@@ -10,7 +10,7 @@ Mettre ici les sons internes a flasher dans la partition LittleFS.
   - chemin configure `kBootFxLittleFsPath` (par defaut `/boot.mp3`)
   - puis auto-detection `/boot.*`
   - puis premier fichier audio supporte trouve a la racine LittleFS
-- Duree conseillee: 0.8s a 3.0s
+- Duree conseillee (profil actuel): ~20 s (intro radio + voix)
 - Debit conseille (fichiers compressees): 64 a 128 kbps mono/stereo
 
 ## Flash LittleFS

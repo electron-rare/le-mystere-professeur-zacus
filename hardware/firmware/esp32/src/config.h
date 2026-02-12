@@ -53,14 +53,16 @@ constexpr uint16_t kBootI2sNoiseAttackMs = 90;
 constexpr uint16_t kBootI2sNoiseReleaseMs = 260;
 constexpr float kBootI2sNoiseGain = 0.18f;
 constexpr bool kEnableBootAudioValidationProtocol = true;
-constexpr uint32_t kBootAudioValidationTimeoutMs = 12000;
-constexpr uint8_t kBootAudioValidationMaxReplays = 3;
+constexpr uint32_t kBootAudioValidationTimeoutMs = 0;  // 0 => pas de timeout auto
+constexpr uint8_t kBootAudioValidationMaxReplays = 6;
+constexpr uint16_t kBootProtocolPromptPeriodMs = 3000;
+constexpr uint16_t kBootRadioScanChunkMs = 18;
 constexpr bool kEnableInternalLittleFs = true;
 constexpr bool kInternalLittleFsFormatOnFail = false;
 constexpr bool kPreferLittleFsBootFx = true;
 constexpr char kBootFxLittleFsPath[] = "/boot.mp3";
-constexpr float kBootFxLittleFsGain = 0.20f;
-constexpr uint32_t kBootFxLittleFsMaxDurationMs = 5000;
+constexpr float kBootFxLittleFsGain = 0.24f;
+constexpr uint32_t kBootFxLittleFsMaxDurationMs = 22000;
 
 // ESP32 -> ESP8266 (ecran) en UART unidirectionnel
 constexpr uint8_t kPinScreenTx = 22;

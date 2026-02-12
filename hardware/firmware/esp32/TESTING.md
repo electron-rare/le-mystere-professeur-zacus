@@ -17,35 +17,28 @@ Cette checklist couvre le comportement attendu du couple ESP32 + ESP8266 OLED.
    - `[MODE] U_LOCK (appuyer touche pour detecter LA)`
    - pas de montage SD immediat
    - `[BOOT_PROTO] START ...`
-   - `[KEYMAP][BOOT_PROTO] K1=OK, K2=REPLAY, K3=KO+REPLAY, K4=TONE, K5=DIAG, K6=SKIP`
+   - intro audio `boot.mp3` puis scan radio I2S
+   - `[KEYMAP][BOOT_PROTO] K1..K6=NEXT ...`
 3. Verifier l'OLED:
    - pictogramme casse + attente appui touche
 
 ## 1b) Validation audio boot (touches + serial)
 
-1. Pendant la fenetre de validation boot:
-   - appuyer `K2`: verifier `REPLAY #...` dans les logs et relecture FX.
-   - appuyer `K3`: verifier `KO recu ...` + relecture FX.
-   - appuyer `K4`: verifier tone test 440 Hz + logs `[AUDIO_DBG]`.
-   - appuyer `K5`: verifier sequence 220/440/880 Hz + logs `[AUDIO_DBG]`.
-2. Validation touches:
-   - appuyer `K1`: verifier `[BOOT_PROTO] DONE status=VALIDATED ...`.
-3. Validation serial:
-   - envoyer `BOOT_STATUS` puis verifier `left=... replay=...`.
-   - envoyer `BOOT_REPLAY` pour rejouer.
-   - envoyer `BOOT_TEST_TONE` puis `BOOT_TEST_DIAG` pour test audio.
-   - envoyer `BOOT_PA_STATUS` (et si besoin `BOOT_PA_ON`).
-   - si silence audio: envoyer `BOOT_PA_INV` puis re-tester `BOOT_TEST_TONE`.
-   - envoyer `BOOT_FS_INFO` puis `BOOT_FS_LIST`.
-   - optionnel: envoyer `BOOT_FS_TEST` pour lire le FX boot LittleFS.
-   - envoyer `BOOT_OK` pour valider.
-   - apres timeout, envoyer `BOOT_REOPEN` pour relancer le protocole sans reset carte.
-   - optionnel: verifier aussi les alias `STATUS`, `REPLAY`, `OK`.
-   - verifier qu'en mode `U-SON`/`MP3`, `BOOT_REPLAY` est refuse (protection anti declenchement audio hors U_LOCK).
-4. Timeout:
-   - ne rien faire pendant ~12 s et verifier `TIMEOUT -> SKIP auto`.
-5. Limite replay:
-   - declencher plus de 3 replays et verifier `REPLAY refuse: max atteint.`
+1. Pendant la fenetre boot (attente touche):
+   - verifier que le scan radio I2S tourne en continu
+   - appuyer `K1..K6`: verifier `[BOOT_PROTO] DONE status=VALIDATED ...`
+2. Validation serial:
+   - envoyer `BOOT_STATUS` puis verifier `waiting_key=1 ...`
+   - envoyer `BOOT_REPLAY` pour relire intro + relancer scan
+   - envoyer `BOOT_TEST_TONE` puis `BOOT_TEST_DIAG` pour test audio
+   - envoyer `BOOT_PA_STATUS` (et si besoin `BOOT_PA_ON`)
+   - si silence audio: envoyer `BOOT_PA_INV` puis re-tester `BOOT_TEST_TONE`
+   - envoyer `BOOT_FS_INFO` puis `BOOT_FS_LIST`
+   - optionnel: envoyer `BOOT_FS_TEST` pour lire le FX boot LittleFS
+   - envoyer `BOOT_NEXT` (ou alias `OK`) pour passer a l'etape suivante
+   - envoyer `BOOT_REOPEN` pour relancer le protocole sans reset carte
+3. Limite replay:
+   - declencher plus de 6 replays et verifier `REPLAY refuse: max atteint.`
 
 ## 1c) Validation codec I2C (ES8388) pas a pas
 
@@ -73,7 +66,7 @@ Cette checklist couvre le comportement attendu du couple ESP32 + ESP8266 OLED.
 
 ## 2) Unlock LA
 
-1. Appuyer sur une touche (`K1..K6`) pour lancer la detection LA.
+1. Appuyer sur une touche (`K1..K6`) pendant le boot pour sortir du scan radio et lancer la detection LA.
 2. Verifier l'OLED:
    - ecran `MODE U_LOCK` en detection
    - bargraphe volume + bargraphe accordage

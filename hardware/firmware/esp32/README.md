@@ -60,28 +60,21 @@ Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
 
 ## Actions des touches
 
-### Protocole validation audio boot
+### Protocole boot audio
 
-- Au demarrage, un FX audio I2S est joue puis la validation boot s'ouvre.
-- Pendant cette phase, les commandes de mode normal sont bloquees jusqu'a validation/saut/timeout.
-- Timeout auto: `kBootAudioValidationTimeoutMs` (par defaut 12000 ms).
-- Relectures max: `kBootAudioValidationMaxReplays` (par defaut 3).
+- Au demarrage, le firmware lit un fichier `boot.mp3` (LittleFS, cible ~20 s).
+- Ensuite il lance un scan radio I2S continu (bruit FM/recherche) en boucle.
+- Pendant cette phase, les commandes de mode normal sont bloquees.
+- Le passage a l'app suivante se fait sur appui d'une touche `K1..K6` (pas de timeout auto).
 
 Touches actives:
 
-- `K1` : valider le rendu audio boot (`OK`)
-- `K2` : rejouer le FX boot
-- `K3` : declarer `KO` + rejouer le FX boot
-- `K4` : jouer un tone test `440 Hz` (debug sortie audio)
-- `K5` : jouer une sequence diag `220 -> 440 -> 880 Hz`
-- `K6` : ignorer la validation (`SKIP`)
+- `K1..K6` : passage a l'etape suivante (detection LA)
 
 Commandes serie (moniteur ESP32):
 
-- `BOOT_OK`
-- `BOOT_REPLAY`
-- `BOOT_KO`
-- `BOOT_SKIP`
+- `BOOT_NEXT` (alias: `NEXT`, `OK`, `SKIP`)
+- `BOOT_REPLAY` (relit l'intro + relance le scan radio)
 - `BOOT_STATUS`
 - `BOOT_HELP`
 - `BOOT_TEST_TONE`
@@ -93,15 +86,15 @@ Commandes serie (moniteur ESP32):
 - `BOOT_FS_INFO` (etat/capacite LittleFS)
 - `BOOT_FS_LIST` (liste des fichiers LittleFS)
 - `BOOT_FS_TEST` (joue le FX boot detecte depuis LittleFS)
-- `BOOT_REOPEN` (relance le FX boot + reouvre la fenetre de validation sans reset)
+- `BOOT_REOPEN` (relance intro + scan sans reset)
 - `CODEC_STATUS` (etat codec I2C + volumes de sortie lus)
 - `CODEC_DUMP` ou `CODEC_DUMP 0x00 0x31` (dump registres codec)
 - `CODEC_RD 0x2E` / `CODEC_WR 0x2E 0x10` (lecture/ecriture registre brut)
 - `CODEC_VOL 70` (volume codec + gain logiciel lecteur a 70%)
 - `CODEC_VOL_RAW 0x12` (force volume brut registres 0x2E..0x31)
-- Alias courts acceptes: `OK`, `REPLAY`, `KO`, `SKIP`, `STATUS`, `HELP`, `PAINV`, `FS_INFO`, `FS_LIST`, `FSTEST`
+- Alias courts acceptes: `NEXT`, `OK`, `REPLAY`, `SKIP`, `STATUS`, `HELP`, `PAINV`, `FS_INFO`, `FS_LIST`, `FSTEST`
 
-Le firmware publie aussi un rappel de statut periodique (`left=... replay=...`) tant que la validation est active.
+Le firmware publie un rappel periodique tant que l'attente touche est active.
 Hors fenetre boot: les commandes BOOT qui declenchent de l'audio sont autorisees uniquement en `U_LOCK`.
 En `U-SON`/`MP3`, seules les commandes de statut restent autorisees (`BOOT_STATUS`, `BOOT_HELP`, `BOOT_PA_STATUS`, `BOOT_FS_INFO`, `BOOT_FS_LIST`).
 
@@ -200,7 +193,7 @@ Sons internes:
   - puis auto-detection: `/boot.mp3`, `/boot.wav`, `/boot.aac`, `/boot.flac`, `/boot.opus`, `/boot.ogg`
   - fallback final: premier fichier audio supporte trouve dans la racine LittleFS
 - Si absent/invalide, fallback automatique sur le bruit radio I2S genere.
-- Les sons longs restent recommandes sur SD (`SD_MMC`).
+- Profil recommande: `boot.mp3` narratif ~20 s en LittleFS.
 
 ## Calibration touches analogiques
 

@@ -1,23 +1,16 @@
 # Licence
 
-Double licence :
+Ce depot est diffuse avec des licences libres/open-source.
 
-## Contenus créatifs — CC BY-NC 4.0 (non commercial)
-S’applique à : documents de jeu, textes, PDFs, PNG, SVG, assets graphiques, et tout contenu dans :
-- `kit-maitre-du-jeu/`
-- `printables/`
-- `assets/`
-- `docs/`
+## Code — GPL-3.0-or-later
+S'applique a: firmware, scripts et tout fichier explicitement identifie comme code source.
 
-Texte : `LICENSES/CC-BY-NC-4.0.txt`
+Texte: `LICENSES/GPL-3.0-or-later.txt`
 
-## Code — MIT
-S’applique à : firmware et code dans :
-- `hardware/firmware/`
-(et tout fichier explicitement indiqué comme code)
+## Contenus creatifs et documentation — CC BY-SA 4.0
+S'applique a: documents de jeu, textes, PDFs, PNG, SVG, assets graphiques, docs et contenus redactionnels.
 
-Texte : `LICENSES/MIT.txt`
+Texte: `LICENSES/CC-BY-SA-4.0.txt`
 
-## En cas de doute
-- imprimable / texte / design -> CC BY-NC
-- code -> MIT
+## Dependances tierces
+Les bibliotheques externes restent sous leurs licences respectives. Voir les README/manifestes de chaque sous-projet.

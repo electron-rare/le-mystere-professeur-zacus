@@ -25,6 +25,8 @@ Objectif : un kit cohérent, fluide à animer, facile à imprimer (noir & blanc)
 ## Licence des contributions
 - Contenu créatif : CC BY-NC 4.0
 - Code : MIT
+- Contenu creatif : CC BY-SA 4.0
+- Code : GPL-3.0-or-later
 
 ## Checklist PR (recommandée)
 - [ ] Cohérence narrative validée (indices/cartes/solution).

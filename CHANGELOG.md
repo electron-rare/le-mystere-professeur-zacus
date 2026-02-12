@@ -5,6 +5,8 @@
 - Documentation : revue de cohérence étendue sur les Markdown/README et mise à jour de `docs/repo-audit.md`.
 - Structure : ajout du dossier `kit-maitre-du-jeu/export/pdf/` pour aligner la documentation avec l'arborescence.
 - Printables : clarification de l'état actuel et du niveau de préparation des dossiers `src/` et `export/{pdf,png}/`.
+- Documentation : ajout d'un plan de maintenance du dépôt (hors firmware).
+- Contribution : ajout d'une checklist PR doc-only dans `CONTRIBUTING.md`.
 
 ## [0.2.0] - 2026-02-12
 

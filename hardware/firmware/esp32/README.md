@@ -2,30 +2,43 @@
 
 Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
 
+## Licence firmware
+
+- Code firmware: `GPL-3.0-or-later`
+- Dependances open source: voir `OPEN_SOURCE.md`
+- Politique de licence du depot: `../../../LICENSE.md`
+
 ## Profil cible
 
 - Carte: ESP32 Audio Kit V2.2 A252
+- Flash interne: partition `no_ota.csv` + filesystem `LittleFS`
 - SD: `SD_MMC` (slot microSD onboard, mode 1-bit)
 - Audio:
   - boot: `MODE U_LOCK` avec pictogramme casse
   - en `U_LOCK`: appui sur une touche pour lancer la detection du LA (440 Hz, micro onboard)
   - affichage OLED pendant detection: bargraphe volume + bargraphe accordage + scope micro (optionnel si `kUseI2SMicInput=true`)
   - apres cumul de 3 secondes de detection LA (continue ou repetee): pictogramme de validation, puis passage en `MODULE U-SON Fonctionnel`
-  - ensuite: activation detection SD, puis passage auto en `MODE LECTEUR U-SON` si SD + MP3
+  - ensuite: activation detection SD, puis passage auto en `MODE LECTEUR U-SON` si SD + fichiers audio supportes
 - Touches: clavier analogique sur une seule entree ADC
 - Ecran distant: ESP8266 NodeMCU OLED via UART
 
 ## Fichiers principaux
 
-- Orchestration: `src/main.cpp`
+- Entree minimale Arduino: `src/main.cpp`
+- Orchestrateur applicatif: `src/app.h`, `src/app.cpp`
+- Ordonnanceur des briques actives/inactives: `src/runtime/app_scheduler.h`, `src/runtime/app_scheduler.cpp`
+- Etat runtime partage (objets + etats): `src/runtime/runtime_state.h`, `src/runtime/runtime_state.cpp`
+- Compatibilite includes historiques: `src/app_state.h`
+- Codec ES8388 (wrapper `arduino-audio-driver`): `src/audio/codec_es8388_driver.h`, `src/audio/codec_es8388_driver.cpp`
 - Config hardware/audio: `src/config.h`
-- MP3 SD_MMC + I2S: `src/mp3_player.h`, `src/mp3_player.cpp`
+- Lecteur audio SD_MMC + I2S (multi-format): `src/mp3_player.h`, `src/mp3_player.cpp`
 - Touches analogiques: `src/keypad_analog.h`, `src/keypad_analog.cpp`
 - Lien ecran ESP8266: `src/screen_link.h`, `src/screen_link.cpp`
 - Memo board A252: `README_A252.md`
 - Cablage: `WIRING.md`
 - Validation terrain: `TESTING.md`
 - Commandes de travail: `Makefile`
+- Assets LittleFS (sons internes): `data/`
 
 ## GPIO utilises (A252)
 
@@ -76,9 +89,21 @@ Commandes serie (moniteur ESP32):
 - `BOOT_PA_ON`
 - `BOOT_PA_OFF`
 - `BOOT_PA_STATUS`
-- Alias courts acceptes: `OK`, `REPLAY`, `KO`, `SKIP`, `STATUS`, `HELP`
+- `BOOT_PA_INV` (inverse la polarite PA active high/active low)
+- `BOOT_FS_INFO` (etat/capacite LittleFS)
+- `BOOT_FS_LIST` (liste des fichiers LittleFS)
+- `BOOT_FS_TEST` (joue le FX boot detecte depuis LittleFS)
+- `BOOT_REOPEN` (relance le FX boot + reouvre la fenetre de validation sans reset)
+- `CODEC_STATUS` (etat codec I2C + volumes de sortie lus)
+- `CODEC_DUMP` ou `CODEC_DUMP 0x00 0x31` (dump registres codec)
+- `CODEC_RD 0x2E` / `CODEC_WR 0x2E 0x10` (lecture/ecriture registre brut)
+- `CODEC_VOL 70` (volume codec + gain logiciel lecteur a 70%)
+- `CODEC_VOL_RAW 0x12` (force volume brut registres 0x2E..0x31)
+- Alias courts acceptes: `OK`, `REPLAY`, `KO`, `SKIP`, `STATUS`, `HELP`, `PAINV`, `FS_INFO`, `FS_LIST`, `FSTEST`
 
 Le firmware publie aussi un rappel de statut periodique (`left=... replay=...`) tant que la validation est active.
+Hors fenetre boot: les commandes BOOT qui declenchent de l'audio sont autorisees uniquement en `U_LOCK`.
+En `U-SON`/`MP3`, seules les commandes de statut restent autorisees (`BOOT_STATUS`, `BOOT_HELP`, `BOOT_PA_STATUS`, `BOOT_FS_INFO`, `BOOT_FS_LIST`).
 
 ### Mode U_LOCK (au boot, detection SD bloquee)
 
@@ -91,13 +116,14 @@ Le firmware publie aussi un rappel de statut periodique (`left=... replay=...`) 
 ### Module U-SON fonctionnel (apres detection du LA)
 
 - `K1` : LA detect on/off
-- `K2` : frequence sinus -
-- `K3` : frequence sinus +
-- `K4` : sinus on/off
+- `K2` : tone test I2S `440 Hz`
+- `K3` : sequence diag I2S `220 -> 440 -> 880 Hz`
+- `K4` : replay FX boot I2S
 - `K5` : demande refresh SD
 - `K6` : lance une calibration micro serie (30 s)
+- Note: profil A252 en mode `I2S-only` (DAC analogique desactive).
 
-### Mode MP3 (SD detectee)
+### Mode lecteur (SD detectee)
 
 - `K1` : play/pause
 - `K2` : piste precedente
@@ -107,7 +133,7 @@ Le firmware publie aussi un rappel de statut periodique (`left=... replay=...`) 
 - `K6` : repeat `ALL/ONE`
 
 Le firmware bascule automatiquement selon la SD:
-- SD presente + pistes MP3: `MODE LECTEUR U-SON`
+- SD presente + pistes audio supportees: `MODE LECTEUR U-SON`
 - SD absente: `MODE U_LOCK`, puis passage automatique en `MODULE U-SON Fonctionnel` apres detection du LA.
 - Note: en `U_LOCK`, la SD n'est volontairement pas scannee ni montee.
 
@@ -134,6 +160,8 @@ Depuis la racine de ce dossier (`hardware/firmware/esp32`):
    - `make build`
 3. Flasher:
    - `make upload-esp32 ESP32_PORT=/dev/ttyUSB0`
+   - `make uploadfs-esp32 ESP32_PORT=/dev/ttyUSB0`
+   - `make erasefs-esp32 ESP32_PORT=/dev/ttyUSB0` (reset partition LittleFS)
    - `make upload-screen SCREEN_PORT=/dev/ttyUSB1`
 4. Monitor:
    - `make monitor-esp32 ESP32_PORT=/dev/ttyUSB0`
@@ -144,6 +172,7 @@ Depuis la racine de ce dossier (`hardware/firmware/esp32`):
 1. ESP32 principal:
    - `pio run -e esp32dev`
    - `pio run -e esp32dev -t upload --upload-port /dev/ttyUSB0`
+   - `pio run -e esp32dev -t uploadfs --upload-port /dev/ttyUSB0`
    - `pio device monitor -e esp32dev --port /dev/ttyUSB0`
 2. ESP8266 OLED:
    - `pio run -e esp8266_oled`
@@ -152,17 +181,26 @@ Depuis la racine de ce dossier (`hardware/firmware/esp32`):
 
 Sans variable `PORT`, PlatformIO choisit automatiquement le port serie.
 
-## Lecteur MP3 evolue
+## Lecteur audio evolue
 
-Le lecteur MP3:
+Le lecteur:
 
 - detecte/monte la SD automatiquement
-- rescane les pistes `.mp3` en racine
+- rescane les pistes supportees en racine: `.mp3`, `.wav`, `.aac`, `.flac`, `.opus`, `.ogg`
 - force un rescan immediat sur `K5` (mode SIGNAL)
 - gere une playlist triee
 - enchaine automatiquement les pistes
 - supporte repeat `ALL/ONE`
 - expose piste courante + volume vers l'ecran ESP8266
+
+Sons internes:
+
+- Le boot tente d'abord un FX depuis `LittleFS`:
+  - priorite: chemin configure `kBootFxLittleFsPath` (defaut `/boot.mp3`)
+  - puis auto-detection: `/boot.mp3`, `/boot.wav`, `/boot.aac`, `/boot.flac`, `/boot.opus`, `/boot.ogg`
+  - fallback final: premier fichier audio supporte trouve dans la racine LittleFS
+- Si absent/invalide, fallback automatique sur le bruit radio I2S genere.
+- Les sons longs restent recommandes sur SD (`SD_MMC`).
 
 ## Calibration touches analogiques
 
@@ -191,6 +229,10 @@ Reglage live (sans reflash):
 - `KEY_TEST_STATUS` : etat `OK/KO` + min/max `raw` par touche
 - `KEY_TEST_RESET` : remet l'auto-test a zero
 - `KEY_TEST_STOP` : arrete l'auto-test
+- `FS_INFO` / `FS_LIST` / `FSTEST` : debug LittleFS et test lecture FX boot
+- `CODEC_STATUS` / `CODEC_DUMP` : debug codec I2C ES8388
+- `CODEC_RD reg` / `CODEC_WR reg val` : lecture/ecriture registre codec
+- `CODEC_VOL pct` / `CODEC_VOL_RAW raw [out2]` : reglage volume sortie codec
 
 Contraintes:
 

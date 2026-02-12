@@ -39,6 +39,13 @@ Dossier : `hardware/`
 ## Licence (non-commercial pour le contenu)
 - Contenus créatifs (documents, PDFs, PNG, SVG, textes de jeu) : **CC BY-NC 4.0**
 - Code (firmware, scripts) : **MIT**
+- **Kit MJ** : structure documentaire en place (`kit-maitre-du-jeu/`).
+- **Printables** : conventions définies, arborescence `src/export` à compléter selon les livrables.
+- **Hardware/firmware** : flux `U_LOCK`/`U-SON`/MP3 opérationnel et documenté (`hardware/firmware/esp32/`).
+
+## Licence (open source)
+- Contenus creatifs (documents, PDFs, PNG, SVG, textes de jeu) : **CC BY-SA 4.0**
+- Code (firmware, scripts) : **GPL-3.0-or-later**
 Voir `LICENSE.md` et `LICENSES/`.
 
 ## Disclaimer
@@ -49,6 +56,7 @@ Voir `DISCLAIMER.md`.
 - Plan : `docs/maintenance-repo.md`
 - Audit : `docs/repo-audit.md`
 - Règles anti-conflits docs : section dédiée dans `docs/maintenance-repo.md`
+Voir `docs/maintenance-repo.md`.
 
 ## Contribuer
 Voir `CONTRIBUTING.md`.
@@ -57,4 +65,3 @@ Voir `CONTRIBUTING.md`.
 Voir `CHANGELOG.md`.
 ## Mainteneur
 L’électron rare
-

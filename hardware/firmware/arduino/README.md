@@ -1,4 +1,4 @@
-# Firmware Arduino (MIT)
+# Firmware Arduino (GPL-3.0-or-later)
 
 Mettre ici :
 - croquis Arduino

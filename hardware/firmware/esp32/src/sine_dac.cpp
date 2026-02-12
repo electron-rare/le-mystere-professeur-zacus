@@ -7,11 +7,23 @@ SineDac::SineDac(uint8_t pin, float freqHz, uint16_t sampleRate)
       periodUs_(sampleRate > 0 ? (1000000UL / sampleRate) : 1000UL) {}
 
 void SineDac::begin() {
+  if (pin_ == 0xFF) {
+    available_ = false;
+    enabled_ = false;
+    return;
+  }
+  available_ = isDacCapablePin(pin_);
+  if (!available_) {
+    enabled_ = false;
+    Serial.printf("[SINE] GPIO%u n'est pas DAC (DAC reels: GPIO25/26). Sine analogique desactive.\n",
+                  static_cast<unsigned int>(pin_));
+    return;
+  }
   buildTable();
 }
 
 void SineDac::update() {
-  if (!enabled_ || pin_ == 0xFF) {
+  if (!available_ || !enabled_ || pin_ == 0xFF) {
     return;
   }
 
@@ -32,6 +44,10 @@ void SineDac::update() {
 }
 
 void SineDac::setEnabled(bool enabled) {
+  if (!available_) {
+    enabled_ = false;
+    return;
+  }
   enabled_ = enabled;
   if (!enabled_ && pin_ != 0xFF) {
     dacWrite(pin_, 128);
@@ -52,7 +68,15 @@ float SineDac::frequency() const {
 }
 
 bool SineDac::isEnabled() const {
-  return enabled_;
+  return available_ && enabled_;
+}
+
+bool SineDac::isAvailable() const {
+  return available_;
+}
+
+bool SineDac::isDacCapablePin(uint8_t pin) {
+  return pin == 25U || pin == 26U;
 }
 
 void SineDac::buildTable() {

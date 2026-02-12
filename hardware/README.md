@@ -9,5 +9,5 @@ Contenu :
 - Boîtier : `enclosure/`
 
 Licence :
-- code = MIT
-- docs hardware = CC BY-NC
+- code = GPL-3.0-or-later
+- docs hardware = CC BY-SA 4.0

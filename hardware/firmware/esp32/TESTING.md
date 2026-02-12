@@ -6,6 +6,7 @@ Cette checklist couvre le comportement attendu du couple ESP32 + ESP8266 OLED.
 
 - Firmware ESP32 flashe.
 - Firmware ESP8266 OLED flashe.
+- Si sons internes utilises: image LittleFS flashee (`make uploadfs-esp32 ...`).
 - Liaison `GPIO22 -> D6` et `GND <-> GND` cablee.
 - Moniteur serie disponible sur les deux cartes.
 
@@ -34,12 +35,41 @@ Cette checklist couvre le comportement attendu du couple ESP32 + ESP8266 OLED.
    - envoyer `BOOT_REPLAY` pour rejouer.
    - envoyer `BOOT_TEST_TONE` puis `BOOT_TEST_DIAG` pour test audio.
    - envoyer `BOOT_PA_STATUS` (et si besoin `BOOT_PA_ON`).
+   - si silence audio: envoyer `BOOT_PA_INV` puis re-tester `BOOT_TEST_TONE`.
+   - envoyer `BOOT_FS_INFO` puis `BOOT_FS_LIST`.
+   - optionnel: envoyer `BOOT_FS_TEST` pour lire le FX boot LittleFS.
    - envoyer `BOOT_OK` pour valider.
+   - apres timeout, envoyer `BOOT_REOPEN` pour relancer le protocole sans reset carte.
    - optionnel: verifier aussi les alias `STATUS`, `REPLAY`, `OK`.
+   - verifier qu'en mode `U-SON`/`MP3`, `BOOT_REPLAY` est refuse (protection anti declenchement audio hors U_LOCK).
 4. Timeout:
    - ne rien faire pendant ~12 s et verifier `TIMEOUT -> SKIP auto`.
 5. Limite replay:
    - declencher plus de 3 replays et verifier `REPLAY refuse: max atteint.`
+
+## 1c) Validation codec I2C (ES8388) pas a pas
+
+1. Verifier la presence codec:
+   - envoyer `CODEC_STATUS`
+   - attendu: `ready=1` et `addr=0x10` (ou `0x11` selon carte)
+2. Verifier les registres audio clefs:
+   - envoyer `CODEC_DUMP`
+   - verifier que les registres sortent sans `<ERR>`
+3. Verifier lecture/ecriture registre brute:
+   - envoyer `CODEC_RD 0x2E`
+   - envoyer `CODEC_WR 0x2E 0x10`
+   - envoyer `CODEC_RD 0x2E` et verifier la nouvelle valeur
+4. Verifier volume codec pilote:
+   - envoyer `CODEC_VOL 30` puis `BOOT_TEST_TONE`
+   - envoyer `CODEC_VOL 80` puis `BOOT_TEST_TONE`
+   - le niveau casque doit monter clairement
+5. Si besoin, forcer brut:
+   - envoyer `CODEC_VOL_RAW 0x08`
+   - puis `CODEC_VOL_RAW 0x1C`
+   - comparer le niveau audio
+6. Si aucun son:
+   - verifier `BOOT_PA_STATUS`
+   - envoyer `BOOT_PA_INV` puis re-tester `BOOT_TEST_TONE`
 
 ## 2) Unlock LA
 
@@ -56,9 +86,9 @@ Cette checklist couvre le comportement attendu du couple ESP32 + ESP8266 OLED.
    - pictogramme de validation
    - puis ecran `U-SON FONCTIONNEL`
 
-## 3) SD et MP3
+## 3) SD et lecteur audio
 
-1. Inserer une SD avec au moins un fichier `.mp3` a la racine.
+1. Inserer une SD avec au moins un fichier audio supporte a la racine (`.mp3`, `.wav`, `.aac`, `.flac`, `.opus`, `.ogg`).
 2. Verifier les logs ESP32:
    - `[MP3] SD_MMC mounted.`
    - `[MP3] x track(s) loaded.`
@@ -67,6 +97,19 @@ Cette checklist couvre le comportement attendu du couple ESP32 + ESP8266 OLED.
    - ecran `LECTEUR U-SON`
    - piste + volume visibles
 
+## 3b) LittleFS (sons internes)
+
+1. Flasher la partition LittleFS:
+   - `make uploadfs-esp32 ESP32_PORT=...`
+2. Redemarrer l'ESP32.
+3. Verifier les logs:
+   - `[FS] ... LittleFS mounted ...`
+   - `[FS] Boot FX ready: ...` (si fichier boot present)
+4. En serie:
+   - `FS_INFO`
+   - `FS_LIST`
+   - `FSTEST` (lecture du FX boot detecte)
+
 ## 4) Touches
 
 1. En `U_LOCK`:
@@ -74,11 +117,13 @@ Cette checklist couvre le comportement attendu du couple ESP32 + ESP8266 OLED.
    - verifier que `K6` lance la calibration micro
 2. En `U-SON FONCTIONNEL`:
    - `K1`: toggle detection LA
-   - `K2/K3`: frequence sine -/+
-   - `K4`: sine on/off
+   - `K2`: tone test I2S 440 Hz
+   - `K3`: sequence diag I2S 220/440/880 Hz
+   - `K4`: replay FX boot I2S
    - `K5`: refresh SD (rescan immediat)
    - `K6`: calibration micro
-3. En mode MP3:
+   - verifier en log que les actions K2/K3/K4 declenchent bien l'audio I2S.
+3. En mode lecteur:
    - `K1`: play/pause
    - `K2/K3`: prev/next
    - `K4/K5`: volume -/+
@@ -118,7 +163,7 @@ Cette checklist couvre le comportement attendu du couple ESP32 + ESP8266 OLED.
 
 ## 6) Retrait SD en lecture
 
-1. Demarrer une lecture MP3.
+1. Demarrer une lecture audio.
 2. Retirer la SD.
 3. Verifier les logs ESP32:
    - `[MP3] SD removed/unmounted.`

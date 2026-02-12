@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <driver/i2s.h>
 
+#include "audio/codec_es8388_driver.h"
 #include "config.h"
 
 class LaDetector {
@@ -25,6 +26,14 @@ class LaDetector {
   uint16_t micMin() const;
   uint16_t micMax() const;
   uint16_t micPeakToPeak() const;
+  bool isCodecReady() const;
+  uint8_t codecAddress() const;
+  bool ensureCodecReady();
+  bool readCodecRegister(uint8_t reg, uint8_t* value);
+  bool writeCodecRegister(uint8_t reg, uint8_t value);
+  bool setCodecOutputVolumeRaw(uint8_t rawValue, bool includeOut2 = true);
+  bool setCodecOutputVolumePercent(uint8_t percent, bool includeOut2 = true);
+  static uint8_t codecOutputRawFromPercent(uint8_t percent);
 
  private:
   bool beginI2sInput();
@@ -33,8 +42,6 @@ class LaDetector {
   void captureFromI2s();
   bool beginCodec();
   bool configureCodecInput(bool useLine2);
-  bool writeCodecReg(uint8_t reg, uint8_t value);
-  bool isCodecAddressReachable(uint8_t address);
   void maybeAutoSwitchCodecInput(uint32_t nowMs);
 
   float goertzelPower(const int16_t* x, uint16_t n, float fs, float targetHz) const;
@@ -53,8 +60,7 @@ class LaDetector {
   uint8_t i2sWsPin_;
   uint8_t i2sDinPin_;
   i2s_port_t i2sPort_ = I2S_NUM_0;
-  uint8_t codecAddress_ = config::kCodecI2CAddress;
-  bool codecReady_ = false;
+  CodecEs8388Driver codec_;
   bool codecUseLine2_ = config::kCodecMicUseLine2Input;
   bool codecAutoSwitched_ = false;
   uint32_t codecSilenceSinceMs_ = 0;

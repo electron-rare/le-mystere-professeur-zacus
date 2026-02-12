@@ -25,3 +25,10 @@ Objectif : un kit cohérent, fluide à animer, facile à imprimer (noir & blanc)
 ## Licence des contributions
 - Contenu créatif : CC BY-NC 4.0
 - Code : MIT
+
+## Checklist PR (recommandée)
+- [ ] Cohérence narrative validée (indices/cartes/solution).
+- [ ] Lisibilité N&B validée (contraste, hiérarchie, impression).
+- [ ] `CHANGELOG.md` mis à jour.
+- [ ] Previews PNG ajoutées si changement visuel.
+- [ ] Si PR doc-only : aucun changement firmware.

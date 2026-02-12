@@ -1,7 +1,8 @@
 # Changelog
 
 ## [Unreleased]
-- Documentation : clarifications sur l'analyse du dépôt et ses axes d'amélioration.
+- Documentation : ajout d'un plan de maintenance du dépôt (hors firmware).
+- Contribution : ajout d'une checklist PR doc-only dans `CONTRIBUTING.md`.
 
 ## [0.2.0] - 2026-02-12
 

@@ -42,6 +42,9 @@ Voir `LICENSE.md` et `LICENSES/`.
 Projet indépendant, non affilié à aucune marque ou éditeur.
 Voir `DISCLAIMER.md`.
 
+## Maintenance du dépôt (hors firmware)
+Voir `docs/maintenance-repo.md`.
+
 ## Contribuer
 Voir `CONTRIBUTING.md`.
 

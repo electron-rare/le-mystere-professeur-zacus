@@ -28,6 +28,11 @@ Dossier : `hardware/`
 - câblage
 - firmware Arduino / ESP32
 
+## État du projet
+- **Kit MJ** : documentation d'animation complète, exports PDF possibles via `kit-maitre-du-jeu/export/pdf/`.
+- **Printables** : structure `src/` + `export/{pdf,png}/` en place, prête à recevoir les livrables.
+- **Hardware/firmware** : flux `U_LOCK`/`U-SON`/MP3 opérationnel et documenté (`hardware/firmware/esp32/`).
+
 ## Licence (non-commercial pour le contenu)
 - Contenus créatifs (documents, PDFs, PNG, SVG, textes de jeu) : **CC BY-NC 4.0**
 - Code (firmware, scripts) : **MIT**
@@ -36,6 +41,10 @@ Voir `LICENSE.md` et `LICENSES/`.
 ## Disclaimer
 Projet indépendant, non affilié à aucune marque ou éditeur.
 Voir `DISCLAIMER.md`.
+
+## Maintenance du dépôt (hors firmware)
+- Plan : `docs/maintenance-repo.md`
+- Audit : `docs/repo-audit.md`
 
 ## Contribuer
 Voir `CONTRIBUTING.md`.

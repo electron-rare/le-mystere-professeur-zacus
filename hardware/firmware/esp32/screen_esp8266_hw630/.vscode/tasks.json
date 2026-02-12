@@ -1,0 +1,107 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "PIO: Build (nodemcuv2)",
+      "type": "shell",
+      "command": "${env:HOME}/.platformio/penv/bin/pio",
+      "args": [
+        "run",
+        "-e",
+        "nodemcuv2"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+    {
+      "label": "PIO: Upload (nodemcuv2)",
+      "type": "shell",
+      "command": "${env:HOME}/.platformio/penv/bin/pio",
+      "args": [
+        "run",
+        "-e",
+        "nodemcuv2",
+        "-t",
+        "upload"
+      ],
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+    {
+      "label": "PIO: List Serial Ports",
+      "type": "shell",
+      "command": "${env:HOME}/.platformio/penv/bin/pio",
+      "args": [
+        "device",
+        "list"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "PIO: Monitor (auto port)",
+      "type": "shell",
+      "command": "${env:HOME}/.platformio/penv/bin/pio",
+      "args": [
+        "device",
+        "monitor",
+        "-e",
+        "nodemcuv2"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "PIO: Monitor (custom port)",
+      "type": "shell",
+      "command": "${env:HOME}/.platformio/penv/bin/pio",
+      "args": [
+        "device",
+        "monitor",
+        "-e",
+        "nodemcuv2",
+        "-p",
+        "${input:serialPort}"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "PIO: Upload + Monitor (auto port)",
+      "type": "shell",
+      "command": "${env:HOME}/.platformio/penv/bin/pio run -e nodemcuv2 -t upload && ${env:HOME}/.platformio/penv/bin/pio device monitor -e nodemcuv2",
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "dedicated"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "serialPort",
+      "type": "promptString",
+      "description": "Port serie (ex: /dev/cu.usbserial-1410)",
+      "default": "/dev/cu.usbserial-1410"
+    }
+  ]
+}

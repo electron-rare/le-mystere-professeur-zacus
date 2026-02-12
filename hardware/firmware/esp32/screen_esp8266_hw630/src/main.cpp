@@ -23,9 +23,16 @@ constexpr uint16_t kLinkTimeoutMs = 10000;
 constexpr uint16_t kLinkDownConfirmMs = 1500;
 constexpr uint16_t kDiagPeriodMs = 5000;
 constexpr uint16_t kBootVisualTestMs = 250;
-constexpr uint16_t kUnlockBadgeMs = 1200;
+constexpr uint16_t kUnlockFrameMs = 2500;
+constexpr uint8_t kUnlockFrameCount = 6;
 constexpr uint8_t kInvalidPin = 0xFF;
 constexpr uint8_t kScopeHistoryLen = 64;
+
+constexpr uint8_t kSpriteChip[8] = {0x3C, 0x7E, 0xDB, 0xA5, 0xA5, 0xDB, 0x7E, 0x3C};
+constexpr uint8_t kSpriteLock[8] = {0x18, 0x24, 0x24, 0x7E, 0x42, 0x5A, 0x42, 0x7E};
+constexpr uint8_t kSpriteStar[8] = {0x18, 0x99, 0x5A, 0x3C, 0x3C, 0x5A, 0x99, 0x18};
+constexpr uint8_t kSpritePhone[8] = {0x60, 0x70, 0x38, 0x1C, 0x0E, 0x87, 0xC3, 0x66};
+constexpr uint8_t kSpriteSkull[8] = {0x3C, 0x7E, 0xA5, 0x81, 0xA5, 0xDB, 0x24, 0x18};
 
 SoftwareSerial g_link(kLinkRx, kLinkTx);  // RX, TX
 Adafruit_SSD1306 g_display(kScreenWidth, kScreenHeight, &Wire, kOledReset);
@@ -84,7 +91,7 @@ uint8_t g_oledAddress = 0;
 uint8_t g_scopeHistory[kScopeHistoryLen] = {};
 uint8_t g_scopeHead = 0;
 bool g_scopeFilled = false;
-uint32_t g_unlockBadgeUntilMs = 0;
+uint32_t g_unlockSequenceStartMs = 0;
 uint32_t g_lastByteMs = 0;
 uint32_t g_linkDownSinceMs = 0;
 
@@ -142,6 +149,65 @@ void drawCenteredText(const char* text, int16_t y, uint8_t textSize) {
   g_display.setTextSize(textSize);
   g_display.setCursor(x, y);
   g_display.print(text);
+}
+
+void drawSprite8(const uint8_t sprite[8], int16_t x, int16_t y, uint16_t color = SSD1306_WHITE) {
+  for (uint8_t row = 0; row < 8; ++row) {
+    const uint8_t bits = sprite[row];
+    for (uint8_t col = 0; col < 8; ++col) {
+      if (((bits >> (7U - col)) & 0x01U) != 0U) {
+        g_display.drawPixel(x + col, y + row, color);
+      }
+    }
+  }
+}
+
+void drawCenteredDemoText(const char* text,
+                          int16_t y,
+                          uint8_t textSize,
+                          uint32_t nowMs,
+                          bool wobble,
+                          uint16_t color = SSD1306_WHITE) {
+  const size_t len = strlen(text);
+  const int16_t charW = 6 * textSize;
+  const int16_t w = static_cast<int16_t>(len) * charW;
+  int16_t x = (kScreenWidth - w) / 2;
+  if (x < 0) {
+    x = 0;
+  }
+
+  g_display.setTextSize(textSize);
+  g_display.setTextColor(color);
+  for (size_t i = 0; i < len; ++i) {
+    int16_t yOffset = 0;
+    if (wobble) {
+      const uint8_t phase =
+          static_cast<uint8_t>(((nowMs / 95U) + static_cast<uint32_t>(i * 3U)) % 4U);
+      yOffset = static_cast<int16_t>(phase);
+      if (yOffset > 2) {
+        yOffset = static_cast<int16_t>(4 - yOffset);
+      }
+      yOffset -= 1;
+    }
+    const int16_t cx = x + static_cast<int16_t>(i) * charW;
+    g_display.setCursor(cx, y + yOffset);
+    g_display.print(text[i]);
+
+    if (((nowMs / 200U) + i) % 9U == 0U) {
+      g_display.drawPixel(cx + (charW / 2), y + yOffset - 1, color);
+    }
+  }
+
+  if (((nowMs / 170U) % 3U) == 0U) {
+    const int16_t scanY =
+        y + static_cast<int16_t>((nowMs / 80U) % static_cast<uint32_t>(8U * textSize));
+    if (scanY >= 0 && scanY < kScreenHeight) {
+      for (int16_t sx = x; sx < (x + w); sx += 2) {
+        g_display.drawPixel(sx, scanY, color);
+      }
+    }
+  }
+  g_display.setTextColor(SSD1306_WHITE);
 }
 
 void drawTitleBar(const char* title) {
@@ -262,20 +328,20 @@ void drawBrokenModuleGlitch(uint32_t nowMs, int16_t cx, int16_t cy) {
   g_display.drawLine(x + (w / 2), y + 4, x + (w / 2) - 8, y + h - 8, SSD1306_WHITE);
 
   // Animated glitch slices distributed over almost full width.
-  for (uint8_t i = 0; i < 10; ++i) {
+  for (uint8_t i = 0; i < 5; ++i) {
     const int16_t sy = y + 3 + static_cast<int16_t>((nowMs / 23U + i * 9U) % (h - 6));
-    const int16_t len = 20 + static_cast<int16_t>((nowMs / 17U + i * 11U) % 70U);
+    const int16_t len = 16 + static_cast<int16_t>((nowMs / 21U + i * 11U) % 44U);
     const int16_t sx = x + 2 + static_cast<int16_t>((nowMs / 13U + i * 23U) % (w - len - 4));
-    const int8_t dx = static_cast<int8_t>((nowMs / 31U + i * 5U) % 9U) - 4;
+    const int8_t dx = static_cast<int8_t>((nowMs / 31U + i * 5U) % 5U) - 2;
     g_display.drawFastHLine(sx + dx, sy, len, SSD1306_WHITE);
-    if ((i % 3U) == 0U) {
-      g_display.drawFastHLine(x + 2, sy + 1, w - 4, SSD1306_WHITE);
+    if ((i % 4U) == 0U) {
+      g_display.drawFastHLine(sx, sy + 1, len / 2, SSD1306_WHITE);
     }
   }
 
   // Sparse static/noise all over the screen.
-  for (uint8_t i = 0; i < 42; ++i) {
-    if (((nowMs / 37U) + i) % 2U != 0U) {
+  for (uint8_t i = 0; i < 14; ++i) {
+    if (((nowMs / 52U) + i) % 3U != 0U) {
       continue;
     }
     const int16_t px = x + static_cast<int16_t>((nowMs + i * 29U) % w);
@@ -291,12 +357,6 @@ void drawBrokenIcon(int16_t cx, int16_t cy) {
   g_display.drawLine(cx - 9, cy + 9, cx + 9, cy - 9, SSD1306_WHITE);
   g_display.drawLine(cx - 4, cy - 11, cx - 1, cy - 6, SSD1306_WHITE);
   g_display.drawLine(cx + 2, cy - 3, cx + 6, cy + 3, SSD1306_WHITE);
-}
-
-void drawCheckIcon(int16_t cx, int16_t cy) {
-  g_display.drawCircle(cx, cy, 12, SSD1306_WHITE);
-  g_display.drawLine(cx - 6, cy + 1, cx - 1, cy + 6, SSD1306_WHITE);
-  g_display.drawLine(cx - 1, cy + 6, cx + 7, cy - 5, SSD1306_WHITE);
 }
 
 void pushScopeSample(uint8_t levelPercent) {
@@ -360,6 +420,177 @@ void drawScope(int16_t x, int16_t y, int16_t w, int16_t h) {
   }
 }
 
+void drawUnlockWaveform(uint32_t nowMs, int16_t x, int16_t y, int16_t w, int16_t h, bool semiStable) {
+  if (w < 6 || h < 6) {
+    return;
+  }
+
+  g_display.drawRect(x, y, w, h, SSD1306_WHITE);
+  const int16_t plotX = x + 1;
+  const int16_t plotY = y + 1;
+  const int16_t plotW = w - 2;
+  const int16_t plotH = h - 2;
+  const int16_t midY = plotY + (plotH / 2);
+  const int16_t maxAmp = (plotH - 2) / 2;
+
+  for (int16_t i = 0; i < plotW; i += 2) {
+    g_display.drawPixel(plotX + i, midY, SSD1306_WHITE);
+  }
+
+  int16_t prevX = plotX;
+  int16_t prevY = midY;
+  for (int16_t i = 1; i < plotW; ++i) {
+    const int16_t currX = plotX + i;
+    const uint32_t t = (nowMs / (semiStable ? 45U : 20U)) + static_cast<uint32_t>(i * (semiStable ? 5U : 11U));
+    int16_t swing = static_cast<int16_t>(t % (semiStable ? 24U : 46U));
+    swing -= semiStable ? 12 : 23;
+
+    int16_t jitter = static_cast<int16_t>(((nowMs / (semiStable ? 73U : 29U)) + i * (semiStable ? 3U : 7U)) %
+                                          (semiStable ? 7U : 19U));
+    jitter -= semiStable ? 3 : 9;
+
+    int16_t amp = semiStable ? ((swing / 2) + jitter) : (swing + jitter);
+    if (amp > maxAmp) {
+      amp = maxAmp;
+    } else if (amp < -maxAmp) {
+      amp = -maxAmp;
+    }
+
+    const int16_t currY = midY - amp;
+    g_display.drawLine(prevX, prevY, currX, currY, SSD1306_WHITE);
+
+    if (!semiStable && ((i % 9) == 0)) {
+      g_display.drawFastVLine(currX, currY - 1, 3, SSD1306_WHITE);
+    }
+
+    prevX = currX;
+    prevY = currY;
+  }
+}
+
+void drawGamingCorners(uint32_t nowMs) {
+  constexpr int16_t k = 9;
+  g_display.drawFastHLine(0, 12, k, SSD1306_WHITE);
+  g_display.drawFastVLine(0, 12, k, SSD1306_WHITE);
+  g_display.drawFastHLine(kScreenWidth - k, 12, k, SSD1306_WHITE);
+  g_display.drawFastVLine(kScreenWidth - 1, 12, k, SSD1306_WHITE);
+  g_display.drawFastHLine(0, kScreenHeight - 1, k, SSD1306_WHITE);
+  g_display.drawFastVLine(0, kScreenHeight - k, k, SSD1306_WHITE);
+  g_display.drawFastHLine(kScreenWidth - k, kScreenHeight - 1, k, SSD1306_WHITE);
+  g_display.drawFastVLine(kScreenWidth - 1, kScreenHeight - k, k, SSD1306_WHITE);
+
+  const int16_t sweep = 2 + static_cast<int16_t>((nowMs / 65U) % (kScreenWidth - 4));
+  g_display.drawPixel(sweep, 13, SSD1306_WHITE);
+  g_display.drawPixel(kScreenWidth - sweep, kScreenHeight - 2, SSD1306_WHITE);
+}
+
+void drawGamingScanlines(uint32_t nowMs, int16_t yStart, int16_t yEnd) {
+  if (yEnd <= yStart + 1) {
+    return;
+  }
+  const int16_t phase = static_cast<int16_t>((nowMs / 55U) % 6U);
+  for (int16_t y = yStart + phase; y <= yEnd; y += 6) {
+    for (int16_t x = 4; x < (kScreenWidth - 4); x += 3) {
+      g_display.drawPixel(x, y, SSD1306_WHITE);
+    }
+  }
+}
+
+void drawReticle(int16_t cx, int16_t cy, int16_t r, uint32_t nowMs) {
+  const int16_t pulse = static_cast<int16_t>((nowMs / 130U) % 3U);
+  const int16_t rr = r + pulse;
+  g_display.drawCircle(cx, cy, rr, SSD1306_WHITE);
+  g_display.drawFastHLine(cx - rr - 4, cy, 4, SSD1306_WHITE);
+  g_display.drawFastHLine(cx + rr + 1, cy, 4, SSD1306_WHITE);
+  g_display.drawFastVLine(cx, cy - rr - 4, 4, SSD1306_WHITE);
+  g_display.drawFastVLine(cx, cy + rr + 1, 4, SSD1306_WHITE);
+}
+
+void drawPulseRays(uint32_t nowMs, int16_t cx, int16_t cy) {
+  const int16_t l = 8 + static_cast<int16_t>((nowMs / 70U) % 6U);
+  g_display.drawLine(cx - l, cy, cx - 2, cy, SSD1306_WHITE);
+  g_display.drawLine(cx + 2, cy, cx + l, cy, SSD1306_WHITE);
+  g_display.drawLine(cx, cy - l, cx, cy - 2, SSD1306_WHITE);
+  g_display.drawLine(cx, cy + 2, cx, cy + l, SSD1306_WHITE);
+  g_display.drawLine(cx - (l - 2), cy - (l - 2), cx - 2, cy - 2, SSD1306_WHITE);
+  g_display.drawLine(cx + 2, cy + 2, cx + (l - 2), cy + (l - 2), SSD1306_WHITE);
+  g_display.drawLine(cx - (l - 2), cy + (l - 2), cx - 2, cy + 2, SSD1306_WHITE);
+  g_display.drawLine(cx + 2, cy - 2, cx + (l - 2), cy - (l - 2), SSD1306_WHITE);
+}
+
+void drawDataRain(uint32_t nowMs, int16_t x, int16_t y, int16_t w, int16_t h) {
+  if (w < 12 || h < 8) {
+    return;
+  }
+
+  g_display.drawRect(x, y, w, h, SSD1306_WHITE);
+  const int16_t columns = w / 8;
+  for (int16_t c = 0; c < columns; ++c) {
+    const int16_t cx = x + 2 + c * 8;
+    const uint32_t speed = 33U + static_cast<uint32_t>(c * 9U);
+    const int16_t head = y + 1 + static_cast<int16_t>(((nowMs / speed) + c * 7U) % (h - 2));
+    for (int8_t t = 0; t < 4; ++t) {
+      int16_t py = head - t * 3;
+      while (py < (y + 1)) {
+        py += (h - 2);
+      }
+      g_display.drawPixel(cx, py, SSD1306_WHITE);
+      if (((c + t) % 2) == 0) {
+        g_display.drawPixel(cx + 1, py, SSD1306_WHITE);
+      }
+    }
+  }
+}
+
+void drawRadarSweep(uint32_t nowMs, int16_t cx, int16_t cy, int16_t r) {
+  static constexpr int8_t kDirX[16] = {8, 7, 6, 3, 0, -3, -6, -7, -8, -7, -6, -3, 0, 3, 6, 7};
+  static constexpr int8_t kDirY[16] = {0, 3, 6, 7, 8, 7, 6, 3, 0, -3, -6, -7, -8, -7, -6, -3};
+
+  g_display.drawCircle(cx, cy, r, SSD1306_WHITE);
+  g_display.drawCircle(cx, cy, r - 4, SSD1306_WHITE);
+  g_display.drawFastHLine(cx - r, cy, 2 * r, SSD1306_WHITE);
+  g_display.drawFastVLine(cx, cy - r, 2 * r, SSD1306_WHITE);
+
+  const uint8_t idx = static_cast<uint8_t>((nowMs / 95U) % 16U);
+  const int16_t ex = cx + (kDirX[idx] * r) / 8;
+  const int16_t ey = cy + (kDirY[idx] * r) / 8;
+  g_display.drawLine(cx, cy, ex, ey, SSD1306_WHITE);
+
+  const uint8_t ping = static_cast<uint8_t>((idx + 5U) % 16U);
+  const int16_t px = cx + (kDirX[ping] * (r - 2)) / 8;
+  const int16_t py = cy + (kDirY[ping] * (r - 2)) / 8;
+  g_display.drawCircle(px, py, 1, SSD1306_WHITE);
+}
+
+void drawMissionGrid(uint32_t nowMs, int16_t x, int16_t y, int16_t w, int16_t h) {
+  if (w < 10 || h < 10) {
+    return;
+  }
+  g_display.drawRect(x, y, w, h, SSD1306_WHITE);
+
+  for (int16_t gx = x + 4; gx < x + w - 2; gx += 8) {
+    for (int16_t gy = y + 2; gy < y + h - 2; gy += 4) {
+      g_display.drawPixel(gx, gy, SSD1306_WHITE);
+    }
+  }
+  for (int16_t gy = y + 4; gy < y + h - 2; gy += 8) {
+    for (int16_t gx = x + 2; gx < x + w - 2; gx += 4) {
+      g_display.drawPixel(gx, gy, SSD1306_WHITE);
+    }
+  }
+
+  const int16_t pathY = y + h / 2;
+  g_display.drawLine(x + 6, pathY + 6, x + 26, pathY, SSD1306_WHITE);
+  g_display.drawLine(x + 26, pathY, x + 48, pathY - 5, SSD1306_WHITE);
+  g_display.drawLine(x + 48, pathY - 5, x + 72, pathY + 2, SSD1306_WHITE);
+  g_display.drawLine(x + 72, pathY + 2, x + 96, pathY - 3, SSD1306_WHITE);
+  g_display.drawLine(x + 96, pathY - 3, x + w - 10, pathY + 5, SSD1306_WHITE);
+
+  const int16_t cursor =
+      x + 6 + static_cast<int16_t>((nowMs / 38U) % static_cast<uint32_t>(w - 16));
+  g_display.drawRect(cursor - 1, pathY - 1, 3, 3, SSD1306_WHITE);
+}
+
 void renderMp3Screen() {
   drawTitleBar("LECTEUR U-SON");
 
@@ -421,27 +652,98 @@ void renderULockScreen(uint32_t nowMs) {
   renderULockDetectScreen();
 }
 
-void renderUnlockBadgeScreen() {
-  drawTitleBar("U-SON FONCTIONNEL");
-  drawCheckIcon(64, 30);
-  drawCenteredText("Validation LA OK", 50, 1);
-}
-
-void renderUSonFunctionalScreen() {
-  drawTitleBar("U-SON FONCTIONNEL");
-  drawCenteredText(g_state.laDetected ? "LA OK" : "LA --", 15, 2);
-
-  char statusLine[28];
-  if (g_state.key == 0) {
-    snprintf(statusLine, sizeof(statusLine), "Pret");
-  } else {
-    snprintf(statusLine, sizeof(statusLine), "Derniere touche K%u", static_cast<unsigned int>(g_state.key));
+void renderUnlockSequenceScreen(uint32_t nowMs) {
+  if (g_unlockSequenceStartMs == 0) {
+    g_unlockSequenceStartMs = nowMs;
   }
-  drawCenteredText(statusLine, 39, 1);
 
-  char upLine[20];
-  snprintf(upLine, sizeof(upLine), "Uptime %lus", static_cast<unsigned long>(g_state.uptimeMs / 1000UL));
-  drawCenteredText(upLine, 51, 1);
+  const uint32_t elapsedMs = nowMs - g_unlockSequenceStartMs;
+  const uint32_t cycleDurationMs = static_cast<uint32_t>(kUnlockFrameMs) * kUnlockFrameCount;
+  const uint32_t cycleMs = (cycleDurationMs > 0U) ? (elapsedMs % cycleDurationMs) : 0U;
+  const uint8_t frameIndex = (kUnlockFrameMs > 0U)
+                                 ? static_cast<uint8_t>(cycleMs / kUnlockFrameMs)
+                                 : 0U;
+
+  drawGamingCorners(nowMs);
+  drawGamingScanlines(nowMs, 14, 62);
+
+  if (frameIndex == 0U) {
+    drawTitleBar("BRIGADE Z - ANALYSE");
+    drawCenteredDemoText("BRIGADE Z - ANALYSE", 2, 1, nowMs, false, SSD1306_BLACK);
+    drawSprite8(kSpriteLock, 3, 2, SSD1306_BLACK);
+    drawSprite8(kSpriteChip, 117, 2, SSD1306_BLACK);
+    drawUnlockWaveform(nowMs, 8, 16, 112, 32, false);
+    drawReticle(64, 32, 8, nowMs);
+    for (uint8_t i = 0; i < 4; ++i) {
+      if (((nowMs / 55U) + i) % 2U == 0U) {
+        continue;
+      }
+      const int16_t px = 6 + static_cast<int16_t>((nowMs + i * 19U) % 116U);
+      const int16_t py = 16 + static_cast<int16_t>(((nowMs / 2U) + i * 13U) % 30U);
+      g_display.drawPixel(px, py, SSD1306_WHITE);
+    }
+    drawSprite8(kSpriteStar, 10, 53);
+    drawSprite8(kSpriteStar, 110, 53);
+    drawCenteredDemoText("CALIBRATION...", 54, 1, nowMs, true);
+    return;
+  }
+
+  if (frameIndex == 1U) {
+    drawTitleBar("OSCILLA VOLT - SYNC");
+    drawCenteredDemoText("OSCILLA VOLT - SYNC", 2, 1, nowMs, false, SSD1306_BLACK);
+    drawSprite8(kSpriteChip, 3, 2, SSD1306_BLACK);
+    drawSprite8(kSpriteStar, 117, 2, SSD1306_BLACK);
+    drawUnlockWaveform(nowMs, 8, 16, 112, 32, true);
+    drawReticle(64, 32, 10, nowMs);
+    g_display.drawRoundRect(26, 22, 76, 20, 3, SSD1306_WHITE);
+    g_display.drawFastVLine(64, 22, 20, SSD1306_WHITE);
+    drawCenteredDemoText("VERIF SIGNATURE", 54, 1, nowMs, true);
+    return;
+  }
+
+  if (frameIndex == 2U) {
+    drawTitleBar("CRYPTO CLEF - LOCK");
+    drawCenteredDemoText("CRYPTO CLEF - LOCK", 2, 1, nowMs, false, SSD1306_BLACK);
+    drawSprite8(kSpriteSkull, 3, 2, SSD1306_BLACK);
+    drawSprite8(kSpriteLock, 117, 2, SSD1306_BLACK);
+    drawDataRain(nowMs, 8, 16, 112, 32);
+    drawRadarSweep(nowMs, 64, 32, 12);
+    drawCenteredDemoText("ECOUTE CANAL Z", 54, 1, nowMs, true);
+    return;
+  }
+
+  if (frameIndex == 3U) {
+    drawTitleBar("ACCES AUTORISE");
+    drawCenteredDemoText("ACCES AUTORISE", 2, 1, nowMs, false, SSD1306_BLACK);
+    drawSprite8(kSpriteStar, 3, 2, SSD1306_BLACK);
+    drawSprite8(kSpriteStar, 117, 2, SSD1306_BLACK);
+    drawPulseRays(nowMs, 64, 34);
+    drawSprite8(kSpriteChip, 16, 26);
+    drawSprite8(kSpriteChip, 104, 26);
+    drawCenteredDemoText("LA CONFIRME", 24, 2, nowMs, true);
+    drawCenteredDemoText("VERROU 01 : OUVERT", 54, 1, nowMs, false);
+    return;
+  }
+
+  if (frameIndex == 4U) {
+    drawTitleBar("NOUVEAU DROIT");
+    drawCenteredDemoText("NOUVEAU DROIT", 2, 1, nowMs, false, SSD1306_BLACK);
+    drawSprite8(kSpriteLock, 3, 2, SSD1306_BLACK);
+    drawSprite8(kSpriteLock, 117, 2, SSD1306_BLACK);
+    g_display.drawRoundRect(8, 18, 112, 28, 4, SSD1306_WHITE);
+    drawSprite8(kSpritePhone, 16, 27);
+    drawSprite8(kSpriteStar, 104, 27);
+    drawCenteredDemoText("APPELER HOTLINE", 28, 1, nowMs, true);
+    drawCenteredDemoText("BRAVO", 54, 1, nowMs, true);
+    return;
+  }
+
+  drawTitleBar("MISSION ACTIVE");
+  drawCenteredDemoText("MISSION ACTIVE", 2, 1, nowMs, false, SSD1306_BLACK);
+  drawSprite8(kSpriteChip, 3, 2, SSD1306_BLACK);
+  drawSprite8(kSpriteSkull, 117, 2, SSD1306_BLACK);
+  drawMissionGrid(nowMs, 8, 16, 112, 32);
+  drawCenteredDemoText("SCAN CAMPUS / INDICES", 54, 1, nowMs, true);
 }
 
 void renderLinkDownScreen(uint32_t nowMs) {
@@ -483,10 +785,8 @@ void renderScreen(uint32_t nowMs, bool linkAlive) {
       renderMp3Screen();
     } else if (g_state.uLockMode) {
       renderULockScreen(nowMs);
-    } else if (g_state.uSonFunctional && (nowMs < g_unlockBadgeUntilMs)) {
-      renderUnlockBadgeScreen();
     } else if (g_state.uSonFunctional) {
-      renderUSonFunctionalScreen();
+      renderUnlockSequenceScreen(nowMs);
     } else {
       drawTitleBar("U-SON SCREEN");
       drawCenteredText("Mode signal", 20, 1);
@@ -632,7 +932,9 @@ void handleIncoming() {
       TelemetryState parsed = g_state;
       if (parseFrame(g_lineBuffer, &parsed)) {
         if (!g_state.uSonFunctional && parsed.uSonFunctional) {
-          g_unlockBadgeUntilMs = millis() + kUnlockBadgeMs;
+          g_unlockSequenceStartMs = millis();
+        } else if (g_state.uSonFunctional && !parsed.uSonFunctional) {
+          g_unlockSequenceStartMs = 0;
         }
         pushScopeSample(parsed.micLevelPercent);
         g_state = parsed;

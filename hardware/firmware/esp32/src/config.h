@@ -30,16 +30,19 @@ constexpr uint32_t kCodecMicSilenceSwitchMs = 3000;
 // Alias pour compatibilite avec le code existant.
 constexpr uint8_t kPinMic = kPinMicAdc;
 
-// DAC interne utilise uniquement en mode fallback (sans SD/MP3).
-// GPIO19 choisi pour eviter le conflit avec I2S DOUT (GPIO26).
-constexpr bool kEnableSineDac = true;
-constexpr uint8_t kPinDacSine = 19;
+// Mode I2S-only sur A252: DAC desactive.
+// Le DAC hardware ESP32 existe seulement sur GPIO25/26 et ne doit pas etre utilise ici.
+constexpr bool kEnableSineDac = false;
+constexpr uint8_t kPinDacSine = 0xFF;
 
 // Profil ESP32 Audio Kit V2.2 A252 (codec + SD_MMC)
 constexpr uint8_t kPinI2SBclk = 27;
 constexpr uint8_t kPinI2SLrc = 25;
 constexpr uint8_t kPinI2SDout = 26;
 constexpr int8_t kPinAudioPaEnable = 21;
+constexpr bool kPinAudioPaEnableActiveHigh = true;
+constexpr bool kBootAudioPaTogglePulse = true;
+constexpr uint16_t kBootAudioPaToggleMs = 20;
 constexpr uint8_t kI2sOutputPort = 0;
 constexpr bool kEnableUnlockI2sJingle = true;
 constexpr float kUnlockI2sJingleGain = 0.22f;
@@ -52,6 +55,12 @@ constexpr float kBootI2sNoiseGain = 0.18f;
 constexpr bool kEnableBootAudioValidationProtocol = true;
 constexpr uint32_t kBootAudioValidationTimeoutMs = 12000;
 constexpr uint8_t kBootAudioValidationMaxReplays = 3;
+constexpr bool kEnableInternalLittleFs = true;
+constexpr bool kInternalLittleFsFormatOnFail = false;
+constexpr bool kPreferLittleFsBootFx = true;
+constexpr char kBootFxLittleFsPath[] = "/boot.mp3";
+constexpr float kBootFxLittleFsGain = 0.20f;
+constexpr uint32_t kBootFxLittleFsMaxDurationMs = 5000;
 
 // ESP32 -> ESP8266 (ecran) en UART unidirectionnel
 constexpr uint8_t kPinScreenTx = 22;

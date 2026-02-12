@@ -3,7 +3,12 @@
 #include <new>
 
 #include <AudioFileSourceFS.h>
+#include <AudioGenerator.h>
+#include <AudioGeneratorAAC.h>
+#include <AudioGeneratorFLAC.h>
 #include <AudioGeneratorMP3.h>
+#include <AudioGeneratorOpus.h>
+#include <AudioGeneratorWAV.h>
 #include <AudioOutputI2S.h>
 #include <FS.h>
 #include <SD_MMC.h>
@@ -30,14 +35,19 @@ void Mp3Player::begin() {
   }
 }
 
-void Mp3Player::update(uint32_t nowMs) {
+void Mp3Player::update(uint32_t nowMs, bool allowPlayback) {
   refreshStorage(nowMs);
   if (!sdReady_ || trackCount_ == 0) {
     stop();
     return;
   }
 
-  if (mp3_ == nullptr) {
+  if (!allowPlayback) {
+    stop();
+    return;
+  }
+
+  if (decoder_ == nullptr) {
     if (paused_) {
       return;
     }
@@ -54,8 +64,8 @@ void Mp3Player::update(uint32_t nowMs) {
     return;
   }
 
-  if (mp3_->isRunning()) {
-    mp3_->loop();
+  if (decoder_->isRunning()) {
+    decoder_->loop();
     return;
   }
 
@@ -152,7 +162,7 @@ bool Mp3Player::hasTracks() const {
 }
 
 bool Mp3Player::isPlaying() const {
-  return mp3_ != nullptr && mp3_->isRunning() && !paused_;
+  return decoder_ != nullptr && decoder_->isRunning() && !paused_;
 }
 
 uint16_t Mp3Player::trackCount() const {
@@ -259,7 +269,7 @@ void Mp3Player::scanTracks() {
   while (file) {
     if (!file.isDirectory()) {
       String filename = String(file.name());
-      if (isMp3File(filename) && trackCount_ < kMaxTracks) {
+      if (isSupportedAudioFile(filename) && trackCount_ < kMaxTracks) {
         if (!filename.startsWith("/")) {
           filename = "/" + filename;
         }
@@ -274,11 +284,11 @@ void Mp3Player::scanTracks() {
   sortTracks();
 
   if (trackCount_ == 0) {
-    if (isMp3File(String(mp3Path_)) && SD_MMC.exists(mp3Path_)) {
+    if (isSupportedAudioFile(String(mp3Path_)) && SD_MMC.exists(mp3Path_)) {
       tracks_[0] = String(mp3Path_);
       trackCount_ = 1;
     } else {
-      Serial.println("[MP3] No .mp3 file found on SD.");
+      Serial.println("[MP3] No supported audio file found on SD.");
       return;
     }
   }
@@ -290,10 +300,65 @@ void Mp3Player::scanTracks() {
   Serial.printf("[MP3] %u track(s) loaded.\n", static_cast<unsigned int>(trackCount_));
 }
 
-bool Mp3Player::isMp3File(const String& filename) {
+bool Mp3Player::isSupportedAudioFile(const String& filename) {
+  return codecForPath(filename) != AudioCodec::kUnknown;
+}
+
+AudioCodec Mp3Player::codecForPath(const String& filename) {
   String lower = filename;
   lower.toLowerCase();
-  return lower.endsWith(".mp3");
+  if (lower.endsWith(".mp3")) {
+    return AudioCodec::kMp3;
+  }
+  if (lower.endsWith(".wav")) {
+    return AudioCodec::kWav;
+  }
+  if (lower.endsWith(".aac")) {
+    return AudioCodec::kAac;
+  }
+  if (lower.endsWith(".flac")) {
+    return AudioCodec::kFlac;
+  }
+  if (lower.endsWith(".opus") || lower.endsWith(".ogg")) {
+    return AudioCodec::kOpus;
+  }
+  return AudioCodec::kUnknown;
+}
+
+const char* Mp3Player::codecLabel(AudioCodec codec) {
+  switch (codec) {
+    case AudioCodec::kMp3:
+      return "MP3";
+    case AudioCodec::kWav:
+      return "WAV";
+    case AudioCodec::kAac:
+      return "AAC";
+    case AudioCodec::kFlac:
+      return "FLAC";
+    case AudioCodec::kOpus:
+      return "OPUS";
+    case AudioCodec::kUnknown:
+    default:
+      return "UNKNOWN";
+  }
+}
+
+AudioGenerator* Mp3Player::createDecoder(AudioCodec codec) {
+  switch (codec) {
+    case AudioCodec::kMp3:
+      return new (std::nothrow) AudioGeneratorMP3();
+    case AudioCodec::kWav:
+      return new (std::nothrow) AudioGeneratorWAV();
+    case AudioCodec::kAac:
+      return new (std::nothrow) AudioGeneratorAAC();
+    case AudioCodec::kFlac:
+      return new (std::nothrow) AudioGeneratorFLAC();
+    case AudioCodec::kOpus:
+      return new (std::nothrow) AudioGeneratorOpus();
+    case AudioCodec::kUnknown:
+    default:
+      return nullptr;
+  }
 }
 
 void Mp3Player::sortTracks() {
@@ -318,6 +383,16 @@ void Mp3Player::startCurrentTrack() {
   }
 
   const String& trackPath = tracks_[currentTrack_];
+  const AudioCodec trackCodec = codecForPath(trackPath);
+  if (trackCodec == AudioCodec::kUnknown) {
+    Serial.printf("[MP3] Unsupported file type: %s\n", trackPath.c_str());
+    if (trackCount_ > 0U) {
+      currentTrack_ = static_cast<uint16_t>((currentTrack_ + 1U) % trackCount_);
+    }
+    nextRetryMs_ = millis() + 250U;
+    return;
+  }
+
   if (!SD_MMC.exists(trackPath.c_str())) {
     Serial.printf("[MP3] Missing track: %s\n", trackPath.c_str());
     scanTracks();
@@ -327,8 +402,9 @@ void Mp3Player::startCurrentTrack() {
 
   mp3File_ = new (std::nothrow) AudioFileSourceFS(SD_MMC, trackPath.c_str());
   i2sOut_ = new (std::nothrow) AudioOutputI2S();
-  mp3_ = new (std::nothrow) AudioGeneratorMP3();
-  if (mp3File_ == nullptr || i2sOut_ == nullptr || mp3_ == nullptr) {
+  decoder_ = createDecoder(trackCodec);
+  activeCodec_ = trackCodec;
+  if (mp3File_ == nullptr || i2sOut_ == nullptr || decoder_ == nullptr) {
     Serial.println("[MP3] Memory allocation failed.");
     stop();
     nextRetryMs_ = millis() + 1000;
@@ -337,27 +413,29 @@ void Mp3Player::startCurrentTrack() {
 
   i2sOut_->SetPinout(i2sBclk_, i2sLrc_, i2sDout_);
   i2sOut_->SetGain(gain_);
-  if (!mp3_->begin(mp3File_, i2sOut_)) {
-    Serial.println("[MP3] Unable to start playback.");
+  if (!decoder_->begin(mp3File_, i2sOut_)) {
+    Serial.printf("[MP3] Unable to start %s playback.\n", codecLabel(trackCodec));
     stop();
     nextRetryMs_ = millis() + 1000;
     return;
   }
 
-  Serial.printf("[MP3] Playing %u/%u: %s\n",
+  Serial.printf("[MP3] Playing %u/%u [%s]: %s\n",
                 static_cast<unsigned int>(currentTrack_ + 1U),
                 static_cast<unsigned int>(trackCount_),
+                codecLabel(trackCodec),
                 trackPath.c_str());
 }
 
 void Mp3Player::stop() {
-  if (mp3_ != nullptr) {
-    if (mp3_->isRunning()) {
-      mp3_->stop();
+  if (decoder_ != nullptr) {
+    if (decoder_->isRunning()) {
+      decoder_->stop();
     }
-    delete mp3_;
-    mp3_ = nullptr;
+    delete decoder_;
+    decoder_ = nullptr;
   }
+  activeCodec_ = AudioCodec::kUnknown;
 
   if (mp3File_ != nullptr) {
     delete mp3File_;

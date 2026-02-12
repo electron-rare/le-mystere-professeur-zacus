@@ -3,8 +3,17 @@
 #include <Arduino.h>
 
 class AudioFileSourceFS;
-class AudioGeneratorMP3;
+class AudioGenerator;
 class AudioOutputI2S;
+
+enum class AudioCodec : uint8_t {
+  kUnknown = 0,
+  kMp3,
+  kWav,
+  kAac,
+  kFlac,
+  kOpus,
+};
 
 enum class RepeatMode : uint8_t {
   kAll = 0,
@@ -21,7 +30,7 @@ class Mp3Player {
   ~Mp3Player();
 
   void begin();
-  void update(uint32_t nowMs);
+  void update(uint32_t nowMs, bool allowPlayback = true);
   void togglePause();
   void restartTrack();
   void nextTrack();
@@ -48,8 +57,11 @@ class Mp3Player {
   void unmountStorage(uint32_t nowMs);
   void refreshStorage(uint32_t nowMs);
   void scanTracks();
-  static bool isMp3File(const String& filename);
+  static bool isSupportedAudioFile(const String& filename);
+  static AudioCodec codecForPath(const String& filename);
+  static const char* codecLabel(AudioCodec codec);
   void sortTracks();
+  static AudioGenerator* createDecoder(AudioCodec codec);
 
   void startCurrentTrack();
   void stop();
@@ -72,7 +84,8 @@ class Mp3Player {
   String tracks_[kMaxTracks];
   RepeatMode repeatMode_ = RepeatMode::kAll;
   bool forceRescan_ = false;
-  AudioGeneratorMP3* mp3_ = nullptr;
+  AudioCodec activeCodec_ = AudioCodec::kUnknown;
+  AudioGenerator* decoder_ = nullptr;
   AudioFileSourceFS* mp3File_ = nullptr;
   AudioOutputI2S* i2sOut_ = nullptr;
 };

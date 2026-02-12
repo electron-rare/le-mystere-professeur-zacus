@@ -12,9 +12,11 @@ class SineDac {
   void setFrequency(float freqHz);
   float frequency() const;
   bool isEnabled() const;
+  bool isAvailable() const;
 
  private:
   static constexpr uint16_t kTableSize = 128;
+  static bool isDacCapablePin(uint8_t pin);
 
   void buildTable();
 
@@ -26,4 +28,5 @@ class SineDac {
   uint32_t periodUs_;
   float phaseAcc_ = 0.0f;
   bool enabled_ = false;
+  bool available_ = false;
 };

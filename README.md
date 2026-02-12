@@ -33,9 +33,9 @@ Dossier : `hardware/`
 - **Printables** : conventions définies, arborescence `src/export` à compléter selon les livrables.
 - **Hardware/firmware** : flux `U_LOCK`/`U-SON`/MP3 opérationnel et documenté (`hardware/firmware/esp32/`).
 
-## Licence (non-commercial pour le contenu)
-- Contenus créatifs (documents, PDFs, PNG, SVG, textes de jeu) : **CC BY-NC 4.0**
-- Code (firmware, scripts) : **MIT**
+## Licence (open source)
+- Contenus creatifs (documents, PDFs, PNG, SVG, textes de jeu) : **CC BY-SA 4.0**
+- Code (firmware, scripts) : **GPL-3.0-or-later**
 Voir `LICENSE.md` et `LICENSES/`.
 
 ## Disclaimer
@@ -52,4 +52,3 @@ Voir `CONTRIBUTING.md`.
 Voir `CHANGELOG.md`.
 ## Mainteneur
 L’électron rare
-

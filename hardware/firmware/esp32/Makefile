@@ -4,7 +4,7 @@ SCREEN_ENV ?= esp8266_oled
 ESP32_PORT ?=
 SCREEN_PORT ?=
 
-.PHONY: help build build-esp32 build-screen upload-esp32 upload-screen monitor-esp32 monitor-screen clean
+.PHONY: help build build-esp32 build-screen upload-esp32 upload-screen uploadfs-esp32 erasefs-esp32 monitor-esp32 monitor-screen clean
 
 help:
 	@echo "Targets:"
@@ -12,6 +12,8 @@ help:
 	@echo "  make build-esp32      # Build ESP32 firmware only"
 	@echo "  make build-screen     # Build ESP8266 OLED firmware only"
 	@echo "  make upload-esp32     # Flash ESP32 (optional ESP32_PORT=/dev/ttyUSB0)"
+	@echo "  make uploadfs-esp32   # Flash LittleFS image to ESP32"
+	@echo "  make erasefs-esp32    # Erase LittleFS partition on ESP32"
 	@echo "  make upload-screen    # Flash ESP8266 (optional SCREEN_PORT=/dev/ttyUSB1)"
 	@echo "  make monitor-esp32    # Serial monitor ESP32 (optional ESP32_PORT=...)"
 	@echo "  make monitor-screen   # Serial monitor ESP8266 (optional SCREEN_PORT=...)"
@@ -30,6 +32,20 @@ upload-esp32:
 		$(PIO) run -e $(ESP32_ENV) -t upload --upload-port "$(ESP32_PORT)"; \
 	else \
 		$(PIO) run -e $(ESP32_ENV) -t upload; \
+	fi
+
+uploadfs-esp32:
+	@if [ -n "$(ESP32_PORT)" ]; then \
+		$(PIO) run -e $(ESP32_ENV) -t uploadfs --upload-port "$(ESP32_PORT)"; \
+	else \
+		$(PIO) run -e $(ESP32_ENV) -t uploadfs; \
+	fi
+
+erasefs-esp32:
+	@if [ -n "$(ESP32_PORT)" ]; then \
+		$(PIO) run -e $(ESP32_ENV) -t erasefs --upload-port "$(ESP32_PORT)"; \
+	else \
+		$(PIO) run -e $(ESP32_ENV) -t erasefs; \
 	fi
 
 upload-screen:

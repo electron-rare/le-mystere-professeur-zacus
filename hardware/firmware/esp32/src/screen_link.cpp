@@ -28,6 +28,7 @@ void ScreenLink::update(bool laDetected,
                         int8_t tuningOffset,
                         uint8_t tuningConfidence,
                         bool micScopeEnabled,
+                        uint8_t unlockHoldPercent,
                         uint32_t nowMs) {
   const bool changed = !hasState_ || laDetected != lastLa_ || mp3Playing != lastMp3_ ||
                        sdReady != lastSd_ || mp3Mode != lastMp3Mode_ || key != lastKey_ ||
@@ -38,13 +39,14 @@ void ScreenLink::update(bool laDetected,
                        uSonFunctional != lastUSonFunctional_ ||
                        tuningOffset != lastTuningOffset_ ||
                        tuningConfidence != lastTuningConfidence_ ||
-                       micScopeEnabled != lastMicScopeEnabled_;
+                       micScopeEnabled != lastMicScopeEnabled_ ||
+                       unlockHoldPercent != lastUnlockHoldPercent_;
   const bool due = (nowMs - lastTxMs_) >= updatePeriodMs_;
   if (!changed && !due) {
     return;
   }
 
-  serial_.printf("STAT,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u,%u,%u\n",
+  serial_.printf("STAT,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u,%u,%u,%u\n",
                  laDetected ? 1U : 0U,
                  mp3Playing ? 1U : 0U,
                  sdReady ? 1U : 0U,
@@ -60,7 +62,8 @@ void ScreenLink::update(bool laDetected,
                  static_cast<unsigned int>(tuningConfidence),
                  uLockListening ? 1U : 0U,
                  static_cast<unsigned int>(micLevelPercent),
-                 micScopeEnabled ? 1U : 0U);
+                 micScopeEnabled ? 1U : 0U,
+                 static_cast<unsigned int>(unlockHoldPercent));
 
   hasState_ = true;
   lastLa_ = laDetected;
@@ -78,5 +81,6 @@ void ScreenLink::update(bool laDetected,
   lastTuningOffset_ = tuningOffset;
   lastTuningConfidence_ = tuningConfidence;
   lastMicScopeEnabled_ = micScopeEnabled;
+  lastUnlockHoldPercent_ = unlockHoldPercent;
   lastTxMs_ = nowMs;
 }

@@ -25,6 +25,7 @@ class ScreenLink {
               int8_t tuningOffset,
               uint8_t tuningConfidence,
               bool micScopeEnabled,
+              uint8_t unlockHoldPercent,
               uint32_t nowMs);
 
  private:
@@ -49,5 +50,6 @@ class ScreenLink {
   int8_t lastTuningOffset_ = 0;
   uint8_t lastTuningConfidence_ = 0;
   bool lastMicScopeEnabled_ = false;
+  uint8_t lastUnlockHoldPercent_ = 0;
   uint32_t lastTxMs_ = 0;
 };

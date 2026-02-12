@@ -14,7 +14,7 @@ Ce document decrit le branchement entre:
 Notes:
 - Le lien est unidirectionnel: ESP32 vers ESP8266.
 - `D5 (TX)` de l'ESP8266 n'est pas utilise.
-- Debit serie: `57600 bauds`.
+- Debit serie: `38400 bauds`.
 
 ## 2) OLED sur la carte ESP8266
 

@@ -42,6 +42,7 @@ Si deja preconfigure sur ta carte, ne rien modifier.
 
 - Mode U_LOCK (boot):
   - un appui touche (`K1..K6`) lance la detection LA
+  - le LA doit cumuler 3 secondes de detection (continue ou repetee) pour deverrouiller
   - `K6` relance la calibration micro (30 s) pendant detection
   - autres touches ignorees tant que le LA n'est pas detecte
 - Module U-SON fonctionnel (apres detection LA):

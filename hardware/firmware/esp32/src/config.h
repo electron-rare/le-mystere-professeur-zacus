@@ -42,7 +42,7 @@ constexpr int8_t kPinAudioPaEnable = 21;
 
 // ESP32 -> ESP8266 (ecran) en UART unidirectionnel
 constexpr uint8_t kPinScreenTx = 22;
-constexpr uint32_t kScreenBaud = 57600;
+constexpr uint32_t kScreenBaud = 38400;
 constexpr uint16_t kScreenUpdatePeriodMs = 250;
 
 // Clavier analogique (6 touches sur 1 entree ADC)
@@ -80,6 +80,7 @@ constexpr bool kEnableMicCalibrationOnSignalEntry = true;
 constexpr uint32_t kMicCalibrationDurationMs = 30000;
 constexpr uint16_t kMicCalibrationLogPeriodMs = 500;
 constexpr bool kULockRequireKeyToStartDetection = true;
+constexpr uint32_t kLaUnlockHoldMs = 3000;
 constexpr float kMicRmsForScreenFullScale = 180.0f;
 constexpr bool kScreenEnableMicScope = true;
 

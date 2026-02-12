@@ -36,6 +36,8 @@ RuntimeMode g_mode = RuntimeMode::kSignal;
 bool g_laDetectionEnabled = true;
 bool g_uSonFunctional = false;
 bool g_uLockListening = false;
+uint32_t g_laHoldAccumMs = 0;
+uint32_t g_lastLoopMs = 0;
 
 struct MicCalibrationState {
   bool active = false;
@@ -88,6 +90,23 @@ uint8_t micLevelPercentFromRms(float micRms) {
     percent = 100.0f;
   }
   return static_cast<uint8_t>(percent);
+}
+
+void resetLaHoldProgress() {
+  g_laHoldAccumMs = 0;
+}
+
+uint8_t unlockHoldPercent(uint32_t holdMs, bool uLockListening) {
+  if (!uLockListening) {
+    return 0;
+  }
+  if (config::kLaUnlockHoldMs == 0) {
+    return 100;
+  }
+  if (holdMs >= config::kLaUnlockHoldMs) {
+    return 100;
+  }
+  return static_cast<uint8_t>((holdMs * 100U) / config::kLaUnlockHoldMs);
 }
 
 void resetMicCalibrationStats() {
@@ -265,6 +284,7 @@ void applyRuntimeMode(RuntimeMode newMode, bool force = false) {
   } else {
     g_uSonFunctional = false;
     g_uLockListening = !config::kULockRequireKeyToStartDetection;
+    resetLaHoldProgress();
     g_laDetectionEnabled = g_uLockListening;
     g_laDetector.setCaptureEnabled(g_uLockListening);
     if (config::kEnableMicCalibrationOnSignalEntry && g_uLockListening) {
@@ -321,6 +341,7 @@ void handleKeyPress(uint8_t key) {
   if (!g_uSonFunctional) {
     if (!g_uLockListening) {
       g_uLockListening = true;
+      resetLaHoldProgress();
       g_laDetectionEnabled = true;
       g_laDetector.setCaptureEnabled(true);
       if (config::kEnableMicCalibrationOnSignalEntry) {
@@ -441,8 +462,32 @@ void loop() {
 
   const bool laDetected =
       (g_mode == RuntimeMode::kSignal) && g_laDetectionEnabled && g_laDetector.isDetected();
-  if (g_mode == RuntimeMode::kSignal && !g_uSonFunctional && g_uLockListening && laDetected) {
+  const bool uLockModeBeforeUnlock = (g_mode == RuntimeMode::kSignal) && !g_uSonFunctional;
+  const bool uLockListeningBeforeUnlock = uLockModeBeforeUnlock && g_uLockListening;
+  uint32_t loopDeltaMs = 0;
+  if (g_lastLoopMs != 0) {
+    loopDeltaMs = nowMs - g_lastLoopMs;
+    if (loopDeltaMs > 250U) {
+      loopDeltaMs = 250U;
+    }
+  }
+  g_lastLoopMs = nowMs;
+
+  if (!uLockListeningBeforeUnlock) {
+    resetLaHoldProgress();
+  } else if (laDetected) {
+    uint32_t nextHoldMs = g_laHoldAccumMs + loopDeltaMs;
+    if (nextHoldMs > config::kLaUnlockHoldMs) {
+      nextHoldMs = config::kLaUnlockHoldMs;
+    }
+    g_laHoldAccumMs = nextHoldMs;
+  }
+
+  const uint8_t laHoldPercentBeforeUnlock = unlockHoldPercent(g_laHoldAccumMs, uLockListeningBeforeUnlock);
+
+  if (uLockListeningBeforeUnlock && g_laHoldAccumMs >= config::kLaUnlockHoldMs) {
     g_uSonFunctional = true;
+    resetLaHoldProgress();
     g_mp3.requestStorageRefresh();
     Serial.println("[MODE] MODULE U-SON Fonctionnel (LA detecte)");
     Serial.println("[SD] Detection SD activee.");
@@ -451,6 +496,7 @@ void loop() {
   const bool uLockMode = (g_mode == RuntimeMode::kSignal) && !g_uSonFunctional;
   const bool uLockListening = uLockMode && g_uLockListening;
   const bool uSonFunctional = (g_mode == RuntimeMode::kSignal) && g_uSonFunctional;
+  const uint8_t laHoldPercent = uLockListening ? laHoldPercentBeforeUnlock : 0;
   const int8_t tuningOffset = uLockListening ? g_laDetector.tuningOffset() : 0;
   const uint8_t tuningConfidence = uLockListening ? g_laDetector.tuningConfidence() : 0;
   const float micRms = g_laDetector.micRms();
@@ -522,5 +568,6 @@ void loop() {
                   tuningOffset,
                   tuningConfidence,
                   config::kScreenEnableMicScope && config::kUseI2SMicInput,
+                  laHoldPercent,
                   nowMs);
 }

@@ -28,6 +28,7 @@ Cette checklist couvre le comportement attendu du couple ESP32 + ESP8266 OLED.
 4. Verifier les logs ESP32:
    - `[MODE] MODULE U-SON Fonctionnel (LA detecte)`
    - `[SD] Detection SD activee.`
+   - La detection LA doit cumuler 3 secondes (continue ou repetee) avant deverrouillage.
 5. Verifier l'OLED:
    - pictogramme de validation
    - puis ecran `U-SON FONCTIONNEL`
@@ -64,7 +65,7 @@ Cette checklist couvre le comportement attendu du couple ESP32 + ESP8266 OLED.
 
 1. Deconnecter temporairement le fil `GPIO22 -> D6`.
 2. Verifier l'OLED:
-   - affichage `LINK DOWN` apres timeout (~3 s)
+   - affichage `LINK DOWN` apres timeout (~10 s + anti-flicker ~1.5 s)
 3. Reconnecter le fil.
 4. Verifier retour automatique vers un ecran de mode.
 

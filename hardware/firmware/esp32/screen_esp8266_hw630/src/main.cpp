@@ -10,14 +10,17 @@ namespace {
 
 constexpr uint8_t kLinkRx = D6;    // ESP8266 RX <- ESP32 TX (GPIO22)
 constexpr uint8_t kLinkTx = D5;    // Non utilise dans le profil actuel
-constexpr uint32_t kLinkBaud = 57600;
+constexpr uint32_t kLinkBaud = 38400;
+constexpr int kLinkRxBufferBytes = 256;
+constexpr int kLinkIsrBufferBytes = 2048;
 
 constexpr uint8_t kScreenWidth = 128;
 constexpr uint8_t kScreenHeight = 64;
 constexpr int8_t kOledReset = -1;
 
 constexpr uint16_t kRenderPeriodMs = 250;
-constexpr uint16_t kLinkTimeoutMs = 3000;
+constexpr uint16_t kLinkTimeoutMs = 10000;
+constexpr uint16_t kLinkDownConfirmMs = 1500;
 constexpr uint16_t kDiagPeriodMs = 5000;
 constexpr uint16_t kBootVisualTestMs = 250;
 constexpr uint16_t kUnlockBadgeMs = 1200;
@@ -56,6 +59,7 @@ struct TelemetryState {
   uint8_t volumePercent = 0;
   uint8_t micLevelPercent = 0;   // 0..100
   bool micScopeEnabled = false;  // scope render only when source supports it
+  uint8_t unlockHoldPercent = 0; // 0..100
   int8_t tuningOffset = 0;      // -8..+8 (left/right around LA)
   uint8_t tuningConfidence = 0; // 0..100
   uint32_t lastRxMs = 0;
@@ -70,7 +74,9 @@ uint32_t g_lastDiagMs = 0;
 bool g_hasValidState = false;
 bool g_linkWasAlive = false;
 uint32_t g_linkLossCount = 0;
-char g_lineBuffer[96];
+uint32_t g_parseErrorCount = 0;
+uint32_t g_rxOverflowCount = 0;
+char g_lineBuffer[128];
 uint8_t g_lineLen = 0;
 uint8_t g_oledSdaPin = kInvalidPin;
 uint8_t g_oledSclPin = kInvalidPin;
@@ -79,12 +85,48 @@ uint8_t g_scopeHistory[kScopeHistoryLen] = {};
 uint8_t g_scopeHead = 0;
 bool g_scopeFilled = false;
 uint32_t g_unlockBadgeUntilMs = 0;
+uint32_t g_lastByteMs = 0;
+uint32_t g_linkDownSinceMs = 0;
+
+uint32_t latestLinkTickMs() {
+  if (g_state.lastRxMs > g_lastByteMs) {
+    return g_state.lastRxMs;
+  }
+  return g_lastByteMs;
+}
+
+bool isPhysicalLinkAlive(uint32_t nowMs) {
+  if (!g_linkEnabled) {
+    return false;
+  }
+
+  const uint32_t lastTickMs = latestLinkTickMs();
+  if (lastTickMs == 0) {
+    return false;
+  }
+  return (nowMs - lastTickMs) <= kLinkTimeoutMs;
+}
 
 bool isLinkAlive(uint32_t nowMs) {
   if (!g_linkEnabled) {
     return false;
   }
-  return g_hasValidState && ((nowMs - g_state.lastRxMs) <= kLinkTimeoutMs);
+
+  if (latestLinkTickMs() == 0) {
+    return false;
+  }
+
+  if (isPhysicalLinkAlive(nowMs)) {
+    g_linkDownSinceMs = 0;
+    return true;
+  }
+
+  if (g_linkDownSinceMs == 0) {
+    g_linkDownSinceMs = nowMs;
+    return true;
+  }
+
+  return (nowMs - g_linkDownSinceMs) < kLinkDownConfirmMs;
 }
 
 int16_t textWidth(const char* text, uint8_t textSize) {
@@ -109,6 +151,23 @@ void drawTitleBar(const char* title) {
   g_display.setTextColor(SSD1306_WHITE);
 }
 
+void drawTinyLock(int16_t x, int16_t y, uint16_t color) {
+  // 7x8 lock icon (body + shackle)
+  g_display.drawRect(x, y + 3, 7, 5, color);
+  g_display.drawLine(x + 2, y + 3, x + 2, y + 1, color);
+  g_display.drawLine(x + 4, y + 3, x + 4, y + 1, color);
+  g_display.drawPixel(x + 3, y + 0, color);
+}
+
+void drawProtoTitleBar() {
+  g_display.fillRect(0, 0, kScreenWidth, 12, SSD1306_WHITE);
+  drawTinyLock(6, 2, SSD1306_BLACK);
+  drawTinyLock(kScreenWidth - 13, 2, SSD1306_BLACK);
+  g_display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
+  drawCenteredText("U-SON PROTO", 2, 1);
+  g_display.setTextColor(SSD1306_WHITE);
+}
+
 void drawHorizontalGauge(int16_t x, int16_t y, int16_t w, int16_t h, uint8_t percent) {
   if (percent > 100U) {
     percent = 100U;
@@ -121,7 +180,7 @@ void drawHorizontalGauge(int16_t x, int16_t y, int16_t w, int16_t h, uint8_t per
 void drawTuningBar(int8_t tuningOffset, uint8_t tuningConfidence, int16_t y) {
   const int16_t x = 8;
   const int16_t w = 112;
-  const int16_t h = 10;
+  const int16_t h = 8;
   const int16_t centerX = x + (w / 2);
 
   int16_t clampedOffset = tuningOffset;
@@ -138,12 +197,93 @@ void drawTuningBar(int8_t tuningOffset, uint8_t tuningConfidence, int16_t y) {
 
   const int16_t markerHalfSpan = (w / 2) - 3;
   const int16_t markerX = centerX + (clampedOffset * markerHalfSpan) / 8;
+  const int16_t markerW = 1 + (static_cast<int16_t>(clampedConfidence) / 30);
 
   g_display.drawRect(x, y, w, h, SSD1306_WHITE);
   g_display.drawFastVLine(centerX, y - 2, h + 4, SSD1306_WHITE);
-  g_display.fillRect(markerX - 1, y + 1, 3, h - 2, SSD1306_WHITE);
+  g_display.fillRect(markerX - markerW, y + 1, (markerW * 2) + 1, h - 2, SSD1306_WHITE);
 
-  drawHorizontalGauge(8, y + h + 3, 112, 7, clampedConfidence);
+  // Left/right graduation ticks for a more "instrument" feel.
+  for (uint8_t i = 1; i < 4; ++i) {
+    const int16_t step = static_cast<int16_t>((w / 2) * i / 4);
+    g_display.drawPixel(centerX - step, y + h + 1, SSD1306_WHITE);
+    g_display.drawPixel(centerX + step, y + h + 1, SSD1306_WHITE);
+  }
+}
+
+void drawUnlockProgressBar(uint8_t unlockHoldPercent, int16_t y) {
+  if (unlockHoldPercent > 100U) {
+    unlockHoldPercent = 100U;
+  }
+  drawHorizontalGauge(8, y, 112, 8, unlockHoldPercent);
+}
+
+void drawMiniEqualizer(uint32_t nowMs, uint8_t levelPercent, int16_t x, int16_t y) {
+  if (levelPercent > 100U) {
+    levelPercent = 100U;
+  }
+
+  constexpr uint8_t kBars = 10;
+  constexpr int16_t kBarW = 3;
+  constexpr int16_t kBarGap = 1;
+  constexpr int16_t kMaxH = 9;
+
+  for (uint8_t i = 0; i < kBars; ++i) {
+    const uint8_t phase = static_cast<uint8_t>((nowMs / 90U) + (i * 17U));
+    const uint8_t wave = static_cast<uint8_t>((phase % 20U) * 5U);
+    const uint8_t mixed = static_cast<uint8_t>((levelPercent + wave) / 2U);
+    const int16_t barH = 1 + ((static_cast<int16_t>(mixed) * kMaxH) / 100);
+    const int16_t bx = x + (i * (kBarW + kBarGap));
+    g_display.fillRect(bx, y + (kMaxH - barH), kBarW, barH, SSD1306_WHITE);
+  }
+}
+
+void drawBrokenIcon(int16_t cx, int16_t cy);
+
+void drawBrokenModuleGlitch(uint32_t nowMs, int16_t cx, int16_t cy) {
+  const int16_t x = 0;
+  const int16_t y = 0;
+  const int16_t w = kScreenWidth;
+  const int16_t h = kScreenHeight;
+
+  const int8_t jitterX = static_cast<int8_t>((nowMs / 90U) % 3U) - 1;
+  const int8_t jitterY = static_cast<int8_t>((nowMs / 130U) % 3U) - 1;
+
+  // Full-screen shell: the intro now owns the complete OLED surface.
+  g_display.drawRect(x, y, w, h, SSD1306_WHITE);
+  g_display.drawRect(x + 1 + jitterX, y + 1 + jitterY, w - 2, h - 2, SSD1306_WHITE);
+  g_display.drawRect(x + 3 - jitterX, y + 3, w - 6, h - 6, SSD1306_WHITE);
+
+  // Main fracture map across the whole panel.
+  const int16_t crackY1 = 8 + static_cast<int16_t>((nowMs / 170U) % 3U);
+  g_display.drawLine(x + 4, crackY1, x + (w / 3), y + (h / 2) - 2, SSD1306_WHITE);
+  g_display.drawLine(x + (w / 3), y + (h / 2) - 2, x + ((w * 2) / 3), y + (h / 3), SSD1306_WHITE);
+  g_display.drawLine(x + ((w * 2) / 3), y + (h / 3), x + w - 5, y + h - 10, SSD1306_WHITE);
+  g_display.drawLine(x + (w / 2), y + 4, x + (w / 2) - 8, y + h - 8, SSD1306_WHITE);
+
+  // Animated glitch slices distributed over almost full width.
+  for (uint8_t i = 0; i < 10; ++i) {
+    const int16_t sy = y + 3 + static_cast<int16_t>((nowMs / 23U + i * 9U) % (h - 6));
+    const int16_t len = 20 + static_cast<int16_t>((nowMs / 17U + i * 11U) % 70U);
+    const int16_t sx = x + 2 + static_cast<int16_t>((nowMs / 13U + i * 23U) % (w - len - 4));
+    const int8_t dx = static_cast<int8_t>((nowMs / 31U + i * 5U) % 9U) - 4;
+    g_display.drawFastHLine(sx + dx, sy, len, SSD1306_WHITE);
+    if ((i % 3U) == 0U) {
+      g_display.drawFastHLine(x + 2, sy + 1, w - 4, SSD1306_WHITE);
+    }
+  }
+
+  // Sparse static/noise all over the screen.
+  for (uint8_t i = 0; i < 42; ++i) {
+    if (((nowMs / 37U) + i) % 2U != 0U) {
+      continue;
+    }
+    const int16_t px = x + static_cast<int16_t>((nowMs + i * 29U) % w);
+    const int16_t py = y + static_cast<int16_t>(((nowMs / 2U) + i * 17U) % h);
+    g_display.drawPixel(px, py, SSD1306_WHITE);
+  }
+
+  drawBrokenIcon(cx, cy);
 }
 
 void drawBrokenIcon(int16_t cx, int16_t cy) {
@@ -180,23 +320,43 @@ void drawScope(int16_t x, int16_t y, int16_t w, int16_t h) {
 
   const int16_t plotW = w - 2;
   const int16_t plotH = h - 2;
+  const int16_t plotX = x + 1;
+  const int16_t plotY = y + 1;
   const uint8_t start = g_scopeFilled ? g_scopeHead : 0;
+  const int16_t centerY = plotY + (plotH / 2);
+  const int16_t maxAmp = (plotH - 1) / 2;
 
-  int16_t prevX = x + 1;
+  // Midline reference for the mirror effect.
+  for (int16_t i = 0; i < plotW; i += 2) {
+    g_display.drawPixel(plotX + i, centerY, SSD1306_WHITE);
+  }
+
+  int16_t prevX = plotX;
   uint8_t firstValue = g_scopeHistory[start];
-  int16_t prevY =
-      y + 1 + (plotH - 1) - ((static_cast<int16_t>(firstValue) * (plotH - 1)) / 100);
+  int16_t firstAmp = (static_cast<int16_t>(firstValue) * maxAmp) / 100;
+  int16_t prevTopY = centerY - firstAmp;
+  int16_t prevBottomY = centerY + firstAmp;
 
   for (int16_t i = 1; i < plotW; ++i) {
     const uint8_t sampleIndex =
         static_cast<uint8_t>((start + (i * sampleCount) / plotW) % kScopeHistoryLen);
     const uint8_t value = g_scopeHistory[sampleIndex];
-    const int16_t currX = x + 1 + i;
-    const int16_t currY =
-        y + 1 + (plotH - 1) - ((static_cast<int16_t>(value) * (plotH - 1)) / 100);
-    g_display.drawLine(prevX, prevY, currX, currY, SSD1306_WHITE);
+    const int16_t currX = plotX + i;
+    const int16_t currAmp = (static_cast<int16_t>(value) * maxAmp) / 100;
+    const int16_t currTopY = centerY - currAmp;
+    const int16_t currBottomY = centerY + currAmp;
+
+    g_display.drawLine(prevX, prevTopY, currX, currTopY, SSD1306_WHITE);
+    g_display.drawLine(prevX, prevBottomY, currX, currBottomY, SSD1306_WHITE);
+
+    // Light bridges to emphasize mirrored "energy".
+    if ((i % 7) == 0) {
+      g_display.drawLine(currX, currTopY, currX, currBottomY, SSD1306_WHITE);
+    }
+
     prevX = currX;
-    prevY = currY;
+    prevTopY = currTopY;
+    prevBottomY = currBottomY;
   }
 }
 
@@ -204,6 +364,10 @@ void renderMp3Screen() {
   drawTitleBar("LECTEUR U-SON");
 
   drawCenteredText(g_state.mp3Playing ? "PLAY" : "PAUSE", 14, 2);
+  drawMiniEqualizer(g_state.uptimeMs,
+                    g_state.mp3Playing ? g_state.volumePercent : static_cast<uint8_t>(g_state.volumePercent / 3U),
+                    84,
+                    15);
 
   char trackLine[20];
   if (g_state.trackCount == 0) {
@@ -235,26 +399,23 @@ void renderMp3Screen() {
   drawHorizontalGauge(12, 54, 104, 8, g_state.volumePercent);
 }
 
-void renderULockWaitingScreen() {
-  drawTitleBar("MODE U_LOCK");
-  drawBrokenIcon(64, 28);
-  drawCenteredText("Pictogramme casse", 43, 1);
-  drawCenteredText("Appuyez une touche", 53, 1);
+void renderULockWaitingScreen(uint32_t nowMs) {
+  drawBrokenModuleGlitch(nowMs, 64, 32);
 }
 
 void renderULockDetectScreen() {
-  drawTitleBar("MODE U_LOCK");
-  drawCenteredText("Detection LA 440Hz", 14, 1);
-  drawHorizontalGauge(8, 23, 112, 7, g_state.micLevelPercent);
-  drawTuningBar(g_state.tuningOffset, g_state.tuningConfidence, 33);
+  drawProtoTitleBar();
+  drawHorizontalGauge(8, 15, 112, 7, g_state.micLevelPercent);
+  drawTuningBar(g_state.tuningOffset, g_state.tuningConfidence, 24);
+  drawUnlockProgressBar(g_state.unlockHoldPercent, 34);
   if (g_state.micScopeEnabled) {
-    drawScope(8, 47, 112, 16);
+    drawScope(8, 44, 112, 19);
   }
 }
 
-void renderULockScreen() {
+void renderULockScreen(uint32_t nowMs) {
   if (!g_state.uLockListening) {
-    renderULockWaitingScreen();
+    renderULockWaitingScreen(nowMs);
     return;
   }
   renderULockDetectScreen();
@@ -284,7 +445,8 @@ void renderUSonFunctionalScreen() {
 }
 
 void renderLinkDownScreen(uint32_t nowMs) {
-  const uint32_t ageMs = g_hasValidState ? (nowMs - g_state.lastRxMs) : 0;
+  const uint32_t lastTickMs = latestLinkTickMs();
+  const uint32_t ageMs = (lastTickMs > 0) ? (nowMs - lastTickMs) : 0;
 
   drawTitleBar("U-SON SCREEN");
   drawCenteredText("LINK DOWN", 18, 2);
@@ -320,7 +482,7 @@ void renderScreen(uint32_t nowMs, bool linkAlive) {
     if (g_state.mp3Mode) {
       renderMp3Screen();
     } else if (g_state.uLockMode) {
-      renderULockScreen();
+      renderULockScreen(nowMs);
     } else if (g_state.uSonFunctional && (nowMs < g_unlockBadgeUntilMs)) {
       renderUnlockBadgeScreen();
     } else if (g_state.uSonFunctional) {
@@ -361,6 +523,10 @@ bool initDisplayOnPins(uint8_t sda, uint8_t scl) {
 }
 
 bool parseFrame(const char* frame, TelemetryState* out) {
+  if (strncmp(frame, "STAT,", 5) != 0) {
+    return false;
+  }
+
   unsigned int la = 0;
   unsigned int mp3 = 0;
   unsigned int sd = 0;
@@ -377,9 +543,10 @@ bool parseFrame(const char* frame, TelemetryState* out) {
   unsigned int uLockListening = 0;
   unsigned int micLevelPercent = 0;
   unsigned int micScopeEnabled = 0;
+  unsigned int unlockHoldPercent = 0;
 
   const int parsed = sscanf(frame,
-                            "STAT,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u,%u,%u",
+                            "STAT,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u,%u,%u,%u",
                             &la,
                             &mp3,
                             &sd,
@@ -395,7 +562,8 @@ bool parseFrame(const char* frame, TelemetryState* out) {
                             &tuningConfidence,
                             &uLockListening,
                             &micLevelPercent,
-                            &micScopeEnabled);
+                            &micScopeEnabled,
+                            &unlockHoldPercent);
   if (parsed < 5) {
     return false;
   }
@@ -439,12 +607,21 @@ bool parseFrame(const char* frame, TelemetryState* out) {
     out->micLevelPercent = 0;
   }
   out->micScopeEnabled = (parsed >= 16) ? (micScopeEnabled != 0U) : false;
+  if (parsed >= 17) {
+    if (unlockHoldPercent > 100U) {
+      unlockHoldPercent = 100U;
+    }
+    out->unlockHoldPercent = static_cast<uint8_t>(unlockHoldPercent);
+  } else {
+    out->unlockHoldPercent = 0;
+  }
   out->lastRxMs = millis();
   return true;
 }
 
 void handleIncoming() {
   while (g_link.available() > 0) {
+    g_lastByteMs = millis();
     const char c = static_cast<char>(g_link.read());
     if (c == '\r') {
       continue;
@@ -461,6 +638,8 @@ void handleIncoming() {
         g_state = parsed;
         g_hasValidState = true;
         g_stateDirty = true;
+      } else if (g_lineLen > 0) {
+        ++g_parseErrorCount;
       }
       g_lineLen = 0;
       continue;
@@ -471,6 +650,10 @@ void handleIncoming() {
     } else {
       g_lineLen = 0;
     }
+  }
+
+  if (g_link.overflow()) {
+    ++g_rxOverflowCount;
   }
 }
 
@@ -522,7 +705,15 @@ void setup() {
   Serial.begin(115200);
   initDisplay();
   if (g_linkEnabled) {
-    g_link.begin(kLinkBaud);
+    g_link.begin(kLinkBaud,
+                 SWSERIAL_8N1,
+                 kLinkRx,
+                 kLinkTx,
+                 false,
+                 kLinkRxBufferBytes,
+                 kLinkIsrBufferBytes);
+    g_link.enableRxGPIOPullUp(true);
+    g_link.enableIntTx(false);
   }
   Serial.println("[SCREEN] Ready.");
 }
@@ -532,6 +723,7 @@ void loop() {
   if (g_linkEnabled) {
     handleIncoming();
   }
+  const bool physicalAlive = isPhysicalLinkAlive(nowMs);
   const bool linkAlive = isLinkAlive(nowMs);
 
   if (!linkAlive && g_linkWasAlive) {
@@ -550,13 +742,17 @@ void loop() {
   }
 
   if ((nowMs - g_lastDiagMs) >= kDiagPeriodMs) {
-    const uint32_t ageMs = g_hasValidState ? (nowMs - g_state.lastRxMs) : 0;
-    Serial.printf("[SCREEN] oled=%s link=%s valid=%u age_ms=%lu losses=%lu sda=%u scl=%u addr=0x%02X\n",
+    const uint32_t lastTickMs = latestLinkTickMs();
+    const uint32_t ageMs = (lastTickMs > 0) ? (nowMs - lastTickMs) : 0;
+    Serial.printf("[SCREEN] oled=%s link=%s phys=%s valid=%u age_ms=%lu losses=%lu parse_err=%lu rx_ovf=%lu sda=%u scl=%u addr=0x%02X\n",
                   g_displayReady ? "OK" : "KO",
                   g_linkEnabled ? (linkAlive ? "OK" : "DOWN") : "OFF",
+                  g_linkEnabled ? (physicalAlive ? "OK" : "DOWN") : "OFF",
                   g_hasValidState ? 1U : 0U,
                   static_cast<unsigned long>(ageMs),
                   static_cast<unsigned long>(g_linkLossCount),
+                  static_cast<unsigned long>(g_parseErrorCount),
+                  static_cast<unsigned long>(g_rxOverflowCount),
                   static_cast<unsigned int>(g_oledSdaPin),
                   static_cast<unsigned int>(g_oledSclPin),
                   static_cast<unsigned int>(g_oledAddress));

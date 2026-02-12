@@ -4,23 +4,23 @@ Ce firmware transforme une carte ESP8266 (HW-630) en ecran de statut pour l'ESP3
 
 ## Affichage
 
-- `MODE U_LOCK` initial: pictogramme casse + attente appui touche
+- `MODE U_LOCK` initial: module casse avec effet glitch (sans texte)
 - `MODE U_LOCK` detection: volume micro + accordage + scope optionnel
 - Pictogramme de validation lors du passage en module fonctionnel
 - `MODULE U-SON FONCTIONNEL` (apres detection du LA)
 - `MODE LECTEUR U-SON` (SD presente): vue lecteur MP3 enrichie (play/pause, piste, volume)
-- Ecran explicite `LINK DOWN` si la telemetrie serie est perdue
+- Ecran explicite `LINK DOWN` si la telemetrie serie est perdue (avec anti-flicker)
 - Uptime + derniere touche (`KEY`)
 
 ## Protocole UART
 
 Trame texte envoyee par l'ESP32 (format etendu):
 
-`STAT,<la>,<mp3>,<sd>,<uptime_ms>,<key>,<mode_mp3>,<track>,<track_count>,<volume_pct>,<u_lock>,<u_son_functional>,<tuning_offset>,<tuning_confidence>,<u_lock_listening>,<mic_level_pct>,<mic_scope>\n`
+`STAT,<la>,<mp3>,<sd>,<uptime_ms>,<key>,<mode_mp3>,<track>,<track_count>,<volume_pct>,<u_lock>,<u_son_functional>,<tuning_offset>,<tuning_confidence>,<u_lock_listening>,<mic_level_pct>,<mic_scope>,<unlock_hold_pct>\n`
 
 Exemple:
 
-`STAT,1,0,0,12345,2,0,0,0,0,1,0,-2,68,1,42,1`
+`STAT,1,0,0,12345,2,0,0,0,0,1,0,-2,68,1,42,1,57`
 
 Compatibilite:
 - le firmware ecran reste compatible avec l'ancien format court `STAT` (les champs additionnels sont optionnels).
@@ -30,6 +30,7 @@ Compatibilite:
 - **Masse commune obligatoire**: ESP32 GND <-> ESP8266 GND
 - ESP32 `GPIO22` (TX) -> ESP8266 `D6` (RX SoftwareSerial)
 - ESP8266 `D5` (TX) non utilise (laisser deconnecte)
+- Debit UART: `38400 bauds`
 - OLED I2C sur ESP8266:
   - recommande: `D1` SDA, `D2` SCL
   - fallback supporte: `D2` SDA, `D1` SCL

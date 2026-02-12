@@ -10,7 +10,7 @@ Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
   - boot: `MODE U_LOCK` avec pictogramme casse
   - en `U_LOCK`: appui sur une touche pour lancer la detection du LA (440 Hz, micro onboard)
   - affichage OLED pendant detection: bargraphe volume + bargraphe accordage + scope micro (optionnel si `kUseI2SMicInput=true`)
-  - apres detection du LA: pictogramme de validation, puis passage en `MODULE U-SON Fonctionnel`
+  - apres cumul de 3 secondes de detection LA (continue ou repetee): pictogramme de validation, puis passage en `MODULE U-SON Fonctionnel`
   - ensuite: activation detection SD, puis passage auto en `MODE LECTEUR U-SON` si SD + MP3
 - Touches: clavier analogique sur une seule entree ADC
 - Ecran distant: ESP8266 NodeMCU OLED via UART
@@ -49,8 +49,9 @@ Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
 
 ### Mode U_LOCK (au boot, detection SD bloquee)
 
-- Ecran initial: pictogramme casse + attente d'un appui touche
+- Ecran initial: module casse avec effet glitch (sans texte)
 - Apres appui touche: detection LA active + affichage accordage/volume/scope
+- Le LA doit cumuler 3 secondes de detection (continue ou repetee) pour deverrouiller
 - Les touches SIGNAL restent bloquees tant que le LA n'est pas detecte
 - La detection SD/MP3 reste desactivee tant que `MODULE U-SON Fonctionnel` n'est pas atteint
 

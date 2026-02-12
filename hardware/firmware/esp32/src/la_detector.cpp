@@ -1,13 +1,322 @@
 #include "la_detector.h"
 
-LaDetector::LaDetector(uint8_t micPin) : micPin_(micPin) {}
+#include <Wire.h>
+
+namespace {
+
+constexpr uint8_t kEs8388RegControl1 = 0x00;
+constexpr uint8_t kEs8388RegControl2 = 0x01;
+constexpr uint8_t kEs8388RegChipPower = 0x02;
+constexpr uint8_t kEs8388RegAdcPower = 0x03;
+constexpr uint8_t kEs8388RegDacPower = 0x04;
+constexpr uint8_t kEs8388RegMasterMode = 0x08;
+constexpr uint8_t kEs8388RegAdcControl1 = 0x09;
+constexpr uint8_t kEs8388RegAdcControl2 = 0x0A;
+constexpr uint8_t kEs8388RegAdcControl3 = 0x0B;
+constexpr uint8_t kEs8388RegAdcControl4 = 0x0C;
+constexpr uint8_t kEs8388RegAdcControl5 = 0x0D;
+constexpr uint8_t kEs8388RegAdcControl8 = 0x10;
+constexpr uint8_t kEs8388RegAdcControl9 = 0x11;
+constexpr uint8_t kEs8388RegDacControl1 = 0x17;
+constexpr uint8_t kEs8388RegDacControl3 = 0x19;
+constexpr uint8_t kEs8388RegDacControl2 = 0x18;
+constexpr uint8_t kEs8388RegDacControl16 = 0x26;
+constexpr uint8_t kEs8388RegDacControl17 = 0x27;
+constexpr uint8_t kEs8388RegDacControl20 = 0x2A;
+constexpr uint8_t kEs8388RegDacControl21 = 0x2B;
+constexpr uint8_t kEs8388RegDacControl23 = 0x2D;
+
+}  // namespace
+
+LaDetector::LaDetector(uint8_t micAdcPin,
+                       bool useI2sMic,
+                       uint8_t i2sBclkPin,
+                       uint8_t i2sWsPin,
+                       uint8_t i2sDinPin)
+    : micAdcPin_(micAdcPin),
+      useI2sMic_(useI2sMic),
+      i2sBclkPin_(i2sBclkPin),
+      i2sWsPin_(i2sWsPin),
+      i2sDinPin_(i2sDinPin) {}
 
 void LaDetector::begin() {
-  analogReadResolution(12);
-  analogSetPinAttenuation(micPin_, ADC_11db);
+  if (!useI2sMic_) {
+    analogReadResolution(12);
+    analogSetPinAttenuation(micAdcPin_, ADC_11db);
+    return;
+  }
+  beginI2sInput();
+}
+
+void LaDetector::setCaptureEnabled(bool enabled) {
+  if (captureEnabled_ == enabled) {
+    return;
+  }
+
+  captureEnabled_ = enabled;
+  captureInProgress_ = false;
+  sampleIndex_ = 0;
+
+  if (!useI2sMic_) {
+    return;
+  }
+
+  if (captureEnabled_) {
+    beginI2sInput();
+  } else {
+    endI2sInput();
+  }
+}
+
+bool LaDetector::beginI2sInput() {
+  if (i2sReady_) {
+    return true;
+  }
+
+  if (!codecReady_ && !beginCodec()) {
+    return false;
+  }
+
+  i2s_config_t i2sConfig = {};
+  i2sConfig.mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_RX);
+  i2sConfig.sample_rate = static_cast<int>(config::kDetectFs);
+  i2sConfig.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
+  i2sConfig.channel_format = config::kMicI2SUseLeftChannel ? I2S_CHANNEL_FMT_ONLY_LEFT
+                                                            : I2S_CHANNEL_FMT_ONLY_RIGHT;
+  i2sConfig.communication_format = I2S_COMM_FORMAT_STAND_I2S;
+  i2sConfig.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
+  i2sConfig.dma_buf_count = 4;
+  i2sConfig.dma_buf_len = 64;
+  i2sConfig.use_apll = false;
+  i2sConfig.tx_desc_auto_clear = false;
+  i2sConfig.fixed_mclk = 0;
+
+  const esp_err_t installErr = i2s_driver_install(i2sPort_, &i2sConfig, 0, nullptr);
+  if (installErr != ESP_OK) {
+    Serial.printf("[MIC][I2S] driver install failed err=%d\n", static_cast<int>(installErr));
+    return false;
+  }
+
+  i2s_pin_config_t pinConfig = {};
+  pinConfig.bck_io_num = static_cast<int>(i2sBclkPin_);
+  pinConfig.ws_io_num = static_cast<int>(i2sWsPin_);
+  pinConfig.data_out_num = I2S_PIN_NO_CHANGE;
+  pinConfig.data_in_num = static_cast<int>(i2sDinPin_);
+
+  const esp_err_t pinErr = i2s_set_pin(i2sPort_, &pinConfig);
+  if (pinErr != ESP_OK) {
+    i2s_driver_uninstall(i2sPort_);
+    Serial.printf("[MIC][I2S] pin config failed err=%d\n", static_cast<int>(pinErr));
+    return false;
+  }
+
+  const esp_err_t clkErr = i2s_set_clk(i2sPort_,
+                                       static_cast<int>(config::kDetectFs),
+                                       I2S_BITS_PER_SAMPLE_16BIT,
+                                       I2S_CHANNEL_MONO);
+  if (clkErr != ESP_OK) {
+    i2s_driver_uninstall(i2sPort_);
+    Serial.printf("[MIC][I2S] clock config failed err=%d\n", static_cast<int>(clkErr));
+    return false;
+  }
+
+  i2sReady_ = true;
+  Serial.println("[MIC][I2S] RX ready.");
+  return true;
+}
+
+void LaDetector::endI2sInput() {
+  if (!i2sReady_) {
+    return;
+  }
+  i2s_driver_uninstall(i2sPort_);
+  i2sReady_ = false;
+}
+
+bool LaDetector::isCodecAddressReachable(uint8_t address) {
+  Wire.beginTransmission(address);
+  return Wire.endTransmission() == 0;
+}
+
+bool LaDetector::writeCodecReg(uint8_t reg, uint8_t value) {
+  Wire.beginTransmission(codecAddress_);
+  Wire.write(reg);
+  Wire.write(value);
+  return Wire.endTransmission() == 0;
+}
+
+bool LaDetector::configureCodecInput(bool useLine2) {
+  const uint8_t gainStep = (config::kCodecMicGainDb / 3U) & 0x0F;
+  const uint8_t gainReg = static_cast<uint8_t>((gainStep << 4) | gainStep);
+  const uint8_t adcInput = useLine2 ? 0x50 : 0x00;
+
+  bool ok = true;
+  ok = ok && writeCodecReg(kEs8388RegAdcControl1, gainReg);
+  ok = ok && writeCodecReg(kEs8388RegAdcControl2, adcInput);
+  ok = ok && writeCodecReg(kEs8388RegAdcControl3, 0x02);
+  ok = ok && writeCodecReg(kEs8388RegAdcControl4, 0x0D);
+  ok = ok && writeCodecReg(kEs8388RegAdcControl5, 0x02);
+  ok = ok && writeCodecReg(kEs8388RegAdcControl8, 0x00);
+  ok = ok && writeCodecReg(kEs8388RegAdcControl9, 0x00);
+  ok = ok && writeCodecReg(kEs8388RegAdcPower, 0x09);
+
+  if (!ok) {
+    Serial.printf("[MIC][CODEC] input config failed (LINE%u).\n", useLine2 ? 2U : 1U);
+    return false;
+  }
+
+  codecUseLine2_ = useLine2;
+  Serial.printf("[MIC][CODEC] input LINE%u active, mic_gain=%u dB.\n",
+                codecUseLine2_ ? 2U : 1U,
+                static_cast<unsigned int>(config::kCodecMicGainDb));
+  return true;
+}
+
+bool LaDetector::beginCodec() {
+  Wire.begin(config::kPinCodecI2CSda, config::kPinCodecI2CScl, config::kCodecI2CClockHz);
+
+  uint8_t detectedAddress = config::kCodecI2CAddress;
+  if (!isCodecAddressReachable(detectedAddress)) {
+    const uint8_t altAddress = (detectedAddress == 0x10U) ? 0x11U : 0x10U;
+    if (isCodecAddressReachable(altAddress)) {
+      detectedAddress = altAddress;
+    } else {
+      Serial.printf("[MIC][CODEC] ES8388 introuvable sur I2C (0x%02X/0x%02X, SDA=%u, SCL=%u)\n",
+                    static_cast<unsigned int>(config::kCodecI2CAddress),
+                    static_cast<unsigned int>(altAddress),
+                    static_cast<unsigned int>(config::kPinCodecI2CSda),
+                    static_cast<unsigned int>(config::kPinCodecI2CScl));
+      return false;
+    }
+  }
+
+  codecAddress_ = detectedAddress;
+  Serial.printf("[MIC][CODEC] ES8388 detecte addr=0x%02X (SDA=%u SCL=%u)\n",
+                static_cast<unsigned int>(codecAddress_),
+                static_cast<unsigned int>(config::kPinCodecI2CSda),
+                static_cast<unsigned int>(config::kPinCodecI2CScl));
+
+  bool ok = true;
+  ok = ok && writeCodecReg(kEs8388RegDacControl3, 0x04);
+  ok = ok && writeCodecReg(kEs8388RegControl2, 0x50);
+  ok = ok && writeCodecReg(kEs8388RegChipPower, 0x00);
+  ok = ok && writeCodecReg(0x35, 0xA0);
+  ok = ok && writeCodecReg(0x37, 0xD0);
+  ok = ok && writeCodecReg(0x39, 0xD0);
+  ok = ok && writeCodecReg(kEs8388RegMasterMode, 0x00);  // codec slave
+
+  ok = ok && writeCodecReg(kEs8388RegDacPower, 0xC0);
+  ok = ok && writeCodecReg(kEs8388RegControl1, 0x12);
+  ok = ok && writeCodecReg(kEs8388RegDacControl1, 0x18);   // 16-bit I2S
+  ok = ok && writeCodecReg(kEs8388RegDacControl2, 0x02);   // fs ratio 256
+  ok = ok && writeCodecReg(kEs8388RegDacControl16, 0x00);
+  ok = ok && writeCodecReg(kEs8388RegDacControl17, 0x90);
+  ok = ok && writeCodecReg(kEs8388RegDacControl20, 0x90);
+  ok = ok && writeCodecReg(kEs8388RegDacControl21, 0x80);
+  ok = ok && writeCodecReg(kEs8388RegDacControl23, 0x00);
+  ok = ok && writeCodecReg(kEs8388RegDacPower, 0x3C);
+  ok = ok && writeCodecReg(kEs8388RegAdcPower, 0xFF);
+
+  if (!ok) {
+    Serial.println("[MIC][CODEC] echec init registres ES8388.");
+    return false;
+  }
+
+  if (!configureCodecInput(codecUseLine2_)) {
+    return false;
+  }
+
+  codecReady_ = true;
+  codecAutoSwitched_ = false;
+  codecSilenceSinceMs_ = 0;
+  Serial.println("[MIC][CODEC] init OK.");
+  return true;
+}
+
+void LaDetector::maybeAutoSwitchCodecInput(uint32_t nowMs) {
+  if (!useI2sMic_ || !codecReady_ || !config::kCodecMicAutoSwitchLineOnSilence ||
+      codecAutoSwitched_) {
+    return;
+  }
+
+  const uint16_t p2p = micPeakToPeak();
+  if (p2p > config::kCodecMicSilenceP2PThreshold) {
+    codecSilenceSinceMs_ = 0;
+    return;
+  }
+
+  if (codecSilenceSinceMs_ == 0) {
+    codecSilenceSinceMs_ = nowMs;
+    return;
+  }
+
+  if ((nowMs - codecSilenceSinceMs_) < config::kCodecMicSilenceSwitchMs) {
+    return;
+  }
+
+  const bool nextUseLine2 = !codecUseLine2_;
+  Serial.printf("[MIC][CODEC] silence persistant (%u ms, p2p=%u): tentative LINE%u -> LINE%u\n",
+                static_cast<unsigned int>(config::kCodecMicSilenceSwitchMs),
+                static_cast<unsigned int>(p2p),
+                codecUseLine2_ ? 2U : 1U,
+                nextUseLine2 ? 2U : 1U);
+  if (configureCodecInput(nextUseLine2)) {
+    codecAutoSwitched_ = true;
+    codecSilenceSinceMs_ = 0;
+  } else {
+    codecSilenceSinceMs_ = nowMs;
+  }
+}
+
+void LaDetector::captureFromAdc() {
+  const uint32_t nowUs = micros();
+  uint8_t samplesRead = 0;
+
+  while (sampleIndex_ < config::kDetectN &&
+         static_cast<int32_t>(nowUs - nextSampleUs_) >= 0 &&
+         samplesRead < config::kDetectMaxSamplesPerLoop) {
+    samples_[sampleIndex_++] = static_cast<int16_t>(analogRead(micAdcPin_));
+    nextSampleUs_ += config::kDetectSamplePeriodUs;
+    ++samplesRead;
+  }
+}
+
+void LaDetector::captureFromI2s() {
+  int16_t i2sBuffer[32];
+
+  while (sampleIndex_ < config::kDetectN) {
+    const size_t remaining = static_cast<size_t>(config::kDetectN - sampleIndex_);
+    const size_t requested = (remaining < 32U) ? remaining : 32U;
+    size_t bytesRead = 0;
+    const esp_err_t readErr =
+        i2s_read(i2sPort_, i2sBuffer, requested * sizeof(int16_t), &bytesRead, 0);
+    if (readErr != ESP_OK || bytesRead == 0) {
+      break;
+    }
+
+    const size_t samplesRead = bytesRead / sizeof(int16_t);
+    for (size_t i = 0; i < samplesRead && sampleIndex_ < config::kDetectN; ++i) {
+      // Convert signed PCM16 to pseudo-ADC 12-bit range [0..4095].
+      int32_t normalized = static_cast<int32_t>(i2sBuffer[i]) + 32768;
+      if (normalized < 0) {
+        normalized = 0;
+      } else if (normalized > 65535) {
+        normalized = 65535;
+      }
+      samples_[sampleIndex_++] = static_cast<int16_t>(normalized >> 4);
+    }
+  }
 }
 
 void LaDetector::update(uint32_t nowMs) {
+  if (!captureEnabled_) {
+    return;
+  }
+
+  if (useI2sMic_ && !i2sReady_ && !beginI2sInput()) {
+    return;
+  }
+
   if (!captureInProgress_) {
     if ((nowMs - lastDetectMs_) < config::kDetectEveryMs) {
       return;
@@ -19,15 +328,10 @@ void LaDetector::update(uint32_t nowMs) {
     nextSampleUs_ = micros();
   }
 
-  const uint32_t nowUs = micros();
-  uint8_t samplesRead = 0;
-
-  while (sampleIndex_ < config::kDetectN &&
-         static_cast<int32_t>(nowUs - nextSampleUs_) >= 0 &&
-         samplesRead < config::kDetectMaxSamplesPerLoop) {
-    samples_[sampleIndex_++] = static_cast<int16_t>(analogRead(micPin_));
-    nextSampleUs_ += config::kDetectSamplePeriodUs;
-    ++samplesRead;
+  if (useI2sMic_) {
+    captureFromI2s();
+  } else {
+    captureFromAdc();
   }
 
   if (sampleIndex_ < config::kDetectN) {
@@ -43,6 +347,7 @@ void LaDetector::update(uint32_t nowMs) {
                      &micRms_,
                      &micMin_,
                      &micMax_);
+  maybeAutoSwitchCodecInput(nowMs);
 }
 
 bool LaDetector::isDetected() const {
@@ -144,6 +449,20 @@ bool LaDetector::detect(const int16_t* samples,
     *micMax = static_cast<uint16_t>(rawMax);
   }
 
+  const uint16_t p2p = static_cast<uint16_t>(rawMax - rawMin);
+  if (p2p < config::kDetectMinP2PForDetection || rms < config::kDetectMinRmsForDetection) {
+    if (targetRatio != nullptr) {
+      *targetRatio = 0.0f;
+    }
+    if (tuningOffset != nullptr) {
+      *tuningOffset = 0;
+    }
+    if (tuningConfidence != nullptr) {
+      *tuningConfidence = 0;
+    }
+    return false;
+  }
+
   if (totalEnergy < 1.0f) {
     if (targetRatio != nullptr) {
       *targetRatio = 0.0f;
@@ -159,10 +478,14 @@ bool LaDetector::detect(const int16_t* samples,
 
   const float targetEnergy =
       goertzelPower(centeredSamples, config::kDetectN, config::kDetectFs, config::kDetectTargetHz);
-  const float lowEnergy =
-      goertzelPower(centeredSamples, config::kDetectN, config::kDetectFs, config::kDetectTargetHz - 20.0f);
-  const float highEnergy =
-      goertzelPower(centeredSamples, config::kDetectN, config::kDetectFs, config::kDetectTargetHz + 20.0f);
+  const float lowEnergy = goertzelPower(centeredSamples,
+                                        config::kDetectN,
+                                        config::kDetectFs,
+                                        config::kDetectTargetHz - 20.0f);
+  const float highEnergy = goertzelPower(centeredSamples,
+                                         config::kDetectN,
+                                         config::kDetectFs,
+                                         config::kDetectTargetHz + 20.0f);
 
   const float ratio = targetEnergy / (totalEnergy + 1.0f);
   const float sideSum = lowEnergy + highEnergy + 1.0f;

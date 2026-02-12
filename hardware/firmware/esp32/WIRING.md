@@ -24,12 +24,13 @@ Branchement recommande:
 |---|---|
 | `VCC` | `3V3` |
 | `GND` | `GND` |
-| `SDA` | `D2` |
-| `SCL` | `D1` |
+| `SDA` | `D1` (recommande) |
+| `SCL` | `D2` (recommande) |
 
 Notes:
 - Logique en `3.3V` uniquement.
 - Ne pas alimenter/sortir de signal en `5V` sur ESP32/ESP8266.
+- Le firmware OLED accepte aussi le cablage inverse `SDA=D2` / `SCL=D1` en fallback auto.
 
 ## 3) Alimentation
 
@@ -50,8 +51,8 @@ GND       -------------   GND
 
 OLED VCC  -------------   3V3
 OLED GND  -------------   GND
-OLED SDA  -------------   D2
-OLED SCL  -------------   D1
+OLED SDA  -------------   D1 (recommande)
+OLED SCL  -------------   D2 (recommande)
 ```
 
 ## 5) Verification rapide
@@ -59,4 +60,9 @@ OLED SCL  -------------   D1
 1. Flasher l'ESP32: `pio run -e esp32dev -t upload --upload-port <PORT_ESP32>`.
 2. Flasher l'ESP8266: `pio run -e esp8266_oled -t upload --upload-port <PORT_ESP8266>`.
 3. Ouvrir le moniteur ESP8266: `pio device monitor -e esp8266_oled --port <PORT_ESP8266>`.
-4. Verifier que l'ecran affiche `LINK: OK` apres reception des trames.
+4. Verifier que l'ecran passe de `Demarrage...` a un ecran de mode (`U_LOCK`, `U-SON FONCTIONNEL` ou `LECTEUR U-SON`) apres reception des trames.
+
+Equivalents Makefile:
+- `make upload-esp32 ESP32_PORT=<PORT_ESP32>`
+- `make upload-screen SCREEN_PORT=<PORT_ESP8266>`
+- `make monitor-screen SCREEN_PORT=<PORT_ESP8266>`

@@ -28,8 +28,6 @@ void Mp3Player::begin() {
     pinMode(paEnablePin_, OUTPUT);
     digitalWrite(paEnablePin_, HIGH);
   }
-
-  refreshStorage(millis());
 }
 
 void Mp3Player::update(uint32_t nowMs) {
@@ -115,6 +113,7 @@ void Mp3Player::cycleRepeatMode() {
 }
 
 void Mp3Player::requestStorageRefresh() {
+  forceRescan_ = true;
   nextMountAttemptMs_ = 0;
   nextRescanMs_ = 0;
 }
@@ -230,6 +229,14 @@ void Mp3Player::refreshStorage(uint32_t nowMs) {
 
   if (trackCount_ == 0 && nowMs >= nextRescanMs_) {
     scanTracks();
+    forceRescan_ = false;
+    nextRescanMs_ = nowMs + 3000;
+    return;
+  }
+
+  if (forceRescan_) {
+    scanTracks();
+    forceRescan_ = false;
     nextRescanMs_ = nowMs + 3000;
     return;
   }

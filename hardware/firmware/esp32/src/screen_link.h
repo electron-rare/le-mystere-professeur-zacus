@@ -15,13 +15,16 @@ class ScreenLink {
               bool sdReady,
               bool mp3Mode,
               bool uLockMode,
+              bool uLockListening,
               bool uSonFunctional,
               uint8_t key,
               uint16_t track,
               uint16_t trackCount,
               uint8_t volumePercent,
+              uint8_t micLevelPercent,
               int8_t tuningOffset,
               uint8_t tuningConfidence,
+              bool micScopeEnabled,
               uint32_t nowMs);
 
  private:
@@ -36,12 +39,15 @@ class ScreenLink {
   bool lastSd_ = false;
   bool lastMp3Mode_ = false;
   bool lastULockMode_ = false;
+  bool lastULockListening_ = false;
   bool lastUSonFunctional_ = false;
   uint8_t lastKey_ = 0;
   uint16_t lastTrack_ = 0;
   uint16_t lastTrackCount_ = 0;
   uint8_t lastVolumePercent_ = 0;
+  uint8_t lastMicLevelPercent_ = 0;
   int8_t lastTuningOffset_ = 0;
   uint8_t lastTuningConfidence_ = 0;
+  bool lastMicScopeEnabled_ = false;
   uint32_t lastTxMs_ = 0;
 };

@@ -10,7 +10,11 @@
 #include "sine_dac.h"
 
 LedController g_led(config::kPinLedR, config::kPinLedG, config::kPinLedB);
-LaDetector g_laDetector(config::kPinMic);
+LaDetector g_laDetector(config::kPinMicAdc,
+                        config::kUseI2SMicInput,
+                        config::kPinMicI2SBclk,
+                        config::kPinMicI2SLrc,
+                        config::kPinMicI2SDin);
 SineDac g_sine(config::kPinDacSine, config::kSineFreqHz, config::kDacSampleRate);
 KeypadAnalog g_keypad(config::kPinKeysAdc);
 ScreenLink g_screen(Serial2,
@@ -31,6 +35,7 @@ enum class RuntimeMode : uint8_t {
 RuntimeMode g_mode = RuntimeMode::kSignal;
 bool g_laDetectionEnabled = true;
 bool g_uSonFunctional = false;
+bool g_uLockListening = false;
 
 struct MicCalibrationState {
   bool active = false;
@@ -68,6 +73,21 @@ const char* micHealthLabel(bool detectionEnabled, float micRms, uint16_t micMin,
     return "TOO_LOUD";
   }
   return "OK";
+}
+
+uint8_t micLevelPercentFromRms(float micRms) {
+  const float fullScale = config::kMicRmsForScreenFullScale;
+  if (fullScale <= 0.0f || micRms <= 0.0f) {
+    return 0;
+  }
+
+  float percent = (micRms * 100.0f) / fullScale;
+  if (percent < 0.0f) {
+    percent = 0.0f;
+  } else if (percent > 100.0f) {
+    percent = 100.0f;
+  }
+  return static_cast<uint8_t>(percent);
 }
 
 void resetMicCalibrationStats() {
@@ -237,21 +257,26 @@ void applyRuntimeMode(RuntimeMode newMode, bool force = false) {
   if (g_mode == RuntimeMode::kMp3) {
     stopMicCalibration(millis(), "mode_mp3");
     g_laDetectionEnabled = false;
+    g_laDetector.setCaptureEnabled(false);
     g_sine.setEnabled(false);
     if (changed) {
       Serial.println("[MODE] LECTEUR U-SON (SD detectee)");
     }
   } else {
-    g_laDetectionEnabled = true;
     g_uSonFunctional = false;
-    if (config::kEnableMicCalibrationOnSignalEntry) {
+    g_uLockListening = !config::kULockRequireKeyToStartDetection;
+    g_laDetectionEnabled = g_uLockListening;
+    g_laDetector.setCaptureEnabled(g_uLockListening);
+    if (config::kEnableMicCalibrationOnSignalEntry && g_uLockListening) {
       startMicCalibration(millis(), changed ? "mode_signal" : "boot_signal");
+    } else {
+      stopMicCalibration(millis(), "ulock_wait_key");
     }
     if (config::kEnableSineDac) {
       g_sine.setEnabled(true);
     }
     if (changed) {
-      Serial.println("[MODE] U_LOCK (accorder vers LA)");
+      Serial.println("[MODE] U_LOCK (appuyer touche pour detecter LA)");
     }
   }
 }
@@ -294,12 +319,24 @@ void handleKeyPress(uint8_t key) {
   }
 
   if (!g_uSonFunctional) {
+    if (!g_uLockListening) {
+      g_uLockListening = true;
+      g_laDetectionEnabled = true;
+      g_laDetector.setCaptureEnabled(true);
+      if (config::kEnableMicCalibrationOnSignalEntry) {
+        startMicCalibration(millis(), "key_start_ulock_detect");
+      }
+      Serial.printf("[MODE] U_LOCK -> detection LA activee (K%u)\n",
+                    static_cast<unsigned int>(key));
+      return;
+    }
+
     if (key == 6) {
       startMicCalibration(millis(), "key_k6_ulock");
       Serial.println("[KEY] K6 calibration micro (U_LOCK)");
       return;
     }
-    Serial.printf("[KEY] K%u ignoree (MODE U_LOCK)\n", static_cast<unsigned int>(key));
+    Serial.printf("[KEY] K%u ignoree (U_LOCK detect en cours)\n", static_cast<unsigned int>(key));
     return;
   }
 
@@ -350,7 +387,11 @@ void setup() {
   g_led.begin();
   g_laDetector.begin();
   g_keypad.begin();
-  randomSeed(analogRead(config::kPinMic));
+  if (config::kUseI2SMicInput) {
+    randomSeed(static_cast<uint32_t>(micros()));
+  } else {
+    randomSeed(analogRead(config::kPinMicAdc));
+  }
   g_sine.begin();
   g_mp3.begin();
   g_screen.begin();
@@ -358,8 +399,11 @@ void setup() {
   applyRuntimeMode(selectRuntimeMode(), true);
 
   Serial.println("[BOOT] U-SON / ESP32 Audio Kit A252 pret.");
+  Serial.printf("[MIC] Source: %s\n",
+                config::kUseI2SMicInput ? "I2S codec onboard (DIN GPIO35)" : "ADC externe GPIO34");
   Serial.println("[KEYMAP][MP3] K1 play/pause, K2 prev, K3 next, K4 vol-, K5 vol+, K6 repeat");
-  Serial.println("[BOOT] Sans SD: MODE U_LOCK puis MODULE U-SON Fonctionnel apres detection LA.");
+  Serial.println("[BOOT] Sans SD: MODE U_LOCK, appuyer une touche pour lancer la detection LA.");
+  Serial.println("[BOOT] Puis MODULE U-SON Fonctionnel apres detection LA.");
   Serial.println("[BOOT] En U_LOCK: detection SD desactivee jusqu'au mode U-SON Fonctionnel.");
   Serial.println("[KEYMAP][SIGNAL] actifs seulement apres unlock: K1 LA on/off, K2 sine-, K3 sine+, K4 sine on/off, K5 refresh SD, K6 cal micro");
 }
@@ -397,7 +441,7 @@ void loop() {
 
   const bool laDetected =
       (g_mode == RuntimeMode::kSignal) && g_laDetectionEnabled && g_laDetector.isDetected();
-  if (g_mode == RuntimeMode::kSignal && !g_uSonFunctional && laDetected) {
+  if (g_mode == RuntimeMode::kSignal && !g_uSonFunctional && g_uLockListening && laDetected) {
     g_uSonFunctional = true;
     g_mp3.requestStorageRefresh();
     Serial.println("[MODE] MODULE U-SON Fonctionnel (LA detecte)");
@@ -405,10 +449,12 @@ void loop() {
   }
 
   const bool uLockMode = (g_mode == RuntimeMode::kSignal) && !g_uSonFunctional;
+  const bool uLockListening = uLockMode && g_uLockListening;
   const bool uSonFunctional = (g_mode == RuntimeMode::kSignal) && g_uSonFunctional;
-  const int8_t tuningOffset = uLockMode ? g_laDetector.tuningOffset() : 0;
-  const uint8_t tuningConfidence = uLockMode ? g_laDetector.tuningConfidence() : 0;
+  const int8_t tuningOffset = uLockListening ? g_laDetector.tuningOffset() : 0;
+  const uint8_t tuningConfidence = uLockListening ? g_laDetector.tuningConfidence() : 0;
   const float micRms = g_laDetector.micRms();
+  const uint8_t micLevelPercent = micLevelPercentFromRms(micRms);
   const uint16_t micMin = g_laDetector.micMin();
   const uint16_t micMax = g_laDetector.micMax();
   const uint16_t micP2P = g_laDetector.micPeakToPeak();
@@ -466,12 +512,15 @@ void loop() {
                   g_mp3.isSdReady(),
                   g_mode == RuntimeMode::kMp3,
                   uLockMode,
+                  uLockListening,
                   uSonFunctional,
                   screenKey,
                   g_mp3.currentTrackNumber(),
                   g_mp3.trackCount(),
                   g_mp3.volumePercent(),
+                  micLevelPercent,
                   tuningOffset,
                   tuningConfidence,
+                  config::kScreenEnableMicScope && config::kUseI2SMicInput,
                   nowMs);
 }

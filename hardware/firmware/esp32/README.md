@@ -7,8 +7,11 @@ Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
 - Carte: ESP32 Audio Kit V2.2 A252
 - SD: `SD_MMC` (slot microSD onboard, mode 1-bit)
 - Audio:
-  - sans SD: boot en `MODE U_LOCK` + accordage LA (bargraphe OLED)
-  - avec SD: `MODE LECTEUR U-SON` (lecteur MP3 I2S vers codec onboard)
+  - boot: `MODE U_LOCK` avec pictogramme casse
+  - en `U_LOCK`: appui sur une touche pour lancer la detection du LA (440 Hz, micro onboard)
+  - affichage OLED pendant detection: bargraphe volume + bargraphe accordage + scope micro (optionnel si `kUseI2SMicInput=true`)
+  - apres detection du LA: pictogramme de validation, puis passage en `MODULE U-SON Fonctionnel`
+  - ensuite: activation detection SD, puis passage auto en `MODE LECTEUR U-SON` si SD + MP3
 - Touches: clavier analogique sur une seule entree ADC
 - Ecran distant: ESP8266 NodeMCU OLED via UART
 
@@ -20,6 +23,9 @@ Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
 - Touches analogiques: `src/keypad_analog.h`, `src/keypad_analog.cpp`
 - Lien ecran ESP8266: `src/screen_link.h`, `src/screen_link.cpp`
 - Memo board A252: `README_A252.md`
+- Cablage: `WIRING.md`
+- Validation terrain: `TESTING.md`
+- Commandes de travail: `Makefile`
 
 ## GPIO utilises (A252)
 
@@ -30,7 +36,8 @@ Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
 - Enable ampli: `GPIO21`
 - UART vers ESP8266 (TX uniquement): `GPIO22`
 - Touches analogiques (ADC): `GPIO36`
-- Micro analogique externe (optionnel): `GPIO34`
+- Micro codec onboard (I2S DIN): `GPIO35`
+- Fallback micro analogique externe (optionnel): `GPIO34` (si `kUseI2SMicInput=false`)
 
 ## Cablage ESP32 -> NodeMCU OLED
 
@@ -40,9 +47,10 @@ Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
 
 ## Actions des touches
 
-### Mode U_LOCK (pas de SD, au boot)
+### Mode U_LOCK (au boot, detection SD bloquee)
 
-- Ecran: bargraphe d'accordage vers le LA
+- Ecran initial: pictogramme casse + attente d'un appui touche
+- Apres appui touche: detection LA active + affichage accordage/volume/scope
 - Les touches SIGNAL restent bloquees tant que le LA n'est pas detecte
 - La detection SD/MP3 reste desactivee tant que `MODULE U-SON Fonctionnel` n'est pas atteint
 
@@ -67,7 +75,7 @@ Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
 Le firmware bascule automatiquement selon la SD:
 - SD presente + pistes MP3: `MODE LECTEUR U-SON`
 - SD absente: `MODE U_LOCK`, puis passage automatique en `MODULE U-SON Fonctionnel` apres detection du LA.
-- Note: en `U_LOCK`, la SD n'est volontairement pas scannee.
+- Note: en `U_LOCK`, la SD n'est volontairement pas scannee ni montee.
 
 ## Calibration micro (serial)
 
@@ -82,7 +90,22 @@ Logs attendus:
 
 ## Build / Flash
 
-Depuis la racine de ce dossier (`hardware/firmware/esp32`), utilisez:
+Depuis la racine de ce dossier (`hardware/firmware/esp32`):
+
+### Option 1 (recommandee): via Makefile
+
+1. Afficher les commandes:
+   - `make help`
+2. Build complet:
+   - `make build`
+3. Flasher:
+   - `make upload-esp32 ESP32_PORT=/dev/ttyUSB0`
+   - `make upload-screen SCREEN_PORT=/dev/ttyUSB1`
+4. Monitor:
+   - `make monitor-esp32 ESP32_PORT=/dev/ttyUSB0`
+   - `make monitor-screen SCREEN_PORT=/dev/ttyUSB1`
+
+### Option 2: via PlatformIO direct
 
 1. ESP32 principal:
    - `pio run -e esp32dev`
@@ -101,6 +124,7 @@ Le lecteur MP3:
 
 - detecte/monte la SD automatiquement
 - rescane les pistes `.mp3` en racine
+- force un rescan immediat sur `K5` (mode SIGNAL)
 - gere une playlist triee
 - enchaine automatiquement les pistes
 - supporte repeat `ALL/ONE`

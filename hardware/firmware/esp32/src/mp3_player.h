@@ -71,6 +71,7 @@ class Mp3Player {
   uint16_t currentTrack_ = 0;
   String tracks_[kMaxTracks];
   RepeatMode repeatMode_ = RepeatMode::kAll;
+  bool forceRescan_ = false;
   AudioGeneratorMP3* mp3_ = nullptr;
   AudioFileSourceFS* mp3File_ = nullptr;
   AudioOutputI2S* i2sOut_ = nullptr;

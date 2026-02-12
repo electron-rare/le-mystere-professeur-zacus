@@ -1,33 +1,5 @@
 #include "la_detector.h"
 
-#include <Wire.h>
-
-namespace {
-
-constexpr uint8_t kEs8388RegControl1 = 0x00;
-constexpr uint8_t kEs8388RegControl2 = 0x01;
-constexpr uint8_t kEs8388RegChipPower = 0x02;
-constexpr uint8_t kEs8388RegAdcPower = 0x03;
-constexpr uint8_t kEs8388RegDacPower = 0x04;
-constexpr uint8_t kEs8388RegMasterMode = 0x08;
-constexpr uint8_t kEs8388RegAdcControl1 = 0x09;
-constexpr uint8_t kEs8388RegAdcControl2 = 0x0A;
-constexpr uint8_t kEs8388RegAdcControl3 = 0x0B;
-constexpr uint8_t kEs8388RegAdcControl4 = 0x0C;
-constexpr uint8_t kEs8388RegAdcControl5 = 0x0D;
-constexpr uint8_t kEs8388RegAdcControl8 = 0x10;
-constexpr uint8_t kEs8388RegAdcControl9 = 0x11;
-constexpr uint8_t kEs8388RegDacControl1 = 0x17;
-constexpr uint8_t kEs8388RegDacControl3 = 0x19;
-constexpr uint8_t kEs8388RegDacControl2 = 0x18;
-constexpr uint8_t kEs8388RegDacControl16 = 0x26;
-constexpr uint8_t kEs8388RegDacControl17 = 0x27;
-constexpr uint8_t kEs8388RegDacControl20 = 0x2A;
-constexpr uint8_t kEs8388RegDacControl21 = 0x2B;
-constexpr uint8_t kEs8388RegDacControl23 = 0x2D;
-
-}  // namespace
-
 LaDetector::LaDetector(uint8_t micAdcPin,
                        bool useI2sMic,
                        uint8_t i2sBclkPin,
@@ -37,7 +9,17 @@ LaDetector::LaDetector(uint8_t micAdcPin,
       useI2sMic_(useI2sMic),
       i2sBclkPin_(i2sBclkPin),
       i2sWsPin_(i2sWsPin),
-      i2sDinPin_(i2sDinPin) {}
+      i2sDinPin_(i2sDinPin),
+      codec_(config::kPinCodecI2CSda,
+             config::kPinCodecI2CScl,
+             config::kCodecI2CClockHz,
+             config::kCodecI2CAddress,
+             i2sBclkPin,
+             i2sWsPin,
+             config::kPinI2SDout,
+             i2sDinPin,
+             config::kI2sOutputPort,
+             config::kPinAudioPaEnable) {}
 
 void LaDetector::begin() {
   if (!useI2sMic_) {
@@ -73,7 +55,7 @@ bool LaDetector::beginI2sInput() {
     return true;
   }
 
-  if (!codecReady_ && !beginCodec()) {
+  if (!codec_.isReady() && !beginCodec()) {
     return false;
   }
 
@@ -133,34 +115,8 @@ void LaDetector::endI2sInput() {
   i2sReady_ = false;
 }
 
-bool LaDetector::isCodecAddressReachable(uint8_t address) {
-  Wire.beginTransmission(address);
-  return Wire.endTransmission() == 0;
-}
-
-bool LaDetector::writeCodecReg(uint8_t reg, uint8_t value) {
-  Wire.beginTransmission(codecAddress_);
-  Wire.write(reg);
-  Wire.write(value);
-  return Wire.endTransmission() == 0;
-}
-
 bool LaDetector::configureCodecInput(bool useLine2) {
-  const uint8_t gainStep = (config::kCodecMicGainDb / 3U) & 0x0F;
-  const uint8_t gainReg = static_cast<uint8_t>((gainStep << 4) | gainStep);
-  const uint8_t adcInput = useLine2 ? 0x50 : 0x00;
-
-  bool ok = true;
-  ok = ok && writeCodecReg(kEs8388RegAdcControl1, gainReg);
-  ok = ok && writeCodecReg(kEs8388RegAdcControl2, adcInput);
-  ok = ok && writeCodecReg(kEs8388RegAdcControl3, 0x02);
-  ok = ok && writeCodecReg(kEs8388RegAdcControl4, 0x0D);
-  ok = ok && writeCodecReg(kEs8388RegAdcControl5, 0x02);
-  ok = ok && writeCodecReg(kEs8388RegAdcControl8, 0x00);
-  ok = ok && writeCodecReg(kEs8388RegAdcControl9, 0x00);
-  ok = ok && writeCodecReg(kEs8388RegAdcPower, 0x09);
-
-  if (!ok) {
+  if (!codec_.configureInput(useLine2, config::kCodecMicGainDb)) {
     Serial.printf("[MIC][CODEC] input config failed (LINE%u).\n", useLine2 ? 2U : 1U);
     return false;
   }
@@ -173,68 +129,33 @@ bool LaDetector::configureCodecInput(bool useLine2) {
 }
 
 bool LaDetector::beginCodec() {
-  Wire.begin(config::kPinCodecI2CSda, config::kPinCodecI2CScl, config::kCodecI2CClockHz);
-
-  uint8_t detectedAddress = config::kCodecI2CAddress;
-  if (!isCodecAddressReachable(detectedAddress)) {
-    const uint8_t altAddress = (detectedAddress == 0x10U) ? 0x11U : 0x10U;
-    if (isCodecAddressReachable(altAddress)) {
-      detectedAddress = altAddress;
-    } else {
-      Serial.printf("[MIC][CODEC] ES8388 introuvable sur I2C (0x%02X/0x%02X, SDA=%u, SCL=%u)\n",
-                    static_cast<unsigned int>(config::kCodecI2CAddress),
-                    static_cast<unsigned int>(altAddress),
-                    static_cast<unsigned int>(config::kPinCodecI2CSda),
-                    static_cast<unsigned int>(config::kPinCodecI2CScl));
-      return false;
-    }
-  }
-
-  codecAddress_ = detectedAddress;
-  Serial.printf("[MIC][CODEC] ES8388 detecte addr=0x%02X (SDA=%u SCL=%u)\n",
-                static_cast<unsigned int>(codecAddress_),
-                static_cast<unsigned int>(config::kPinCodecI2CSda),
-                static_cast<unsigned int>(config::kPinCodecI2CScl));
-
-  bool ok = true;
-  ok = ok && writeCodecReg(kEs8388RegDacControl3, 0x04);
-  ok = ok && writeCodecReg(kEs8388RegControl2, 0x50);
-  ok = ok && writeCodecReg(kEs8388RegChipPower, 0x00);
-  ok = ok && writeCodecReg(0x35, 0xA0);
-  ok = ok && writeCodecReg(0x37, 0xD0);
-  ok = ok && writeCodecReg(0x39, 0xD0);
-  ok = ok && writeCodecReg(kEs8388RegMasterMode, 0x00);  // codec slave
-
-  ok = ok && writeCodecReg(kEs8388RegDacPower, 0xC0);
-  ok = ok && writeCodecReg(kEs8388RegControl1, 0x12);
-  ok = ok && writeCodecReg(kEs8388RegDacControl1, 0x18);   // 16-bit I2S
-  ok = ok && writeCodecReg(kEs8388RegDacControl2, 0x02);   // fs ratio 256
-  ok = ok && writeCodecReg(kEs8388RegDacControl16, 0x00);
-  ok = ok && writeCodecReg(kEs8388RegDacControl17, 0x90);
-  ok = ok && writeCodecReg(kEs8388RegDacControl20, 0x90);
-  ok = ok && writeCodecReg(kEs8388RegDacControl21, 0x80);
-  ok = ok && writeCodecReg(kEs8388RegDacControl23, 0x00);
-  ok = ok && writeCodecReg(kEs8388RegDacPower, 0x3C);
-  ok = ok && writeCodecReg(kEs8388RegAdcPower, 0xFF);
-
-  if (!ok) {
-    Serial.println("[MIC][CODEC] echec init registres ES8388.");
+  if (!codec_.begin(codecUseLine2_, config::kCodecMicGainDb)) {
+    const uint8_t altAddress = (config::kCodecI2CAddress == 0x10U) ? 0x11U : 0x10U;
+    Serial.printf("[MIC][CODEC] ES8388 introuvable sur I2C (0x%02X/0x%02X, SDA=%u, SCL=%u)\n",
+                  static_cast<unsigned int>(config::kCodecI2CAddress),
+                  static_cast<unsigned int>(altAddress),
+                  static_cast<unsigned int>(config::kPinCodecI2CSda),
+                  static_cast<unsigned int>(config::kPinCodecI2CScl));
     return false;
   }
+
+  Serial.printf("[MIC][CODEC] ES8388 detecte addr=0x%02X (SDA=%u SCL=%u)\n",
+                static_cast<unsigned int>(codec_.address()),
+                static_cast<unsigned int>(config::kPinCodecI2CSda),
+                static_cast<unsigned int>(config::kPinCodecI2CScl));
 
   if (!configureCodecInput(codecUseLine2_)) {
     return false;
   }
 
-  codecReady_ = true;
   codecAutoSwitched_ = false;
   codecSilenceSinceMs_ = 0;
-  Serial.println("[MIC][CODEC] init OK.");
+  Serial.println("[MIC][CODEC] init OK (arduino-audio-driver).");
   return true;
 }
 
 void LaDetector::maybeAutoSwitchCodecInput(uint32_t nowMs) {
-  if (!useI2sMic_ || !codecReady_ || !config::kCodecMicAutoSwitchLineOnSilence ||
+  if (!useI2sMic_ || !codec_.isReady() || !config::kCodecMicAutoSwitchLineOnSilence ||
       codecAutoSwitched_) {
     return;
   }
@@ -380,6 +301,38 @@ uint16_t LaDetector::micMin() const {
 
 uint16_t LaDetector::micMax() const {
   return micMax_;
+}
+
+bool LaDetector::isCodecReady() const {
+  return codec_.isReady();
+}
+
+uint8_t LaDetector::codecAddress() const {
+  return codec_.address();
+}
+
+bool LaDetector::ensureCodecReady() {
+  return codec_.ensureReady();
+}
+
+bool LaDetector::readCodecRegister(uint8_t reg, uint8_t* value) {
+  return codec_.readRegister(reg, value);
+}
+
+bool LaDetector::writeCodecRegister(uint8_t reg, uint8_t value) {
+  return codec_.writeRegister(reg, value);
+}
+
+bool LaDetector::setCodecOutputVolumeRaw(uint8_t rawValue, bool includeOut2) {
+  return codec_.setOutputVolumeRaw(rawValue, includeOut2);
+}
+
+bool LaDetector::setCodecOutputVolumePercent(uint8_t percent, bool includeOut2) {
+  return setCodecOutputVolumeRaw(codecOutputRawFromPercent(percent), includeOut2);
+}
+
+uint8_t LaDetector::codecOutputRawFromPercent(uint8_t percent) {
+  return CodecEs8388Driver::outputRawFromPercent(percent);
 }
 
 uint16_t LaDetector::micPeakToPeak() const {

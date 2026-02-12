@@ -17,7 +17,8 @@
 #include <SD_MMC.h>
 
 #include "app.h"
-#include "app_state.h"
+#include "runtime/app_scheduler.h"
+#include "runtime/runtime_state.h"
 
 constexpr char kUnlockJingleRtttl[] =
     "zac_unlock:d=16,o=6,b=118:e,p,b,p,e7,8p,e7,b,e7";
@@ -2020,16 +2021,17 @@ void updateMicCalibration(uint32_t nowMs,
   }
 }
 
-RuntimeMode selectRuntimeMode() {
-  // Tant qu'on est en U_LOCK ou en jingle d'unlock, on n'active pas la detection SD/MP3.
-  if (g_mode == RuntimeMode::kSignal && (!g_uSonFunctional || g_unlockJingle.active)) {
-    return RuntimeMode::kSignal;
-  }
-
-  if (g_mp3.isSdReady() && g_mp3.hasTracks()) {
-    return RuntimeMode::kMp3;
-  }
-  return RuntimeMode::kSignal;
+AppSchedulerInputs makeSchedulerInputs() {
+  AppSchedulerInputs input;
+  input.currentMode = g_mode;
+  input.uSonFunctional = g_uSonFunctional;
+  input.unlockJingleActive = g_unlockJingle.active;
+  input.sdReady = g_mp3.isSdReady();
+  input.hasTracks = g_mp3.hasTracks();
+  input.laDetectionEnabled = g_laDetectionEnabled;
+  input.sineEnabled = config::kEnableSineDac;
+  input.bootProtocolActive = g_bootAudioProtocol.active;
+  return input;
 }
 
 void applyRuntimeMode(RuntimeMode newMode, bool force = false) {
@@ -2189,7 +2191,7 @@ void App::setup() {
   setBootAudioPaEnabled(true, "boot_setup");
   printBootAudioOutputInfo("boot_setup");
   g_sine.setEnabled(false);
-  applyRuntimeMode(selectRuntimeMode(), true);
+  applyRuntimeMode(schedulerSelectRuntimeMode(makeSchedulerInputs()), true);
   playBootAudioPrimaryFx("boot_setup");
   startBootAudioValidationProtocol(millis());
 
@@ -2219,26 +2221,34 @@ void App::setup() {
 
 void App::loop() {
   const uint32_t nowMs = millis();
-  updateBootAudioValidationProtocol(nowMs);
-  pollKeyTuneSerial(nowMs);
+  AppSchedulerInputs schedulerInput = makeSchedulerInputs();
+  AppBrickSchedule schedule = schedulerBuildBricks(schedulerInput);
 
-  if (g_mode == RuntimeMode::kSignal) {
+  if (schedule.runBootProtocol) {
+    updateBootAudioValidationProtocol(nowMs);
+  }
+  if (schedule.runSerialConsole) {
+    pollKeyTuneSerial(nowMs);
+  }
+
+  schedulerInput = makeSchedulerInputs();
+  schedule = schedulerBuildBricks(schedulerInput);
+
+  if (schedule.runUnlockJingle) {
     updateUnlockJingle(nowMs);
   }
 
-  // En U_LOCK: ne pas scanner/monter la SD.
-  // En U-SON (avant mode MP3), on scanne la SD sans lancer de playback pour
-  // eviter le conflit I2S avec le micro encore actif.
-  if (g_mode == RuntimeMode::kMp3 || (g_uSonFunctional && !g_unlockJingle.active)) {
-    g_mp3.update(nowMs, g_mode == RuntimeMode::kMp3);
+  if (schedule.runMp3Service) {
+    g_mp3.update(nowMs, schedule.allowMp3Playback);
   }
-  applyRuntimeMode(selectRuntimeMode());
+  applyRuntimeMode(schedulerSelectRuntimeMode(makeSchedulerInputs()));
   updateMp3FormatTest(nowMs);
 
-  if (g_mode == RuntimeMode::kSignal && config::kEnableSineDac) {
+  const AppBrickSchedule postModeSchedule = schedulerBuildBricks(makeSchedulerInputs());
+  if (postModeSchedule.runSineDac) {
     g_sine.update();
   }
-  if (g_mode == RuntimeMode::kSignal && g_laDetectionEnabled) {
+  if (postModeSchedule.runLaDetector) {
     g_laDetector.update(nowMs);
   }
   g_keypad.update(nowMs);

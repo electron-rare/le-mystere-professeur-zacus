@@ -1,4 +1,4 @@
-#include "app_state.h"
+#include "runtime_state.h"
 
 LedController g_led(config::kPinLedR, config::kPinLedG, config::kPinLedB);
 LaDetector g_laDetector(config::kPinMicAdc,

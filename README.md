@@ -3,6 +3,9 @@
 Kit d’enquête pour anniversaire (9–11 ans), ambiance laboratoire / campus scientifique.
 Style visuel : noir & blanc, graphique, lisible, élégant, homogène.
 
+## Aperçu visuel
+![Vue d'ensemble du dépôt](docs/assets/repo-map.svg)
+
 ## Contenu
 ### 1) Kit Maître du jeu
 Dossier : `kit-maitre-du-jeu/`

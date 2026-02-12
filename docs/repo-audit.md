@@ -33,7 +33,7 @@ Périmètre: **contenu documentaire + structure fichiers**, sans modification fi
 
 ### 4) Hardware
 - Arborescence hardware lisible (`bom`, `wiring`, `firmware`, `enclosure`).
-- Le firmware reste hors scope de modification dans ce cycle.
+- Le firmware reste hors périmètre de modification dans ce cycle.
 
 ## Analyse des images
 
@@ -44,8 +44,8 @@ Résultat:
 - Aucun fichier image détecté dans les fichiers versionnés.
 
 Conséquence:
-- pas d'audit visuel possible sur des assets exportés.
-- recommandé: ajouter des previews PNG sous `printables/export/png/` pour revue PR.
+- Pas d'audit visuel possible sur des assets exportés.
+- Recommandé: ajouter des previews PNG sous `printables/export/png/` pour revue PR.
 
 ## Corrections de cohérence appliquées
 

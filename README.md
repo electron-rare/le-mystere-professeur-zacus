@@ -45,6 +45,7 @@ Voir `DISCLAIMER.md`.
 ## Maintenance du dépôt (hors firmware)
 - Plan : `docs/maintenance-repo.md`
 - Audit : `docs/repo-audit.md`
+- Règles anti-conflits docs : section dédiée dans `docs/maintenance-repo.md`
 
 ## Contribuer
 Voir `CONTRIBUTING.md`.

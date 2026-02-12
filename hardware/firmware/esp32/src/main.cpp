@@ -1,250 +1,477 @@
 #include <Arduino.h>
-#include <SD.h>
-#include <SPI.h>
-#include <AudioFileSourceSD.h>
-#include <AudioGeneratorMP3.h>
-#include <AudioOutputI2S.h>
+#include <cstring>
 
-// -------------------- ESP32 DevKit GPIO --------------------
-// RGB LED externe (3 sorties digitales)
-static constexpr uint8_t PIN_LED_R = 16;
-static constexpr uint8_t PIN_LED_G = 17;
-static constexpr uint8_t PIN_LED_B = 4;
+#include "config.h"
+#include "keypad_analog.h"
+#include "la_detector.h"
+#include "led_controller.h"
+#include "mp3_player.h"
+#include "screen_link.h"
+#include "sine_dac.h"
 
-// Micro analogique
-static constexpr uint8_t PIN_MIC = 34;
+LedController g_led(config::kPinLedR, config::kPinLedG, config::kPinLedB);
+LaDetector g_laDetector(config::kPinMic);
+SineDac g_sine(config::kPinDacSine, config::kSineFreqHz, config::kDacSampleRate);
+KeypadAnalog g_keypad(config::kPinKeysAdc);
+ScreenLink g_screen(Serial2,
+                    config::kPinScreenTx,
+                    config::kScreenBaud,
+                    config::kScreenUpdatePeriodMs);
+Mp3Player g_mp3(config::kPinI2SBclk,
+                config::kPinI2SLrc,
+                config::kPinI2SDout,
+                config::kMp3Path,
+                config::kPinAudioPaEnable);
 
-// DAC interne pour sinus
-static constexpr uint8_t PIN_DAC_SINE = 25;
+enum class RuntimeMode : uint8_t {
+  kSignal = 0,
+  kMp3 = 1,
+};
 
-// Carte SD (bus VSPI standard ESP32 DevKit)
-static constexpr uint8_t PIN_SD_CS = 5;
-static constexpr uint8_t PIN_SD_SCK = 18;
-static constexpr uint8_t PIN_SD_MISO = 19;
-static constexpr uint8_t PIN_SD_MOSI = 23;
+RuntimeMode g_mode = RuntimeMode::kSignal;
+bool g_laDetectionEnabled = true;
+bool g_uSonFunctional = false;
 
-// I2S sortie MP3 (vers DAC/ampli I2S externe type MAX98357A)
-static constexpr uint8_t PIN_I2S_BCLK = 26;
-static constexpr uint8_t PIN_I2S_LRC = 27;
-static constexpr uint8_t PIN_I2S_DOUT = 22;
+struct MicCalibrationState {
+  bool active = false;
+  uint32_t untilMs = 0;
+  uint32_t nextLogMs = 0;
+  uint32_t samples = 0;
+  float rmsMin = 1000000.0f;
+  float rmsMax = 0.0f;
+  float ratioMin = 1000000.0f;
+  float ratioMax = 0.0f;
+  uint16_t p2pMin = 0xFFFF;
+  uint16_t p2pMax = 0;
+  uint16_t okCount = 0;
+  uint16_t silenceCount = 0;
+  uint16_t saturationCount = 0;
+  uint16_t tooLoudCount = 0;
+  uint16_t detectOffCount = 0;
+};
 
-static constexpr char MP3_PATH[] = "/track001.mp3";
+MicCalibrationState g_micCalibration;
 
-// -------------------- MP3 --------------------
-AudioGeneratorMP3* mp3 = nullptr;
-AudioFileSourceSD* mp3File = nullptr;
-AudioOutputI2S* i2sOut = nullptr;
+const char* micHealthLabel(bool detectionEnabled, float micRms, uint16_t micMin, uint16_t micMax) {
+  if (!detectionEnabled) {
+    return "DETECT_OFF";
+  }
+  if (micMin <= 5 || micMax >= 4090) {
+    return "SATURATION";
+  }
 
-// -------------------- DAC sinus 440 Hz --------------------
-static constexpr float SINE_FREQ_HZ = 440.0f;
-static constexpr uint16_t DAC_SAMPLE_RATE = 22050;
-static constexpr uint16_t SINE_TABLE_SIZE = 128;
-uint8_t sineTable[SINE_TABLE_SIZE];
-uint32_t lastDacMicros = 0;
-uint32_t dacPeriodUs = 1000000UL / DAC_SAMPLE_RATE;
-
-// -------------------- Détection LA (Goertzel) --------------------
-static constexpr float DETECT_FS = 4000.0f;
-static constexpr uint16_t DETECT_N = 128;
-static constexpr float DETECT_TARGET_HZ = 440.0f;
-static constexpr float DETECT_RATIO_THRESHOLD = 1.8f;
-static constexpr uint16_t DETECT_EVERY_MS = 100;
-
-bool laDetected = false;
-uint32_t lastDetectMs = 0;
-
-// -------------------- LED random --------------------
-uint32_t nextLedUpdateMs = 0;
-
-void setLed(bool r, bool g, bool b) {
-  digitalWrite(PIN_LED_R, r ? HIGH : LOW);
-  digitalWrite(PIN_LED_G, g ? HIGH : LOW);
-  digitalWrite(PIN_LED_B, b ? HIGH : LOW);
+  const uint16_t p2p = static_cast<uint16_t>(micMax - micMin);
+  if (p2p < 12 || micRms < 2.0f) {
+    return "SILENCE/GAIN";
+  }
+  if (micRms > 900.0f) {
+    return "TOO_LOUD";
+  }
+  return "OK";
 }
 
-void updateLedRandom(uint32_t nowMs) {
-  if (nowMs < nextLedUpdateMs) {
+void resetMicCalibrationStats() {
+  g_micCalibration.samples = 0;
+  g_micCalibration.rmsMin = 1000000.0f;
+  g_micCalibration.rmsMax = 0.0f;
+  g_micCalibration.ratioMin = 1000000.0f;
+  g_micCalibration.ratioMax = 0.0f;
+  g_micCalibration.p2pMin = 0xFFFF;
+  g_micCalibration.p2pMax = 0;
+  g_micCalibration.okCount = 0;
+  g_micCalibration.silenceCount = 0;
+  g_micCalibration.saturationCount = 0;
+  g_micCalibration.tooLoudCount = 0;
+  g_micCalibration.detectOffCount = 0;
+}
+
+void startMicCalibration(uint32_t nowMs, const char* reason) {
+  g_micCalibration.active = true;
+  g_micCalibration.untilMs = nowMs + config::kMicCalibrationDurationMs;
+  g_micCalibration.nextLogMs = nowMs;
+  resetMicCalibrationStats();
+  Serial.printf("[MIC_CAL] START reason=%s duration=%lu ms\n",
+                reason,
+                static_cast<unsigned long>(config::kMicCalibrationDurationMs));
+}
+
+void stopMicCalibration(uint32_t nowMs, const char* reason) {
+  if (!g_micCalibration.active) {
     return;
   }
 
-  // Pas de vert seul pour garder la signification "LA détecté"
-  const uint8_t mode = random(0, 5);
-  switch (mode) {
-    case 0:
-      setLed(true, false, false);
-      break;  // rouge
+  g_micCalibration.active = false;
+  Serial.printf("[MIC_CAL] STOP reason=%s now=%lu ms\n",
+                reason,
+                static_cast<unsigned long>(nowMs));
+
+  if (g_micCalibration.samples == 0) {
+    Serial.println("[MIC_CAL] SUMMARY no sample captured.");
+    return;
+  }
+
+  Serial.printf(
+      "[MIC_CAL] SUMMARY n=%lu rms[min/max]=%.1f/%.1f p2p[min/max]=%u/%u ratio[min/max]=%.3f/%.3f\n",
+      static_cast<unsigned long>(g_micCalibration.samples),
+      static_cast<double>(g_micCalibration.rmsMin),
+      static_cast<double>(g_micCalibration.rmsMax),
+      static_cast<unsigned int>(g_micCalibration.p2pMin),
+      static_cast<unsigned int>(g_micCalibration.p2pMax),
+      static_cast<double>(g_micCalibration.ratioMin),
+      static_cast<double>(g_micCalibration.ratioMax));
+  Serial.printf("[MIC_CAL] HEALTH ok=%u silence=%u saturation=%u too_loud=%u detect_off=%u\n",
+                static_cast<unsigned int>(g_micCalibration.okCount),
+                static_cast<unsigned int>(g_micCalibration.silenceCount),
+                static_cast<unsigned int>(g_micCalibration.saturationCount),
+                static_cast<unsigned int>(g_micCalibration.tooLoudCount),
+                static_cast<unsigned int>(g_micCalibration.detectOffCount));
+
+  if (g_micCalibration.saturationCount > 0) {
+    Serial.println("[MIC_CAL] DIAG saturation detectee (niveau trop fort ou biais incorrect).");
+  } else if (g_micCalibration.silenceCount > (g_micCalibration.samples / 2U)) {
+    Serial.println("[MIC_CAL] DIAG signal faible: verifier micro, cablage ou gain.");
+  } else if (g_micCalibration.okCount > (g_micCalibration.samples / 2U)) {
+    Serial.println("[MIC_CAL] DIAG micro globalement OK.");
+  } else {
+    Serial.println("[MIC_CAL] DIAG etat mixte: verifier position/gain/source audio.");
+  }
+}
+
+void updateMicCalibration(uint32_t nowMs,
+                          bool laDetected,
+                          int8_t tuningOffset,
+                          uint8_t tuningConfidence,
+                          float ratio,
+                          float mean,
+                          float rms,
+                          uint16_t micMin,
+                          uint16_t micMax,
+                          const char* healthLabel) {
+  if (!g_micCalibration.active) {
+    return;
+  }
+
+  if (static_cast<int32_t>(nowMs - g_micCalibration.nextLogMs) < 0) {
+    if (static_cast<int32_t>(nowMs - g_micCalibration.untilMs) >= 0) {
+      stopMicCalibration(nowMs, "timeout");
+    }
+    return;
+  }
+  g_micCalibration.nextLogMs = nowMs + config::kMicCalibrationLogPeriodMs;
+
+  const uint16_t p2p = static_cast<uint16_t>(micMax - micMin);
+  ++g_micCalibration.samples;
+  if (rms < g_micCalibration.rmsMin) {
+    g_micCalibration.rmsMin = rms;
+  }
+  if (rms > g_micCalibration.rmsMax) {
+    g_micCalibration.rmsMax = rms;
+  }
+  if (ratio < g_micCalibration.ratioMin) {
+    g_micCalibration.ratioMin = ratio;
+  }
+  if (ratio > g_micCalibration.ratioMax) {
+    g_micCalibration.ratioMax = ratio;
+  }
+  if (p2p < g_micCalibration.p2pMin) {
+    g_micCalibration.p2pMin = p2p;
+  }
+  if (p2p > g_micCalibration.p2pMax) {
+    g_micCalibration.p2pMax = p2p;
+  }
+
+  if (strcmp(healthLabel, "OK") == 0) {
+    ++g_micCalibration.okCount;
+  } else if (strcmp(healthLabel, "SILENCE/GAIN") == 0) {
+    ++g_micCalibration.silenceCount;
+  } else if (strcmp(healthLabel, "SATURATION") == 0) {
+    ++g_micCalibration.saturationCount;
+  } else if (strcmp(healthLabel, "TOO_LOUD") == 0) {
+    ++g_micCalibration.tooLoudCount;
+  } else if (strcmp(healthLabel, "DETECT_OFF") == 0) {
+    ++g_micCalibration.detectOffCount;
+  }
+
+  const uint32_t leftMs =
+      (static_cast<int32_t>(g_micCalibration.untilMs - nowMs) > 0)
+          ? (g_micCalibration.untilMs - nowMs)
+          : 0;
+  Serial.printf(
+      "[MIC_CAL] left=%lus det=%u off=%d conf=%u ratio=%.3f mean=%.1f rms=%.1f min=%u max=%u p2p=%u health=%s\n",
+      static_cast<unsigned long>(leftMs / 1000UL),
+      laDetected ? 1U : 0U,
+      static_cast<int>(tuningOffset),
+      static_cast<unsigned int>(tuningConfidence),
+      static_cast<double>(ratio),
+      static_cast<double>(mean),
+      static_cast<double>(rms),
+      static_cast<unsigned int>(micMin),
+      static_cast<unsigned int>(micMax),
+      static_cast<unsigned int>(p2p),
+      healthLabel);
+
+  if (static_cast<int32_t>(nowMs - g_micCalibration.untilMs) >= 0) {
+    stopMicCalibration(nowMs, "timeout");
+  }
+}
+
+RuntimeMode selectRuntimeMode() {
+  // Tant qu'on est en U_LOCK, on n'active pas la detection SD/MP3.
+  if (g_mode == RuntimeMode::kSignal && !g_uSonFunctional) {
+    return RuntimeMode::kSignal;
+  }
+
+  if (g_mp3.isSdReady() && g_mp3.hasTracks()) {
+    return RuntimeMode::kMp3;
+  }
+  return RuntimeMode::kSignal;
+}
+
+void applyRuntimeMode(RuntimeMode newMode, bool force = false) {
+  const bool changed = (newMode != g_mode);
+  if (!changed && !force) {
+    return;
+  }
+
+  g_mode = newMode;
+  if (g_mode == RuntimeMode::kMp3) {
+    stopMicCalibration(millis(), "mode_mp3");
+    g_laDetectionEnabled = false;
+    g_sine.setEnabled(false);
+    if (changed) {
+      Serial.println("[MODE] LECTEUR U-SON (SD detectee)");
+    }
+  } else {
+    g_laDetectionEnabled = true;
+    g_uSonFunctional = false;
+    if (config::kEnableMicCalibrationOnSignalEntry) {
+      startMicCalibration(millis(), changed ? "mode_signal" : "boot_signal");
+    }
+    if (config::kEnableSineDac) {
+      g_sine.setEnabled(true);
+    }
+    if (changed) {
+      Serial.println("[MODE] U_LOCK (accorder vers LA)");
+    }
+  }
+}
+
+void handleKeyPress(uint8_t key) {
+  if (g_mode == RuntimeMode::kMp3) {
+    switch (key) {
+      case 1:
+        g_mp3.togglePause();
+        Serial.printf("[KEY] K1 MP3 %s\n", g_mp3.isPaused() ? "PAUSE" : "PLAY");
+        break;
+      case 2:
+        g_mp3.previousTrack();
+        Serial.printf("[KEY] K2 PREV %u/%u\n",
+                      static_cast<unsigned int>(g_mp3.currentTrackNumber()),
+                      static_cast<unsigned int>(g_mp3.trackCount()));
+        break;
+      case 3:
+        g_mp3.nextTrack();
+        Serial.printf("[KEY] K3 NEXT %u/%u\n",
+                      static_cast<unsigned int>(g_mp3.currentTrackNumber()),
+                      static_cast<unsigned int>(g_mp3.trackCount()));
+        break;
+      case 4:
+        g_mp3.setGain(g_mp3.gain() - 0.05f);
+        Serial.printf("[KEY] K4 VOL- %u%%\n", static_cast<unsigned int>(g_mp3.volumePercent()));
+        break;
+      case 5:
+        g_mp3.setGain(g_mp3.gain() + 0.05f);
+        Serial.printf("[KEY] K5 VOL+ %u%%\n", static_cast<unsigned int>(g_mp3.volumePercent()));
+        break;
+      case 6:
+        g_mp3.cycleRepeatMode();
+        Serial.printf("[KEY] K6 REPEAT %s\n", g_mp3.repeatModeLabel());
+        break;
+      default:
+        break;
+    }
+    return;
+  }
+
+  if (!g_uSonFunctional) {
+    if (key == 6) {
+      startMicCalibration(millis(), "key_k6_ulock");
+      Serial.println("[KEY] K6 calibration micro (U_LOCK)");
+      return;
+    }
+    Serial.printf("[KEY] K%u ignoree (MODE U_LOCK)\n", static_cast<unsigned int>(key));
+    return;
+  }
+
+  switch (key) {
     case 1:
-      setLed(false, false, true);
-      break;  // bleu
-    case 2:
-      setLed(true, false, true);
-      break;  // violet
-    case 3:
-      setLed(true, true, false);
-      break;  // jaune
+      g_laDetectionEnabled = !g_laDetectionEnabled;
+      Serial.printf("[KEY] K1 LA DETECT %s\n", g_laDetectionEnabled ? "ON" : "OFF");
+      break;
+    case 2: {
+      const float newFreq =
+          max(config::kSineFreqMinHz, g_sine.frequency() - config::kSineFreqStepHz);
+      g_sine.setFrequency(newFreq);
+      Serial.printf("[KEY] K2 SINE %.1f Hz\n", static_cast<double>(g_sine.frequency()));
+      break;
+    }
+    case 3: {
+      const float newFreq =
+          min(config::kSineFreqMaxHz, g_sine.frequency() + config::kSineFreqStepHz);
+      g_sine.setFrequency(newFreq);
+      Serial.printf("[KEY] K3 SINE %.1f Hz\n", static_cast<double>(g_sine.frequency()));
+      break;
+    }
+    case 4:
+      if (config::kEnableSineDac) {
+        g_sine.setEnabled(!g_sine.isEnabled());
+        Serial.printf("[KEY] K4 SINE %s\n", g_sine.isEnabled() ? "ON" : "OFF");
+      } else {
+        Serial.println("[KEY] K4 SINE indisponible.");
+      }
+      break;
+    case 5:
+      g_mp3.requestStorageRefresh();
+      Serial.println("[KEY] K5 SD refresh request");
+      break;
+    case 6:
+      startMicCalibration(millis(), "key_k6_signal");
+      Serial.println("[KEY] K6 calibration micro (30s)");
+      break;
     default:
-      setLed(false, false, false);
-      break;  // off
+      break;
   }
-
-  nextLedUpdateMs = nowMs + random(120, 500);
-}
-
-void buildSineTable() {
-  for (uint16_t i = 0; i < SINE_TABLE_SIZE; ++i) {
-    const float phase = 2.0f * PI * static_cast<float>(i) / static_cast<float>(SINE_TABLE_SIZE);
-    const float normalized = 0.5f + 0.5f * sinf(phase);
-    sineTable[i] = static_cast<uint8_t>(normalized * 255.0f);
-  }
-}
-
-void updateDacSine() {
-  const uint32_t nowUs = micros();
-  if ((nowUs - lastDacMicros) < dacPeriodUs) {
-    return;
-  }
-
-  lastDacMicros = nowUs;
-
-  static float phaseAcc = 0.0f;
-  const float step = (SINE_FREQ_HZ * static_cast<float>(SINE_TABLE_SIZE)) /
-                     static_cast<float>(DAC_SAMPLE_RATE);
-  phaseAcc += step;
-  if (phaseAcc >= SINE_TABLE_SIZE) {
-    phaseAcc -= SINE_TABLE_SIZE;
-  }
-
-  const uint8_t sample = sineTable[static_cast<uint16_t>(phaseAcc)];
-  dacWrite(PIN_DAC_SINE, sample);
-}
-
-float goertzelPower(const int16_t* x, uint16_t n, float fs, float targetHz) {
-  const float k = roundf((static_cast<float>(n) * targetHz) / fs);
-  const float omega = (2.0f * PI * k) / static_cast<float>(n);
-  const float coeff = 2.0f * cosf(omega);
-
-  float s0 = 0.0f;
-  float s1 = 0.0f;
-  float s2 = 0.0f;
-
-  for (uint16_t i = 0; i < n; ++i) {
-    s0 = x[i] + coeff * s1 - s2;
-    s2 = s1;
-    s1 = s0;
-  }
-
-  return (s1 * s1) + (s2 * s2) - (coeff * s1 * s2);
-}
-
-bool detectLA440() {
-  static int16_t samples[DETECT_N];
-
-  int32_t meanAccum = 0;
-  for (uint16_t i = 0; i < DETECT_N; ++i) {
-    const int16_t v = static_cast<int16_t>(analogRead(PIN_MIC));
-    samples[i] = v;
-    meanAccum += v;
-    delayMicroseconds(static_cast<uint32_t>(1000000.0f / DETECT_FS));
-  }
-
-  const float mean = static_cast<float>(meanAccum) / static_cast<float>(DETECT_N);
-  float totalEnergy = 0.0f;
-
-  for (uint16_t i = 0; i < DETECT_N; ++i) {
-    const int16_t centered = static_cast<int16_t>(samples[i] - mean);
-    samples[i] = centered;
-    totalEnergy += static_cast<float>(centered) * static_cast<float>(centered);
-  }
-
-  if (totalEnergy < 1.0f) {
-    return false;
-  }
-
-  const float targetEnergy = goertzelPower(samples, DETECT_N, DETECT_FS, DETECT_TARGET_HZ);
-  const float ratio = targetEnergy / (totalEnergy + 1.0f);
-  return ratio > DETECT_RATIO_THRESHOLD;
-}
-
-void startMp3() {
-  if (!SD.exists(MP3_PATH)) {
-    Serial.printf("[MP3] Fichier absent: %s\n", MP3_PATH);
-    return;
-  }
-
-  mp3File = new AudioFileSourceSD(MP3_PATH);
-  i2sOut = new AudioOutputI2S();
-  i2sOut->SetPinout(PIN_I2S_BCLK, PIN_I2S_LRC, PIN_I2S_DOUT);
-  i2sOut->SetGain(0.20f);
-
-  mp3 = new AudioGeneratorMP3();
-  mp3->begin(mp3File, i2sOut);
-  Serial.println("[MP3] Lecture en cours.");
-}
-
-void initSdAndMp3() {
-  SPI.begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, PIN_SD_CS);
-
-  if (!SD.begin(PIN_SD_CS)) {
-    Serial.println("[MP3] Carte SD non détectée.");
-    return;
-  }
-
-  startMp3();
-}
-
-void loopMp3() {
-  if (mp3 == nullptr) {
-    return;
-  }
-
-  if (mp3->isRunning()) {
-    mp3->loop();
-    return;
-  }
-
-  mp3->stop();
-  delete mp3;
-  delete mp3File;
-  mp3 = nullptr;
-  mp3File = nullptr;
-
-  startMp3();
 }
 
 void setup() {
   Serial.begin(115200);
   delay(200);
 
-  pinMode(PIN_LED_R, OUTPUT);
-  pinMode(PIN_LED_G, OUTPUT);
-  pinMode(PIN_LED_B, OUTPUT);
-  setLed(false, false, false);
+  g_led.begin();
+  g_laDetector.begin();
+  g_keypad.begin();
+  randomSeed(analogRead(config::kPinMic));
+  g_sine.begin();
+  g_mp3.begin();
+  g_screen.begin();
+  g_sine.setEnabled(false);
+  applyRuntimeMode(selectRuntimeMode(), true);
 
-  analogReadResolution(12);
-  analogSetPinAttenuation(PIN_MIC, ADC_11db);
-
-  randomSeed(analogRead(PIN_MIC));
-
-  buildSineTable();
-  initSdAndMp3();
-
-  Serial.println("[BOOT] U-SON / ESP32 DevKit prêt.");
+  Serial.println("[BOOT] U-SON / ESP32 Audio Kit A252 pret.");
+  Serial.println("[KEYMAP][MP3] K1 play/pause, K2 prev, K3 next, K4 vol-, K5 vol+, K6 repeat");
+  Serial.println("[BOOT] Sans SD: MODE U_LOCK puis MODULE U-SON Fonctionnel apres detection LA.");
+  Serial.println("[BOOT] En U_LOCK: detection SD desactivee jusqu'au mode U-SON Fonctionnel.");
+  Serial.println("[KEYMAP][SIGNAL] actifs seulement apres unlock: K1 LA on/off, K2 sine-, K3 sine+, K4 sine on/off, K5 refresh SD, K6 cal micro");
 }
 
 void loop() {
   const uint32_t nowMs = millis();
 
-  updateDacSine();
-  loopMp3();
+  // En U_LOCK: ne pas scanner/monter la SD.
+  if (g_mode == RuntimeMode::kMp3 || g_uSonFunctional) {
+    g_mp3.update(nowMs);
+  }
+  applyRuntimeMode(selectRuntimeMode());
 
-  if ((nowMs - lastDetectMs) >= DETECT_EVERY_MS) {
-    lastDetectMs = nowMs;
-    laDetected = detectLA440();
+  if (g_mode == RuntimeMode::kSignal && config::kEnableSineDac) {
+    g_sine.update();
+  }
+  if (g_mode == RuntimeMode::kSignal && g_laDetectionEnabled) {
+    g_laDetector.update(nowMs);
+  }
+  g_keypad.update(nowMs);
+
+  static uint8_t screenKey = 0;
+  static uint32_t screenKeyUntilMs = 0;
+  uint8_t pressedKey = 0;
+  uint16_t pressedRaw = 0;
+  if (g_keypad.consumePress(&pressedKey, &pressedRaw)) {
+    Serial.printf("[KEY] K%u raw=%u\n", static_cast<unsigned int>(pressedKey), pressedRaw);
+    handleKeyPress(pressedKey);
+    screenKey = pressedKey;
+    screenKeyUntilMs = nowMs + 1200;
+  }
+  if (screenKey != 0 && static_cast<int32_t>(nowMs - screenKeyUntilMs) >= 0) {
+    screenKey = 0;
   }
 
-  if (laDetected) {
-    setLed(false, true, false);
+  const bool laDetected =
+      (g_mode == RuntimeMode::kSignal) && g_laDetectionEnabled && g_laDetector.isDetected();
+  if (g_mode == RuntimeMode::kSignal && !g_uSonFunctional && laDetected) {
+    g_uSonFunctional = true;
+    g_mp3.requestStorageRefresh();
+    Serial.println("[MODE] MODULE U-SON Fonctionnel (LA detecte)");
+    Serial.println("[SD] Detection SD activee.");
+  }
+
+  const bool uLockMode = (g_mode == RuntimeMode::kSignal) && !g_uSonFunctional;
+  const bool uSonFunctional = (g_mode == RuntimeMode::kSignal) && g_uSonFunctional;
+  const int8_t tuningOffset = uLockMode ? g_laDetector.tuningOffset() : 0;
+  const uint8_t tuningConfidence = uLockMode ? g_laDetector.tuningConfidence() : 0;
+  const float micRms = g_laDetector.micRms();
+  const uint16_t micMin = g_laDetector.micMin();
+  const uint16_t micMax = g_laDetector.micMax();
+  const uint16_t micP2P = g_laDetector.micPeakToPeak();
+  const float targetRatio = g_laDetector.targetRatio();
+  const float micMean = g_laDetector.micMean();
+  const char* micHealth = micHealthLabel(g_laDetectionEnabled, micRms, micMin, micMax);
+
+  if (g_mode == RuntimeMode::kSignal) {
+    updateMicCalibration(nowMs,
+                         laDetected,
+                         tuningOffset,
+                         tuningConfidence,
+                         targetRatio,
+                         micMean,
+                         micRms,
+                         micMin,
+                         micMax,
+                         micHealth);
+  }
+
+  if (config::kEnableLaDebugSerial && g_mode == RuntimeMode::kSignal) {
+    static uint32_t nextLaDebugMs = 0;
+    if (static_cast<int32_t>(nowMs - nextLaDebugMs) >= 0) {
+      nextLaDebugMs = nowMs + config::kLaDebugPeriodMs;
+      Serial.printf(
+          "[LA][MIC] mode=%s det=%u off=%d conf=%u ratio=%.3f mean=%.1f rms=%.1f min=%u max=%u p2p=%u health=%s\n",
+          g_micCalibration.active ? "CAL" : "RUN",
+          laDetected ? 1U : 0U,
+          static_cast<int>(tuningOffset),
+          static_cast<unsigned int>(tuningConfidence),
+          static_cast<double>(targetRatio),
+          static_cast<double>(micMean),
+          static_cast<double>(micRms),
+          static_cast<unsigned int>(micMin),
+          static_cast<unsigned int>(micMax),
+          static_cast<unsigned int>(micP2P),
+          micHealth);
+    }
+  }
+
+  if (g_mode == RuntimeMode::kMp3) {
+    if (g_mp3.isPlaying()) {
+      g_led.showMp3Playing();
+    } else {
+      g_led.showMp3Paused();
+    }
+  } else if (laDetected) {
+    g_led.showLaDetected();
   } else {
-    updateLedRandom(nowMs);
+    g_led.updateRandom(nowMs);
   }
+
+  g_screen.update(laDetected,
+                  g_mp3.isPlaying(),
+                  g_mp3.isSdReady(),
+                  g_mode == RuntimeMode::kMp3,
+                  uLockMode,
+                  uSonFunctional,
+                  screenKey,
+                  g_mp3.currentTrackNumber(),
+                  g_mp3.trackCount(),
+                  g_mp3.volumePercent(),
+                  tuningOffset,
+                  tuningConfidence,
+                  nowMs);
 }

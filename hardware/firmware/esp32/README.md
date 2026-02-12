@@ -47,6 +47,39 @@ Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
 
 ## Actions des touches
 
+### Protocole validation audio boot
+
+- Au demarrage, un FX audio I2S est joue puis la validation boot s'ouvre.
+- Pendant cette phase, les commandes de mode normal sont bloquees jusqu'a validation/saut/timeout.
+- Timeout auto: `kBootAudioValidationTimeoutMs` (par defaut 12000 ms).
+- Relectures max: `kBootAudioValidationMaxReplays` (par defaut 3).
+
+Touches actives:
+
+- `K1` : valider le rendu audio boot (`OK`)
+- `K2` : rejouer le FX boot
+- `K3` : declarer `KO` + rejouer le FX boot
+- `K4` : jouer un tone test `440 Hz` (debug sortie audio)
+- `K5` : jouer une sequence diag `220 -> 440 -> 880 Hz`
+- `K6` : ignorer la validation (`SKIP`)
+
+Commandes serie (moniteur ESP32):
+
+- `BOOT_OK`
+- `BOOT_REPLAY`
+- `BOOT_KO`
+- `BOOT_SKIP`
+- `BOOT_STATUS`
+- `BOOT_HELP`
+- `BOOT_TEST_TONE`
+- `BOOT_TEST_DIAG`
+- `BOOT_PA_ON`
+- `BOOT_PA_OFF`
+- `BOOT_PA_STATUS`
+- Alias courts acceptes: `OK`, `REPLAY`, `KO`, `SKIP`, `STATUS`, `HELP`
+
+Le firmware publie aussi un rappel de statut periodique (`left=... replay=...`) tant que la validation est active.
+
 ### Mode U_LOCK (au boot, detection SD bloquee)
 
 - Ecran initial: module casse avec effet glitch (sans texte)
@@ -144,3 +177,21 @@ Procedure:
 2. Appuyer chaque touche.
 3. Relever les logs `[KEY] Kx raw=...`.
 4. Ajuster les seuils pour separer les 6 zones.
+
+Reglage live (sans reflash):
+
+- `KEY_STATUS` : affiche les seuils actifs + valeur brute courante
+- `KEY_RAW_ON` / `KEY_RAW_OFF` : flux live `[KEY_RAW] raw=... stable=K...`
+- `KEY_SET K4 1500` : change la borne max de `K4`
+- `KEY_SET K6 2200` : change la borne max de `K6`
+- `KEY_SET REL 3920` : change le seuil de relache
+- `KEY_SET_ALL k1 k2 k3 k4 k5 k6 rel` : applique tous les seuils d'un coup
+- `KEY_RESET` : retour aux valeurs de `src/config.h`
+- `KEY_TEST_START` : demarre un auto-test K1..K6 (sans actions metier)
+- `KEY_TEST_STATUS` : etat `OK/KO` + min/max `raw` par touche
+- `KEY_TEST_RESET` : remet l'auto-test a zero
+- `KEY_TEST_STOP` : arrete l'auto-test
+
+Contraintes:
+
+- ordre strict obligatoire: `K1 < K2 < K3 < K4 < K5 < K6 < REL`

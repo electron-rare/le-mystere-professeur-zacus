@@ -15,8 +15,31 @@ Cette checklist couvre le comportement attendu du couple ESP32 + ESP8266 OLED.
 2. Verifier les logs ESP32:
    - `[MODE] U_LOCK (appuyer touche pour detecter LA)`
    - pas de montage SD immediat
+   - `[BOOT_PROTO] START ...`
+   - `[KEYMAP][BOOT_PROTO] K1=OK, K2=REPLAY, K3=KO+REPLAY, K4=TONE, K5=DIAG, K6=SKIP`
 3. Verifier l'OLED:
    - pictogramme casse + attente appui touche
+
+## 1b) Validation audio boot (touches + serial)
+
+1. Pendant la fenetre de validation boot:
+   - appuyer `K2`: verifier `REPLAY #...` dans les logs et relecture FX.
+   - appuyer `K3`: verifier `KO recu ...` + relecture FX.
+   - appuyer `K4`: verifier tone test 440 Hz + logs `[AUDIO_DBG]`.
+   - appuyer `K5`: verifier sequence 220/440/880 Hz + logs `[AUDIO_DBG]`.
+2. Validation touches:
+   - appuyer `K1`: verifier `[BOOT_PROTO] DONE status=VALIDATED ...`.
+3. Validation serial:
+   - envoyer `BOOT_STATUS` puis verifier `left=... replay=...`.
+   - envoyer `BOOT_REPLAY` pour rejouer.
+   - envoyer `BOOT_TEST_TONE` puis `BOOT_TEST_DIAG` pour test audio.
+   - envoyer `BOOT_PA_STATUS` (et si besoin `BOOT_PA_ON`).
+   - envoyer `BOOT_OK` pour valider.
+   - optionnel: verifier aussi les alias `STATUS`, `REPLAY`, `OK`.
+4. Timeout:
+   - ne rien faire pendant ~12 s et verifier `TIMEOUT -> SKIP auto`.
+5. Limite replay:
+   - declencher plus de 3 replays et verifier `REPLAY refuse: max atteint.`
 
 ## 2) Unlock LA
 
@@ -60,6 +83,30 @@ Cette checklist couvre le comportement attendu du couple ESP32 + ESP8266 OLED.
    - `K2/K3`: prev/next
    - `K4/K5`: volume -/+
    - `K6`: repeat ALL/ONE
+
+## 4b) Reglage live seuils clavier (K4/K6)
+
+1. Ouvrir le moniteur serie ESP32.
+2. Envoyer `KEY_STATUS` pour lire les seuils actifs.
+3. Envoyer `KEY_RAW_ON`, appuyer plusieurs fois `K4` puis `K6`, relever les valeurs `raw`.
+4. Ajuster les bornes:
+   - `KEY_SET K4 <valeur>`
+   - `KEY_SET K6 <valeur>`
+   - si besoin `KEY_SET REL <valeur>`
+5. Verifier:
+   - chaque appui K4 log bien `[KEY] K4 raw=...`
+   - chaque appui K6 log bien `[KEY] K6 raw=...`
+6. Couper le flux live avec `KEY_RAW_OFF`.
+7. Si besoin, revenir config compile-time avec `KEY_RESET`.
+
+## 4c) Validation brique K1..K6
+
+1. Envoyer `KEY_TEST_START`.
+2. Appuyer une fois sur chaque touche `K1` a `K6` (ordre libre).
+3. Verifier les logs:
+   - `[KEY_TEST] HIT Kx raw=...`
+   - `[KEY_TEST] SUCCESS: K1..K6 valides.`
+4. En cas de doute, envoyer `KEY_TEST_STATUS` pour voir `seen=.../6` et les min/max raw.
 
 ## 5) Robustesse lien UART
 

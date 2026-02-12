@@ -7,6 +7,7 @@ class LedController {
   LedController(uint8_t pinR, uint8_t pinG, uint8_t pinB);
 
   void begin();
+  void off();
   void showLaDetected();
   void showMp3Playing();
   void showMp3Paused();

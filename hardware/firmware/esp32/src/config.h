@@ -7,6 +7,7 @@ namespace config {
 constexpr uint8_t kPinLedR = 16;
 constexpr uint8_t kPinLedG = 17;
 constexpr uint8_t kPinLedB = 4;
+constexpr bool kDisableBoardRgbLeds = true;
 
 // Micro:
 // - Profil A252 recommande: micro du codec ES8388 en I2S (DIN GPIO35)
@@ -29,16 +30,28 @@ constexpr uint32_t kCodecMicSilenceSwitchMs = 3000;
 // Alias pour compatibilite avec le code existant.
 constexpr uint8_t kPinMic = kPinMicAdc;
 
-// DAC interne utilise uniquement en mode fallback (sans SD/MP3)
-// Note: ce GPIO est partage avec l'I2S codec, donc le sinus est coupe en mode MP3.
+// DAC interne utilise uniquement en mode fallback (sans SD/MP3).
+// GPIO19 choisi pour eviter le conflit avec I2S DOUT (GPIO26).
 constexpr bool kEnableSineDac = true;
-constexpr uint8_t kPinDacSine = 26;
+constexpr uint8_t kPinDacSine = 19;
 
 // Profil ESP32 Audio Kit V2.2 A252 (codec + SD_MMC)
 constexpr uint8_t kPinI2SBclk = 27;
 constexpr uint8_t kPinI2SLrc = 25;
 constexpr uint8_t kPinI2SDout = 26;
 constexpr int8_t kPinAudioPaEnable = 21;
+constexpr uint8_t kI2sOutputPort = 0;
+constexpr bool kEnableUnlockI2sJingle = true;
+constexpr float kUnlockI2sJingleGain = 0.22f;
+constexpr bool kEnableBootI2sNoiseFx = true;
+constexpr uint16_t kBootI2sNoiseDurationMs = 1100;
+constexpr uint16_t kBootI2sNoiseSampleRateHz = 22050;
+constexpr uint16_t kBootI2sNoiseAttackMs = 90;
+constexpr uint16_t kBootI2sNoiseReleaseMs = 260;
+constexpr float kBootI2sNoiseGain = 0.18f;
+constexpr bool kEnableBootAudioValidationProtocol = true;
+constexpr uint32_t kBootAudioValidationTimeoutMs = 12000;
+constexpr uint8_t kBootAudioValidationMaxReplays = 3;
 
 // ESP32 -> ESP8266 (ecran) en UART unidirectionnel
 constexpr uint8_t kPinScreenTx = 22;
@@ -49,13 +62,15 @@ constexpr uint16_t kScreenUpdatePeriodMs = 250;
 constexpr uint8_t kPinKeysAdc = 36;
 constexpr uint16_t kKeysSampleEveryMs = 8;
 constexpr uint16_t kKeysDebounceMs = 30;
-constexpr uint16_t kKeysReleaseThreshold = 3800;
-constexpr uint16_t kKey1Max = 260;
-constexpr uint16_t kKey2Max = 700;
-constexpr uint16_t kKey3Max = 1200;
-constexpr uint16_t kKey4Max = 1800;
-constexpr uint16_t kKey5Max = 2500;
-constexpr uint16_t kKey6Max = 3300;
+// Profil A252 "dur" ajuste d'apres mesures live:
+// ~1360 -> K4, ~1650 -> K5, ~1885 -> K6.
+constexpr uint16_t kKeysReleaseThreshold = 3920;
+constexpr uint16_t kKey1Max = 300;
+constexpr uint16_t kKey2Max = 760;
+constexpr uint16_t kKey3Max = 1340;
+constexpr uint16_t kKey4Max = 1500;
+constexpr uint16_t kKey5Max = 1770;
+constexpr uint16_t kKey6Max = 2200;
 
 constexpr char kMp3Path[] = "/track001.mp3";
 

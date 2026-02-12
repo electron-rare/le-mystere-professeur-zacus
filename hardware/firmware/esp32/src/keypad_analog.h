@@ -4,6 +4,11 @@
 
 class KeypadAnalog {
  public:
+  struct Thresholds {
+    uint16_t releaseThreshold = 0;
+    uint16_t keyMax[6] = {0, 0, 0, 0, 0, 0};
+  };
+
   explicit KeypadAnalog(uint8_t adcPin);
 
   void begin();
@@ -12,11 +17,19 @@ class KeypadAnalog {
   bool consumePress(uint8_t* key, uint16_t* raw = nullptr);
   uint8_t currentKey() const;
   uint16_t lastRaw() const;
+  const Thresholds& thresholds() const;
+  void resetThresholdsToDefault();
+  bool setKeyMax(uint8_t key, uint16_t rawMax);
+  bool setReleaseThreshold(uint16_t rawMax);
+  bool setThresholds(const Thresholds& thresholds);
 
  private:
   uint8_t decodeKey(uint16_t raw) const;
+  static Thresholds defaultThresholds();
+  static bool isThresholdsValid(const Thresholds& thresholds);
 
   uint8_t adcPin_;
+  Thresholds thresholds_;
   uint32_t lastSampleMs_ = 0;
   uint32_t candidateSinceMs_ = 0;
   uint16_t lastRaw_ = 0;

@@ -7,6 +7,10 @@ void LedController::begin() {
   pinMode(pinR_, OUTPUT);
   pinMode(pinG_, OUTPUT);
   pinMode(pinB_, OUTPUT);
+  off();
+}
+
+void LedController::off() {
   setColor(false, false, false);
 }
 

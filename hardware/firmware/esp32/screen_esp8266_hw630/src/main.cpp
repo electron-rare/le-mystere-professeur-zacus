@@ -597,6 +597,19 @@ const char* backendShortLabel(uint8_t backendMode) {
   }
 }
 
+const char* settingsShortLabel(uint16_t idx) {
+  switch (idx) {
+    case 0:
+      return "REPEAT";
+    case 1:
+      return "BACKEND";
+    case 2:
+      return "SCAN";
+    default:
+      return "-";
+  }
+}
+
 void renderMp3Screen() {
   drawTitleBar("LECTEUR U-SON");
 
@@ -607,7 +620,25 @@ void renderMp3Screen() {
                     15);
 
   char trackLine[20];
-  if (g_state.trackCount == 0) {
+  if (g_state.uiPage == 1U) {
+    const uint16_t cursor = (g_state.uiCursor < g_state.uiCount) ? g_state.uiCursor : 0U;
+    snprintf(trackLine,
+             sizeof(trackLine),
+             "BRW %u/%u",
+             static_cast<unsigned int>((g_state.uiCount == 0U) ? 0U : (cursor + 1U)),
+             static_cast<unsigned int>(g_state.uiCount));
+  } else if (g_state.uiPage == 2U) {
+    snprintf(trackLine,
+             sizeof(trackLine),
+             "QUE +%u/%u",
+             static_cast<unsigned int>(g_state.uiOffset),
+             static_cast<unsigned int>(g_state.queueCount));
+  } else if (g_state.uiPage == 3U) {
+    snprintf(trackLine,
+             sizeof(trackLine),
+             "SET %s",
+             settingsShortLabel(g_state.uiCursor));
+  } else if (g_state.trackCount == 0U) {
     snprintf(trackLine, sizeof(trackLine), "-- / --");
   } else {
     snprintf(trackLine,
@@ -619,7 +650,24 @@ void renderMp3Screen() {
   drawCenteredText(trackLine, 33, 1);
 
   char infoLine[32];
-  if (g_state.key == 0) {
+  if (g_state.uiPage == 1U) {
+    snprintf(infoLine,
+             sizeof(infoLine),
+             "CUR %u OFF %u",
+             static_cast<unsigned int>((g_state.uiCount == 0U) ? 0U : (g_state.uiCursor + 1U)),
+             static_cast<unsigned int>(g_state.uiOffset));
+  } else if (g_state.uiPage == 2U) {
+    snprintf(infoLine,
+             sizeof(infoLine),
+             "QUEUE +%u  N%u",
+             static_cast<unsigned int>(g_state.uiOffset),
+             static_cast<unsigned int>(g_state.queueCount));
+  } else if (g_state.uiPage == 3U) {
+    snprintf(infoLine,
+             sizeof(infoLine),
+             "K1 %s",
+             settingsShortLabel(g_state.uiCursor));
+  } else if (g_state.key == 0) {
     snprintf(infoLine,
              sizeof(infoLine),
              "VOL %u%%  SD %s",

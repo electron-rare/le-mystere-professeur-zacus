@@ -52,6 +52,10 @@ bool ScreenLink::update(const ScreenFrame& frame, bool forceKeyframe) {
                        frame.startupStage != lastStartupStage_ ||
                        frame.appStage != lastAppStage_ ||
                        frame.uiPage != lastUiPage_ ||
+                       frame.uiCursor != lastUiCursor_ ||
+                       frame.uiOffset != lastUiOffset_ ||
+                       frame.uiCount != lastUiCount_ ||
+                       frame.queueCount != lastQueueCount_ ||
                        frame.repeatMode != lastRepeatMode_ ||
                        frame.fxActive != lastFxActive_ ||
                        frame.backendMode != lastBackendMode_ ||
@@ -66,10 +70,10 @@ bool ScreenLink::update(const ScreenFrame& frame, bool forceKeyframe) {
     return false;
   }
 
-  char payload[232] = {};
+  char payload[280] = {};
   const int payloadLen = snprintf(payload,
                                   sizeof(payload),
-                                  "STAT,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u,%u,%u,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u",
+                                  "STAT,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u,%u,%u,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u",
                                   frame.laDetected ? 1U : 0U,
                                   frame.mp3Playing ? 1U : 0U,
                                   frame.sdReady ? 1U : 0U,
@@ -95,7 +99,11 @@ bool ScreenLink::update(const ScreenFrame& frame, bool forceKeyframe) {
                                   frame.fxActive ? 1U : 0U,
                                   static_cast<unsigned int>(frame.backendMode),
                                   frame.scanBusy ? 1U : 0U,
-                                  static_cast<unsigned int>(frame.errorCode));
+                                  static_cast<unsigned int>(frame.errorCode),
+                                  static_cast<unsigned int>(frame.uiCursor),
+                                  static_cast<unsigned int>(frame.uiOffset),
+                                  static_cast<unsigned int>(frame.uiCount),
+                                  static_cast<unsigned int>(frame.queueCount));
   if (payloadLen <= 0) {
     return false;
   }
@@ -103,7 +111,7 @@ bool ScreenLink::update(const ScreenFrame& frame, bool forceKeyframe) {
   const size_t rawLen = strnlen(payload, sizeof(payload));
   const uint8_t crc = crc8(reinterpret_cast<const uint8_t*>(payload), rawLen);
 
-  char txFrame[256] = {};
+  char txFrame[304] = {};
   const int len = snprintf(txFrame, sizeof(txFrame), "%s,%02X\n", payload, static_cast<unsigned int>(crc));
   if (len <= 0) {
     return false;
@@ -136,6 +144,10 @@ bool ScreenLink::update(const ScreenFrame& frame, bool forceKeyframe) {
   lastStartupStage_ = frame.startupStage;
   lastAppStage_ = frame.appStage;
   lastUiPage_ = frame.uiPage;
+  lastUiCursor_ = frame.uiCursor;
+  lastUiOffset_ = frame.uiOffset;
+  lastUiCount_ = frame.uiCount;
+  lastQueueCount_ = frame.queueCount;
   lastRepeatMode_ = frame.repeatMode;
   lastFxActive_ = frame.fxActive;
   lastBackendMode_ = frame.backendMode;

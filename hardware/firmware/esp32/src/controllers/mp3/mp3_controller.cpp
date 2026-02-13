@@ -19,17 +19,21 @@ void Mp3Controller::applyUiAction(const UiAction& action) {
 
 void Mp3Controller::printUiStatus(Print& out, const char* source) const {
   const char* safeSource = (source != nullptr && source[0] != '\0') ? source : "status";
-  out.printf("[MP3_UI] %s page=%s cursor=%u offset=%u tracks=%u\n",
+  out.printf("[MP3_UI] %s page=%s cursor=%u offset=%u browse=%u queue_off=%u set_idx=%u tracks=%u\n",
              safeSource,
              playerUiPageLabel(ui_.page()),
              static_cast<unsigned int>(ui_.cursor()),
              static_cast<unsigned int>(ui_.offset()),
+             static_cast<unsigned int>(ui_.browseCount()),
+             static_cast<unsigned int>(ui_.queueOffset()),
+             static_cast<unsigned int>(ui_.settingsIndex()),
              static_cast<unsigned int>(player_.trackCount()));
 }
 
 void Mp3Controller::printQueuePreview(Print& out, uint8_t count, const char* source) const {
   const char* safeSource = (source != nullptr && source[0] != '\0') ? source : "preview";
   const uint16_t total = player_.trackCount();
+  const uint16_t queueOffset = ui_.queueOffset();
   if (count == 0U) {
     count = 5U;
   } else if (count > 12U) {
@@ -47,7 +51,8 @@ void Mp3Controller::printQueuePreview(Print& out, uint8_t count, const char* sou
   }
   uint8_t emitted = 0U;
   for (uint8_t i = 0U; i < count && i < total; ++i) {
-    const uint16_t nextOneBased = static_cast<uint16_t>(((current + i) % total) + 1U);
+    const uint16_t nextOneBased =
+        static_cast<uint16_t>(((current + queueOffset + i) % total) + 1U);
     const TrackEntry* entry = player_.trackEntryByNumber(nextOneBased);
     if (entry == nullptr) {
       continue;

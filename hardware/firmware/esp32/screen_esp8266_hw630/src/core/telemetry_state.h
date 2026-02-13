@@ -32,6 +32,10 @@ struct TelemetryState {
   uint8_t appStage = kAppStageULockWaiting;
   uint32_t frameSeq = 0;
   uint8_t uiPage = 0;
+  uint16_t uiCursor = 0;
+  uint16_t uiOffset = 0;
+  uint16_t uiCount = 0;
+  uint16_t queueCount = 0;
   uint8_t repeatMode = 0;
   bool fxActive = false;
   uint8_t backendMode = 0;

@@ -95,6 +95,8 @@ Diagnostic:
 Compat legacy conservee pendant PR1 via feature flag:
 
 - default compile-time: `config::kStoryV2EnabledDefault = false`
+- rollback runtime: `STORY_V2_ENABLE OFF`
+- rollback release: garder `kStoryV2EnabledDefault=false` puis recompiler/reflasher
 
 ## Creation d'un nouveau scenario
 

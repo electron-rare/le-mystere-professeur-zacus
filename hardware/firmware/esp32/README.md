@@ -149,6 +149,8 @@ Notes:
 - `STORY_STATUS` expose un `stage` explicite: `WAIT_UNLOCK`, `WIN_PENDING`, `WAIT_ETAPE2`, `ETAPE2_DONE`.
 - Le moteur STORY V2 est protege par le flag `kStoryV2EnabledDefault` (default `false`).
 - Si le flag V2 est OFF, `STORY_V2_EVENT/STEP/SCENARIO/VALIDATE/HEALTH` repondent `OUT_OF_CONTEXT`.
+- Rollback runtime immediat: `STORY_V2_ENABLE OFF` (retour controleur legacy sans reflash).
+- Rollback release: conserver `kStoryV2EnabledDefault=false` puis recompiler/reflasher.
 - Les delais par defaut sont configures dans `src/config.h`:
   - `kStoryEtape2DelayMs` (production, defaut 15 min)
   - `kStoryEtape2TestDelayMs` (test rapide)

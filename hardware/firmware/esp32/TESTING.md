@@ -177,6 +177,12 @@ Procedure rapide:
 14. Envoyer `STORY_V2_TRACE OFF`.
 15. Envoyer `STORY_TEST_OFF`.
 
+Rollback (si anomalie en live):
+
+1. Envoyer `STORY_V2_ENABLE OFF` pour revenir sur le controleur legacy sans reflash.
+2. Verifier `STORY_STATUS` et `STORY_V2_STATUS` (attendu: V2 desactive).
+3. Pour un rollback durable, remettre `kStoryV2EnabledDefault=false`, recompiler et reflasher l'ESP32.
+
 ## 3) SD et lecteur audio
 
 1. Inserer une SD avec au moins un fichier audio supporte a la racine (`.mp3`, `.wav`, `.aac`, `.flac`, `.opus`, `.ogg`).

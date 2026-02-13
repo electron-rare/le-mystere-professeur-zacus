@@ -3,8 +3,11 @@ ESP32_ENV ?= esp32dev
 SCREEN_ENV ?= esp8266_oled
 ESP32_PORT ?=
 SCREEN_PORT ?=
+SOAK_MINUTES ?= 20
+POLL_SECONDS ?= 15
+TRACE_LEVEL ?= INFO
 
-.PHONY: help build build-esp32 build-screen story-validate story-gen qa-story-v2 upload-esp32 upload-screen uploadfs-esp32 erasefs-esp32 monitor-esp32 monitor-screen clean
+.PHONY: help build build-esp32 build-screen story-validate story-gen qa-story-v2 qa-story-v2-smoke qa-story-v2-smoke-fast qa-story-v2-rc upload-esp32 upload-screen uploadfs-esp32 erasefs-esp32 monitor-esp32 monitor-screen clean
 
 help:
 	@echo "Targets:"
@@ -17,6 +20,9 @@ help:
 	@echo "  make story-validate   # Validate YAML scenarios (StorySpec V1)"
 	@echo "  make story-gen        # Generate C++ story sources from YAML"
 	@echo "  make qa-story-v2      # Story V2 static QA (validate/gen/idempotence/builds)"
+	@echo "  make qa-story-v2-smoke      # Story V2 live smoke (flash + serial commands)"
+	@echo "  make qa-story-v2-smoke-fast # Story V2 smoke without flashing"
+	@echo "  make qa-story-v2-rc         # Story V2 release-candidate matrix + soak"
 	@echo "  make upload-screen    # Flash ESP8266 (optional SCREEN_PORT=/dev/ttyUSB1)"
 	@echo "  make monitor-esp32    # Serial monitor ESP32 (optional ESP32_PORT=...)"
 	@echo "  make monitor-screen   # Serial monitor ESP8266 (optional SCREEN_PORT=...)"
@@ -32,6 +38,15 @@ story-gen: story-validate
 
 qa-story-v2:
 	bash tools/qa/story_v2_ci.sh
+
+qa-story-v2-smoke:
+	bash tools/qa/live_story_v2_smoke.sh --esp32-port "$(ESP32_PORT)" --screen-port "$(SCREEN_PORT)"
+
+qa-story-v2-smoke-fast:
+	bash tools/qa/live_story_v2_smoke.sh --skip-flash --esp32-port "$(ESP32_PORT)"
+
+qa-story-v2-rc:
+	bash tools/qa/story_v2_rc_matrix.sh --esp32-port "$(ESP32_PORT)" --soak-minutes "$(SOAK_MINUTES)" --poll-seconds "$(POLL_SECONDS)" --trace-level "$(TRACE_LEVEL)"
 
 build-esp32:
 	$(PIO) run -e $(ESP32_ENV)

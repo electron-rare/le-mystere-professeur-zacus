@@ -1,0 +1,157 @@
+name: firmware-story-v2
+
+on:
+  pull_request:
+    paths:
+      - "hardware/firmware/esp32/**"
+      - ".github/workflows/firmware-story-v2.yml"
+      - ".github/PULL_REQUEST_TEMPLATE.md"
+  push:
+    branches:
+      - main
+      - codex/esp32-audio-mozzi-20260213
+    paths:
+      - "hardware/firmware/esp32/**"
+      - ".github/workflows/firmware-story-v2.yml"
+      - ".github/PULL_REQUEST_TEMPLATE.md"
+  workflow_dispatch:
+
+concurrency:
+  group: firmware-story-v2-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  story-toolchain:
+    name: story toolchain
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hardware/firmware/esp32
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: pio-${{ runner.os }}-${{ hashFiles('hardware/firmware/esp32/platformio.ini') }}
+          restore-keys: |
+            pio-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: python -m pip install --upgrade pip platformio
+
+      - name: Run Story validate/gen/idempotence
+        run: |
+          mkdir -p reports/ci
+          make story-validate 2>&1 | tee reports/ci/story_validate.log
+          make story-gen 2>&1 | tee reports/ci/story_generate.log
+          QA_STORY_V2_SKIP_BUILDS=1 QA_STORY_V2_REQUIRE_CLEAN_GEN=1 bash tools/qa/story_v2_ci.sh 2>&1 | tee reports/ci/story_toolchain.log
+
+      - name: Upload tooling artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: story-toolchain-logs
+          path: |
+            hardware/firmware/esp32/reports/ci/story_validate.log
+            hardware/firmware/esp32/reports/ci/story_generate.log
+            hardware/firmware/esp32/reports/ci/story_toolchain.log
+            hardware/firmware/esp32/src/story/generated/*
+          if-no-files-found: error
+
+  build-firmware:
+    name: build ${{ matrix.env }}
+    runs-on: ubuntu-latest
+    needs: story-toolchain
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [esp32dev, esp8266_oled]
+    defaults:
+      run:
+        working-directory: hardware/firmware/esp32
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: pio-${{ runner.os }}-${{ hashFiles('hardware/firmware/esp32/platformio.ini') }}
+          restore-keys: |
+            pio-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: python -m pip install --upgrade pip platformio
+
+      - name: Build firmware
+        run: |
+          mkdir -p reports/ci
+          pio run -e "${{ matrix.env }}" 2>&1 | tee "reports/ci/build_${{ matrix.env }}.log"
+
+      - name: Upload build log
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.env }}-log
+          path: hardware/firmware/esp32/reports/ci/build_${{ matrix.env }}.log
+          if-no-files-found: error
+
+  build-screen:
+    name: build nodemcuv2
+    runs-on: ubuntu-latest
+    needs: story-toolchain
+    defaults:
+      run:
+        working-directory: hardware/firmware/esp32/screen_esp8266_hw630
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: pio-${{ runner.os }}-${{ hashFiles('hardware/firmware/esp32/screen_esp8266_hw630/platformio.ini') }}
+          restore-keys: |
+            pio-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: python -m pip install --upgrade pip platformio
+
+      - name: Build screen firmware
+        run: |
+          mkdir -p ../reports/ci
+          pio run -e nodemcuv2 2>&1 | tee ../reports/ci/build_nodemcuv2.log
+
+      - name: Upload screen build log
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-nodemcuv2-log
+          path: hardware/firmware/esp32/reports/ci/build_nodemcuv2.log
+          if-no-files-found: error

@@ -8,6 +8,15 @@ Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
 - Dependances open source: voir `OPEN_SOURCE.md`
 - Politique de licence du depot: `../../../LICENSE.md`
 
+## Gouvernance branches (double flux)
+
+- Flux actifs: `main` et `codex/esp32-audio-mozzi-20260213`
+- Regle de sync hebdomadaire:
+  1. PR `sync/main-into-codex-<date>`
+  2. validation build matrix firmware
+  3. PR `sync/codex-into-main-<date>`
+- Toute PR sprint doit indiquer explicitement sa base (`main` ou `codex/*`) et le plan de resynchronisation.
+
 ## Profil cible
 
 - Carte: ESP32 Audio Kit V2.2 A252
@@ -161,6 +170,7 @@ Workflow auteur STORY V2:
 - `make story-validate` (strict)
 - `make story-gen` (strict + `spec_hash`)
 - `make qa-story-v2`
+- checklist review sprint: `tools/qa/story_v2_review_checklist.md`
 - `pio run -e esp32dev`
 
 Un nouveau scenario est ajoute via `story_specs/scenarios/*.yaml`, puis generation C++ dans `src/story/generated/*`.
@@ -257,6 +267,7 @@ Sans variable `PORT`, PlatformIO choisit automatiquement le port serie.
 
 Astuce detection ports:
 - `pio device list`
+- Runbook semi-auto Story V2: `tools/qa/live_story_v2_runbook.md`
 
 ## Lecteur audio evolue
 

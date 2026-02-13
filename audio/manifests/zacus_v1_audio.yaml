@@ -1,0 +1,50 @@
+scenario_id: zacus_v1
+audio_assets:
+  - id: uson_boot_corrompu
+    path: audio/generated/uson_boot_corrompu_30s.mp3
+    duration_hint_s: 30
+    device: U-SON
+  - id: uson_win
+    path: audio/generated/uson_win_15s.mp3
+    duration_hint_s: 15
+    device: U-SON
+  - id: zone5_radio_v1
+    path: audio/generated/zone5_radio_brouille_v1_30s.mp3
+    duration_hint_s: 30
+    device: telephones_zones
+  - id: zone5_radio_v2
+    path: audio/generated/zone5_radio_brouille_v2_45s.mp3
+    duration_hint_s: 45
+    device: telephones_zones
+  - id: hotline_rep_01
+    path: audio/generated/hotline_validation_01.mp3
+    duration_hint_s: 8
+    device: telephone_hotline
+  - id: hotline_rep_02
+    path: audio/generated/hotline_indice_01.mp3
+    duration_hint_s: 10
+    device: telephone_hotline
+  - id: hotline_rep_03
+    path: audio/generated/hotline_relance_01.mp3
+    duration_hint_s: 10
+    device: telephone_hotline
+  - id: hotline_rep_04
+    path: audio/generated/hotline_validation_02.mp3
+    duration_hint_s: 9
+    device: telephone_hotline
+  - id: hotline_rep_05
+    path: audio/generated/hotline_indice_02.mp3
+    duration_hint_s: 9
+    device: telephone_hotline
+  - id: hotline_rep_06
+    path: audio/generated/hotline_relance_02.mp3
+    duration_hint_s: 9
+    device: telephone_hotline
+  - id: ambiance_labo_25min_prompt
+    path: PROMPT_ONLY
+    duration_hint_s: 1500
+    device: chaine_hifi
+  - id: ambiance_boucle_1h_prompt
+    path: PROMPT_ONLY
+    duration_hint_s: 3600
+    device: chaine_hifi

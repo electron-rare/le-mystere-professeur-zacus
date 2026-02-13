@@ -1,0 +1,199 @@
+id: zacus_v1
+metadata:
+  title: "Le Mystère du Professeur Zacus — Scénario canonique v1"
+  version: "1.0.0"
+  duration_minutes: 60-90
+  players: 6-14
+  ages: 9-11
+  tone: "enquête coopérative rétro-futuriste, rythme dynamique"
+  optional_modules:
+    - U-SON prototype
+    - U-LOCK (déverrouillage vocal LA)
+    - Oscilloscope visuel/morse
+    - Téléphones zones + Hotline
+
+zones:
+  - id: Z1
+    name: "Cantine des Savants"
+    color: "#2F7D32"
+    home_location: "Entrée / Cuisine"
+    responsible_suspect_id: S_NONE
+  - id: Z2
+    name: "Salle des Démonstrations"
+    color: "#1E6FA8"
+    home_location: "Salon"
+    responsible_suspect_id: S4
+    features: [HOTLINE, OSCILLOSCOPE]
+  - id: Z3
+    name: "Atelier des Circuits"
+    color: "#D9801B"
+    home_location: "Atelier électronique"
+    responsible_suspect_id: S1
+    features: [OSCILLOSCOPE, U_SON]
+  - id: Z4
+    name: "Studio de Résonance"
+    color: "#6E3AA8"
+    home_location: "Suite + coin musique"
+    responsible_suspect_id: S5
+    features: [GENERATEUR_FREQUENCE]
+  - id: Z5
+    name: "Hangar du Droïde R3-D2Z"
+    color: "#1E88A8"
+    home_location: "Chambre Isaac"
+    responsible_suspect_id: S2
+    features: [AMBIANCE_AUDIO, TABLE_MORSE_CACHEE]
+  - id: Z6
+    name: "Archives Interdites"
+    color: "#9B7A4B"
+    home_location: "Grenier + portrait"
+    responsible_suspect_id: S3
+
+suspects:
+  - id: S1
+    name: "Dr Oscilla Volt"
+    role: "Spécialiste oscillations"
+    gimmick: "Parle en fréquences"
+    alibi: "Réglait l’oscilloscope en zone 3"
+    relation_to_zacus: "Ancien collaborateur"
+    suspicion_level: 4
+  - id: S2
+    name: "Pr Octave Baryon"
+    role: "Logistique du hangar"
+    gimmick: "Toujours avec un tournevis"
+    alibi: "Inspection du droïde R3-D2Z"
+    relation_to_zacus: "Rival cordial"
+    suspicion_level: 2
+  - id: S3
+    name: "Dr Sacha Néon"
+    role: "Archiviste du labo"
+    gimmick: "Classe tout par codes couleur"
+    alibi: "Inventaire en archives"
+    relation_to_zacus: "Confiance professionnelle"
+    suspicion_level: 2
+  - id: S4
+    name: "Prof Alma Fractal"
+    role: "Formatrice démonstrations"
+    gimmick: "Dessine des fractales sur tout"
+    alibi: "Tenait la hotline Brigade Z"
+    relation_to_zacus: "Mentor académique"
+    suspicion_level: 1
+  - id: S5
+    name: "Professeur Électron"
+    role: "Chef du studio de résonance"
+    gimmick: "Collectionne les synthés vintage"
+    alibi: "Test audio privé au studio"
+    relation_to_zacus: "Partenaire jaloux"
+    suspicion_level: 5
+
+props:
+  - {id: P1, name: U-SON, type: hardware}
+  - {id: P2, name: U-LOCK, type: hardware}
+  - {id: P3, name: Oscilloscope, type: hardware}
+  - {id: P4, name: Droïde R3-D2Z, type: decor}
+  - {id: P5, name: Téléphone hotline maître, type: hardware}
+  - {id: P6, name: Téléphones zones (L/AFO/EFO/LE/U), type: hardware}
+  - {id: P7, name: Carte SD finale, type: evidence}
+  - {id: P8, name: Table Morse cachée, type: clue}
+
+steps:
+  - id: ETAPE_1
+    title: "Double départ"
+    objective: "Collecter premiers signaux"
+    stations:
+      - zone_id: Z3
+        action: "Observer sinus U-SON + oscilloscope"
+      - zone_id: Z5
+        action: "Écouter message brouillé « au-dessus du sol… »"
+  - id: ETAPE_2
+    title: "Regroupement salon"
+    objective: "Débrief + premier appel hotline"
+    stations:
+      - zone_id: Z2
+        action: "Validation hypothèses initiales"
+  - id: ETAPE_3
+    title: "Fausse piste assumée"
+    objective: "Tester hypothèse Dr Oscilla Volt"
+    explicit_false_lead: true
+    stations:
+      - zone_id: Z4
+        action: "Tentative de déverrouillage résonance + pause goûter"
+  - id: ETAPE_4
+    title: "Alarme: module manquant"
+    objective: "Repartir avec feuille QUI/OU/COMMENT"
+    stations:
+      - zone_id: Z5
+        action: "Trouver table Morse derrière R3-D2Z"
+      - zone_id: Z3
+        action: "Oscilloscope en mode Morse partiel"
+  - id: ETAPE_5
+    title: "Décodage + LA"
+    objective: "Décoder Morse, valider via hotline, produire un LA"
+    stations:
+      - zone_id: Z2
+        action: "Validation hotline"
+      - zone_id: Z4
+        action: "Générateur fréquence = LA"
+  - id: ETAPE_6
+    title: "Révélation finale"
+    objective: "Identifier le coupable et ouvrir l’épilogue"
+    stations:
+      - zone_id: Z2
+        action: "Hotline confirme Professeur Électron"
+      - zone_id: Z6
+        action: "Derrière portrait: enveloppe + SD => lecteur MP3"
+
+hotline:
+  rules:
+    max_calls_per_team: 3
+    call_types: [INDICE, VALIDATION, RELANCE]
+    tone: "Brigade Z, bref, encourageant"
+  short_script:
+    greeting: "Brigade Z, ligne sécurisée. Donnez votre hypothèse en 10 secondes."
+    indice: "Indice validé: cherchez le signal qui transforme le bruit en lettre."
+    validation: "Hypothèse reçue. Vérification... réponse dans 3, 2, 1."
+    relance: "Relance Brigade Z: revenez au QUI/OU/COMMENT et au LA."
+  phone_tokens:
+    - {phone: Z1, token: L}
+    - {phone: Z2, token: AFO}
+    - {phone: Z3, token: EFO}
+    - {phone: Z4, token: LE}
+    - {phone: Z5, token: U}
+  validation_table:
+    - hypothesis: "Coupable = Dr Oscilla Volt"
+      response: "FAUSSE PISTE ETAPE 3. Continuez: module manquant + Morse."
+    - hypothesis: "Coupable = Professeur Électron"
+      response: "VALIDÉ. Dirigez-vous vers Archives Interdites."
+
+solution:
+  unique: true
+  culprit_suspect_id: S5
+  motive: "Saboter U-SON pour discréditer Zacus avant la démo campus"
+  method: "Retrait du module critique + brouillage des pistes audio"
+  chronology:
+    - "Avant jeu: sabotage en studio de résonance"
+    - "ETAPE 1-3: diversion orientée Oscilla"
+    - "ETAPE 4-5: preuves techniques convergent"
+    - "ETAPE 6: aveu indirect via hotline + preuve SD en archives"
+
+info_distribution:
+  team_modes:
+    6_8_players: 2
+    9_14_players: 3
+  revelations:
+    - when: ETAPE_1
+      who: "Equipe Atelier"
+      learns: "Signal sinus et module U-SON incomplet"
+    - when: ETAPE_1
+      who: "Equipe Hangar"
+      learns: "Message brouillé répétitif et note/fréquence"
+    - when: ETAPE_4
+      who: "Toutes équipes"
+      learns: "Morse + correspondance téléphones"
+    - when: ETAPE_6
+      who: "Toutes équipes"
+      learns: "Professeur Électron est l’unique coupable"
+
+fallbacks:
+  lost_clue: "Le MJ replace une copie scellée dans la zone concernée après 3 minutes."
+  blocked_team: "Hotline autorise 1 indice direct supplémentaire (hors quota) si blocage >5 min."
+  too_fast_group: "Déployer mini-défi 'calibrer le LA' (+7 min) avant révélation finale."

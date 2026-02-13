@@ -3,3 +3,16 @@
 
 # Local IDE settings
 .vscode/
+
+# Generated game exports
+game/exports/*
+!game/exports/.gitkeep
+!game/exports/previews/
+
+# Locally generated audio/render outputs (not versioned)
+audio/generated/*
+!audio/generated/README.md
+
+# Locally generated printable PDFs (not versioned)
+printables/export/pdf/zacus_v1/*
+!printables/export/pdf/zacus_v1/README.md

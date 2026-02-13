@@ -1,33 +1,23 @@
 # Changelog
 
 ## [Unreleased]
-- Printables : déplacement et classement des PNG dans `printables/export/png/{general,fiche-enquete,personnages,zones}`.
-- Documentation : ajout d'une illustration SVG de structure du dépôt dans le README (`docs/assets/repo-map.svg`).
-- Documentation : revue de cohérence étendue sur les Markdown/README et mise à jour de `docs/repo-audit.md`.
-- Structure : ajout du dossier `kit-maitre-du-jeu/export/pdf/` pour aligner la documentation avec l'arborescence.
-- Printables : clarification de l'état actuel et du niveau de préparation des dossiers `src/` et `export/{pdf,png}/`.
-- Documentation : ajout d'un plan de maintenance du dépôt (hors firmware).
-- Contribution : ajout d'une checklist PR doc-only dans `CONTRIBUTING.md`.
-- Documentation : ajout d'une illustration SVG de structure du dépôt dans le README (`docs/assets/repo-map.svg`).
-- Documentation : revue de cohérence étendue sur les Markdown/README et mise à jour de `docs/repo-audit.md`.
-- Structure : ajout du dossier `kit-maitre-du-jeu/export/pdf/` pour aligner la documentation avec l'arborescence.
-- Printables : clarification de l'état actuel et du niveau de préparation des dossiers `src/` et `export/{pdf,png}/`.
+- Correction extraction: suppression des binaires versionnés (MP3/PDF générés) et passage en génération locale ignorée par Git (`audio/generated`, `printables/export/pdf/zacus_v1`).
+- Génération locale des assets restants: `audio/generated/*` via script utilitaire + PDF placeholders dans `printables/export/pdf/zacus_v1/`.
+- Ajout des utilitaires `tools/audio/generate_local_assets.py` et `tools/printables/generate_local_pdf_placeholders.py`.
+- Ajout du canon scénario `game/scenarios/zacus_v1.yaml` (zones, suspects, étapes, hotline, solution unique, anti-chaos).
+- Remplissage complet du kit MJ (`script-minute-par-minute`, `solution-complete`, `checklist`, `plan stations`, `distribution`, `guide anti-chaos`).
+- Ajout d’une structure IA-friendly pour printables (`printables/src/prompts/*`, `printables/WORKFLOW.md`, placeholders).
+- Ajout pipeline audio (`audio/README.md`, `audio/manifests/zacus_v1_audio.yaml`, prompts audio, validateur manifest).
+- Ajout docs d’intégration hardware scénario + story spec `zacus_v1_unlock_and_etape2.yaml`.
+- Harmonisation licence vers MIT (code) + CC BY-NC 4.0 (contenu/docs) et déplacement des anciennes licences dans `LICENSES/legacy/`.
+- Ajout validateur scénario `tools/scenario/validate_scenario.py`.
+- Ajout docs `docs/STYLEGUIDE.md`, `docs/QUICKSTART.md`, `docs/GLOSSARY.md`, `docs/repo-status.md`.
 
 ## [0.2.0] - 2026-02-12
-
-### Ajouté
 - Workflow de validation audio au boot (touches + commandes série) avec timeout et limite de relecture.
 - Outils de diagnostic clavier analogique : `KEY_STATUS`, `KEY_SET`, `KEY_SET_ALL`, `KEY_RAW_ON/OFF`, auto-test `KEY_TEST_*`.
 - Calibration micro série et logs de santé micro (`[MIC_CAL] ...`).
 - Makefile pour standardiser build/flash/monitor ESP32 + écran ESP8266.
 
-### Modifié
-- UX `U_LOCK`/déverrouillage LA et transitions automatiques vers `MODULE U-SON` puis lecteur MP3.
-- Amélioration de l'affichage OLED (séquences visuelles de déverrouillage, effet glitch adouci).
-- Stabilisation du mapping clavier analogique et robustesse générale des interactions.
-
-### Corrigé
-- Robustesse du lien série ESP32 -> ESP8266 et gestion des états de reprise.
-
 ## [0.1.0] - 2026-02-03
-- Initialisation du dépôt et fichiers de gouvernance
+- Initialisation du dépôt et fichiers de gouvernance.

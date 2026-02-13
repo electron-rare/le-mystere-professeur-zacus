@@ -1,73 +1,25 @@
-# Le Mystère du Professeur Zacus — kit d’enquête (printables + guide MJ + hardware)
+# Le Mystère du Professeur Zacus
 
-Kit d’enquête pour anniversaire (9–11 ans), ambiance laboratoire / campus scientifique.
+Escape game / enquête modulaire assisté par IA (9–11 ans, 6–14 enfants, 60–90 min).
 
-## Aperçu visuel
-![Vue d'ensemble du dépôt](docs/assets/repo-map.svg)
+## Démarrage rapide
+- Quickstart: `docs/QUICKSTART.md`
+- Canon scénario: `game/scenarios/zacus_v1.yaml`
+- Kit MJ prêt à jouer: `kit-maitre-du-jeu/`
 
-## Aperçu visuel
-![Vue d'ensemble du dépôt](docs/assets/repo-map.svg)
+## Structure
+- `game/` : source de vérité scénario + prompts IA
+- `kit-maitre-du-jeu/` : animation minute-par-minute, solution, anti-chaos
+- `printables/` : prompts et exports imprimables
+- `audio/` : manifest audio + pipeline local
+- `hardware/` : firmware existant + intégration scénario
+- `tools/` : validateurs scénario/audio
 
-## Contenu
-### 1) Kit Maître du jeu
-Dossier : `kit-maitre-du-jeu/`
-- script minute-par-minute
-- solution complète (coupable + mobile + méthode + chronologie)
-- checklist matériel + mise en place
-- distribution des rôles + adaptations (6–14 enfants)
-- guide anti-chaos
-- stations (option bonus)
+## Validation
+- `python3 tools/scenario/validate_scenario.py`
+- `python3 tools/audio/validate_manifest.py`
 
-### 2) Printables (imprimables)
-Dossier : `printables/`
-- invitations
-- cartes (personnages / lieux / objets / indices)
-- feuille d’enquête
-- badges détective
-- règles en 1 page
-- ordre d’impression
-
-### 3) Hardware (optionnel)
-Dossier : `hardware/`
-- BOM (liste de matériel)
-- câblage
-- firmware Arduino / ESP32
-
-## État du projet
-- **Kit MJ** : documentation d'animation complète, exports PDF possibles via `kit-maitre-du-jeu/export/pdf/`.
-- **Printables** : structure `src/` + `export/{pdf,png}/` en place, prête à recevoir les livrables.
-- **Hardware/firmware** : flux `U_LOCK`/`U-SON`/MP3 opérationnel et documenté (`hardware/firmware/esp32/`).
-
-## Licence (non-commercial pour le contenu)
-- Contenus créatifs (documents, PDFs, PNG, SVG, textes de jeu) : **CC BY-NC 4.0**
-- Code (firmware, scripts) : **MIT**
-- **Kit MJ** : structure documentaire en place (`kit-maitre-du-jeu/`).
-- **Printables** : conventions définies, arborescence `src/export` à compléter selon les livrables.
-- **Hardware/firmware** : flux `U_LOCK`/`U-SON`/MP3 opérationnel et documenté (`hardware/firmware/esp32/`).
-
-## Licence (open source)
-- Contenus créatifs (documents, PDFs, PNG, SVG, textes de jeu) : **CC BY-SA 4.0**
-- Code (firmware, scripts) : **GPL-3.0-or-later**
-Voir `LICENSE.md` et `LICENSES/`.
-
-## Disclaimer
-Projet indépendant, non affilié à aucune marque ou éditeur.
-Voir `DISCLAIMER.md`.
-
-## Maintenance du dépôt (hors firmware)
-- Plan : `docs/maintenance-repo.md`
-- Audit : `docs/repo-audit.md`
-- Règles anti-conflits docs : section dédiée dans `docs/maintenance-repo.md`
-Voir `docs/maintenance-repo.md`.
-
-## Contribuer
-Voir `CONTRIBUTING.md`.
-
-## Historique
-Voir `CHANGELOG.md`.
-## Mainteneur
-L’électron rare
-
-
-## Exemples transverses
-- Index exemples: `examples/README.md`
+## Licence
+- **Code**: MIT (`LICENSES/MIT.txt`)
+- **Contenus créatifs/docs/printables**: CC BY-NC 4.0 (`LICENSES/CC-BY-NC-4.0.txt`)
+- Historique licences: `LICENSES/legacy/`

@@ -1,18 +1,16 @@
 # Licence
 
-Ce dépôt applique un schéma dual clair:
+Ce dépôt est diffusé avec des licences libres adaptées aux contenus créatifs et aux outils.
 
-## 1) Code (scripts, outils, firmware)
-- Licence: **MIT**
-- Texte: `LICENSES/MIT.txt`
+## Code — MIT
+S’applique à : firmware, scripts, outils (répertoires `hardware/`, `tools/`, fichiers exécutables, validateurs, automations).
 
-## 2) Contenus créatifs et documentation
-- Licence: **CC BY-NC 4.0**
-- Texte: `LICENSES/CC-BY-NC-4.0.txt`
+Texte : `LICENSES/MIT.txt`
 
-## Legacy / historique
-Les anciennes licences précédemment utilisées sont conservées pour traçabilité dans:
-- `LICENSES/legacy/CC-BY-SA-4.0.txt`
-- `LICENSES/legacy/GPL-3.0-or-later.txt`
+## Contenus créatifs & documentation — CC BY-NC 4.0
+S’applique à : documents de jeu, guides, prompts, printables, illustrations, textes narratifs et assets (`kit-maitre-du-jeu/`, `printables/`, `docs/`, `game/`, `audio/`, `include-humain-IA/`).
 
-Statut: **historique / à confirmer** (ne s’applique plus par défaut aux nouveaux apports).
+Texte : `LICENSES/CC-BY-NC-4.0.txt`
+
+## Dépendances tierces
+Les bibliothèques externes restent sous leurs licences respectives. Voir les README/manifestes de chaque sous-projet.

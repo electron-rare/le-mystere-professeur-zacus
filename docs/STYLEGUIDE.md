@@ -1,31 +1,22 @@
-# Styleguide visuel Zacus
+# Style guide
 
-## Signature
-Style "Cluedo premium × labo rétro-futuriste": cadre métal, vis coins, bandeaux noir/doré, glow gold discret, trames circuits, grain/halftone.
+## Tonalité générale
+- Français léger, accessible, phrases courtes.
+- Préfère des verbes d’action, un vocabulaire spatial (laboratoire, station, énigme) et des termes d’enquête (preuve, mobile, hypothèse).
+- Maintiens le respect des consignes (noir & blanc, pas de marques externes, jeux pour 6–14 enfants). Mentionne la plage 60–90 minutes dès que tu décris un déroulé.
 
-## Palette
-- Noir panneau `#0F1620`
-- Acier clair `#C9D0D8`
-- Acier sombre `#4B545E`
-- Gris technique `#7A8592`
-- Blanc cassé papier `#F2E9D6`
-- Texte sombre `#1B232D`
-- Gold principal `#F6C453`, ombre `#B07B1E`, glow `#FFD88A`
+## Markdown & structure
+- Titres H2 ou H3 pour chaque bloc logique (Objectif, Étapes, Matériel).
+- Listes numérotées pour les workflows et checkboxes pour les listes de matériel.
+- Utilise des blocs `> Astuce :` ou `> Conseils :` pour souligner les recommandations.
+- Évite les tableaux complexes, privilégie des sections dédoublées pour les horaires, stations et rôles.
 
-## Couleurs zones
-- Z1 `#2F7D32`
-- Z2 `#1E6FA8`
-- Z3 `#D9801B`
-- Z4 `#6E3AA8`
-- Z5 `#1E88A8`
-- Z6 `#9B7A4B`
-- Hotline `#0E3B5A`
+## Contenus spécifiques
+- **Scénarios (`game/scenarios/*.yaml`)** : structure clé/valeur, durée 60–90 min, `solution_unique` vrai. Chaque entrée `stations` ou `puzzles` doit contenir `clue` explicite et `effect` qui aide la narration.
+- **Audio (`game/prompts/audio/*.md`)** : texte court (<3 phrases), voix directe, mentionne quand déclencher chaque piste. La feuille `audio/manifests/*.yaml` doit décrire les `tracks` avec `cues` et pointer vers les fichiers de `game/prompts/audio/`.
+- **Printables (`printables/src/prompts/` et `WORKFLOW.md`)** : encourage les prompts (ex. « dessine un badge ... »), rappelle les dimensions recommandées (A6/A5/A4) et l’orientation recto/verso.
 
-## Typographie
-- Titres: Bebas Neue
-- Texte: Inter ou Montserrat
-- Codes/indices: Roboto Mono
-
-## Contraintes impression
-- Toujours lisible en N&B.
-- Contraste fort, pas d’info uniquement portée par la couleur.
+## Documentation collaborative
+- Si tu mentionnes un fichier influent (ex. un scénario ou un prompt), écris son chemin complet (`kit-maitre-du-jeu/...`, `game/scenarios/...`).
+- Mets à jour `docs/index.md` si tu ajoutes une nouvelle catégorie ou un nouveau guide.
+- Avant de soumettre un PR, vérifie les scripts de validation (`tools/scenario/validate_scenario.py`, `tools/audio/validate_manifest.py`).

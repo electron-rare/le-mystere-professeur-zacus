@@ -1,87 +1,106 @@
 #!/usr/bin/env python3
-from __future__ import annotations
-import json
-import subprocess
+"""Validate scenario YAML files for Le Mystère du Professeur Zacus."""
+
+import argparse
 import sys
 from pathlib import Path
 
+try:
+    import yaml
+except ImportError:  # pragma: no cover
+    sys.exit("Missing dependency: install PyYAML (pip install pyyaml) to validate scenarios.")
 
-SCENARIO = Path("game/scenarios/zacus_v1.yaml")
-
-
-def load_yaml(path: Path):
-    ruby = "require 'yaml'; require 'json'; puts JSON.generate(YAML.load_file(ARGV[0]))"
-    p = subprocess.run(["ruby", "-e", ruby, str(path)], capture_output=True, text=True)
-    if p.returncode != 0:
-        raise RuntimeError(p.stderr.strip() or "YAML parse error")
-    return json.loads(p.stdout)
+REQUIRED_SCENE_KEYS = ["id", "title", "version", "players", "duration_minutes", "canon", "stations", "puzzles", "solution", "solution_unique"]
 
 
-def dup_ids(items, key="id"):
-    seen, dups = set(), set()
-    for i in items:
-        v = i.get(key)
-        if v in seen:
-            dups.add(v)
-        seen.add(v)
-    return sorted(dups)
+class ValidationError(Exception):
+    pass
+
+
+def load_yaml(path: Path) -> dict:
+    try:
+        return yaml.safe_load(path.read_text())
+    except yaml.YAMLError as exc:
+        raise ValidationError(f"Invalid YAML in {path}: {exc}")
+
+
+def validate_scenario(path: Path) -> None:
+    data = load_yaml(path)
+    if not isinstance(data, dict):
+        raise ValidationError(f"Scenario {path} is not a YAML mapping")
+
+    missing = [key for key in REQUIRED_SCENE_KEYS if key not in data]
+    if missing:
+        raise ValidationError(f"Missing required keys: {', '.join(missing)}")
+
+    players = data["players"]
+    if not (isinstance(players, dict) and "min" in players and "max" in players):
+        raise ValidationError("`players` must be a mapping with `min` and `max`")
+    if not (isinstance(players["min"], int) and isinstance(players["max"], int)):
+        raise ValidationError("`players.min` and `players.max` must be integers")
+    if players["min"] > players["max"]:
+        raise ValidationError("`players.min` must be <= `players.max`")
+    if players["min"] < 6:
+        raise ValidationError("`players.min` should be at least 6")
+
+    duration = data["duration_minutes"]
+    if not (isinstance(duration, dict) and "min" in duration and "max" in duration):
+        raise ValidationError("`duration_minutes` must define `min` and `max`")
+    if duration["min"] > duration["max"]:
+        raise ValidationError("`duration_minutes.min` must be <= `duration_minutes.max`")
+    if duration["min"] < 60 or duration["max"] > 90:
+        raise ValidationError("Duration should stay within 60-90 minutes")
+
+    stations = data["stations"]
+    if not (isinstance(stations, list) and stations):
+        raise ValidationError("`stations` must be a non-empty list")
+    for idx, station in enumerate(stations, start=1):
+        if not all(field in station for field in ("name", "focus", "clue")):
+            raise ValidationError(f"Station #{idx} is missing one of name/focus/clue")
+
+    puzzles = data["puzzles"]
+    if not (isinstance(puzzles, list) and puzzles):
+        raise ValidationError("`puzzles` must be a non-empty list")
+    for idx, puzzle in enumerate(puzzles, start=1):
+        if not all(field in puzzle for field in ("id", "type", "clue", "effect")):
+            raise ValidationError(f"Puzzle #{idx} is missing id/type/clue/effect")
+
+    solution = data["solution"]
+    if not all(field in solution for field in ("culprit", "motive", "method", "proof")):
+        raise ValidationError("`solution` must include culprit, motive, method, proof")
+    proof = solution["proof"]
+    if not (isinstance(proof, list) and len(proof) >= 3):
+        raise ValidationError("`solution.proof` must be a list of at least 3 strings")
+    if data.get("solution_unique") is not True:
+        raise ValidationError("`solution_unique` must be true for canonical scenarios")
+
+    canon = data["canon"]
+    if not (isinstance(canon, dict) and "timeline" in canon):
+        raise ValidationError("`canon` must contain a timeline")
+    timeline = canon["timeline"]
+    if not (isinstance(timeline, list) and timeline):
+        raise ValidationError("`canon.timeline` must be a non-empty list")
+    for idx, entry in enumerate(timeline, start=1):
+        if not ("label" in entry and "note" in entry):
+            raise ValidationError(f"canon.timeline entry #{idx} must include label and note")
+
+    print(f"[scenario-validate] ok {path.name} (players {players['min']}-{players['max']}, duration {duration['min']}-{duration['max']})")
 
 
 def main() -> int:
-    if not SCENARIO.exists():
-        print(f"ERROR: missing {SCENARIO}")
-        return 1
-    doc = load_yaml(SCENARIO)
-    errors = []
+    parser = argparse.ArgumentParser(description="Validate a Zacus scenario YAML file.")
+    parser.add_argument("paths", nargs="+", help="Path(s) to scenario YAML")
+    args = parser.parse_args()
 
-    zones = doc.get("zones", [])
-    suspects = doc.get("suspects", [])
-    props = doc.get("props", [])
-    steps = doc.get("steps", [])
-
-    for label, arr in [("zones", zones), ("suspects", suspects), ("props", props), ("steps", steps)]:
-        d = dup_ids(arr)
-        if d:
-            errors.append(f"duplicate {label} ids: {d}")
-
-    suspect_ids = {s.get("id") for s in suspects}
-    zone_ids = {z.get("id") for z in zones}
-    prop_ids = {p.get("id") for p in props}
-
-    for z in zones:
-        sid = z.get("responsible_suspect_id")
-        if sid not in suspect_ids and sid != "S_NONE":
-            errors.append(f"zone {z.get('id')} references unknown suspect {sid}")
-
-    for st in steps:
-        for station in st.get("stations", []):
-            zid = station.get("zone_id")
-            if zid not in zone_ids:
-                errors.append(f"step {st.get('id')} references unknown zone {zid}")
-
-    sol = doc.get("solution", {})
-    if not sol.get("unique"):
-        errors.append("solution.unique must be true")
-    culprit = sol.get("culprit_suspect_id")
-    if culprit not in suspect_ids:
-        errors.append("solution culprit invalid")
-
-    if any(st.get("id") == "ETAPE_3" and not st.get("explicit_false_lead") for st in steps):
-        errors.append("ETAPE_3 must be flagged explicit_false_lead")
-
-    required_props = {"P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8"}
-    if not required_props.issubset(prop_ids):
-        errors.append(f"missing required props: {sorted(required_props - prop_ids)}")
-
-    if errors:
-        print("SCENARIO VALIDATION: FAIL")
-        for e in errors:
-            print(" -", e)
-        return 2
-
-    print("SCENARIO VALIDATION: PASS")
-    print(f" - zones={len(zones)} suspects={len(suspects)} props={len(props)} steps={len(steps)}")
-    return 0
+    errors = False
+    for raw_path in args.paths:
+        path = Path(raw_path)
+        try:
+            validate_scenario(path)
+        except ValidationError as exc:
+            errors = True
+            print(f"[scenario-validate] error {path.name} -> {exc}")
+    return 1 if errors else 0
 
 
 if __name__ == "__main__":

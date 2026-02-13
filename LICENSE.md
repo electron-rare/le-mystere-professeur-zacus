@@ -1,16 +1,18 @@
 # Licence
 
-Ce depot est diffuse avec des licences libres/open-source.
+Ce dépôt applique un schéma dual clair:
 
-## Code — GPL-3.0-or-later
-S'applique a: firmware, scripts et tout fichier explicitement identifie comme code source.
+## 1) Code (scripts, outils, firmware)
+- Licence: **MIT**
+- Texte: `LICENSES/MIT.txt`
 
-Texte: `LICENSES/GPL-3.0-or-later.txt`
+## 2) Contenus créatifs et documentation
+- Licence: **CC BY-NC 4.0**
+- Texte: `LICENSES/CC-BY-NC-4.0.txt`
 
-## Contenus creatifs et documentation — CC BY-SA 4.0
-S'applique a: documents de jeu, textes, PDFs, PNG, SVG, assets graphiques, docs et contenus redactionnels.
+## Legacy / historique
+Les anciennes licences précédemment utilisées sont conservées pour traçabilité dans:
+- `LICENSES/legacy/CC-BY-SA-4.0.txt`
+- `LICENSES/legacy/GPL-3.0-or-later.txt`
 
-Texte: `LICENSES/CC-BY-SA-4.0.txt`
-
-## Dependances tierces
-Les bibliotheques externes restent sous leurs licences respectives. Voir les README/manifestes de chaque sous-projet.
+Statut: **historique / à confirmer** (ne s’applique plus par défaut aux nouveaux apports).

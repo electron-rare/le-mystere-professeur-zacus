@@ -175,25 +175,29 @@ Procedure rapide:
 1. Envoyer `STORY_V2_STATUS` et verifier `enabled=1`.
    - sinon envoyer `STORY_V2_ENABLE ON`
 2. Envoyer `STORY_V2_TRACE_LEVEL STATUS`, puis `STORY_V2_TRACE_LEVEL DEBUG` pour la session.
-3. Envoyer `STORY_V2_LIST` puis verifier le scenario `DEFAULT`.
-4. Envoyer `STORY_V2_VALIDATE` et verifier `OK valid`.
-5. Envoyer `STORY_V2_HEALTH`:
+3. Envoyer `STORY_V2_LIST` puis verifier `DEFAULT` et `SPECTRE_RADIO_LAB`.
+4. (optionnel RC2) Basculer de scenario:
+   - `STORY_V2_SCENARIO SPECTRE_RADIO_LAB`
+   - verifier `STORY_V2_STATUS` (`scenario=SPECTRE_RADIO_LAB`)
+5. Envoyer `STORY_V2_VALIDATE` et verifier `OK valid`.
+6. Envoyer `STORY_V2_HEALTH`:
    - attendu initial: `OK` ou `BUSY`
-6. Envoyer `STORY_TEST_ON`.
-7. Envoyer `STORY_TEST_DELAY 5000`.
-8. Envoyer `STORY_ARM`.
-9. Verifier `STORY_STATUS` ou `STORY_V2_STATUS`:
+7. Envoyer `STORY_TEST_ON`.
+8. Envoyer `STORY_TEST_DELAY 5000`.
+9. Envoyer `STORY_ARM`.
+10. Verifier `STORY_STATUS` ou `STORY_V2_STATUS`:
    - progression `STEP_WAIT_UNLOCK -> STEP_WIN -> STEP_WAIT_ETAPE2`
-10. Forcer un event timer si besoin:
+11. Forcer un event timer si besoin:
    - `STORY_V2_EVENT ETAPE2_DUE`
    - ou `STORY_FORCE_ETAPE2`
-11. Verifier transition vers `STEP_ETAPE2` puis `STEP_DONE`.
-12. Envoyer `STORY_V2_HEALTH`:
+12. Verifier transition vers `STEP_ETAPE2` puis `STEP_DONE`.
+13. Envoyer `STORY_V2_HEALTH`:
    - attendu final: `OK`
-13. Envoyer `STORY_V2_METRICS` et verifier transitions/events > 0.
-14. Verifier que le gate MP3 est ouvert en fin de flux.
-15. Envoyer `STORY_V2_TRACE_LEVEL OFF`.
-16. Envoyer `STORY_V2_METRICS_RESET` puis `STORY_TEST_OFF`.
+14. Envoyer `STORY_V2_METRICS` et verifier transitions/events > 0.
+15. Verifier que le gate MP3 est ouvert en fin de flux.
+16. Envoyer `STORY_V2_TRACE_LEVEL OFF`.
+17. Envoyer `STORY_V2_SCENARIO DEFAULT` (retour nominal).
+18. Envoyer `STORY_V2_METRICS_RESET` puis `STORY_TEST_OFF`.
 
 Rollback (si anomalie en live):
 

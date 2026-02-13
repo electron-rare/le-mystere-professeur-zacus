@@ -7,6 +7,8 @@ namespace {
 constexpr StoryAudioPackDef kAudioPacks[] = {
     {"PACK_WIN", "WIN", AudioEffectId::kWin, 6000U, 1800U, 0.22f, true},
     {"PACK_ETAPE2", "ETAPE_2", AudioEffectId::kWin, 6000U, 1800U, 0.22f, true},
+    {"PACK_SONAR_HINT", "SONAR", AudioEffectId::kSonar, 5000U, 2400U, 0.24f, true},
+    {"PACK_MORSE_HINT", "MORSE", AudioEffectId::kMorse, 5000U, 2800U, 0.22f, true},
 };
 
 }  // namespace

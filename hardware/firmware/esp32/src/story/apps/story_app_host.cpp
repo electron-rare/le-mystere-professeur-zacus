@@ -152,6 +152,27 @@ bool StoryAppHost::validateScenario(const ScenarioDef& scenario, StoryAppValidat
         local.detail = bindingId;
         break;
       }
+      if (binding->type == StoryAppType::kLaDetector) {
+        const LaDetectorAppConfigDef* cfg = generatedLaDetectorConfigByBindingId(bindingId);
+        if (cfg == nullptr) {
+          local.ok = false;
+          local.code = "APP_LA_CONFIG_MISSING";
+          local.detail = bindingId;
+          break;
+        }
+        if (cfg->holdMs < 100U || cfg->holdMs > 60000U) {
+          local.ok = false;
+          local.code = "APP_LA_HOLD_INVALID";
+          local.detail = bindingId;
+          break;
+        }
+        if (cfg->unlockEvent == nullptr || cfg->unlockEvent[0] == '\0') {
+          local.ok = false;
+          local.code = "APP_LA_EVENT_INVALID";
+          local.detail = bindingId;
+          break;
+        }
+      }
     }
     if (!local.ok) {
       break;

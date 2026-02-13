@@ -18,6 +18,7 @@
 #include "../runtime/runtime_state.h"
 #include "../services/audio/audio_service.h"
 #include "../services/input/input_service.h"
+#include "../services/la/la_detector_runtime_service.h"
 #include "../services/serial/serial_dispatch.h"
 #include "../services/serial/serial_commands_boot.h"
 #include "../services/serial/serial_commands_codec.h"
@@ -40,6 +41,8 @@ constexpr uint32_t kFxWinDurationMs = 1800U;
 constexpr uint32_t kFxMorseDurationMs = 3200U;
 constexpr uint32_t kFxSonarDurationMs = 2600U;
 constexpr uint32_t kFxFmDurationMs = 2600U;
+constexpr uint16_t kResolveTokenScanEntryCap = 320U;
+constexpr uint32_t kResolveTokenScanBudgetMs = 35U;
 
 struct BootRadioScanState {
   bool restoreMicCapture = false;
@@ -125,6 +128,7 @@ void printCodecDebugHelp();
 void printMp3DebugHelp();
 bool processMp3DebugCommand(const char* cmd, uint32_t nowMs);
 void printStoryDebugHelp();
+void resetLaHoldProgress();
 void updateMp3FormatTest(uint32_t nowMs);
 PlayerUiPage currentPlayerUiPage();
 bool setPlayerUiPage(PlayerUiPage page);
@@ -150,6 +154,7 @@ void prepareStoryAudioCaptureGuard(const char* source);
 void releaseStoryAudioCaptureGuard(const char* source);
 void serviceStoryAudioCaptureGuard(uint32_t nowMs);
 void applyStoryV2ActionHook(const StoryActionDef& action, uint32_t nowMs, const char* source);
+void onStoryV2UnlockRuntimeApplied(uint32_t nowMs, const char* source);
 void handleBootAudioProtocolKey(uint8_t key, uint32_t nowMs);
 void handleKeySelfTestPress(uint8_t key, uint16_t raw);
 void handleKeyPress(uint8_t key);
@@ -169,6 +174,15 @@ InputService& inputService() {
 
 AudioService& audioService() {
   static AudioService service(g_asyncAudio, g_bootRadioScanFx, g_mp3);
+  return service;
+}
+
+bool laDetectedHook() {
+  return g_laDetector.isDetected();
+}
+
+LaDetectorRuntimeService& laRuntimeService() {
+  static LaDetectorRuntimeService service(laDetectedHook);
   return service;
 }
 
@@ -260,6 +274,20 @@ void applyStoryV2ActionHook(const StoryActionDef& action, uint32_t nowMs, const 
   }
 }
 
+void onStoryV2UnlockRuntimeApplied(uint32_t nowMs, const char* source) {
+  (void)nowMs;
+  if (g_uSonFunctional) {
+    return;
+  }
+  g_uSonFunctional = true;
+  cancelULockSearchSonarCue("unlock");
+  resetLaHoldProgress();
+  g_mp3.requestStorageRefresh(false);
+  Serial.printf("[MODE] MODULE U-SON Fonctionnel (LA detecte) via=%s\n",
+                source != nullptr ? source : "-");
+  Serial.println("[SD] Detection SD activee.");
+}
+
 StoryController& storyController() {
   static StoryController::Hooks hooks = []() {
     StoryController::Hooks out;
@@ -284,6 +312,8 @@ StoryControllerV2& storyV2Controller() {
     out.startRandomTokenBase = startStoryRandomTokenBaseHook;
     out.startFallbackBaseFx = startStoryFallbackBaseFxHook;
     out.applyAction = applyStoryV2ActionHook;
+    out.laRuntime = &laRuntimeService();
+    out.onUnlockRuntimeApplied = onStoryV2UnlockRuntimeApplied;
     return out;
   }();
   static StoryControllerV2::Options options = []() {
@@ -552,7 +582,14 @@ void sendScreenFrameSnapshot(uint32_t nowMs, uint8_t keyForScreen) {
   frame.tuningOffset = uLockListening ? g_laDetector.tuningOffset() : 0;
   frame.tuningConfidence = uLockListening ? g_laDetector.tuningConfidence() : 0;
   frame.micScopeEnabled = config::kScreenEnableMicScope && config::kUseI2SMicInput;
-  frame.unlockHoldPercent = unlockHoldPercent(g_laHoldAccumMs, uLockListening);
+  uint8_t holdPercent = unlockHoldPercent(g_laHoldAccumMs, uLockListening);
+  if (isStoryV2Enabled()) {
+    const LaDetectorRuntimeService::Snapshot laSnap = laRuntimeService().snapshot();
+    if (laSnap.active) {
+      holdPercent = laRuntimeService().holdPercent();
+    }
+  }
+  frame.unlockHoldPercent = holdPercent;
   frame.startupStage = g_bootAudioProtocol.active ? 1U : 0U;
   frame.uiPage = static_cast<uint8_t>(currentPlayerUiPage());
   frame.repeatMode = static_cast<uint8_t>(g_mp3.repeatMode());
@@ -963,8 +1000,16 @@ bool resolveRandomFsPathContaining(fs::FS& storage, const char* token, String* o
   }
 
   uint32_t matches = 0;
+  uint16_t scanned = 0U;
+  const uint32_t startedAtMs = millis();
   fs::File file = root.openNextFile();
   while (file) {
+    ++scanned;
+    const uint32_t elapsedMs = millis() - startedAtMs;
+    if (scanned > kResolveTokenScanEntryCap || elapsedMs > kResolveTokenScanBudgetMs) {
+      file.close();
+      break;
+    }
     if (!file.isDirectory()) {
       String name = String(file.name());
       if (!name.startsWith("/")) {
@@ -3325,6 +3370,7 @@ void app_orchestrator::setup() {
 
   g_led.begin();
   g_laDetector.begin();
+  laRuntimeService().reset();
   inputService().begin();
   if (config::kUseI2SMicInput) {
     randomSeed(static_cast<uint32_t>(micros()));
@@ -3356,6 +3402,7 @@ void app_orchestrator::setup() {
   setBootAudioPaEnabled(true, "boot_setup");
   printBootAudioOutputInfo("boot_setup");
   g_sine.setEnabled(false);
+  laRuntimeService().setEnvironment(g_laDetectionEnabled, g_uLockListening, g_uSonFunctional);
   if (isStoryV2Enabled()) {
     storyV2Controller().begin(millis());
   }
@@ -3417,6 +3464,7 @@ void app_orchestrator::loop() {
   updateAsyncAudioService(nowMs);
   serviceStoryAudioCaptureGuard(nowMs);
   nowMs = millis();
+  laRuntimeService().setEnvironment(g_laDetectionEnabled, g_uLockListening, g_uSonFunctional);
   updateStoryTimeline(nowMs);
   serviceStoryAudioCaptureGuard(nowMs);
   serialRouter().update(nowMs);
@@ -3480,37 +3528,40 @@ void app_orchestrator::loop() {
 
   const bool laDetected =
       (g_mode == RuntimeMode::kSignal) && g_laDetectionEnabled && g_laDetector.isDetected();
-  const bool uLockModeBeforeUnlock = (g_mode == RuntimeMode::kSignal) && !g_uSonFunctional;
-  const bool uLockListeningBeforeUnlock = uLockModeBeforeUnlock && g_uLockListening;
-  uint32_t loopDeltaMs = 0;
-  if (g_lastLoopMs != 0) {
-    loopDeltaMs = nowMs - g_lastLoopMs;
-    if (loopDeltaMs > 250U) {
-      loopDeltaMs = 250U;
+  if (isStoryV2Enabled()) {
+    const LaDetectorRuntimeService::Snapshot laSnap = laRuntimeService().snapshot();
+    g_laHoldAccumMs = laSnap.active ? laSnap.holdMs : 0U;
+  } else {
+    const bool uLockModeBeforeUnlock = (g_mode == RuntimeMode::kSignal) && !g_uSonFunctional;
+    const bool uLockListeningBeforeUnlock = uLockModeBeforeUnlock && g_uLockListening;
+    uint32_t loopDeltaMs = 0;
+    if (g_lastLoopMs != 0) {
+      loopDeltaMs = nowMs - g_lastLoopMs;
+      if (loopDeltaMs > 250U) {
+        loopDeltaMs = 250U;
+      }
     }
-  }
-  g_lastLoopMs = nowMs;
+    g_lastLoopMs = nowMs;
 
-  if (!uLockListeningBeforeUnlock) {
-    resetLaHoldProgress();
-  } else if (laDetected) {
-    uint32_t nextHoldMs = g_laHoldAccumMs + loopDeltaMs;
-    if (nextHoldMs > config::kLaUnlockHoldMs) {
-      nextHoldMs = config::kLaUnlockHoldMs;
+    if (!uLockListeningBeforeUnlock) {
+      resetLaHoldProgress();
+    } else if (laDetected) {
+      uint32_t nextHoldMs = g_laHoldAccumMs + loopDeltaMs;
+      if (nextHoldMs > config::kLaUnlockHoldMs) {
+        nextHoldMs = config::kLaUnlockHoldMs;
+      }
+      g_laHoldAccumMs = nextHoldMs;
     }
-    g_laHoldAccumMs = nextHoldMs;
-  }
 
-  const uint8_t laHoldPercentBeforeUnlock = unlockHoldPercent(g_laHoldAccumMs, uLockListeningBeforeUnlock);
-
-  if (uLockListeningBeforeUnlock && g_laHoldAccumMs >= config::kLaUnlockHoldMs) {
-    g_uSonFunctional = true;
-    cancelULockSearchSonarCue("unlock");
-    resetLaHoldProgress();
-    armStoryTimelineAfterUnlock(nowMs);
-    g_mp3.requestStorageRefresh(false);
-    Serial.println("[MODE] MODULE U-SON Fonctionnel (LA detecte)");
-    Serial.println("[SD] Detection SD activee.");
+    if (uLockListeningBeforeUnlock && g_laHoldAccumMs >= config::kLaUnlockHoldMs) {
+      g_uSonFunctional = true;
+      cancelULockSearchSonarCue("unlock");
+      resetLaHoldProgress();
+      armStoryTimelineAfterUnlock(nowMs);
+      g_mp3.requestStorageRefresh(false);
+      Serial.println("[MODE] MODULE U-SON Fonctionnel (LA detecte)");
+      Serial.println("[SD] Detection SD activee.");
+    }
   }
 
   const bool uLockMode = (g_mode == RuntimeMode::kSignal) && !g_uSonFunctional;

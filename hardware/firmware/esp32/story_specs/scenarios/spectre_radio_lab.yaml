@@ -1,5 +1,5 @@
-id: EXAMPLE_UNLOCK_EXPRESS
-version: 2
+id: SPECTRE_RADIO_LAB
+version: 1
 initial_step: STEP_WAIT_UNLOCK
 
 app_bindings:
@@ -22,6 +22,7 @@ steps:
     audio_pack_id: ""
     actions:
       - ACTION_TRACE_STEP
+      - ACTION_QUEUE_SONAR
     apps:
       - APP_LA
       - APP_SCREEN
@@ -31,9 +32,57 @@ steps:
       - trigger: on_event
         event_type: unlock
         event_name: UNLOCK
+        target_step_id: STEP_SONAR_SEARCH
+        after_ms: 0
+        priority: 100
+
+  - step_id: STEP_SONAR_SEARCH
+    screen_scene_id: SCENE_SEARCH
+    audio_pack_id: PACK_SONAR_HINT
+    actions:
+      - ACTION_TRACE_STEP
+    apps:
+      - APP_AUDIO
+      - APP_SCREEN
+      - APP_GATE
+    mp3_gate_open: false
+    transitions:
+      - trigger: on_event
+        event_type: audio_done
+        event_name: AUDIO_DONE
+        target_step_id: STEP_MORSE_CLUE
+        after_ms: 0
+        priority: 100
+      - trigger: on_event
+        event_type: serial
+        event_name: FORCE_DONE
+        target_step_id: STEP_DONE
+        after_ms: 0
+        priority: 120
+
+  - step_id: STEP_MORSE_CLUE
+    screen_scene_id: SCENE_SEARCH
+    audio_pack_id: PACK_MORSE_HINT
+    actions:
+      - ACTION_TRACE_STEP
+    apps:
+      - APP_AUDIO
+      - APP_SCREEN
+      - APP_GATE
+    mp3_gate_open: false
+    transitions:
+      - trigger: on_event
+        event_type: audio_done
+        event_name: AUDIO_DONE
         target_step_id: STEP_WIN
         after_ms: 0
         priority: 100
+      - trigger: on_event
+        event_type: serial
+        event_name: FORCE_DONE
+        target_step_id: STEP_DONE
+        after_ms: 0
+        priority: 120
 
   - step_id: STEP_WIN
     screen_scene_id: SCENE_REWARD

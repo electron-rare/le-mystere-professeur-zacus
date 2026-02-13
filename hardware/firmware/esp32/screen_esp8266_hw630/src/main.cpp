@@ -7,6 +7,15 @@
 #include <cstdio>
 #include <cstring>
 
+#include "apps/boot_app.h"
+#include "apps/link_app.h"
+#include "apps/mp3_app.h"
+#include "apps/ulock_app.h"
+#include "core/link_monitor.h"
+#include "core/render_scheduler.h"
+#include "core/stat_parser.h"
+#include "core/telemetry_state.h"
+
 namespace {
 
 constexpr uint8_t kLinkRx = D6;    // ESP8266 RX <- ESP32 TX (GPIO22)
@@ -35,14 +44,6 @@ constexpr uint8_t kUnlockFrameCount = 6;
 constexpr uint8_t kInvalidPin = 0xFF;
 constexpr uint8_t kScopeHistoryLen = 64;
 
-constexpr uint8_t kStartupStageInactive = 0;
-constexpr uint8_t kStartupStageBootValidation = 1;
-
-constexpr uint8_t kAppStageULockWaiting = 0;
-constexpr uint8_t kAppStageULockListening = 1;
-constexpr uint8_t kAppStageUSonFunctional = 2;
-constexpr uint8_t kAppStageMp3 = 3;
-
 constexpr uint8_t kSpriteChip[8] = {0x3C, 0x7E, 0xDB, 0xA5, 0xA5, 0xDB, 0x7E, 0x3C};
 constexpr uint8_t kSpriteLock[8] = {0x18, 0x24, 0x24, 0x7E, 0x42, 0x5A, 0x42, 0x7E};
 constexpr uint8_t kSpriteStar[8] = {0x18, 0x99, 0x5A, 0x3C, 0x3C, 0x5A, 0x99, 0x18};
@@ -66,39 +67,9 @@ constexpr I2cCandidate kI2cCandidates[] = {
     {14, 12, "GPIO14/GPIO12 (swappe)"},
 };
 
-struct TelemetryState {
-  bool laDetected = false;
-  bool mp3Playing = false;
-  bool sdReady = false;
-  bool mp3Mode = false;
-  bool uLockMode = false;
-  bool uLockListening = false;
-  bool uSonFunctional = false;
-  uint32_t uptimeMs = 0;
-  uint8_t key = 0;
-  uint16_t track = 0;
-  uint16_t trackCount = 0;
-  uint8_t volumePercent = 0;
-  uint8_t micLevelPercent = 0;   // 0..100
-  bool micScopeEnabled = false;  // scope render only when source supports it
-  uint8_t unlockHoldPercent = 0; // 0..100
-  uint8_t startupStage = kStartupStageInactive;
-  uint8_t appStage = kAppStageULockWaiting;
-  uint32_t frameSeq = 0;
-  uint8_t uiPage = 0;
-  uint8_t repeatMode = 0;
-  bool fxActive = false;
-  uint8_t backendMode = 0;
-  bool scanBusy = false;
-  uint8_t errorCode = 0;
-  int8_t tuningOffset = 0;      // -8..+8 (left/right around LA)
-  uint8_t tuningConfidence = 0; // 0..100
-  uint32_t lastRxMs = 0;
-};
-
-TelemetryState g_state;
+screen_core::TelemetryState g_state;
 bool g_displayReady = false;
-bool g_linkEnabled = true;
+screen_core::LinkMonitorState g_linkState;
 bool g_stateDirty = true;
 uint32_t g_lastRenderMs = 0;
 uint32_t g_lastDiagMs = 0;
@@ -119,65 +90,26 @@ uint8_t g_scopeHistory[kScopeHistoryLen] = {};
 uint8_t g_scopeHead = 0;
 bool g_scopeFilled = false;
 uint32_t g_unlockSequenceStartMs = 0;
-uint32_t g_lastByteMs = 0;
-uint32_t g_linkDownSinceMs = 0;
-uint32_t g_linkLostSinceMs = 0;
-uint32_t g_peerRebootUntilMs = 0;
 uint32_t g_bootSplashUntilMs = 0;
 
 uint32_t latestLinkTickMs() {
-  if (g_state.lastRxMs > g_lastByteMs) {
-    return g_state.lastRxMs;
-  }
-  return g_lastByteMs;
+  return screen_core::latestLinkTickMs(g_state, g_linkState);
 }
 
 uint32_t safeAgeMs(uint32_t nowMs, uint32_t tickMs) {
-  if (tickMs == 0U || nowMs < tickMs) {
-    return 0U;
-  }
-  return nowMs - tickMs;
+  return screen_core::safeAgeMs(nowMs, tickMs);
 }
 
 bool isPhysicalLinkAlive(uint32_t nowMs) {
-  if (!g_linkEnabled) {
-    return false;
-  }
-
-  const uint32_t lastTickMs = latestLinkTickMs();
-  if (lastTickMs == 0) {
-    return false;
-  }
-  if (nowMs < lastTickMs) {
-    return true;
-  }
-  return (nowMs - lastTickMs) <= kLinkTimeoutMs;
+  return screen_core::isPhysicalLinkAlive(g_state, g_linkState, nowMs, kLinkTimeoutMs);
 }
 
 bool isLinkAlive(uint32_t nowMs) {
-  if (!g_linkEnabled) {
-    return false;
-  }
-
-  if (latestLinkTickMs() == 0) {
-    return false;
-  }
-
-  if (isPhysicalLinkAlive(nowMs)) {
-    g_linkDownSinceMs = 0;
-    return true;
-  }
-
-  if (g_linkDownSinceMs == 0) {
-    g_linkDownSinceMs = nowMs;
-    return true;
-  }
-
-  return (nowMs - g_linkDownSinceMs) < kLinkDownConfirmMs;
+  return screen_core::isLinkAlive(g_state, &g_linkState, nowMs, kLinkTimeoutMs, kLinkDownConfirmMs);
 }
 
 bool isPeerRebootGraceActive(uint32_t nowMs) {
-  return g_peerRebootUntilMs != 0U && static_cast<int32_t>(nowMs - g_peerRebootUntilMs) < 0;
+  return screen_core::isPeerRebootGraceActive(g_linkState, nowMs);
 }
 
 int16_t textWidth(const char* text, uint8_t textSize) {
@@ -903,6 +835,32 @@ void renderLinkRecoveringScreen(uint32_t nowMs) {
   drawHorizontalGauge(12, 54, 104, 8, sweep);
 }
 
+void renderBootSplashScreen(uint32_t nowMs) {
+  drawTitleBar("U-SON SCREEN");
+
+  char line[22] = {};
+  const uint8_t dots = static_cast<uint8_t>((nowMs / 280U) % 4U);
+  snprintf(line, sizeof(line), "Demarrage%.*s", static_cast<int>(dots), "...");
+  drawCenteredText(line, 20, 2);
+  drawCenteredText(g_linkState.linkEnabled ? "Init OLED + lien ESP32" : "Init OLED", 43, 1);
+
+  const uint16_t sweepPhase = static_cast<uint16_t>((nowMs / 35U) % 200U);
+  const uint8_t sweep = static_cast<uint8_t>((sweepPhase <= 100U) ? sweepPhase : (200U - sweepPhase));
+  drawHorizontalGauge(12, 54, 104, 8, sweep);
+}
+
+void renderLinkDisabledScreen() {
+  drawTitleBar("U-SON SCREEN");
+  drawCenteredText("Liaison indisponible", 22, 1);
+  drawCenteredText("Verifier cablage", 34, 1);
+}
+
+void renderFallbackSignalScreen() {
+  drawTitleBar("U-SON SCREEN");
+  drawCenteredText("Mode signal", 20, 1);
+  drawCenteredText("En attente...", 34, 1);
+}
+
 void renderScreen(uint32_t nowMs, bool linkAlive) {
   if (!g_displayReady) {
     return;
@@ -911,52 +869,45 @@ void renderScreen(uint32_t nowMs, bool linkAlive) {
   g_display.clearDisplay();
   g_display.setTextColor(SSD1306_WHITE);
 
-  if (g_bootSplashUntilMs != 0U && static_cast<int32_t>(nowMs - g_bootSplashUntilMs) < 0) {
-    drawTitleBar("U-SON SCREEN");
+  const bool bootSplashActive =
+      g_bootSplashUntilMs != 0U && static_cast<int32_t>(nowMs - g_bootSplashUntilMs) < 0;
+  const bool recoveringLink = isPeerRebootGraceActive(nowMs) || g_linkState.linkLostSinceMs == 0U ||
+                              (nowMs - g_linkState.linkLostSinceMs) < kLinkRecoverGraceMs;
 
-    char line[22] = {};
-    const uint8_t dots = static_cast<uint8_t>((nowMs / 280U) % 4U);
-    snprintf(line, sizeof(line), "Demarrage%.*s", static_cast<int>(dots), "...");
-    drawCenteredText(line, 20, 2);
-    drawCenteredText(g_linkEnabled ? "Init OLED + lien ESP32" : "Init OLED", 43, 1);
+  screen_apps::UiHooks hooks = {};
+  hooks.renderBootSplash = renderBootSplashScreen;
+  hooks.renderStartup = renderStartupBootScreen;
+  hooks.renderULock = renderULockScreen;
+  hooks.renderUnlockSequence = renderUnlockSequenceScreen;
+  hooks.renderMp3 = renderMp3Screen;
+  hooks.renderLinkDown = renderLinkDownScreen;
+  hooks.renderLinkRecovering = renderLinkRecoveringScreen;
+  hooks.renderLinkDisabled = renderLinkDisabledScreen;
+  hooks.renderFallback = renderFallbackSignalScreen;
 
-    const uint16_t sweepPhase = static_cast<uint16_t>((nowMs / 35U) % 200U);
-    const uint8_t sweep = static_cast<uint8_t>((sweepPhase <= 100U) ? sweepPhase : (200U - sweepPhase));
-    drawHorizontalGauge(12, 54, 104, 8, sweep);
+  screen_apps::ScreenRenderContext ctx = {};
+  ctx.nowMs = nowMs;
+  ctx.linkEnabled = g_linkState.linkEnabled;
+  ctx.linkAlive = linkAlive;
+  ctx.hasValidState = g_hasValidState;
+  ctx.bootSplashActive = bootSplashActive;
+  ctx.recoveringLink = recoveringLink;
+  ctx.state = g_hasValidState ? &g_state : nullptr;
+  ctx.ui = hooks;
 
-    g_display.display();
-    return;
-  }
+  static screen_apps::BootApp bootApp;
+  static screen_apps::LinkApp linkApp;
+  static screen_apps::Mp3App mp3App;
+  static screen_apps::ULockApp ulockApp;
+  static const screen_apps::ScreenApp* kApps[] = {&bootApp, &linkApp, &mp3App, &ulockApp};
+  static screen_core::RenderScheduler scheduler(
+      kApps, static_cast<uint8_t>(sizeof(kApps) / sizeof(kApps[0])));
 
-  if (!g_linkEnabled) {
-    drawTitleBar("U-SON SCREEN");
-    drawCenteredText("Liaison indisponible", 22, 1);
-    drawCenteredText("Verifier cablage", 34, 1);
-  } else if (!g_hasValidState) {
-    renderStartupBootScreen(nowMs);
-  } else if (!linkAlive) {
-    const bool recovering = isPeerRebootGraceActive(nowMs) || g_linkLostSinceMs == 0U ||
-                            (nowMs - g_linkLostSinceMs) < kLinkRecoverGraceMs;
-    if (recovering) {
-      renderLinkRecoveringScreen(nowMs);
-    } else {
-      renderLinkDownScreen(nowMs);
-    }
-  } else {
-    if (g_state.startupStage == kStartupStageBootValidation) {
-      renderStartupBootScreen(nowMs);
-    } else if (g_state.appStage == kAppStageMp3) {
-      renderMp3Screen();
-    } else if (g_state.appStage == kAppStageULockWaiting ||
-               g_state.appStage == kAppStageULockListening) {
-      renderULockScreen(nowMs);
-    } else if (g_state.appStage == kAppStageUSonFunctional) {
-      renderUnlockSequenceScreen(nowMs);
-    } else {
-      drawTitleBar("U-SON SCREEN");
-      drawCenteredText("Mode signal", 20, 1);
-      drawCenteredText("En attente...", 34, 1);
-    }
+  const screen_apps::ScreenApp* selected = scheduler.select(ctx);
+  if (selected != nullptr) {
+    selected->render(ctx);
+  } else if (hooks.renderFallback != nullptr) {
+    hooks.renderFallback();
   }
 
   g_display.display();
@@ -987,188 +938,13 @@ bool initDisplayOnPins(uint8_t sda, uint8_t scl) {
   return false;
 }
 
-uint8_t crc8(const uint8_t* data, size_t len) {
-  uint8_t crc = 0x00U;
-  for (size_t i = 0; i < len; ++i) {
-    crc ^= data[i];
-    for (uint8_t bit = 0U; bit < 8U; ++bit) {
-      if ((crc & 0x80U) != 0U) {
-        crc = static_cast<uint8_t>((crc << 1U) ^ 0x07U);
-      } else {
-        crc <<= 1U;
-      }
-    }
-  }
-  return crc;
-}
-
-bool parseFrame(const char* frame, TelemetryState* out) {
-  if (strncmp(frame, "STAT,", 5) != 0) {
-    return false;
-  }
-
-  unsigned int la = 0;
-  unsigned int mp3 = 0;
-  unsigned int sd = 0;
-  unsigned long up = 0;
-  unsigned int key = 0;
-  unsigned int mode = 0;
-  unsigned int track = 0;
-  unsigned int trackCount = 0;
-  unsigned int volumePercent = 0;
-  unsigned int uLockMode = 0;
-  unsigned int uSonFunctional = 0;
-  int tuningOffset = 0;
-  unsigned int tuningConfidence = 0;
-  unsigned int uLockListening = 0;
-  unsigned int micLevelPercent = 0;
-  unsigned int micScopeEnabled = 0;
-  unsigned int unlockHoldPercent = 0;
-  unsigned int startupStage = 0;
-  unsigned int appStage = 0;
-  unsigned long frameSeq = 0;
-  unsigned int uiPage = 0;
-  unsigned int repeatMode = 0;
-  unsigned int fxActive = 0;
-  unsigned int backendMode = 0;
-  unsigned int scanBusy = 0;
-  unsigned int errorCode = 0;
-  unsigned int frameCrc = 0;
-
-  const int parsed = sscanf(frame,
-                            "STAT,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u,%u,%u,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%x",
-                            &la,
-                            &mp3,
-                            &sd,
-                            &up,
-                            &key,
-                            &mode,
-                            &track,
-                            &trackCount,
-                            &volumePercent,
-                            &uLockMode,
-                            &uSonFunctional,
-                            &tuningOffset,
-                            &tuningConfidence,
-                            &uLockListening,
-                            &micLevelPercent,
-                            &micScopeEnabled,
-                            &unlockHoldPercent,
-                            &startupStage,
-                            &appStage,
-                            &frameSeq,
-                            &uiPage,
-                            &repeatMode,
-                            &fxActive,
-                            &backendMode,
-                            &scanBusy,
-                            &errorCode,
-                            &frameCrc);
-  if (parsed < 19) {
-    return false;
-  }
-  if (parsed >= 27) {
-    const char* lastComma = strrchr(frame, ',');
-    if (lastComma == nullptr) {
-      return false;
-    }
-    const size_t payloadLen = static_cast<size_t>(lastComma - frame);
-    const uint8_t computed = crc8(reinterpret_cast<const uint8_t*>(frame), payloadLen);
-    const uint8_t expected = static_cast<uint8_t>(frameCrc & 0xFFU);
-    if (computed != expected) {
-      ++g_crcErrorCount;
-      return false;
-    }
-  }
-
-  out->laDetected = (la != 0U);
-  out->mp3Playing = (mp3 != 0U);
-  out->sdReady = (sd != 0U);
-  out->uptimeMs = static_cast<uint32_t>(up);
-  out->key = static_cast<uint8_t>(key);
-  out->mp3Mode = (parsed >= 6) ? (mode != 0U) : false;
-  out->track = (parsed >= 7) ? static_cast<uint16_t>(track) : 0;
-  out->trackCount = (parsed >= 8) ? static_cast<uint16_t>(trackCount) : 0;
-  out->volumePercent = (parsed >= 9) ? static_cast<uint8_t>(volumePercent) : 0;
-  out->uLockMode = (parsed >= 10) ? (uLockMode != 0U) : false;
-  out->uSonFunctional = (parsed >= 11) ? (uSonFunctional != 0U) : false;
-  if (parsed >= 12) {
-    if (tuningOffset < -8) {
-      tuningOffset = -8;
-    } else if (tuningOffset > 8) {
-      tuningOffset = 8;
-    }
-    out->tuningOffset = static_cast<int8_t>(tuningOffset);
-  } else {
-    out->tuningOffset = 0;
-  }
-  if (parsed >= 13) {
-    if (tuningConfidence > 100U) {
-      tuningConfidence = 100U;
-    }
-    out->tuningConfidence = static_cast<uint8_t>(tuningConfidence);
-  } else {
-    out->tuningConfidence = 0;
-  }
-  out->uLockListening = (parsed >= 14) ? (uLockListening != 0U) : false;
-  if (parsed >= 15) {
-    if (micLevelPercent > 100U) {
-      micLevelPercent = 100U;
-    }
-    out->micLevelPercent = static_cast<uint8_t>(micLevelPercent);
-  } else {
-    out->micLevelPercent = 0;
-  }
-  out->micScopeEnabled = (parsed >= 16) ? (micScopeEnabled != 0U) : false;
-  if (parsed >= 17) {
-    if (unlockHoldPercent > 100U) {
-      unlockHoldPercent = 100U;
-    }
-    out->unlockHoldPercent = static_cast<uint8_t>(unlockHoldPercent);
-  } else {
-    out->unlockHoldPercent = 0;
-  }
-
-  if (parsed >= 18) {
-    out->startupStage =
-        (startupStage == kStartupStageBootValidation) ? kStartupStageBootValidation
-                                                      : kStartupStageInactive;
-  } else {
-    out->startupStage = kStartupStageInactive;
-  }
-
-  if (parsed >= 19) {
-    if (appStage > kAppStageMp3) {
-      appStage = kAppStageULockWaiting;
-    }
-    out->appStage = static_cast<uint8_t>(appStage);
-  } else if (out->mp3Mode) {
-    out->appStage = kAppStageMp3;
-  } else if (out->uSonFunctional) {
-    out->appStage = kAppStageUSonFunctional;
-  } else if (out->uLockMode && out->uLockListening) {
-    out->appStage = kAppStageULockListening;
-  } else {
-    out->appStage = kAppStageULockWaiting;
-  }
-
-  if (parsed >= 20) {
-    out->frameSeq = static_cast<uint32_t>(frameSeq);
-  }
-  out->uiPage = (parsed >= 21) ? static_cast<uint8_t>(uiPage) : 0U;
-  out->repeatMode = (parsed >= 22) ? static_cast<uint8_t>(repeatMode) : 0U;
-  out->fxActive = (parsed >= 23) ? (fxActive != 0U) : false;
-  out->backendMode = (parsed >= 24) ? static_cast<uint8_t>(backendMode) : 0U;
-  out->scanBusy = (parsed >= 25) ? (scanBusy != 0U) : false;
-  out->errorCode = (parsed >= 26) ? static_cast<uint8_t>(errorCode) : 0U;
-
-  out->lastRxMs = millis();
-  return true;
+bool parseFrame(const char* frame, screen_core::TelemetryState* out) {
+  return screen_core::parseStatFrame(frame, out, millis(), &g_crcErrorCount);
 }
 
 void handleIncoming() {
   while (g_link.available() > 0) {
-    g_lastByteMs = millis();
+    g_linkState.lastByteMs = millis();
     const char c = static_cast<char>(g_link.read());
     if (c == '\r') {
       continue;
@@ -1176,20 +952,20 @@ void handleIncoming() {
 
     if (c == '\n') {
       g_lineBuffer[g_lineLen] = '\0';
-      TelemetryState parsed = g_state;
+      screen_core::TelemetryState parsed = g_state;
       if (parseFrame(g_lineBuffer, &parsed)) {
         if (g_hasValidState &&
             (parsed.uptimeMs + kPeerUptimeRollbackSlackMs) < g_state.uptimeMs) {
-          g_peerRebootUntilMs = millis() + kPeerRebootGraceMs;
+          g_linkState.peerRebootUntilMs = millis() + kPeerRebootGraceMs;
           Serial.printf("[SCREEN] Peer reboot detecte: uptime %lu -> %lu\n",
                         static_cast<unsigned long>(g_state.uptimeMs),
                         static_cast<unsigned long>(parsed.uptimeMs));
         }
-        if (g_state.appStage != kAppStageUSonFunctional &&
-            parsed.appStage == kAppStageUSonFunctional) {
+        if (g_state.appStage != screen_core::kAppStageUSonFunctional &&
+            parsed.appStage == screen_core::kAppStageUSonFunctional) {
           g_unlockSequenceStartMs = millis();
-        } else if (g_state.appStage == kAppStageUSonFunctional &&
-                   parsed.appStage != kAppStageUSonFunctional) {
+        } else if (g_state.appStage == screen_core::kAppStageUSonFunctional &&
+                   parsed.appStage != screen_core::kAppStageUSonFunctional) {
           g_unlockSequenceStartMs = 0;
         }
         if (g_hasValidState) {
@@ -1264,7 +1040,7 @@ void initDisplay() {
 
     if (g_oledSdaPin == kLinkRx || g_oledSdaPin == kLinkTx ||
         g_oledSclPin == kLinkRx || g_oledSclPin == kLinkTx) {
-      g_linkEnabled = false;
+      g_linkState.linkEnabled = false;
       Serial.println("[SCREEN] LINK desactive (conflit de broches avec OLED).");
       Serial.println("[SCREEN] Utiliser d'autres broches pour le lien ESP32.");
     }
@@ -1279,7 +1055,7 @@ void initDisplay() {
 void setup() {
   Serial.begin(115200);
   initDisplay();
-  if (g_linkEnabled) {
+  if (g_linkState.linkEnabled) {
     g_link.begin(kLinkBaud,
                  SWSERIAL_8N1,
                  kLinkRx,
@@ -1295,7 +1071,7 @@ void setup() {
 
 void loop() {
   const uint32_t nowMs = millis();
-  if (g_linkEnabled) {
+  if (g_linkState.linkEnabled) {
     handleIncoming();
   }
   const bool physicalAlive = isPhysicalLinkAlive(nowMs);
@@ -1306,12 +1082,12 @@ void loop() {
     g_stateDirty = true;
   }
   if (linkAlive) {
-    if (g_linkLostSinceMs != 0U) {
+    if (g_linkState.linkLostSinceMs != 0U) {
       g_stateDirty = true;
     }
-    g_linkLostSinceMs = 0U;
-  } else if (g_linkLostSinceMs == 0U) {
-    g_linkLostSinceMs = nowMs;
+    g_linkState.linkLostSinceMs = 0U;
+  } else if (g_linkState.linkLostSinceMs == 0U) {
+    g_linkState.linkLostSinceMs = nowMs;
     g_stateDirty = true;
   }
   if (linkAlive != g_linkWasAlive) {
@@ -1330,8 +1106,8 @@ void loop() {
     const uint32_t ageMs = safeAgeMs(nowMs, lastTickMs);
     Serial.printf("[SCREEN] oled=%s link=%s phys=%s valid=%u age_ms=%lu losses=%lu parse_err=%lu crc_err=%lu rx_ovf=%lu seq_gap=%lu seq_rb=%lu sda=%u scl=%u addr=0x%02X\n",
                   g_displayReady ? "OK" : "KO",
-                  g_linkEnabled ? (linkAlive ? "OK" : "DOWN") : "OFF",
-                  g_linkEnabled ? (physicalAlive ? "OK" : "DOWN") : "OFF",
+                  g_linkState.linkEnabled ? (linkAlive ? "OK" : "DOWN") : "OFF",
+                  g_linkState.linkEnabled ? (physicalAlive ? "OK" : "DOWN") : "OFF",
                   g_hasValidState ? 1U : 0U,
                   static_cast<unsigned long>(ageMs),
                   static_cast<unsigned long>(g_linkLossCount),

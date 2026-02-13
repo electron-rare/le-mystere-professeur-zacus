@@ -5,6 +5,10 @@ initial_step: STEP_1
 app_bindings:
   - id: APP_LA
     app: LA_DETECTOR
+    config:
+      hold_ms: 3000
+      unlock_event: UNLOCK
+      require_listening: true
   - id: APP_AUDIO
     app: AUDIO_PACK
   - id: APP_SCREEN

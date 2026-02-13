@@ -12,6 +12,12 @@ class LaDetectorApp : public StoryApp {
   StoryAppSnapshot snapshot() const override;
 
  private:
+  void loadConfigForBinding(const char* bindingId);
+
   StoryAppContext context_ = {};
   StoryAppSnapshot snapshot_ = {};
+  uint32_t holdTargetMs_ = 3000U;
+  bool requireListening_ = true;
+  bool unlockPosted_ = false;
+  char unlockEventName_[24] = "UNLOCK";
 };

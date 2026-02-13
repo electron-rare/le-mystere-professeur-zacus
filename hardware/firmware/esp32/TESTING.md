@@ -161,7 +161,7 @@ Procedure rapide:
 
 1. Envoyer `STORY_V2_STATUS` et verifier `enabled=1`.
    - sinon envoyer `STORY_V2_ENABLE ON`
-2. Envoyer `STORY_V2_TRACE STATUS` puis activer `STORY_V2_TRACE ON` pour la session.
+2. Envoyer `STORY_V2_TRACE_LEVEL STATUS`, puis `STORY_V2_TRACE_LEVEL DEBUG` pour la session.
 3. Envoyer `STORY_V2_LIST` puis verifier le scenario `DEFAULT`.
 4. Envoyer `STORY_V2_VALIDATE` et verifier `OK valid`.
 5. Envoyer `STORY_V2_HEALTH`:
@@ -177,9 +177,10 @@ Procedure rapide:
 11. Verifier transition vers `STEP_ETAPE2` puis `STEP_DONE`.
 12. Envoyer `STORY_V2_HEALTH`:
    - attendu final: `OK`
-13. Verifier que le gate MP3 est ouvert en fin de flux.
-14. Envoyer `STORY_V2_TRACE OFF`.
-15. Envoyer `STORY_TEST_OFF`.
+13. Envoyer `STORY_V2_METRICS` et verifier transitions/events > 0.
+14. Verifier que le gate MP3 est ouvert en fin de flux.
+15. Envoyer `STORY_V2_TRACE_LEVEL OFF`.
+16. Envoyer `STORY_V2_METRICS_RESET` puis `STORY_TEST_OFF`.
 
 Rollback (si anomalie en live):
 
@@ -284,3 +285,18 @@ Rollback (si anomalie en live):
 4. Envoyer `MP3_SCAN REBUILD` et verifier la fin:
    - `state=DONE`
    - `tracks>0` si des fichiers supportes sont presents
+5. Envoyer `MP3_SCAN_PROGRESS`:
+   - verifier `depth/stack/folders/files/tracks`
+6. Envoyer `MP3_BACKEND_STATUS`:
+   - verifier compteurs `attempts/fail/retries/fallback`
+
+## 8) Diagnostics runtime/screen (serie)
+
+1. Envoyer `SYS_LOOP_BUDGET STATUS`:
+   - verifier `max/avg/samples/warn`
+2. Envoyer `SCREEN_LINK_STATUS`:
+   - verifier `seq`, `tx_ok`, `tx_drop`, `resync`
+3. Envoyer `SCREEN_LINK_RESET_STATS` puis `SCREEN_LINK_STATUS`:
+   - verifier remise a zero des compteurs
+4. Envoyer `SYS_LOOP_BUDGET RESET` puis `SYS_LOOP_BUDGET STATUS`:
+   - verifier remise a zero des compteurs loop budget

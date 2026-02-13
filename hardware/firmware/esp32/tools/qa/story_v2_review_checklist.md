@@ -15,9 +15,10 @@ rg -n "serialProcessStoryCommand|makeStorySerialRuntimeContext" src/app/app_orch
 
 - [ ] `StoryControllerV2Snapshot` expose les champs attendus
 - [ ] `STORY_V2_HEALTH` retourne une ligne exploitable
+- [ ] `STORY_V2_METRICS` / `STORY_V2_METRICS_RESET` operationnels
 - Preuve:
 ```bash
-rg -n "StoryControllerV2Snapshot|healthLabel|STORY_V2_HEALTH" src/controllers/story src/services/serial/serial_commands_story.cpp
+rg -n "StoryControllerV2Snapshot|StoryMetricsSnapshot|healthLabel|STORY_V2_HEALTH|STORY_V2_METRICS" src/controllers/story src/services/serial/serial_commands_story.cpp
 ```
 
 ## STV2-43 — Hardening events/timers
@@ -55,9 +56,11 @@ rg -n "kScreenKeyframePeriodMs|kScreenWatchdogMs|tx_drop|seq_gap|seq_rb" src/ser
 
 - [ ] pas de `delay()` dans transitions metier
 - [ ] latence action->feedback conforme
+- [ ] diagnostics `SYS_LOOP_BUDGET` et `SCREEN_LINK_STATUS` exposes
 - Preuve:
 ```bash
 rg -n "\\bdelay\\(" src/app/app_orchestrator.cpp src/controllers src/services src/story
+rg -n "SYS_LOOP_BUDGET|SCREEN_LINK_STATUS|SCREEN_LINK_RESET_STATS" src/app/app_orchestrator.cpp
 ```
 
 ## STV2-47 — Script QA binaire

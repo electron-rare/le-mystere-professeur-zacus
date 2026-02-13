@@ -147,6 +147,12 @@ bool ScreenLink::update(const ScreenFrame& frame, bool forceKeyframe) {
   return true;
 }
 
+void ScreenLink::resetStats() {
+  txFrameCount_ = 0U;
+  txDropCount_ = 0U;
+  lastTxMs_ = 0U;
+}
+
 uint32_t ScreenLink::txFrameCount() const {
   return txFrameCount_;
 }

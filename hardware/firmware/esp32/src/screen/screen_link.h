@@ -14,6 +14,7 @@ class ScreenLink {
 
   void begin();
   bool update(const ScreenFrame& frame, bool forceKeyframe = false);
+  void resetStats();
   uint32_t txFrameCount() const;
   uint32_t txDropCount() const;
   uint32_t lastTxMs() const;

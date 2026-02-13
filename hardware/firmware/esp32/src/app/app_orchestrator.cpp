@@ -503,6 +503,7 @@ uint8_t encodeMp3ErrorForScreen() {
 
 void printMp3ScanStatus(const char* source) {
   const CatalogStats stats = g_mp3.catalogStats();
+  const Mp3ScanProgress progress = g_mp3.scanProgress();
   Serial.printf("[MP3_SCAN] %s state=%s busy=%u tracks=%u folders=%u scan_ms=%lu indexed=%u metadata_best=%u\n",
                 source,
                 g_mp3.scanStateLabel(),
@@ -512,22 +513,39 @@ void printMp3ScanStatus(const char* source) {
                 static_cast<unsigned long>(stats.scanMs),
                 stats.indexed ? 1U : 0U,
                 stats.metadataBestEffort ? 1U : 0U);
+  Serial.printf(
+      "[MP3_SCAN] %s pending=%u force=%u reason=%s ticks=%lu elapsed=%lu budget_ms=%u entry_budget=%u\n",
+      source,
+      progress.pendingRequest ? 1U : 0U,
+      progress.forceRebuild ? 1U : 0U,
+      progress.reason,
+      static_cast<unsigned long>(progress.ticks),
+      static_cast<unsigned long>(progress.elapsedMs),
+      static_cast<unsigned int>(progress.tickBudgetMs),
+      static_cast<unsigned int>(progress.tickEntryBudget));
 }
 
 void printMp3ScanProgress(const char* source) {
   const Mp3ScanProgress progress = g_mp3.scanProgress();
   const CatalogStats stats = g_mp3.catalogStats();
   Serial.printf(
-      "[MP3_SCAN_PROGRESS] %s state=%s active=%u depth=%u stack=%u folders=%u files=%u tracks=%u limit=%u scan_ms=%lu\n",
+      "[MP3_SCAN_PROGRESS] %s state=%s active=%u pending=%u force=%u reason=%s depth=%u stack=%u folders=%u files=%u tracks=%u limit=%u tick_entries=%u tick_hits=%u ticks=%lu elapsed=%lu scan_ms=%lu\n",
       source,
       g_mp3.scanStateLabel(),
       progress.active ? 1U : 0U,
+      progress.pendingRequest ? 1U : 0U,
+      progress.forceRebuild ? 1U : 0U,
+      progress.reason,
       static_cast<unsigned int>(progress.depth),
       static_cast<unsigned int>(progress.stackSize),
       static_cast<unsigned int>(progress.foldersScanned),
       static_cast<unsigned int>(progress.filesScanned),
       static_cast<unsigned int>(progress.tracksAccepted),
       progress.limitReached ? 1U : 0U,
+      static_cast<unsigned int>(progress.entriesThisTick),
+      static_cast<unsigned int>(progress.entryBudgetHits),
+      static_cast<unsigned long>(progress.ticks),
+      static_cast<unsigned long>(progress.elapsedMs),
       static_cast<unsigned long>(stats.scanMs));
 }
 

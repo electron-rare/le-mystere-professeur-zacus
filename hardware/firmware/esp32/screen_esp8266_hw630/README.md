@@ -30,15 +30,16 @@ Ce decoupage garde la compatibilite protocole tout en permettant d'ajouter de no
 
 Trame texte envoyee par l'ESP32 (format etendu v2):
 
-`STAT,<la>,<mp3>,<sd>,<uptime_ms>,<key>,<mode_mp3>,<track>,<track_count>,<volume_pct>,<u_lock>,<u_son_functional>,<tuning_offset>,<tuning_confidence>,<u_lock_listening>,<mic_level_pct>,<mic_scope>,<unlock_hold_pct>,<startup_stage>,<app_stage>,<seq>,<ui_page>,<repeat_mode>,<fx_active>,<backend_mode>,<scan_busy>,<error_code>,<crc8_hex>\n`
+`STAT,<la>,<mp3>,<sd>,<uptime_ms>,<key>,<mode_mp3>,<track>,<track_count>,<volume_pct>,<u_lock>,<u_son_functional>,<tuning_offset>,<tuning_confidence>,<u_lock_listening>,<mic_level_pct>,<mic_scope>,<unlock_hold_pct>,<startup_stage>,<app_stage>,<seq>,<ui_page>,<repeat_mode>,<fx_active>,<backend_mode>,<scan_busy>,<error_code>,<ui_cursor>,<ui_offset>,<ui_count>,<queue_count>,<crc8_hex>\n`
 
 Exemple:
 
-`STAT,1,0,0,12345,2,0,0,0,0,1,0,-2,68,1,42,1,57,1,0,77,1,0,0,1,0,0,5A`
+`STAT,1,0,0,12345,2,0,0,0,0,1,0,-2,68,1,42,1,57,1,0,77,1,0,0,1,0,0,2,1,34,5,5A`
 
 Compatibilite:
 - le parser ecran accepte encore les trames `STAT` sans CRC (format legacy).
 - si CRC present, la trame est validee et rejetee si checksum invalide.
+- les champs UI MP3 (`ui_cursor/ui_offset/ui_count/queue_count`) sont optionnels et parses seulement s'ils sont presents.
 
 ## Cablage
 

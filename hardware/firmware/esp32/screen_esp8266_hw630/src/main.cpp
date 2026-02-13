@@ -108,6 +108,8 @@ uint32_t g_linkLossCount = 0;
 uint32_t g_parseErrorCount = 0;
 uint32_t g_crcErrorCount = 0;
 uint32_t g_rxOverflowCount = 0;
+uint32_t g_seqGapCount = 0;
+uint32_t g_seqRollbackCount = 0;
 char g_lineBuffer[220];
 uint8_t g_lineLen = 0;
 uint8_t g_oledSdaPin = kInvalidPin;
@@ -1190,6 +1192,13 @@ void handleIncoming() {
                    parsed.appStage != kAppStageUSonFunctional) {
           g_unlockSequenceStartMs = 0;
         }
+        if (g_hasValidState) {
+          if (parsed.frameSeq < g_state.frameSeq) {
+            ++g_seqRollbackCount;
+          } else if (parsed.frameSeq > (g_state.frameSeq + 1U)) {
+            g_seqGapCount += (parsed.frameSeq - g_state.frameSeq - 1U);
+          }
+        }
         pushScopeSample(parsed.micLevelPercent);
         g_state = parsed;
         g_hasValidState = true;
@@ -1319,7 +1328,7 @@ void loop() {
   if ((nowMs - g_lastDiagMs) >= kDiagPeriodMs) {
     const uint32_t lastTickMs = latestLinkTickMs();
     const uint32_t ageMs = safeAgeMs(nowMs, lastTickMs);
-    Serial.printf("[SCREEN] oled=%s link=%s phys=%s valid=%u age_ms=%lu losses=%lu parse_err=%lu crc_err=%lu rx_ovf=%lu sda=%u scl=%u addr=0x%02X\n",
+    Serial.printf("[SCREEN] oled=%s link=%s phys=%s valid=%u age_ms=%lu losses=%lu parse_err=%lu crc_err=%lu rx_ovf=%lu seq_gap=%lu seq_rb=%lu sda=%u scl=%u addr=0x%02X\n",
                   g_displayReady ? "OK" : "KO",
                   g_linkEnabled ? (linkAlive ? "OK" : "DOWN") : "OFF",
                   g_linkEnabled ? (physicalAlive ? "OK" : "DOWN") : "OFF",
@@ -1329,6 +1338,8 @@ void loop() {
                   static_cast<unsigned long>(g_parseErrorCount),
                   static_cast<unsigned long>(g_crcErrorCount),
                   static_cast<unsigned long>(g_rxOverflowCount),
+                  static_cast<unsigned long>(g_seqGapCount),
+                  static_cast<unsigned long>(g_seqRollbackCount),
                   static_cast<unsigned int>(g_oledSdaPin),
                   static_cast<unsigned int>(g_oledSclPin),
                   static_cast<unsigned int>(g_oledAddress));

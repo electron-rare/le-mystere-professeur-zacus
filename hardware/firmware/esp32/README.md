@@ -135,7 +135,9 @@ Commandes scenario (moniteur ESP32):
 - `STORY_V2_STATUS`
 - `STORY_V2_LIST`
 - `STORY_V2_VALIDATE`
+- `STORY_V2_HEALTH`
 - `STORY_V2_ENABLE [STATUS|ON|OFF]`
+- `STORY_V2_TRACE [ON|OFF|STATUS]`
 - `STORY_V2_EVENT <name>`
 - `STORY_V2_STEP <id>`
 - `STORY_V2_SCENARIO <id>`
@@ -146,15 +148,16 @@ Notes:
 - `STORY_ARM` lance maintenant le scenario complet: armement + tentative de lecture `WIN`.
 - `STORY_STATUS` expose un `stage` explicite: `WAIT_UNLOCK`, `WIN_PENDING`, `WAIT_ETAPE2`, `ETAPE2_DONE`.
 - Le moteur STORY V2 est protege par le flag `kStoryV2EnabledDefault` (default `false`).
-- Si le flag V2 est OFF, `STORY_V2_EVENT/STEP/SCENARIO/VALIDATE` repondent `OUT_OF_CONTEXT`.
+- Si le flag V2 est OFF, `STORY_V2_EVENT/STEP/SCENARIO/VALIDATE/HEALTH` repondent `OUT_OF_CONTEXT`.
 - Les delais par defaut sont configures dans `src/config.h`:
   - `kStoryEtape2DelayMs` (production, defaut 15 min)
   - `kStoryEtape2TestDelayMs` (test rapide)
 
 Workflow auteur STORY V2:
 
-- `make story-validate`
-- `make story-gen`
+- `make story-validate` (strict)
+- `make story-gen` (strict + `spec_hash`)
+- `make qa-story-v2`
 - `pio run -e esp32dev`
 
 Un nouveau scenario est ajoute via `story_specs/scenarios/*.yaml`, puis generation C++ dans `src/story/generated/*`.
@@ -310,7 +313,7 @@ Reglage live (sans reflash):
 - `KEY_TEST_STOP` : arrete l'auto-test
 - `BOOT_FS_INFO` / `BOOT_FS_LIST` / `BOOT_FS_TEST` : debug LittleFS et test lecture FX boot
 - `STORY_STATUS` / `STORY_TEST_ON` / `STORY_TEST_OFF` / `STORY_TEST_DELAY` / `STORY_ARM` / `STORY_FORCE_ETAPE2` : pilotage scenario STORY
-- `STORY_V2_ENABLE` / `STORY_V2_STATUS` / `STORY_V2_LIST` / `STORY_V2_VALIDATE` / `STORY_V2_EVENT` / `STORY_V2_STEP` / `STORY_V2_SCENARIO` : debug/migration STORY V2
+- `STORY_V2_ENABLE` / `STORY_V2_TRACE` / `STORY_V2_STATUS` / `STORY_V2_LIST` / `STORY_V2_VALIDATE` / `STORY_V2_HEALTH` / `STORY_V2_EVENT` / `STORY_V2_STEP` / `STORY_V2_SCENARIO` : debug/migration STORY V2
 - `CODEC_STATUS` / `CODEC_DUMP` : debug codec I2C ES8388
 - `CODEC_RD reg` / `CODEC_WR reg val` : lecture/ecriture registre codec
 - `CODEC_VOL pct` / `CODEC_VOL_RAW raw [out2]` : reglage volume sortie codec

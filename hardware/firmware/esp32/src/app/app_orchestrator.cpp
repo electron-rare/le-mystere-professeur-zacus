@@ -74,6 +74,11 @@ struct StoryAudioCaptureGuardState {
 StoryAudioCaptureGuardState g_storyAudioCaptureGuard;
 PlayerUiModel g_playerUi;
 String g_mp3BrowsePath = "/";
+struct LoopBudgetState {
+  uint32_t lastWarnMs = 0U;
+  uint32_t maxLoopMs = 0U;
+};
+LoopBudgetState g_loopBudget;
 
 void setBootAudioPaEnabled(bool enabled, const char* source);
 void printBootAudioOutputInfo(const char* source);
@@ -111,7 +116,6 @@ void printCodecDebugHelp();
 void printMp3DebugHelp();
 bool processMp3DebugCommand(const char* cmd, uint32_t nowMs);
 void printStoryDebugHelp();
-bool processStoryDebugCommand(const char* cmd, uint32_t nowMs);
 void updateMp3FormatTest(uint32_t nowMs);
 PlayerUiPage currentPlayerUiPage();
 bool setPlayerUiPage(PlayerUiPage page);
@@ -138,6 +142,7 @@ void requestULockSearchSonarCue(const char* source);
 void cancelULockSearchSonarCue(const char* source);
 void serviceULockSearchSonarCue(uint32_t nowMs);
 void onSerialCommand(const SerialCommand& cmd, uint32_t nowMs, void* ctx);
+StorySerialRuntimeContext makeStorySerialRuntimeContext();
 bool isCanonicalSerialCommand(const char* token);
 bool commandMatches(const char* cmd, const char* token);
 
@@ -2532,214 +2537,22 @@ void printStoryDebugHelp() {
   Serial.println("[STORY] Flow: UNLOCK -> WIN -> attente -> ETAPE_2 -> gate MP3 ouvert.");
   Serial.println("[STORY] Cmd: STORY_STATUS | STORY_RESET | STORY_ARM | STORY_FORCE_ETAPE2");
   Serial.println("[STORY] Cmd: STORY_TEST_ON | STORY_TEST_OFF | STORY_TEST_DELAY <ms>");
-  Serial.println("[STORY] Cmd: STORY_V2_ENABLE [STATUS|ON|OFF]");
-  Serial.println("[STORY] Cmd: STORY_V2_STATUS | STORY_V2_LIST | STORY_V2_VALIDATE");
+  Serial.println("[STORY] Cmd: STORY_V2_ENABLE [STATUS|ON|OFF] | STORY_V2_TRACE [ON|OFF|STATUS]");
+  Serial.println("[STORY] Cmd: STORY_V2_STATUS | STORY_V2_LIST | STORY_V2_VALIDATE | STORY_V2_HEALTH");
   Serial.println("[STORY] Cmd: STORY_V2_EVENT <name> | STORY_V2_STEP <id> | STORY_V2_SCENARIO <id>");
 }
 
-bool processStoryDebugCommand(const char* cmd, uint32_t nowMs) {
-  if (commandMatches(cmd, "STORY_V2_ENABLE")) {
-    const char* arg = cmd + strlen("STORY_V2_ENABLE");
-    while (*arg == ' ') {
-      ++arg;
-    }
-    if (arg[0] == '\0' || strcmp(arg, "STATUS") == 0) {
-      Serial.printf("[STORY_V2] enable=%u default=%u\n",
-                    isStoryV2Enabled() ? 1U : 0U,
-                    config::kStoryV2EnabledDefault ? 1U : 0U);
-      return true;
-    }
-    if (strcmp(arg, "ON") == 0) {
-      if (!isStoryV2Enabled()) {
-        g_storyV2Enabled = true;
-        if (!storyV2Controller().begin(nowMs)) {
-          g_storyV2Enabled = false;
-          serialDispatchReply(Serial, "STORY_V2", SerialDispatchResult::kBusy, "begin_failed");
-          return true;
-        }
-        if (g_uSonFunctional) {
-          storyV2Controller().onUnlock(nowMs, "serial_story_v2_enable_sync");
-        }
-      }
-      serialDispatchReply(Serial, "STORY_V2", SerialDispatchResult::kOk, "enabled");
-      storyV2Controller().printStatus(nowMs, "serial_story_v2_enable");
-      return true;
-    }
-    if (strcmp(arg, "OFF") == 0) {
-      if (isStoryV2Enabled()) {
-        g_storyV2Enabled = false;
-        storyController().reset("serial_story_v2_disable");
-        if (g_uSonFunctional) {
-          storyController().onUnlock(nowMs, "serial_story_v2_disable_sync");
-        }
-      }
-      serialDispatchReply(Serial, "STORY_V2", SerialDispatchResult::kOk, "disabled");
-      storyController().printStatus(nowMs, "serial_story_v2_disable");
-      return true;
-    }
-    serialDispatchReply(Serial, "STORY_V2", SerialDispatchResult::kBadArgs, "STATUS|ON|OFF");
-    return true;
-  }
-
-  if (commandMatches(cmd, "STORY_V2_STATUS")) {
-    Serial.printf("[STORY_V2] enabled=%u default=%u\n",
-                  isStoryV2Enabled() ? 1U : 0U,
-                  config::kStoryV2EnabledDefault ? 1U : 0U);
-    storyV2Controller().printStatus(nowMs, "serial_story_v2_status");
-    return true;
-  }
-  if (commandMatches(cmd, "STORY_V2_LIST")) {
-    storyV2Controller().printScenarioList("serial_story_v2_list");
-    serialDispatchReply(Serial, "STORY_V2", SerialDispatchResult::kOk, "list");
-    return true;
-  }
-  if (commandMatches(cmd, "STORY_V2_VALIDATE")) {
-    if (!isStoryV2Enabled()) {
-      serialDispatchReply(Serial, "STORY_V2", SerialDispatchResult::kOutOfContext, "legacy mode");
-      return true;
-    }
-    if (!storyV2Controller().validateActiveScenario("serial_story_v2_validate")) {
-      serialDispatchReply(Serial, "STORY_V2", SerialDispatchResult::kBadArgs, "invalid");
-      return true;
-    }
-    serialDispatchReply(Serial, "STORY_V2", SerialDispatchResult::kOk, "valid");
-    return true;
-  }
-  if (commandMatches(cmd, "STORY_V2_EVENT")) {
-    const char* eventName = cmd + strlen("STORY_V2_EVENT");
-    while (*eventName == ' ') {
-      ++eventName;
-    }
-    if (eventName[0] == '\0') {
-      serialDispatchReply(Serial, "STORY_V2", SerialDispatchResult::kBadArgs, "event required");
-      return true;
-    }
-    if (!isStoryV2Enabled()) {
-      serialDispatchReply(Serial, "STORY_V2", SerialDispatchResult::kOutOfContext, "legacy mode");
-      return true;
-    }
-    if (!storyV2Controller().postSerialEvent(eventName, nowMs, "serial_story_v2_event")) {
-      serialDispatchReply(Serial, "STORY_V2", SerialDispatchResult::kBadArgs, eventName);
-      return true;
-    }
-    serialDispatchReply(Serial, "STORY_V2", SerialDispatchResult::kOk, eventName);
-    return true;
-  }
-  if (commandMatches(cmd, "STORY_V2_STEP")) {
-    const char* stepId = cmd + strlen("STORY_V2_STEP");
-    while (*stepId == ' ') {
-      ++stepId;
-    }
-    if (stepId[0] == '\0') {
-      serialDispatchReply(Serial, "STORY_V2", SerialDispatchResult::kBadArgs, "step required");
-      return true;
-    }
-    if (!isStoryV2Enabled()) {
-      serialDispatchReply(Serial, "STORY_V2", SerialDispatchResult::kOutOfContext, "legacy mode");
-      return true;
-    }
-    if (!storyV2Controller().jumpToStep(stepId, nowMs, "serial_story_v2_step")) {
-      serialDispatchReply(Serial, "STORY_V2", SerialDispatchResult::kNotFound, stepId);
-      return true;
-    }
-    storyV2Controller().printStatus(nowMs, "serial_story_v2_step");
-    serialDispatchReply(Serial, "STORY_V2", SerialDispatchResult::kOk, stepId);
-    return true;
-  }
-  if (commandMatches(cmd, "STORY_V2_SCENARIO")) {
-    const char* scenarioId = cmd + strlen("STORY_V2_SCENARIO");
-    while (*scenarioId == ' ') {
-      ++scenarioId;
-    }
-    if (scenarioId[0] == '\0') {
-      serialDispatchReply(Serial, "STORY_V2", SerialDispatchResult::kBadArgs, "scenario required");
-      return true;
-    }
-    if (!isStoryV2Enabled()) {
-      serialDispatchReply(Serial, "STORY_V2", SerialDispatchResult::kOutOfContext, "legacy mode");
-      return true;
-    }
-    if (!storyV2Controller().setScenario(scenarioId, nowMs, "serial_story_v2_scenario")) {
-      serialDispatchReply(Serial, "STORY_V2", SerialDispatchResult::kNotFound, scenarioId);
-      return true;
-    }
-    storyV2Controller().printStatus(nowMs, "serial_story_v2_scenario");
-    serialDispatchReply(Serial, "STORY_V2", SerialDispatchResult::kOk, scenarioId);
-    return true;
-  }
-
-  const bool useV2 = isStoryV2Enabled();
-  if (strcmp(cmd, "STORY_STATUS") == 0) {
-    if (useV2) {
-      storyV2Controller().printStatus(nowMs, "serial_story_status");
-    } else {
-      storyController().printStatus(nowMs, "serial_story_status");
-    }
-    return true;
-  }
-  if (strcmp(cmd, "STORY_HELP") == 0) {
-    printStoryDebugHelp();
-    return true;
-  }
-  if (strcmp(cmd, "STORY_RESET") == 0) {
-    if (useV2) {
-      storyV2Controller().reset(nowMs, "serial_story_reset");
-    } else {
-      storyController().reset("serial_story_reset");
-    }
-    return true;
-  }
-  if (strcmp(cmd, "STORY_ARM") == 0) {
-    armStoryTimelineAfterUnlock(nowMs);
-    if (useV2) {
-      storyV2Controller().printStatus(nowMs, "serial_story_arm");
-    } else {
-      storyController().printStatus(nowMs, "serial_story_arm");
-    }
-    return true;
-  }
-  if (strcmp(cmd, "STORY_FORCE_ETAPE2") == 0) {
-    if (useV2) {
-      storyV2Controller().forceEtape2DueNow(nowMs, "serial_story_force");
-    } else {
-      storyController().forceEtape2DueNow(nowMs, "serial_story_force");
-    }
-    updateStoryTimeline(nowMs);
-    if (useV2) {
-      storyV2Controller().printStatus(nowMs, "serial_story_force");
-    } else {
-      storyController().printStatus(nowMs, "serial_story_force");
-    }
-    return true;
-  }
-  if (strcmp(cmd, "STORY_TEST_ON") == 0) {
-    if (useV2) {
-      storyV2Controller().setTestMode(true, nowMs, "serial_story_test_on");
-    } else {
-      storyController().setTestMode(true, nowMs, "serial_story_test_on");
-    }
-    return true;
-  }
-  if (strcmp(cmd, "STORY_TEST_OFF") == 0) {
-    if (useV2) {
-      storyV2Controller().setTestMode(false, nowMs, "serial_story_test_off");
-    } else {
-      storyController().setTestMode(false, nowMs, "serial_story_test_off");
-    }
-    return true;
-  }
-
-  uint32_t delayMs = 0U;
-  if (sscanf(cmd, "STORY_TEST_DELAY %lu", &delayMs) == 1) {
-    if (useV2) {
-      storyV2Controller().setTestDelayMs(delayMs, nowMs, "serial_story_test_delay");
-    } else {
-      storyController().setTestDelayMs(delayMs, nowMs, "serial_story_test_delay");
-    }
-    return true;
-  }
-
-  return false;
+StorySerialRuntimeContext makeStorySerialRuntimeContext() {
+  StorySerialRuntimeContext context = {};
+  context.storyV2Enabled = &g_storyV2Enabled;
+  context.uSonFunctional = g_uSonFunctional;
+  context.storyV2Default = config::kStoryV2EnabledDefault;
+  context.legacy = &storyController();
+  context.v2 = &storyV2Controller();
+  context.armAfterUnlock = armStoryTimelineAfterUnlock;
+  context.updateStoryTimeline = updateStoryTimeline;
+  context.printHelp = printStoryDebugHelp;
+  return context;
 }
 
 void printKeyTuneHelp() {
@@ -2751,8 +2564,8 @@ void printKeyTuneHelp() {
   Serial.println("[KEY_TUNE] Cmd: BOOT_FX_FM | BOOT_FX_SONAR | BOOT_FX_MORSE | BOOT_FX_WIN");
   Serial.println(
       "[KEY_TUNE] Cmd: STORY_STATUS | STORY_TEST_ON/OFF | STORY_TEST_DELAY | STORY_ARM | STORY_FORCE_ETAPE2");
-  Serial.println("[KEY_TUNE] Cmd: STORY_V2_ENABLE [STATUS|ON|OFF]");
-  Serial.println("[KEY_TUNE] Cmd: STORY_V2_STATUS | STORY_V2_LIST | STORY_V2_VALIDATE");
+  Serial.println("[KEY_TUNE] Cmd: STORY_V2_ENABLE [STATUS|ON|OFF] | STORY_V2_TRACE [ON|OFF|STATUS]");
+  Serial.println("[KEY_TUNE] Cmd: STORY_V2_STATUS | STORY_V2_LIST | STORY_V2_VALIDATE | STORY_V2_HEALTH");
   Serial.println("[KEY_TUNE] Cmd: STORY_V2_EVENT <name> | STORY_V2_STEP <id> | STORY_V2_SCENARIO <id>");
   Serial.println("[KEY_TUNE] Cmd: CODEC_STATUS | CODEC_DUMP | CODEC_RD/WR | CODEC_VOL");
   Serial.println("[KEY_TUNE] Cmd: MP3_STATUS | MP3_UNLOCK | MP3_REFRESH | MP3_LIST | MP3_TEST_START | MP3_FX");
@@ -2919,6 +2732,7 @@ bool isCanonicalSerialCommand(const char* token) {
       "STORY_ARM",                  "STORY_FORCE_ETAPE2", "STORY_TEST_ON",
       "STORY_TEST_OFF",             "STORY_TEST_DELAY","STORY_V2_ENABLE",
       "STORY_V2_STATUS",            "STORY_V2_LIST",   "STORY_V2_VALIDATE",
+      "STORY_V2_HEALTH",            "STORY_V2_TRACE",
       "STORY_V2_EVENT",             "STORY_V2_STEP",   "STORY_V2_SCENARIO",
       "MP3_HELP",                   "MP3_STATUS",
       "MP3_UNLOCK",
@@ -2964,7 +2778,8 @@ void onSerialCommand(const SerialCommand& cmd, uint32_t nowMs, void* ctx) {
     return;
   }
   if (serialIsStoryCommand(cmd.token)) {
-    if (!processStoryDebugCommand(routedCmd, nowMs)) {
+    const StorySerialRuntimeContext context = makeStorySerialRuntimeContext();
+    if (!serialProcessStoryCommand(cmd, nowMs, context, Serial)) {
       serialDispatchReply(Serial, "STORY", SerialDispatchResult::kUnknown, cmd.line);
     }
     return;
@@ -3398,7 +3213,8 @@ void app_orchestrator::setup() {
   Serial.println(
       "[KEY_TUNE] Serial: KEY_STATUS | KEY_RAW_ON/OFF | KEY_SET Kx/REL v | KEY_TEST_START/STATUS/RESET/STOP");
   Serial.println("[KEY_TUNE] Serial: BOOT_FX_FM | BOOT_FX_SONAR | BOOT_FX_MORSE | BOOT_FX_WIN");
-  Serial.println("[STORY] Serial V2: STORY_V2_ENABLE [STATUS|ON|OFF] | STORY_V2_STATUS | STORY_V2_LIST | STORY_V2_VALIDATE");
+  Serial.println("[STORY] Serial V2: STORY_V2_ENABLE [STATUS|ON|OFF] | STORY_V2_TRACE [ON|OFF|STATUS]");
+  Serial.println("[STORY] Serial V2: STORY_V2_STATUS | STORY_V2_LIST | STORY_V2_VALIDATE | STORY_V2_HEALTH");
   Serial.println("[STORY] Serial V2: STORY_V2_EVENT <name> | STORY_V2_STEP <id> | STORY_V2_SCENARIO <id>");
   Serial.println(
       "[MP3_DBG] Serial: MP3_STATUS | MP3_UNLOCK | MP3_REFRESH | MP3_LIST | MP3_PLAY n | MP3_TEST_START [ms]");
@@ -3420,6 +3236,7 @@ void app_orchestrator::setup() {
 }
 
 void app_orchestrator::loop() {
+  const uint32_t loopStartMs = millis();
   uint32_t nowMs = millis();
   updateAsyncAudioService(nowMs);
   serviceStoryAudioCaptureGuard(nowMs);
@@ -3581,4 +3398,18 @@ void app_orchestrator::loop() {
   }
 
   sendScreenFrameSnapshot(nowMs, screenKey);
+
+  const uint32_t loopElapsedMs = static_cast<uint32_t>(millis() - loopStartMs);
+  if (loopElapsedMs > g_loopBudget.maxLoopMs) {
+    g_loopBudget.maxLoopMs = loopElapsedMs;
+  }
+  if (loopElapsedMs > 25U && static_cast<int32_t>(nowMs - g_loopBudget.lastWarnMs) >= 0) {
+    Serial.printf("[LOOP_BUDGET] warn loop=%lums max=%lums mode=%u boot=%u mp3=%u\n",
+                  static_cast<unsigned long>(loopElapsedMs),
+                  static_cast<unsigned long>(g_loopBudget.maxLoopMs),
+                  static_cast<unsigned int>(g_mode),
+                  g_bootAudioProtocol.active ? 1U : 0U,
+                  (g_mode == RuntimeMode::kMp3) ? 1U : 0U);
+    g_loopBudget.lastWarnMs = nowMs + 2000U;
+  }
 }

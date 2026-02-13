@@ -10,6 +10,19 @@
 
 class StoryControllerV2 {
  public:
+  struct StoryControllerV2Snapshot {
+    bool enabled = false;
+    bool running = false;
+    const char* scenarioId = nullptr;
+    const char* stepId = nullptr;
+    bool mp3GateOpen = true;
+    uint8_t queueDepth = 0U;
+    const char* appHostError = "OK";
+    const char* engineError = "OK";
+    uint32_t etape2DueMs = 0U;
+    bool testMode = false;
+  };
+
   struct Hooks {
     bool (*startRandomTokenBase)(const char* token,
                                  const char* source,
@@ -49,6 +62,10 @@ class StoryControllerV2 {
   void printStatus(uint32_t nowMs, const char* source) const;
   void printScenarioList(const char* source) const;
   bool validateActiveScenario(const char* source) const;
+  StoryControllerV2Snapshot snapshot(bool enabled, uint32_t nowMs) const;
+  const char* healthLabel(bool enabled, uint32_t nowMs) const;
+  void setTraceEnabled(bool enabled);
+  bool traceEnabled() const;
 
   const char* scenarioId() const;
   const char* stepId() const;
@@ -69,6 +86,7 @@ class StoryControllerV2 {
   void resetRuntimeState();
   StoryEventSink makeAppEventSink(const char* source);
   static bool postEventFromSink(const StoryEvent& event, void* user);
+  bool isDuplicateStormEvent(const StoryEvent& event) const;
 
   AudioService& audio_;
   Hooks hooks_;
@@ -80,6 +98,11 @@ class StoryControllerV2 {
   uint32_t testDelayMs_ = 5000U;
   uint32_t etape2DueMs_ = 0U;
   bool etape2DuePosted_ = false;
+  bool traceEnabled_ = false;
+  StoryEvent lastPostedEvent_ = {};
+  bool hasLastPostedEvent_ = false;
+  uint32_t lastPostedEventAtMs_ = 0U;
+  uint32_t droppedStormEvents_ = 0U;
   char activeScreenSceneId_[24] = {};
   char scenarioId_[20] = {};
 };

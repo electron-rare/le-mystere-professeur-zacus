@@ -1,16 +1,16 @@
 # Licence
 
-Ce depot est diffuse avec des licences libres/open-source.
+Ce dépôt est diffusé avec des licences libres adaptées aux contenus créatifs et aux outils.
 
-## Code — GPL-3.0-or-later
-S'applique a: firmware, scripts et tout fichier explicitement identifie comme code source.
+## Code — MIT
+S’applique à : firmware, scripts, outils (répertoires `hardware/`, `tools/`, fichiers exécutables, validateurs, automations).
 
-Texte: `LICENSES/GPL-3.0-or-later.txt`
+Texte : `LICENSES/MIT.txt`
 
-## Contenus creatifs et documentation — CC BY-SA 4.0
-S'applique a: documents de jeu, textes, PDFs, PNG, SVG, assets graphiques, docs et contenus redactionnels.
+## Contenus créatifs & documentation — CC BY-NC 4.0
+S’applique à : documents de jeu, guides, prompts, printables, illustrations, textes narratifs et assets (`kit-maitre-du-jeu/`, `printables/`, `docs/`, `game/`, `audio/`, `include-humain-IA/`).
 
-Texte: `LICENSES/CC-BY-SA-4.0.txt`
+Texte : `LICENSES/CC-BY-NC-4.0.txt`
 
-## Dependances tierces
-Les bibliotheques externes restent sous leurs licences respectives. Voir les README/manifestes de chaque sous-projet.
+## Dépendances tierces
+Les bibliothèques externes restent sous leurs licences respectives. Voir les README/manifestes de chaque sous-projet.

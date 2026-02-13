@@ -1,17 +1,13 @@
 # Changelog
 
 ## [Unreleased]
-- Printables : déplacement et classement des PNG dans `printables/export/png/{general,fiche-enquete,personnages,zones}`.
-- Documentation : ajout d'une illustration SVG de structure du dépôt dans le README (`docs/assets/repo-map.svg`).
-- Documentation : revue de cohérence étendue sur les Markdown/README et mise à jour de `docs/repo-audit.md`.
-- Structure : ajout du dossier `kit-maitre-du-jeu/export/pdf/` pour aligner la documentation avec l'arborescence.
-- Printables : clarification de l'état actuel et du niveau de préparation des dossiers `src/` et `export/{pdf,png}/`.
-- Documentation : ajout d'un plan de maintenance du dépôt (hors firmware).
-- Contribution : ajout d'une checklist PR doc-only dans `CONTRIBUTING.md`.
-- Documentation : ajout d'une illustration SVG de structure du dépôt dans le README (`docs/assets/repo-map.svg`).
-- Documentation : revue de cohérence étendue sur les Markdown/README et mise à jour de `docs/repo-audit.md`.
-- Structure : ajout du dossier `kit-maitre-du-jeu/export/pdf/` pour aligner la documentation avec l'arborescence.
-- Printables : clarification de l'état actuel et du niveau de préparation des dossiers `src/` et `export/{pdf,png}/`.
+- Kit MJ : script minute-par-minute, solution complète, checklist matériel, plan des stations, guide anti-chaos et distribution des rôles prêts à l’usage pour 6–14 enfants pendant 60–90 minutes.
+- Printables : structure `src/` + `export/{pdf,png}/` maintenue, prompts graphiques dans `src/prompts/`, workflow documenté dans `WORKFLOW.md`, et réorganisation des aperçus (`printables/export/png/{general,fiche-enquete,personnages,zones}`).
+- Game & audio : scénario canon `game/scenarios/zacus_v1.yaml` (canon, solution unique), manifestes audio `audio/manifests/zacus_v1_audio.yaml` et prompts narratifs (`game/prompts/audio/intro.md`, `incident.md`, `accusation.md`, `solution.md`).
+- Outils : scripts de validation `tools/scenario/validate_scenario.py` et `tools/audio/validate_manifest.py` pour sécuriser chaque nouvelle piste narrative ou audio.
+- Documentation & guides : `docs/QUICKSTART.md`, `docs/STYLEGUIDE.md`, `docs/index.md`, `docs/repo-status.md`, et `printables/WORKFLOW.md` donnent un chemin clair pour déployer le kit, rédiger les scénarios et maintenir la cohérence.
+- Licences : texte homogène CC BY-NC 4.0 pour les contenus créatifs et MIT pour les codes, avec les fichiers associés (`LICENSES/CC-BY-NC-4.0.txt`, `LICENSES/MIT.txt`), et `README.md` + `CONTRIBUTING.md` + `LICENSE.md` alignés sur cette répartition.
+- Références annexes : `include-humain-IA/` (et `include-humain-IA/version-finale/`) renommés pour la portabilité, et la section `docs/repo-status.md` mise à jour pour documenter ces changements.
 
 ## [0.2.0] - 2026-02-12
 

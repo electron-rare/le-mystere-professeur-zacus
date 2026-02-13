@@ -30,6 +30,29 @@ bool textEqualsIgnoreCase(const char* lhs, const char* rhs) {
   return (*lhs == '\0' && *rhs == '\0');
 }
 
+bool parseTraceLevelToken(const char* token, StoryControllerV2::TraceLevel* outLevel) {
+  if (token == nullptr || outLevel == nullptr) {
+    return false;
+  }
+  if (textEqualsIgnoreCase(token, "OFF")) {
+    *outLevel = StoryControllerV2::TraceLevel::kOff;
+    return true;
+  }
+  if (textEqualsIgnoreCase(token, "ERR")) {
+    *outLevel = StoryControllerV2::TraceLevel::kErr;
+    return true;
+  }
+  if (textEqualsIgnoreCase(token, "INFO")) {
+    *outLevel = StoryControllerV2::TraceLevel::kInfo;
+    return true;
+  }
+  if (textEqualsIgnoreCase(token, "DEBUG")) {
+    *outLevel = StoryControllerV2::TraceLevel::kDebug;
+    return true;
+  }
+  return false;
+}
+
 const char* skipSpaces(const char* text) {
   if (text == nullptr) {
     return "";
@@ -103,6 +126,26 @@ bool serialProcessStoryCommand(const SerialCommand& cmd,
     return true;
   }
 
+  if (serialTokenEquals(cmd, "STORY_V2_TRACE_LEVEL")) {
+    if (ctx.v2 == nullptr) {
+      serialDispatchReply(out, "STORY_V2", SerialDispatchResult::kOutOfContext, "controller_missing");
+      return true;
+    }
+    if (args[0] == '\0' || textEqualsIgnoreCase(args, "STATUS")) {
+      out.printf("[STORY_V2] trace_level=%s\n", ctx.v2->traceLevelLabel());
+      serialDispatchReply(out, "STORY_V2", SerialDispatchResult::kOk, "trace_level_status");
+      return true;
+    }
+    StoryControllerV2::TraceLevel level = StoryControllerV2::TraceLevel::kOff;
+    if (!parseTraceLevelToken(args, &level)) {
+      serialDispatchReply(out, "STORY_V2", SerialDispatchResult::kBadArgs, "OFF|ERR|INFO|DEBUG");
+      return true;
+    }
+    ctx.v2->setTraceLevel(level);
+    serialDispatchReply(out, "STORY_V2", SerialDispatchResult::kOk, ctx.v2->traceLevelLabel());
+    return true;
+  }
+
   if (serialTokenEquals(cmd, "STORY_V2_ENABLE")) {
     if (ctx.storyV2Enabled == nullptr || ctx.v2 == nullptr || ctx.legacy == nullptr) {
       serialDispatchReply(out, "STORY_V2", SerialDispatchResult::kOutOfContext, "missing_context");
@@ -170,6 +213,37 @@ bool serialProcessStoryCommand(const SerialCommand& cmd,
         static_cast<unsigned long>(snap.etape2DueMs),
         snap.testMode ? 1U : 0U);
     serialDispatchReply(out, "STORY_V2", SerialDispatchResult::kOk, health);
+    return true;
+  }
+
+  if (serialTokenEquals(cmd, "STORY_V2_METRICS")) {
+    if (!useV2 || ctx.v2 == nullptr) {
+      serialDispatchReply(out, "STORY_V2", SerialDispatchResult::kOutOfContext, "legacy mode");
+      return true;
+    }
+    const StoryControllerV2::StoryMetricsSnapshot metrics = ctx.v2->metricsSnapshot();
+    out.printf(
+        "[STORY_V2] METRICS posted=%lu accepted=%lu rejected=%lu storm_drop=%lu queue_drop=%lu transitions=%lu max_queue=%u app_err=%s engine_err=%s\n",
+        static_cast<unsigned long>(metrics.eventsPosted),
+        static_cast<unsigned long>(metrics.eventsAccepted),
+        static_cast<unsigned long>(metrics.eventsRejected),
+        static_cast<unsigned long>(metrics.stormDropped),
+        static_cast<unsigned long>(metrics.queueDropped),
+        static_cast<unsigned long>(metrics.transitions),
+        static_cast<unsigned int>(metrics.maxQueueDepth),
+        metrics.lastAppHostError != nullptr ? metrics.lastAppHostError : "-",
+        metrics.lastEngineError != nullptr ? metrics.lastEngineError : "-");
+    serialDispatchReply(out, "STORY_V2", SerialDispatchResult::kOk, "metrics");
+    return true;
+  }
+
+  if (serialTokenEquals(cmd, "STORY_V2_METRICS_RESET")) {
+    if (!useV2 || ctx.v2 == nullptr) {
+      serialDispatchReply(out, "STORY_V2", SerialDispatchResult::kOutOfContext, "legacy mode");
+      return true;
+    }
+    ctx.v2->resetMetrics();
+    serialDispatchReply(out, "STORY_V2", SerialDispatchResult::kOk, "metrics_reset");
     return true;
   }
 

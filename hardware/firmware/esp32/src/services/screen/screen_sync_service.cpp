@@ -17,6 +17,18 @@ void ScreenSyncService::reset() {
   lastStatsLogMs_ = 0U;
   txSuccessCount_ = 0U;
   txDropCount_ = 0U;
+  keyframeCount_ = 0U;
+  watchdogResyncCount_ = 0U;
+  link_.resetStats();
+}
+
+void ScreenSyncService::resetStats() {
+  txSuccessCount_ = 0U;
+  txDropCount_ = 0U;
+  keyframeCount_ = 0U;
+  watchdogResyncCount_ = 0U;
+  lastStatsLogMs_ = 0U;
+  link_.resetStats();
 }
 
 void ScreenSyncService::update(ScreenFrame* frame, uint32_t nowMs) {
@@ -37,11 +49,13 @@ void ScreenSyncService::update(ScreenFrame* frame, uint32_t nowMs) {
     ++txSuccessCount_;
     if (keyframeDue) {
       lastKeyframeMs_ = nowMs;
+      ++keyframeCount_;
     }
   } else {
     ++txDropCount_;
     if (keyframeDue && static_cast<uint32_t>(nowMs - lastTxSuccessMs_) > kScreenWatchdogMs) {
       lastKeyframeMs_ = 0U;
+      ++watchdogResyncCount_;
     }
   }
 
@@ -58,4 +72,18 @@ void ScreenSyncService::update(ScreenFrame* frame, uint32_t nowMs) {
 
 uint32_t ScreenSyncService::sequence() const {
   return sequence_;
+}
+
+ScreenSyncStats ScreenSyncService::snapshot() const {
+  ScreenSyncStats out = {};
+  out.sequence = sequence_;
+  out.txSuccess = txSuccessCount_;
+  out.txDrop = txDropCount_;
+  out.keyframes = keyframeCount_;
+  out.watchdogResync = watchdogResyncCount_;
+  out.lastTxSuccessMs = lastTxSuccessMs_;
+  out.linkTxFrames = link_.txFrameCount();
+  out.linkTxDrop = link_.txDropCount();
+  out.linkLastTxMs = link_.lastTxMs();
+  return out;
 }

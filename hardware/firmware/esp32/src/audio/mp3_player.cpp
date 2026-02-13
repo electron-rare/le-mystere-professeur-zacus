@@ -104,6 +104,8 @@ void Mp3Player::begin() {
   }
   scanService_.reset();
   clearScanContext();
+  scanProgress_ = Mp3ScanProgress();
+  backendStats_ = Mp3BackendRuntimeStats();
 }
 
 void Mp3Player::update(uint32_t nowMs, bool allowPlayback) {
@@ -460,6 +462,14 @@ bool Mp3Player::isScanBusy() const {
   return scanBusy_ || scanService_.isBusy();
 }
 
+Mp3ScanProgress Mp3Player::scanProgress() const {
+  return scanProgress_;
+}
+
+Mp3BackendRuntimeStats Mp3Player::backendStats() const {
+  return backendStats_;
+}
+
 const TrackEntry* Mp3Player::trackEntryByNumber(uint16_t oneBasedNumber) const {
   if (oneBasedNumber == 0U) {
     return nullptr;
@@ -589,6 +599,7 @@ void Mp3Player::unmountStorage(uint32_t nowMs) {
   scanService_.reset();
   clearScanContext();
   scanBusy_ = false;
+  scanProgress_ = Mp3ScanProgress();
 
   Serial.println("[MP3] SD removed/unmounted.");
 }
@@ -638,6 +649,8 @@ void Mp3Player::beginScanIfRequested(uint32_t nowMs) {
   }
 
   scanBusy_ = true;
+  scanProgress_ = Mp3ScanProgress();
+  scanProgress_.active = true;
   catalogStats_ = CatalogStats();
   clearScanContext();
   scanService_.start(nowMs);
@@ -649,6 +662,7 @@ void Mp3Player::beginScanIfRequested(uint32_t nowMs) {
   }
 
   if (loadedFromIndex) {
+    scanProgress_.tracksAccepted = catalog_.size();
     finalizeScan(nowMs, true, true);
     return;
   }
@@ -685,7 +699,10 @@ void Mp3Player::updateScan(uint32_t nowMs) {
         continue;
       }
       scanCtx_.currentDepth = depth;
+      scanProgress_.depth = depth;
+      scanProgress_.stackSize = scanCtx_.stackSize;
       ++catalogStats_.folders;
+      ++scanProgress_.foldersScanned;
     }
 
     fs::File entry = scanCtx_.currentDir.openNextFile();
@@ -698,6 +715,7 @@ void Mp3Player::updateScan(uint32_t nowMs) {
     const bool isDir = entry.isDirectory();
     const uint32_t fileSize = static_cast<uint32_t>(entry.size());
     entry.close();
+    ++scanProgress_.filesScanned;
 
     if (!path.startsWith("/")) {
       path = "/" + path;
@@ -712,6 +730,7 @@ void Mp3Player::updateScan(uint32_t nowMs) {
           finalizeScan(nowMs, false, false);
           return;
         }
+        scanProgress_.stackSize = scanCtx_.stackSize;
       }
       continue;
     }
@@ -722,9 +741,11 @@ void Mp3Player::updateScan(uint32_t nowMs) {
 
     if (!catalog_.appendFallbackPath(path.c_str(), fileSize)) {
       scanCtx_.limitReached = true;
+      scanProgress_.limitReached = true;
       finalizeScan(nowMs, true, false);
       return;
     }
+    scanProgress_.tracksAccepted = catalog_.size();
   }
 }
 
@@ -735,6 +756,7 @@ void Mp3Player::finalizeScan(uint32_t nowMs, bool success, bool loadedFromIndex)
 
   if (!success) {
     scanBusy_ = false;
+    scanProgress_.active = false;
     scanService_.finish(CatalogScanService::State::kFailed, nowMs);
     clearScanContext();
     Serial.println("[MP3] Catalog scan failed.");
@@ -762,6 +784,7 @@ void Mp3Player::finalizeScan(uint32_t nowMs, bool success, bool loadedFromIndex)
 
   if (trackCount_ == 0U) {
     scanBusy_ = false;
+    scanProgress_.active = false;
     scanService_.finish(CatalogScanService::State::kDone, nowMs);
     clearScanContext();
     Serial.println("[MP3] No supported audio file found on SD.");
@@ -774,6 +797,9 @@ void Mp3Player::finalizeScan(uint32_t nowMs, bool success, bool loadedFromIndex)
   restoreTrackFromStatePath();
 
   scanBusy_ = false;
+  scanProgress_.active = false;
+  scanProgress_.tracksAccepted = trackCount_;
+  scanProgress_.limitReached = wasTruncated;
   scanService_.finish(CatalogScanService::State::kDone, nowMs);
   clearScanContext();
   Serial.printf("[MP3] %u track(s) loaded. index=%s%s\n",
@@ -828,12 +854,15 @@ void Mp3Player::updateDeferredStateSave(uint32_t nowMs) {
 }
 
 bool Mp3Player::startLegacyTrack() {
+  ++backendStats_.startAttempts;
   if (!sdReady_ || trackCount_ == 0U || currentTrack_ >= trackCount_) {
+    ++backendStats_.startFailures;
     return false;
   }
 
   const TrackEntry* entry = catalog_.entry(currentTrack_);
   if (entry == nullptr || entry->path[0] == '\0') {
+    ++backendStats_.startFailures;
     return false;
   }
 
@@ -842,6 +871,8 @@ bool Mp3Player::startLegacyTrack() {
   if (trackCodec == AudioCodec::kUnknown) {
     Serial.printf("[MP3] Unsupported file type: %s\n", trackPath.c_str());
     nextRetryMs_ = millis() + 250U;
+    ++backendStats_.retriesScheduled;
+    ++backendStats_.startFailures;
     return false;
   }
 
@@ -849,6 +880,8 @@ bool Mp3Player::startLegacyTrack() {
     Serial.printf("[MP3] Missing track: %s\n", trackPath.c_str());
     requestCatalogScan(true);
     nextRetryMs_ = millis() + 1000U;
+    ++backendStats_.retriesScheduled;
+    ++backendStats_.startFailures;
     return false;
   }
 
@@ -860,6 +893,8 @@ bool Mp3Player::startLegacyTrack() {
     Serial.println("[MP3] Memory allocation failed.");
     stopLegacyTrack();
     nextRetryMs_ = millis() + 1000U;
+    ++backendStats_.retriesScheduled;
+    ++backendStats_.startFailures;
     return false;
   }
 
@@ -872,11 +907,15 @@ bool Mp3Player::startLegacyTrack() {
     Serial.printf("[MP3] Unable to start %s playback.\n", codecLabel(trackCodec));
     stopLegacyTrack();
     nextRetryMs_ = millis() + 1000U;
+    ++backendStats_.retriesScheduled;
+    ++backendStats_.startFailures;
     return false;
   }
 
   activeBackend_ = PlayerBackendId::kLegacy;
   copyCStr(backendError_, sizeof(backendError_), "OK");
+  ++backendStats_.startSuccess;
+  ++backendStats_.legacyStarts;
   Serial.printf("[MP3] Playing %u/%u [%s|LEGACY]: %s\n",
                 static_cast<unsigned int>(currentTrack_ + 1U),
                 static_cast<unsigned int>(trackCount_),
@@ -886,26 +925,33 @@ bool Mp3Player::startLegacyTrack() {
 }
 
 bool Mp3Player::startAudioToolsTrack() {
+  ++backendStats_.startAttempts;
   if (!sdReady_ || trackCount_ == 0U || currentTrack_ >= trackCount_) {
+    ++backendStats_.startFailures;
     return false;
   }
   const TrackEntry* entry = catalog_.entry(currentTrack_);
   if (entry == nullptr || entry->path[0] == '\0') {
+    ++backendStats_.startFailures;
     return false;
   }
   if (!audioTools_.canHandlePath(entry->path)) {
     copyCStr(backendError_, sizeof(backendError_), "UNSUPPORTED");
+    ++backendStats_.startFailures;
     return false;
   }
 
   if (!audioTools_.start(entry->path, gain_)) {
     copyCStr(backendError_, sizeof(backendError_), audioTools_.lastError());
+    ++backendStats_.startFailures;
     return false;
   }
 
   activeBackend_ = PlayerBackendId::kAudioTools;
   activeCodec_ = codecForPath(String(entry->path));
   copyCStr(backendError_, sizeof(backendError_), "OK");
+  ++backendStats_.startSuccess;
+  ++backendStats_.audioToolsStarts;
   Serial.printf("[MP3] Playing %u/%u [%s|AUDIO_TOOLS]: %s\n",
                 static_cast<unsigned int>(currentTrack_ + 1U),
                 static_cast<unsigned int>(trackCount_),
@@ -928,6 +974,7 @@ void Mp3Player::startCurrentTrack() {
     started = startAudioToolsTrack();
     if (!started && backendMode_ == PlayerBackendMode::kAutoFallback) {
       fallbackUsed_ = true;
+      ++backendStats_.fallbackCount;
       started = startLegacyTrack();
     }
   } else {
@@ -936,6 +983,7 @@ void Mp3Player::startCurrentTrack() {
 
   if (!started && backendMode_ == PlayerBackendMode::kAudioToolsOnly) {
     nextRetryMs_ = millis() + 1000U;
+    ++backendStats_.retriesScheduled;
     Serial.printf("[MP3] AudioTools start failed (mode=%s err=%s).\n",
                   backendModeLabel(),
                   backendError_);
@@ -944,6 +992,7 @@ void Mp3Player::startCurrentTrack() {
 
   if (!started) {
     nextRetryMs_ = millis() + 1000U;
+    ++backendStats_.retriesScheduled;
     return;
   }
 

@@ -24,6 +24,7 @@
 #include "../services/serial/serial_commands_key.h"
 #include "../services/serial/serial_commands_mp3.h"
 #include "../services/serial/serial_commands_story.h"
+#include "../services/serial/serial_commands_system.h"
 #include "../services/serial/serial_router.h"
 #include "../services/screen/screen_sync_service.h"
 #include "../story/resources/screen_scene_registry.h"
@@ -77,6 +78,14 @@ String g_mp3BrowsePath = "/";
 struct LoopBudgetState {
   uint32_t lastWarnMs = 0U;
   uint32_t maxLoopMs = 0U;
+  uint32_t warnCount = 0U;
+  uint32_t sampleCount = 0U;
+  uint32_t totalLoopMs = 0U;
+  uint32_t overBootThresholdCount = 0U;
+  uint32_t overRuntimeThresholdCount = 0U;
+  uint32_t bootThresholdMs = 40U;
+  uint32_t runtimeThresholdMs = 25U;
+  uint32_t warnThrottleMs = 2500U;
 };
 LoopBudgetState g_loopBudget;
 
@@ -123,6 +132,8 @@ bool parsePlayerUiPageToken(const char* token, PlayerUiPage* outPage);
 uint8_t encodeBackendForScreen();
 uint8_t encodeMp3ErrorForScreen();
 void printMp3ScanStatus(const char* source);
+void printMp3ScanProgress(const char* source);
+void printMp3BackendStatus(const char* source);
 void printMp3BrowseList(const char* source, const char* path, uint16_t offset, uint16_t limit);
 bool parseBackendModeToken(const char* token, PlayerBackendMode* outMode);
 const char* currentBrowsePath();
@@ -130,6 +141,11 @@ const char* mp3FxModeLabel(Mp3FxMode mode);
 const char* mp3FxEffectLabel(Mp3FxEffect effect);
 bool parseMp3FxEffectToken(const char* token, Mp3FxEffect* outEffect);
 bool triggerMp3Fx(Mp3FxEffect effect, uint32_t durationMs, const char* source);
+void printLoopBudgetStatus(const char* source, uint32_t nowMs);
+void resetLoopBudgetStats(uint32_t nowMs, const char* source);
+void printScreenLinkStatus(const char* source, uint32_t nowMs);
+void resetScreenLinkStats(const char* source);
+bool processSystemDebugCommand(const char* cmd, uint32_t nowMs);
 void prepareStoryAudioCaptureGuard(const char* source);
 void releaseStoryAudioCaptureGuard(const char* source);
 void serviceStoryAudioCaptureGuard(uint32_t nowMs);
@@ -460,6 +476,40 @@ void printMp3ScanStatus(const char* source) {
                 static_cast<unsigned long>(stats.scanMs),
                 stats.indexed ? 1U : 0U,
                 stats.metadataBestEffort ? 1U : 0U);
+}
+
+void printMp3ScanProgress(const char* source) {
+  const Mp3ScanProgress progress = g_mp3.scanProgress();
+  const CatalogStats stats = g_mp3.catalogStats();
+  Serial.printf(
+      "[MP3_SCAN_PROGRESS] %s state=%s active=%u depth=%u stack=%u folders=%u files=%u tracks=%u limit=%u scan_ms=%lu\n",
+      source,
+      g_mp3.scanStateLabel(),
+      progress.active ? 1U : 0U,
+      static_cast<unsigned int>(progress.depth),
+      static_cast<unsigned int>(progress.stackSize),
+      static_cast<unsigned int>(progress.foldersScanned),
+      static_cast<unsigned int>(progress.filesScanned),
+      static_cast<unsigned int>(progress.tracksAccepted),
+      progress.limitReached ? 1U : 0U,
+      static_cast<unsigned long>(stats.scanMs));
+}
+
+void printMp3BackendStatus(const char* source) {
+  const Mp3BackendRuntimeStats stats = g_mp3.backendStats();
+  Serial.printf(
+      "[MP3_BACKEND_STATUS] %s mode=%s active=%s err=%s attempts=%lu success=%lu fail=%lu retries=%lu fallback=%lu legacy=%lu tools=%lu\n",
+      source,
+      g_mp3.backendModeLabel(),
+      g_mp3.activeBackendLabel(),
+      g_mp3.lastBackendError(),
+      static_cast<unsigned long>(stats.startAttempts),
+      static_cast<unsigned long>(stats.startSuccess),
+      static_cast<unsigned long>(stats.startFailures),
+      static_cast<unsigned long>(stats.retriesScheduled),
+      static_cast<unsigned long>(stats.fallbackCount),
+      static_cast<unsigned long>(stats.legacyStarts),
+      static_cast<unsigned long>(stats.audioToolsStarts));
 }
 
 void printMp3BrowseList(const char* source, const char* path, uint16_t offset, uint16_t limit) {
@@ -2052,8 +2102,8 @@ void printMp3DebugHelp() {
   Serial.println("[MP3_DBG] Cmd: MP3_TEST_START [ms] | MP3_TEST_STOP");
   Serial.println("[MP3_DBG] Cmd: MP3_FX_MODE DUCKING|OVERLAY | MP3_FX_GAIN duck% mix%");
   Serial.println("[MP3_DBG] Cmd: MP3_FX FM|SONAR|MORSE|WIN [ms] | MP3_FX_STOP");
-  Serial.println("[MP3_DBG] Cmd: MP3_BACKEND STATUS|SET AUTO|AUDIO_TOOLS|LEGACY");
-  Serial.println("[MP3_DBG] Cmd: MP3_SCAN START|STATUS|CANCEL|REBUILD");
+  Serial.println("[MP3_DBG] Cmd: MP3_BACKEND STATUS|SET AUTO|AUDIO_TOOLS|LEGACY | MP3_BACKEND_STATUS");
+  Serial.println("[MP3_DBG] Cmd: MP3_SCAN START|STATUS|CANCEL|REBUILD | MP3_SCAN_PROGRESS");
   Serial.println("[MP3_DBG] Cmd: MP3_BROWSE LS [path] | MP3_BROWSE CD <path> | MP3_PLAY_PATH <path>");
   Serial.println("[MP3_DBG] Cmd: MP3_UI PAGE NOW|BROWSE|QUEUE|SET | MP3_STATE SAVE|LOAD|RESET");
 }
@@ -2086,9 +2136,10 @@ void forceUsonFunctionalForMp3Debug(const char* source) {
 void printMp3Status(const char* source) {
   const String current = g_mp3.currentTrackName();
   const CatalogStats stats = g_mp3.catalogStats();
+  const Mp3BackendRuntimeStats backendStats = g_mp3.backendStats();
   const PlayerUiPage page = currentPlayerUiPage();
   Serial.printf(
-      "[MP3_DBG] %s mode=%s u_son=%u sd=%u tracks=%u cur=%u play=%u pause=%u repeat=%s vol=%u%% fx_mode=%s fx=%u(%s,%lums) duck=%u%% mix=%u%% backend=%s/%s err=%s scan_busy=%u scan_ms=%lu ui=%s browse=%s file=%s\n",
+      "[MP3_DBG] %s mode=%s u_son=%u sd=%u tracks=%u cur=%u play=%u pause=%u repeat=%s vol=%u%% fx_mode=%s fx=%u(%s,%lums) duck=%u%% mix=%u%% backend=%s/%s err=%s b_attempt=%lu b_fail=%lu b_retry=%lu b_fallback=%lu scan_busy=%u scan_ms=%lu ui=%s browse=%s file=%s\n",
       source,
       runtimeModeLabel(),
       g_uSonFunctional ? 1U : 0U,
@@ -2108,6 +2159,10 @@ void printMp3Status(const char* source) {
       g_mp3.backendModeLabel(),
       g_mp3.activeBackendLabel(),
       g_mp3.lastBackendError(),
+      static_cast<unsigned long>(backendStats.startAttempts),
+      static_cast<unsigned long>(backendStats.startFailures),
+      static_cast<unsigned long>(backendStats.retriesScheduled),
+      static_cast<unsigned long>(backendStats.fallbackCount),
       g_mp3.isScanBusy() ? 1U : 0U,
       static_cast<unsigned long>(stats.scanMs),
       playerUiPageLabel(page),
@@ -2145,6 +2200,11 @@ bool processMp3DebugCommand(const char* cmd, uint32_t nowMs) {
 
   if (strcmp(cmd, "MP3_STATUS") == 0) {
     printMp3Status("status");
+    return true;
+  }
+
+  if (strcmp(cmd, "MP3_BACKEND_STATUS") == 0) {
+    printMp3BackendStatus("status");
     return true;
   }
 
@@ -2206,6 +2266,11 @@ bool processMp3DebugCommand(const char* cmd, uint32_t nowMs) {
       return true;
     }
     Serial.printf("[MP3_SCAN] BAD_ARGS op=%s (START|STATUS|CANCEL|REBUILD)\n", arg);
+    return true;
+  }
+
+  if (strcmp(cmd, "MP3_SCAN_PROGRESS") == 0) {
+    printMp3ScanProgress("status");
     return true;
   }
 
@@ -2533,12 +2598,106 @@ void updateMp3FormatTest(uint32_t nowMs) {
   g_mp3FormatTest.stageResultLogged = false;
 }
 
+void printLoopBudgetStatus(const char* source, uint32_t nowMs) {
+  const uint32_t avgLoopMs =
+      (g_loopBudget.sampleCount > 0U) ? (g_loopBudget.totalLoopMs / g_loopBudget.sampleCount) : 0U;
+  Serial.printf(
+      "[SYS_LOOP_BUDGET] %s mode=%s max=%lu avg=%lu samples=%lu warn=%lu over_boot=%lu over_runtime=%lu thr_boot=%lu thr_runtime=%lu throttle=%lu\n",
+      source,
+      runtimeModeLabel(),
+      static_cast<unsigned long>(g_loopBudget.maxLoopMs),
+      static_cast<unsigned long>(avgLoopMs),
+      static_cast<unsigned long>(g_loopBudget.sampleCount),
+      static_cast<unsigned long>(g_loopBudget.warnCount),
+      static_cast<unsigned long>(g_loopBudget.overBootThresholdCount),
+      static_cast<unsigned long>(g_loopBudget.overRuntimeThresholdCount),
+      static_cast<unsigned long>(g_loopBudget.bootThresholdMs),
+      static_cast<unsigned long>(g_loopBudget.runtimeThresholdMs),
+      static_cast<unsigned long>(g_loopBudget.warnThrottleMs));
+  (void)nowMs;
+}
+
+void resetLoopBudgetStats(uint32_t nowMs, const char* source) {
+  g_loopBudget.lastWarnMs = nowMs;
+  g_loopBudget.maxLoopMs = 0U;
+  g_loopBudget.warnCount = 0U;
+  g_loopBudget.sampleCount = 0U;
+  g_loopBudget.totalLoopMs = 0U;
+  g_loopBudget.overBootThresholdCount = 0U;
+  g_loopBudget.overRuntimeThresholdCount = 0U;
+  Serial.printf("[SYS_LOOP_BUDGET] reset via=%s\n", source);
+}
+
+void printScreenLinkStatus(const char* source, uint32_t nowMs) {
+  const ScreenSyncStats stats = screenSyncService().snapshot();
+  const uint32_t sinceOkMs = (stats.lastTxSuccessMs > 0U && nowMs >= stats.lastTxSuccessMs)
+                                 ? (nowMs - stats.lastTxSuccessMs)
+                                 : 0U;
+  const uint32_t sinceLinkTxMs = (stats.linkLastTxMs > 0U && nowMs >= stats.linkLastTxMs)
+                                     ? (nowMs - stats.linkLastTxMs)
+                                     : 0U;
+  Serial.printf(
+      "[SCREEN_LINK_STATUS] %s seq=%lu tx_ok=%lu tx_drop=%lu keyframes=%lu resync=%lu last_ok_age=%lu link_tx=%lu link_drop=%lu link_last_age=%lu\n",
+      source,
+      static_cast<unsigned long>(stats.sequence),
+      static_cast<unsigned long>(stats.txSuccess),
+      static_cast<unsigned long>(stats.txDrop),
+      static_cast<unsigned long>(stats.keyframes),
+      static_cast<unsigned long>(stats.watchdogResync),
+      static_cast<unsigned long>(sinceOkMs),
+      static_cast<unsigned long>(stats.linkTxFrames),
+      static_cast<unsigned long>(stats.linkTxDrop),
+      static_cast<unsigned long>(sinceLinkTxMs));
+}
+
+void resetScreenLinkStats(const char* source) {
+  screenSyncService().resetStats();
+  Serial.printf("[SCREEN_LINK_STATUS] stats_reset via=%s\n", source);
+}
+
+bool processSystemDebugCommand(const char* cmd, uint32_t nowMs) {
+  if (cmd == nullptr || cmd[0] == '\0') {
+    return false;
+  }
+
+  if (commandMatches(cmd, "SYS_LOOP_BUDGET")) {
+    const char* arg = cmd + strlen("SYS_LOOP_BUDGET");
+    while (*arg == ' ') {
+      ++arg;
+    }
+    if (arg[0] == '\0' || strcmp(arg, "STATUS") == 0) {
+      printLoopBudgetStatus("status", nowMs);
+      return true;
+    }
+    if (strcmp(arg, "RESET") == 0) {
+      resetLoopBudgetStats(nowMs, "serial");
+      return true;
+    }
+    Serial.printf("[SYS_LOOP_BUDGET] BAD_ARGS op=%s (STATUS|RESET)\n", arg);
+    return true;
+  }
+
+  if (strcmp(cmd, "SCREEN_LINK_STATUS") == 0) {
+    printScreenLinkStatus("status", nowMs);
+    return true;
+  }
+
+  if (strcmp(cmd, "SCREEN_LINK_RESET_STATS") == 0) {
+    resetScreenLinkStats("serial");
+    return true;
+  }
+
+  return false;
+}
+
 void printStoryDebugHelp() {
   Serial.println("[STORY] Flow: UNLOCK -> WIN -> attente -> ETAPE_2 -> gate MP3 ouvert.");
   Serial.println("[STORY] Cmd: STORY_STATUS | STORY_RESET | STORY_ARM | STORY_FORCE_ETAPE2");
   Serial.println("[STORY] Cmd: STORY_TEST_ON | STORY_TEST_OFF | STORY_TEST_DELAY <ms>");
   Serial.println("[STORY] Cmd: STORY_V2_ENABLE [STATUS|ON|OFF] | STORY_V2_TRACE [ON|OFF|STATUS]");
+  Serial.println("[STORY] Cmd: STORY_V2_TRACE_LEVEL [OFF|ERR|INFO|DEBUG|STATUS]");
   Serial.println("[STORY] Cmd: STORY_V2_STATUS | STORY_V2_LIST | STORY_V2_VALIDATE | STORY_V2_HEALTH");
+  Serial.println("[STORY] Cmd: STORY_V2_METRICS | STORY_V2_METRICS_RESET");
   Serial.println("[STORY] Cmd: STORY_V2_EVENT <name> | STORY_V2_STEP <id> | STORY_V2_SCENARIO <id>");
 }
 
@@ -2565,10 +2724,14 @@ void printKeyTuneHelp() {
   Serial.println(
       "[KEY_TUNE] Cmd: STORY_STATUS | STORY_TEST_ON/OFF | STORY_TEST_DELAY | STORY_ARM | STORY_FORCE_ETAPE2");
   Serial.println("[KEY_TUNE] Cmd: STORY_V2_ENABLE [STATUS|ON|OFF] | STORY_V2_TRACE [ON|OFF|STATUS]");
+  Serial.println("[KEY_TUNE] Cmd: STORY_V2_TRACE_LEVEL [OFF|ERR|INFO|DEBUG|STATUS]");
   Serial.println("[KEY_TUNE] Cmd: STORY_V2_STATUS | STORY_V2_LIST | STORY_V2_VALIDATE | STORY_V2_HEALTH");
+  Serial.println("[KEY_TUNE] Cmd: STORY_V2_METRICS | STORY_V2_METRICS_RESET");
   Serial.println("[KEY_TUNE] Cmd: STORY_V2_EVENT <name> | STORY_V2_STEP <id> | STORY_V2_SCENARIO <id>");
   Serial.println("[KEY_TUNE] Cmd: CODEC_STATUS | CODEC_DUMP | CODEC_RD/WR | CODEC_VOL");
   Serial.println("[KEY_TUNE] Cmd: MP3_STATUS | MP3_UNLOCK | MP3_REFRESH | MP3_LIST | MP3_TEST_START | MP3_FX");
+  Serial.println("[KEY_TUNE] Cmd: MP3_SCAN_PROGRESS | MP3_BACKEND_STATUS");
+  Serial.println("[KEY_TUNE] Cmd: SYS_LOOP_BUDGET STATUS|RESET | SCREEN_LINK_STATUS | SCREEN_LINK_RESET_STATS");
 }
 
 void processKeyTuneSerialCommand(const char* rawCmd, uint32_t nowMs) {
@@ -2732,20 +2895,23 @@ bool isCanonicalSerialCommand(const char* token) {
       "STORY_ARM",                  "STORY_FORCE_ETAPE2", "STORY_TEST_ON",
       "STORY_TEST_OFF",             "STORY_TEST_DELAY","STORY_V2_ENABLE",
       "STORY_V2_STATUS",            "STORY_V2_LIST",   "STORY_V2_VALIDATE",
-      "STORY_V2_HEALTH",            "STORY_V2_TRACE",
+      "STORY_V2_HEALTH",            "STORY_V2_TRACE",  "STORY_V2_TRACE_LEVEL",
+      "STORY_V2_METRICS",           "STORY_V2_METRICS_RESET",
       "STORY_V2_EVENT",             "STORY_V2_STEP",   "STORY_V2_SCENARIO",
       "MP3_HELP",                   "MP3_STATUS",
       "MP3_UNLOCK",
       "MP3_REFRESH",                "MP3_LIST",        "MP3_NEXT",    "MP3_PREV",
       "MP3_RESTART",                "MP3_PLAY",        "MP3_FX_MODE", "MP3_FX_GAIN",
       "MP3_FX",                     "MP3_FX_STOP",     "MP3_TEST_START", "MP3_TEST_STOP",
-      "MP3_BACKEND",                "MP3_SCAN",        "MP3_BROWSE",  "MP3_PLAY_PATH",
+      "MP3_BACKEND",                "MP3_BACKEND_STATUS", "MP3_SCAN", "MP3_SCAN_PROGRESS",
+      "MP3_BROWSE",                 "MP3_PLAY_PATH",
       "MP3_UI",                     "MP3_STATE",
       "KEY_HELP",                   "KEY_STATUS",      "KEY_RAW_ON",  "KEY_RAW_OFF",
       "KEY_RESET",                  "KEY_SET",         "KEY_SET_ALL", "KEY_TEST_START",
       "KEY_TEST_STATUS",            "KEY_TEST_RESET",  "KEY_TEST_STOP", "CODEC_HELP",
       "CODEC_STATUS",               "CODEC_DUMP",      "CODEC_RD",    "CODEC_WR",
-      "CODEC_VOL",                  "CODEC_VOL_RAW",
+      "CODEC_VOL",                  "CODEC_VOL_RAW",   "SYS_LOOP_BUDGET",
+      "SCREEN_LINK_STATUS",         "SCREEN_LINK_RESET_STATS",
   };
 
   for (const char* canonical : kCanonicalCommands) {
@@ -2797,6 +2963,12 @@ void onSerialCommand(const SerialCommand& cmd, uint32_t nowMs, void* ctx) {
   if (serialIsCodecCommand(cmd.token)) {
     if (!processCodecDebugCommand(routedCmd)) {
       serialDispatchReply(Serial, "CODEC", SerialDispatchResult::kUnknown, cmd.line);
+    }
+    return;
+  }
+  if (serialIsSystemCommand(cmd.token)) {
+    if (!processSystemDebugCommand(routedCmd, nowMs)) {
+      serialDispatchReply(Serial, "SYS", SerialDispatchResult::kUnknown, cmd.line);
     }
     return;
   }
@@ -3149,6 +3321,7 @@ void handleKeyPress(uint8_t key) {
 void app_orchestrator::setup() {
   Serial.begin(115200);
   delay(200);
+  resetLoopBudgetStats(millis(), "boot");
 
   g_led.begin();
   g_laDetector.begin();
@@ -3214,15 +3387,18 @@ void app_orchestrator::setup() {
       "[KEY_TUNE] Serial: KEY_STATUS | KEY_RAW_ON/OFF | KEY_SET Kx/REL v | KEY_TEST_START/STATUS/RESET/STOP");
   Serial.println("[KEY_TUNE] Serial: BOOT_FX_FM | BOOT_FX_SONAR | BOOT_FX_MORSE | BOOT_FX_WIN");
   Serial.println("[STORY] Serial V2: STORY_V2_ENABLE [STATUS|ON|OFF] | STORY_V2_TRACE [ON|OFF|STATUS]");
+  Serial.println("[STORY] Serial V2: STORY_V2_TRACE_LEVEL [OFF|ERR|INFO|DEBUG|STATUS]");
   Serial.println("[STORY] Serial V2: STORY_V2_STATUS | STORY_V2_LIST | STORY_V2_VALIDATE | STORY_V2_HEALTH");
+  Serial.println("[STORY] Serial V2: STORY_V2_METRICS | STORY_V2_METRICS_RESET");
   Serial.println("[STORY] Serial V2: STORY_V2_EVENT <name> | STORY_V2_STEP <id> | STORY_V2_SCENARIO <id>");
   Serial.println(
       "[MP3_DBG] Serial: MP3_STATUS | MP3_UNLOCK | MP3_REFRESH | MP3_LIST | MP3_PLAY n | MP3_TEST_START [ms]");
   Serial.println("[MP3_DBG] Serial: MP3_FX_MODE DUCKING|OVERLAY | MP3_FX_GAIN duck mix | MP3_FX FM|SONAR|MORSE|WIN [ms]");
   Serial.println(
-      "[MP3_DBG] Serial: MP3_BACKEND STATUS|SET AUTO|AUDIO_TOOLS|LEGACY | MP3_SCAN START|STATUS|CANCEL|REBUILD");
+      "[MP3_DBG] Serial: MP3_BACKEND STATUS|SET AUTO|AUDIO_TOOLS|LEGACY | MP3_BACKEND_STATUS | MP3_SCAN START|STATUS|CANCEL|REBUILD | MP3_SCAN_PROGRESS");
   Serial.println(
       "[MP3_DBG] Serial: MP3_BROWSE LS [path] | MP3_BROWSE CD <path> | MP3_PLAY_PATH <path> | MP3_UI PAGE ... | MP3_STATE SAVE|LOAD|RESET");
+  Serial.println("[SYS] Serial: SYS_LOOP_BUDGET STATUS|RESET | SCREEN_LINK_STATUS | SCREEN_LINK_RESET_STATS");
   Serial.println("[FS] Serial: BOOT_FS_INFO | BOOT_FS_LIST | BOOT_FS_TEST");
   Serial.printf("[FS] Boot FX path: %s (%s)\n",
                 config::kBootFxLittleFsPath,
@@ -3400,16 +3576,28 @@ void app_orchestrator::loop() {
   sendScreenFrameSnapshot(nowMs, screenKey);
 
   const uint32_t loopElapsedMs = static_cast<uint32_t>(millis() - loopStartMs);
+  ++g_loopBudget.sampleCount;
+  g_loopBudget.totalLoopMs += loopElapsedMs;
   if (loopElapsedMs > g_loopBudget.maxLoopMs) {
     g_loopBudget.maxLoopMs = loopElapsedMs;
   }
-  if (loopElapsedMs > 25U && static_cast<int32_t>(nowMs - g_loopBudget.lastWarnMs) >= 0) {
+
+  const bool bootActive = g_bootAudioProtocol.active;
+  const uint32_t thresholdMs = bootActive ? g_loopBudget.bootThresholdMs : g_loopBudget.runtimeThresholdMs;
+  if (loopElapsedMs > g_loopBudget.bootThresholdMs) {
+    ++g_loopBudget.overBootThresholdCount;
+  }
+  if (loopElapsedMs > g_loopBudget.runtimeThresholdMs) {
+    ++g_loopBudget.overRuntimeThresholdCount;
+  }
+  if (loopElapsedMs > thresholdMs && static_cast<int32_t>(nowMs - g_loopBudget.lastWarnMs) >= 0) {
+    ++g_loopBudget.warnCount;
     Serial.printf("[LOOP_BUDGET] warn loop=%lums max=%lums mode=%u boot=%u mp3=%u\n",
                   static_cast<unsigned long>(loopElapsedMs),
                   static_cast<unsigned long>(g_loopBudget.maxLoopMs),
                   static_cast<unsigned int>(g_mode),
                   g_bootAudioProtocol.active ? 1U : 0U,
                   (g_mode == RuntimeMode::kMp3) ? 1U : 0U);
-    g_loopBudget.lastWarnMs = nowMs + 2000U;
+    g_loopBudget.lastWarnMs = nowMs + g_loopBudget.warnThrottleMs;
   }
 }

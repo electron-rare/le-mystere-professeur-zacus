@@ -146,8 +146,11 @@ Commandes scenario (moniteur ESP32):
 - `STORY_V2_LIST`
 - `STORY_V2_VALIDATE`
 - `STORY_V2_HEALTH`
+- `STORY_V2_METRICS`
+- `STORY_V2_METRICS_RESET`
 - `STORY_V2_ENABLE [STATUS|ON|OFF]`
 - `STORY_V2_TRACE [ON|OFF|STATUS]`
+- `STORY_V2_TRACE_LEVEL [OFF|ERR|INFO|DEBUG|STATUS]`
 - `STORY_V2_EVENT <name>`
 - `STORY_V2_STEP <id>`
 - `STORY_V2_SCENARIO <id>`
@@ -158,7 +161,7 @@ Notes:
 - `STORY_ARM` lance maintenant le scenario complet: armement + tentative de lecture `WIN`.
 - `STORY_STATUS` expose un `stage` explicite: `WAIT_UNLOCK`, `WIN_PENDING`, `WAIT_ETAPE2`, `ETAPE2_DONE`.
 - Le moteur STORY V2 est protege par le flag `kStoryV2EnabledDefault` (default `false`).
-- Si le flag V2 est OFF, `STORY_V2_EVENT/STEP/SCENARIO/VALIDATE/HEALTH` repondent `OUT_OF_CONTEXT`.
+- Si le flag V2 est OFF, `STORY_V2_EVENT/STEP/SCENARIO/VALIDATE/HEALTH/METRICS` repondent `OUT_OF_CONTEXT`.
 - Rollback runtime immediat: `STORY_V2_ENABLE OFF` (retour controleur legacy sans reflash).
 - Rollback release: conserver `kStoryV2EnabledDefault=false` puis recompiler/reflasher.
 - Les delais par defaut sont configures dans `src/config.h`:
@@ -288,6 +291,8 @@ Commandes MP3 utiles:
 - `MP3_SCAN START` : scan incremental (index prioritaire)
 - `MP3_SCAN REBUILD` : rebuild force sans index
 - `MP3_SCAN CANCEL` : annule un scan en cours
+- `MP3_SCAN_PROGRESS` : progression scan live (depth/stack/folders/files/tracks/limit)
+- `MP3_BACKEND_STATUS` : compteurs runtime backend (attempts/fail/retry/fallback)
 
 Sons internes:
 
@@ -327,7 +332,9 @@ Reglage live (sans reflash):
 - `KEY_TEST_STOP` : arrete l'auto-test
 - `BOOT_FS_INFO` / `BOOT_FS_LIST` / `BOOT_FS_TEST` : debug LittleFS et test lecture FX boot
 - `STORY_STATUS` / `STORY_TEST_ON` / `STORY_TEST_OFF` / `STORY_TEST_DELAY` / `STORY_ARM` / `STORY_FORCE_ETAPE2` : pilotage scenario STORY
-- `STORY_V2_ENABLE` / `STORY_V2_TRACE` / `STORY_V2_STATUS` / `STORY_V2_LIST` / `STORY_V2_VALIDATE` / `STORY_V2_HEALTH` / `STORY_V2_EVENT` / `STORY_V2_STEP` / `STORY_V2_SCENARIO` : debug/migration STORY V2
+- `STORY_V2_ENABLE` / `STORY_V2_TRACE` / `STORY_V2_TRACE_LEVEL` / `STORY_V2_STATUS` / `STORY_V2_LIST` / `STORY_V2_VALIDATE` / `STORY_V2_HEALTH` / `STORY_V2_METRICS` / `STORY_V2_METRICS_RESET` / `STORY_V2_EVENT` / `STORY_V2_STEP` / `STORY_V2_SCENARIO` : debug/migration STORY V2
+- `MP3_SCAN_PROGRESS` / `MP3_BACKEND_STATUS` : observabilite lecteur MP3
+- `SYS_LOOP_BUDGET STATUS|RESET` / `SCREEN_LINK_STATUS` / `SCREEN_LINK_RESET_STATS` : diagnostics runtime/screen link
 - `CODEC_STATUS` / `CODEC_DUMP` : debug codec I2C ES8388
 - `CODEC_RD reg` / `CODEC_WR reg val` : lecture/ecriture registre codec
 - `CODEC_VOL pct` / `CODEC_VOL_RAW raw [out2]` : reglage volume sortie codec

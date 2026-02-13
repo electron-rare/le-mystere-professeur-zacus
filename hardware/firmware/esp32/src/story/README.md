@@ -79,8 +79,11 @@ Generation:
 
 - `STORY_V2_ENABLE [STATUS|ON|OFF]`
 - `STORY_V2_TRACE [ON|OFF|STATUS]`
+- `STORY_V2_TRACE_LEVEL [OFF|ERR|INFO|DEBUG|STATUS]`
 - `STORY_V2_STATUS`
 - `STORY_V2_HEALTH`
+- `STORY_V2_METRICS`
+- `STORY_V2_METRICS_RESET`
 - `STORY_V2_LIST`
 - `STORY_V2_VALIDATE`
 - `STORY_V2_EVENT <name>`
@@ -91,6 +94,8 @@ Diagnostic:
 
 - `STORY_V2_HEALTH` retourne un snapshot court (`OK|BUSY|ERROR|OUT_OF_CONTEXT`)
 - `STORY_V2_TRACE ON` active les logs transitions/events pour debug live
+- `STORY_V2_TRACE_LEVEL` ajuste la verbosite (`OFF/ERR/INFO/DEBUG`)
+- `STORY_V2_METRICS` expose les compteurs events/transitions/queue drops/storm drops
 
 Compat legacy conservee pendant PR1 via feature flag:
 

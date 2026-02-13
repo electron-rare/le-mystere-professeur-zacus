@@ -257,6 +257,7 @@ Sans variable `PORT`, PlatformIO choisit automatiquement le port serie.
 
 Astuce detection ports:
 - `pio device list`
+- Runbook semi-auto Story V2: `tools/qa/live_story_v2_runbook.md`
 
 ## Lecteur audio evolue
 

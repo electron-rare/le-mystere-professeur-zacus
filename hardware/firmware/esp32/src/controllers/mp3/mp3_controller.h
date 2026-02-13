@@ -12,7 +12,13 @@ class Mp3Controller {
   void update(uint32_t nowMs, bool allowPlayback);
   void refreshStorage();
   void applyUiAction(const UiAction& action);
+  const char* browsePath() const;
+  void setBrowsePath(const char* path);
   void printUiStatus(Print& out, const char* source) const;
+  void printScanStatus(Print& out, const char* source) const;
+  void printScanProgress(Print& out, const char* source) const;
+  void printBackendStatus(Print& out, const char* source) const;
+  void printBrowseList(Print& out, const char* source, const char* path, uint16_t offset, uint16_t limit) const;
   void printQueuePreview(Print& out, uint8_t count, const char* source) const;
   void printCapabilities(Print& out, const char* source) const;
 
@@ -24,4 +30,5 @@ class Mp3Controller {
  private:
   Mp3Player& player_;
   PlayerUiModel& ui_;
+  String browsePath_ = "/";
 };

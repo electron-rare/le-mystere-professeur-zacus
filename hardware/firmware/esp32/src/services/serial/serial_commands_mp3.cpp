@@ -45,6 +45,10 @@ bool allowPlayback(const Mp3SerialRuntimeContext& ctx) {
 }
 
 void printUiStatus(Print& out, const Mp3SerialRuntimeContext& ctx, const char* source) {
+  if (ctx.printUiStatus != nullptr) {
+    ctx.printUiStatus(source != nullptr ? source : "status");
+    return;
+  }
   if (ctx.ui == nullptr || ctx.player == nullptr) {
     serialDispatchReply(out, "MP3_UI", SerialDispatchResult::kOutOfContext, "missing_context");
     return;

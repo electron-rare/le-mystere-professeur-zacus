@@ -21,6 +21,7 @@ struct Mp3SerialRuntimeContext {
   const char* (*currentBrowsePath)() = nullptr;
   void (*setBrowsePath)(const char* path) = nullptr;
   void (*printHelp)() = nullptr;
+  void (*printUiStatus)(const char* source) = nullptr;
   void (*printStatus)(const char* source) = nullptr;
   void (*printScanStatus)(const char* source) = nullptr;
   void (*printScanProgress)(const char* source) = nullptr;

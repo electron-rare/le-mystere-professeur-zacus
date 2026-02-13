@@ -22,6 +22,10 @@ Crée un nouveau fichier dans `story_specs/scenarios/`, par exemple:
 
 `story_specs/scenarios/mon_scenario.yaml`
 
+Exemple prêt à l'emploi dans le repo:
+
+- `story_specs/scenarios/example_unlock_express.yaml`
+
 ## 2) Définir la structure minimale
 
 Dans le YAML, renseigne au minimum:

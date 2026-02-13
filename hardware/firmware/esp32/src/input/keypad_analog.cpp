@@ -1,6 +1,6 @@
 #include "keypad_analog.h"
 
-#include "config.h"
+#include "../config.h"
 
 KeypadAnalog::KeypadAnalog(uint8_t adcPin) : adcPin_(adcPin), thresholds_(defaultThresholds()) {}
 

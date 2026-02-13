@@ -3,6 +3,9 @@
 Kit d’enquête pour anniversaire (9–11 ans), ambiance laboratoire / campus scientifique.
 Style visuel : noir & blanc, graphique, lisible, élégant, homogène.
 
+## Aperçu visuel
+![Vue d'ensemble du dépôt](docs/assets/repo-map.svg)
+
 ## Contenu
 ### 1) Kit Maître du jeu
 Dossier : `kit-maitre-du-jeu/`
@@ -29,12 +32,12 @@ Dossier : `hardware/`
 - firmware Arduino / ESP32
 
 ## État du projet
-- **Kit MJ** : structure documentaire en place (`kit-maitre-du-jeu/`).
-- **Printables** : conventions définies, arborescence `src/export` à compléter selon les livrables.
+- **Kit MJ** : documentation d'animation complète, exports PDF possibles via `kit-maitre-du-jeu/export/pdf/`.
+- **Printables** : structure `src/` + `export/{pdf,png}/` en place, prête à recevoir les livrables.
 - **Hardware/firmware** : flux `U_LOCK`/`U-SON`/MP3 opérationnel et documenté (`hardware/firmware/esp32/`).
 
 ## Licence (open source)
-- Contenus creatifs (documents, PDFs, PNG, SVG, textes de jeu) : **CC BY-SA 4.0**
+- Contenus créatifs (documents, PDFs, PNG, SVG, textes de jeu) : **CC BY-SA 4.0**
 - Code (firmware, scripts) : **GPL-3.0-or-later**
 Voir `LICENSE.md` et `LICENSES/`.
 
@@ -43,7 +46,9 @@ Projet indépendant, non affilié à aucune marque ou éditeur.
 Voir `DISCLAIMER.md`.
 
 ## Maintenance du dépôt (hors firmware)
-Voir `docs/maintenance-repo.md`.
+- Plan : `docs/maintenance-repo.md`
+- Audit : `docs/repo-audit.md`
+- Règles anti-conflits docs : section dédiée dans `docs/maintenance-repo.md`
 
 ## Contribuer
 Voir `CONTRIBUTING.md`.

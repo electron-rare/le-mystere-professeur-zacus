@@ -8,3 +8,8 @@ Dossiers :
 Convention de nommage (recommandée) :
 - PDF : `invite-a6-recto-v1.pdf`, `invite-a6-verso-v1.pdf`
 - PNG : `invite-a6-recto-v1.png`, `invite-a6-verso-v1.png`
+
+
+État actuel :
+- arborescence prête,
+- exports à ajouter selon les prochaines versions graphiques.

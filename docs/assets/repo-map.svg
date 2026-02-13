@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="680" viewBox="0 0 1200 680" role="img" aria-labelledby="title desc">
+  <title id="title">Le Mystère du Professeur Zacus - Vue d'ensemble du dépôt</title>
+  <desc id="desc">Schéma des trois piliers du dépôt: Kit Maître du jeu, Printables et Hardware.</desc>
+  <defs>
+    <style>
+      .bg{fill:#f7f7f7}
+      .panel{fill:#fff;stroke:#222;stroke-width:2}
+      .h{font:700 32px 'Segoe UI',Arial,sans-serif;fill:#111}
+      .t{font:600 22px 'Segoe UI',Arial,sans-serif;fill:#111}
+      .s{font:400 18px 'Segoe UI',Arial,sans-serif;fill:#333}
+      .cap{font:700 20px 'Segoe UI',Arial,sans-serif;fill:#111}
+      .line{stroke:#222;stroke-width:2}
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1200" height="680"/>
+
+  <text class="h" x="600" y="62" text-anchor="middle">Le Mystère du Professeur Zacus</text>
+  <text class="s" x="600" y="92" text-anchor="middle">Structure actuelle du dépôt</text>
+
+  <rect class="panel" x="70" y="150" rx="12" ry="12" width="320" height="430"/>
+  <text class="t" x="230" y="195" text-anchor="middle">Kit Maître du jeu</text>
+  <text class="s" x="95" y="240">• script minute-par-minute</text>
+  <text class="s" x="95" y="272">• solution complète</text>
+  <text class="s" x="95" y="304">• checklist matériel</text>
+  <text class="s" x="95" y="336">• distribution des rôles</text>
+  <text class="s" x="95" y="368">• guide anti-chaos</text>
+  <text class="s" x="95" y="400">• stations modulaires</text>
+  <text class="s" x="95" y="446">Path: kit-maitre-du-jeu/</text>
+
+  <rect class="panel" x="440" y="150" rx="12" ry="12" width="320" height="430"/>
+  <text class="t" x="600" y="195" text-anchor="middle">Printables</text>
+  <text class="s" x="465" y="240">• invitations</text>
+  <text class="s" x="465" y="272">• cartes / feuille d'enquête</text>
+  <text class="s" x="465" y="304">• badges / règles 1 page</text>
+  <text class="s" x="465" y="336">• ordre d'impression</text>
+  <text class="s" x="465" y="384">Sous-structure:</text>
+  <text class="s" x="465" y="416">  - src/</text>
+  <text class="s" x="465" y="448">  - export/pdf/</text>
+  <text class="s" x="465" y="480">  - export/png/</text>
+  <text class="s" x="465" y="526">Path: printables/</text>
+
+  <rect class="panel" x="810" y="150" rx="12" ry="12" width="320" height="430"/>
+  <text class="t" x="970" y="195" text-anchor="middle">Hardware (optionnel)</text>
+  <text class="s" x="835" y="240">• BOM</text>
+  <text class="s" x="835" y="272">• câblage</text>
+  <text class="s" x="835" y="304">• firmware Arduino / ESP32</text>
+  <text class="s" x="835" y="336">• boîtier</text>
+  <text class="s" x="835" y="384">Firmware ESP32:</text>
+  <text class="s" x="835" y="416">  U_LOCK → U-SON → MP3</text>
+  <text class="s" x="835" y="462">Path: hardware/</text>
+
+  <line class="line" x1="390" y1="365" x2="440" y2="365"/>
+  <line class="line" x1="760" y1="365" x2="810" y2="365"/>
+
+  <text class="cap" x="600" y="635" text-anchor="middle">Objectif: documentation cohérente, livrables imprimables et firmware stable</text>
+</svg>

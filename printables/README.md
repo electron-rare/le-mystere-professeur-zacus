@@ -16,3 +16,8 @@ Exemples :
 - `regles-1-page-a4-v1.pdf`
 
 Ordre d’impression : voir `ordre-dimpression.md`.
+
+## État actuel
+- Structure prête : `src/`, `export/pdf/`, `export/png/`.
+- Invitations initialisées : `invitations/src/` et `invitations/export/{pdf,png}/`.
+- Aucun asset image versionné pour l'instant (préviews à ajouter au fil des PR).

@@ -2,7 +2,7 @@
 
 Ce document decrit le branchement entre:
 - la carte principale ESP32 (firmware principal),
-- la carte ESP8266 NodeMCU + ecran OLED (firmware `esp8266_oled`).
+- la carte ESP8266 NodeMCU + ecran OLED (env racine `esp8266_oled`, sous-projet `nodemcuv2`).
 
 ## 1) Liaison serie entre les 2 cartes (obligatoire)
 
@@ -14,7 +14,7 @@ Ce document decrit le branchement entre:
 Notes:
 - Le lien est unidirectionnel: ESP32 vers ESP8266.
 - `D5 (TX)` de l'ESP8266 n'est pas utilise.
-- Debit serie: `38400 bauds`.
+- Debit serie: `19200 bauds`.
 
 ## 2) OLED sur la carte ESP8266
 
@@ -59,6 +59,7 @@ OLED SCL  -------------   D2 (recommande)
 
 1. Flasher l'ESP32: `pio run -e esp32dev -t upload --upload-port <PORT_ESP32>`.
 2. Flasher l'ESP8266: `pio run -e esp8266_oled -t upload --upload-port <PORT_ESP8266>`.
+   - ou dans `screen_esp8266_hw630`: `pio run -e nodemcuv2 -t upload --upload-port <PORT_ESP8266>`.
 3. Ouvrir le moniteur ESP8266: `pio device monitor -e esp8266_oled --port <PORT_ESP8266>`.
 4. Verifier que l'ecran passe de `Demarrage...` a un ecran de mode (`U_LOCK`, `U-SON FONCTIONNEL` ou `LECTEUR U-SON`) apres reception des trames.
 
@@ -66,3 +67,9 @@ Equivalents Makefile:
 - `make upload-esp32 ESP32_PORT=<PORT_ESP32>`
 - `make upload-screen SCREEN_PORT=<PORT_ESP8266>`
 - `make monitor-screen SCREEN_PORT=<PORT_ESP8266>`
+
+## 6) Sequence USB pour test live
+
+1. Brancher d'abord l'ESP32, flasher, verifier le boot serial.
+2. Brancher ensuite l'ESP8266 OLED, flasher, verifier reception trames `STAT,...`.
+3. Garder les deux USB branches pendant la validation fonctionnelle complete.

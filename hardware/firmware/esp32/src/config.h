@@ -57,6 +57,8 @@ constexpr uint32_t kBootAudioValidationTimeoutMs = 0;  // 0 => pas de timeout au
 constexpr uint8_t kBootAudioValidationMaxReplays = 6;
 constexpr uint16_t kBootProtocolPromptPeriodMs = 3000;
 constexpr uint16_t kBootRadioScanChunkMs = 18;
+constexpr uint32_t kStoryEtape2DelayMs = 15UL * 60UL * 1000UL;
+constexpr uint32_t kStoryEtape2TestDelayMs = 5000U;
 constexpr bool kEnableInternalLittleFs = true;
 constexpr bool kInternalLittleFsFormatOnFail = false;
 constexpr bool kPreferLittleFsBootFx = true;
@@ -66,8 +68,9 @@ constexpr uint32_t kBootFxLittleFsMaxDurationMs = 22000;
 
 // ESP32 -> ESP8266 (ecran) en UART unidirectionnel
 constexpr uint8_t kPinScreenTx = 22;
-constexpr uint32_t kScreenBaud = 38400;
+constexpr uint32_t kScreenBaud = 19200;
 constexpr uint16_t kScreenUpdatePeriodMs = 250;
+constexpr uint16_t kScreenChangeMinPeriodMs = 90;
 
 // Clavier analogique (6 touches sur 1 entree ADC)
 constexpr uint8_t kPinKeysAdc = 36;
@@ -84,6 +87,10 @@ constexpr uint16_t kKey5Max = 1770;
 constexpr uint16_t kKey6Max = 2200;
 
 constexpr char kMp3Path[] = "/track001.mp3";
+constexpr bool kMp3FxOverlayModeDefault = false;  // false=DUCKING, true=OVERLAY
+constexpr float kMp3FxDuckingGainDefault = 0.45f;
+constexpr float kMp3FxOverlayGainDefault = 0.42f;
+constexpr uint16_t kMp3FxDefaultDurationMs = 2200;
 
 constexpr float kSineFreqHz = 440.0f;
 constexpr float kSineFreqStepHz = 20.0f;

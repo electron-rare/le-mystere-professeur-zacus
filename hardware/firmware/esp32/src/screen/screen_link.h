@@ -2,39 +2,25 @@
 
 #include <Arduino.h>
 
+#include "screen_frame.h"
+
 class ScreenLink {
  public:
   ScreenLink(HardwareSerial& serial,
              uint8_t txPin,
              uint32_t baud,
-             uint16_t updatePeriodMs);
+             uint16_t updatePeriodMs,
+             uint16_t changeMinPeriodMs);
 
   void begin();
-  void update(bool laDetected,
-              bool mp3Playing,
-              bool sdReady,
-              bool mp3Mode,
-              bool uLockMode,
-              bool uLockListening,
-              bool uSonFunctional,
-              uint8_t key,
-              uint16_t track,
-              uint16_t trackCount,
-              uint8_t volumePercent,
-              uint8_t micLevelPercent,
-              int8_t tuningOffset,
-              uint8_t tuningConfidence,
-              bool micScopeEnabled,
-              uint8_t unlockHoldPercent,
-              uint8_t startupStage,
-              uint8_t appStage,
-              uint32_t nowMs);
+  void update(const ScreenFrame& frame);
 
  private:
   HardwareSerial& serial_;
   uint8_t txPin_;
   uint32_t baud_;
   uint16_t updatePeriodMs_;
+  uint16_t changeMinPeriodMs_;
 
   bool hasState_ = false;
   bool lastLa_ = false;
@@ -55,5 +41,12 @@ class ScreenLink {
   uint8_t lastUnlockHoldPercent_ = 0;
   uint8_t lastStartupStage_ = 0;
   uint8_t lastAppStage_ = 0;
+  uint8_t lastUiPage_ = 0;
+  uint8_t lastRepeatMode_ = 0;
+  bool lastFxActive_ = false;
+  uint8_t lastBackendMode_ = 0;
+  bool lastScanBusy_ = false;
+  uint8_t lastErrorCode_ = 0;
+  uint32_t lastSequence_ = 0;
   uint32_t lastTxMs_ = 0;
 };

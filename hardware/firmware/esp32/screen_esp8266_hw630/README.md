@@ -30,7 +30,7 @@ Compatibilite:
 - **Masse commune obligatoire**: ESP32 GND <-> ESP8266 GND
 - ESP32 `GPIO22` (TX) -> ESP8266 `D6` (RX SoftwareSerial)
 - ESP8266 `D5` (TX) non utilise (laisser deconnecte)
-- Debit UART: `38400 bauds`
+- Debit UART: `19200 bauds`
 - OLED I2C sur ESP8266:
   - recommande: `D1` SDA, `D2` SCL
   - fallback supporte: `D2` SDA, `D1` SCL

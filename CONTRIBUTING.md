@@ -23,7 +23,7 @@ Objectif : un kit cohérent, fluide à animer, facile à imprimer (noir & blanc)
 5. PR avec explication + previews PNG si possible
 
 ## Licence des contributions
-- Contenu creatif : CC BY-SA 4.0
+- Contenu créatif : CC BY-SA 4.0
 - Code : GPL-3.0-or-later
 
 ## Checklist PR (recommandée)

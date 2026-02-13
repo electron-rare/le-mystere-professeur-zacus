@@ -67,3 +67,10 @@ sans modifier le code firmware.
 - [ ] Cohérence de ton et vocabulaire (FR).
 - [ ] `CHANGELOG.md` mis à jour.
 - [ ] Diff relu pour supprimer le bruit (formatage inutile, doublons).
+
+## Règles anti-conflits (PR docs)
+
+- Toujours rebaser la branche sur `main` avant de modifier `CHANGELOG.md`.
+- Dans `Unreleased`, ajouter les lignes en tête (plus récent en premier).
+- Éviter de réécrire les anciennes sections de release (`0.x.y`) sauf correction factuelle.
+- Limiter une PR doc à un thème principal (ex: printables, kit MJ, gouvernance).

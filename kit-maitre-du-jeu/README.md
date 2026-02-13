@@ -14,4 +14,4 @@ Bonus :
 - `stations/` (4–8 stations possibles, modulaires)
 
 Exports :
-- `export/pdf/` (si tu ajoutes des versions PDF)
+- `export/pdf/` (dossier prêt pour les versions PDF imprimables)

@@ -11,7 +11,8 @@ KeypadAnalog g_keypad(config::kPinKeysAdc);
 ScreenLink g_screen(Serial2,
                     config::kPinScreenTx,
                     config::kScreenBaud,
-                    config::kScreenUpdatePeriodMs);
+                    config::kScreenUpdatePeriodMs,
+                    config::kScreenChangeMinPeriodMs);
 Mp3Player g_mp3(config::kPinI2SBclk,
                 config::kPinI2SLrc,
                 config::kPinI2SDout,
@@ -21,6 +22,11 @@ I2sJinglePlayer g_unlockJinglePlayer(config::kPinI2SBclk,
                                      config::kPinI2SLrc,
                                      config::kPinI2SDout,
                                      config::kI2sOutputPort);
+AsyncAudioService g_asyncAudio(config::kPinI2SBclk,
+                               config::kPinI2SLrc,
+                               config::kPinI2SDout,
+                               config::kI2sOutputPort,
+                               config::kBootRadioScanChunkMs);
 
 RuntimeMode g_mode = RuntimeMode::kSignal;
 bool g_laDetectionEnabled = true;

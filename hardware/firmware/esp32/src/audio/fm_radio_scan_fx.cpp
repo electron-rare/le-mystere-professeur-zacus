@@ -14,6 +14,16 @@ constexpr float kTwoPi = 6.28318530718f;
 constexpr uint16_t kBlockFrames = 96U;
 constexpr uint16_t kSynthRateHz = 22050U;
 
+constexpr char kMorsePattern[] = ".-- .. -.";  // "WIN"
+constexpr uint16_t kMorseUnitMs = 90U;
+constexpr uint16_t kMorseFreqHz = 680U;
+
+constexpr uint16_t kWinNotesHz[] = {
+    523U, 659U, 784U, 1047U, 1319U, 1047U, 1568U, 1319U, 0U};
+constexpr uint16_t kWinNotesMs[] = {
+    120U, 120U, 120U, 150U, 180U, 120U, 210U, 260U, 180U};
+constexpr uint16_t kWinNoteCount = sizeof(kWinNotesHz) / sizeof(kWinNotesHz[0]);
+
 float clampf(float value, float minValue, float maxValue) {
   if (value < minValue) {
     return minValue;
@@ -49,6 +59,22 @@ void FmRadioScanFx::setSampleRate(uint32_t sampleRateHz) {
     return;
   }
   sampleRateHz_ = sampleRateHz;
+}
+
+void FmRadioScanFx::setEffect(Effect effect) {
+  effect_ = effect;
+  if (active_) {
+    resetSynthesisState();
+  }
+}
+
+FmRadioScanFx::Effect FmRadioScanFx::effect() const {
+  return effect_;
+}
+
+bool FmRadioScanFx::start(Effect effect) {
+  setEffect(effect);
+  return start();
 }
 
 bool FmRadioScanFx::start() {
@@ -138,6 +164,11 @@ void FmRadioScanFx::update(uint32_t nowMs, uint16_t chunkMs) {
   }
 }
 
+bool FmRadioScanFx::playBlocking(Effect effect, uint32_t durationMs, uint16_t chunkMs) {
+  setEffect(effect);
+  return playBlocking(durationMs, chunkMs);
+}
+
 bool FmRadioScanFx::playBlocking(uint32_t durationMs, uint16_t chunkMs) {
   if (durationMs == 0U) {
     return true;
@@ -199,15 +230,46 @@ void FmRadioScanFx::resetSynthesisState() {
   sweepCycle_ = static_cast<uint32_t>(random(0L, 2L));
   sweepPosInCycle_ = 0U;
   sampleClock_ = 0U;
+  sonarPhase_ = 0.0f;
+  sonarEchoPhase_ = 0.0f;
+  morsePhase_ = 0.0f;
+  winPhase_ = 0.0f;
+  morseToneSamplesLeft_ = 0U;
+  morseGapSamplesLeft_ = 0U;
+  morsePatternPos_ = 0U;
+  winStepSamplesLeft_ = 0U;
+  winStepTotalSamples_ = 0U;
+  winStepIndex_ = 0U;
+  winCurrentFreqHz_ = 0U;
 
   if (synth_ != nullptr) {
     synth_->sweepOsc.setPhase(0U);
     synth_->stationOsc.setPhase(0U);
     synth_->carrierOsc.setPhase(0U);
   }
+
+  if (effect_ == Effect::kMorse) {
+    morsePrepareNextState();
+  } else if (effect_ == Effect::kWin) {
+    winPrepareNextStep();
+  }
 }
 
 int16_t FmRadioScanFx::nextSample() {
+  switch (effect_) {
+    case Effect::kSonar:
+      return nextSampleSonar();
+    case Effect::kMorse:
+      return nextSampleMorse();
+    case Effect::kWin:
+      return nextSampleWin();
+    case Effect::kFmSweep:
+    default:
+      return nextSampleFmSweep();
+  }
+}
+
+int16_t FmRadioScanFx::nextSampleFmSweep() {
   if (synth_ == nullptr) {
     return 0;
   }
@@ -253,8 +315,7 @@ int16_t FmRadioScanFx::nextSample() {
 
   const float t = static_cast<float>(sampleClock_) / static_cast<float>(sampleRateHz_);
   const float seekFlutter = 0.83f + (0.17f * sinf(kTwoPi * 0.45f * t));
-  const bool softDropout =
-      !stationWindow && (((sampleClock_ / ((sampleRateHz_ / 11U) + 1U)) % 19U) == 7U);
+  const bool softDropout = !stationWindow && (((sampleClock_ / ((sampleRateHz_ / 11U) + 1U)) % 19U) == 7U);
   const float dropoutGain = softDropout ? 0.34f : 1.0f;
 
   float sampleF = 0.0f;
@@ -283,5 +344,191 @@ int16_t FmRadioScanFx::nextSample() {
     ++sweepCycle_;
   }
 
+  return static_cast<int16_t>(sampleF * 32000.0f);
+}
+
+int16_t FmRadioScanFx::nextSampleSonar() {
+  const uint32_t periodSamples = (sampleRateHz_ * 1300UL) / 1000UL;
+  const uint32_t pingSamples = (sampleRateHz_ * 150UL) / 1000UL;
+  const uint32_t echoStartSamples = (sampleRateHz_ * 220UL) / 1000UL;
+  const uint32_t echoLenSamples = (sampleRateHz_ * 540UL) / 1000UL;
+
+  const uint32_t cycle = (periodSamples > 0U) ? (sampleClock_ % periodSamples) : 0U;
+  float sampleF = 0.0f;
+
+  if (cycle < pingSamples && pingSamples > 0U) {
+    const float pingT = static_cast<float>(cycle) / static_cast<float>(pingSamples);
+    const float freqHz = 1800.0f - (1200.0f * pingT);
+    sonarPhase_ += kTwoPi * (freqHz / static_cast<float>(sampleRateHz_));
+    if (sonarPhase_ >= kTwoPi) {
+      sonarPhase_ -= kTwoPi;
+    }
+    const float env = (1.0f - pingT) * (1.0f - pingT);
+    sampleF += 0.90f * sinf(sonarPhase_) * env;
+    if (cycle < ((sampleRateHz_ * 4UL) / 1000UL)) {
+      sampleF += 0.22f;
+    }
+  }
+
+  if (cycle >= echoStartSamples && cycle < (echoStartSamples + echoLenSamples) && echoLenSamples > 0U) {
+    const uint32_t echoPos = cycle - echoStartSamples;
+    const float echoT = static_cast<float>(echoPos) / static_cast<float>(echoLenSamples);
+    const float freqHz = 760.0f - (240.0f * echoT);
+    sonarEchoPhase_ += kTwoPi * (freqHz / static_cast<float>(sampleRateHz_));
+    if (sonarEchoPhase_ >= kTwoPi) {
+      sonarEchoPhase_ -= kTwoPi;
+    }
+    const float env = expf(-4.5f * echoT);
+    sampleF += 0.46f * sinf(sonarEchoPhase_) * env;
+  }
+
+  sampleF += 0.03f * (static_cast<float>(random(-128L, 128L)) / 128.0f);
+  sampleF *= gain_;
+  sampleF = clampf(sampleF, -1.0f, 1.0f);
+
+  ++sampleClock_;
+  return static_cast<int16_t>(sampleF * 32000.0f);
+}
+
+bool FmRadioScanFx::morsePrepareNextState() {
+  const uint32_t unitSamplesRaw = (sampleRateHz_ * static_cast<uint32_t>(kMorseUnitMs)) / 1000UL;
+  const uint32_t unitSamples = (unitSamplesRaw > 0U) ? unitSamplesRaw : 1U;
+
+  while (true) {
+    const char symbol = kMorsePattern[morsePatternPos_];
+    if (symbol == '\0') {
+      morsePatternPos_ = 0U;
+      morseGapSamplesLeft_ = unitSamples * 7U;
+      return false;
+    }
+
+    ++morsePatternPos_;
+    if (symbol == ' ') {
+      morseGapSamplesLeft_ = unitSamples * 3U;
+      return false;
+    }
+
+    if (symbol == '.') {
+      morseToneSamplesLeft_ = unitSamples;
+      morseGapSamplesLeft_ = unitSamples;
+      return true;
+    }
+
+    if (symbol == '-') {
+      morseToneSamplesLeft_ = unitSamples * 3U;
+      morseGapSamplesLeft_ = unitSamples;
+      return true;
+    }
+  }
+}
+
+int16_t FmRadioScanFx::nextSampleMorse() {
+  if (morseToneSamplesLeft_ == 0U) {
+    if (morseGapSamplesLeft_ > 0U) {
+      --morseGapSamplesLeft_;
+      ++sampleClock_;
+      return 0;
+    }
+    if (!morsePrepareNextState()) {
+      ++sampleClock_;
+      return 0;
+    }
+  }
+
+  const float warble = 1.0f + (0.05f * sinf(kTwoPi * 0.7f *
+                                             (static_cast<float>(sampleClock_) /
+                                              static_cast<float>(sampleRateHz_))));
+  const float freqHz = static_cast<float>(kMorseFreqHz) * warble;
+  morsePhase_ += kTwoPi * (freqHz / static_cast<float>(sampleRateHz_));
+  if (morsePhase_ >= kTwoPi) {
+    morsePhase_ -= kTwoPi;
+  }
+
+  float sampleF = 0.82f * sinf(morsePhase_);
+  sampleF += 0.10f * sinf(morsePhase_ * 2.0f);
+  sampleF *= gain_;
+  sampleF = clampf(sampleF, -1.0f, 1.0f);
+
+  --morseToneSamplesLeft_;
+  ++sampleClock_;
+  return static_cast<int16_t>(sampleF * 32000.0f);
+}
+
+bool FmRadioScanFx::winPrepareNextStep() {
+  if (kWinNoteCount == 0U) {
+    return false;
+  }
+
+  if (winStepIndex_ >= kWinNoteCount) {
+    winStepIndex_ = 0U;
+  }
+
+  const uint16_t idx = winStepIndex_;
+  winCurrentFreqHz_ = kWinNotesHz[idx];
+  uint32_t stepSamples =
+      (sampleRateHz_ * static_cast<uint32_t>(kWinNotesMs[idx])) / 1000UL;
+  if (stepSamples == 0U) {
+    stepSamples = 1U;
+  }
+  winStepSamplesLeft_ = stepSamples;
+  winStepTotalSamples_ = stepSamples;
+  ++winStepIndex_;
+  return true;
+}
+
+int16_t FmRadioScanFx::nextSampleWin() {
+  if (winStepSamplesLeft_ == 0U && !winPrepareNextStep()) {
+    ++sampleClock_;
+    return 0;
+  }
+
+  float sampleF = 0.0f;
+  if (winCurrentFreqHz_ > 0U) {
+    winPhase_ += kTwoPi * (static_cast<float>(winCurrentFreqHz_) /
+                           static_cast<float>(sampleRateHz_));
+    if (winPhase_ >= kTwoPi) {
+      winPhase_ -= kTwoPi;
+    }
+
+    const float sineWave = sinf(winPhase_);
+    const float squareWave = (sineWave >= 0.0f) ? 1.0f : -1.0f;
+    const float progress =
+        1.0f - (static_cast<float>(winStepSamplesLeft_) /
+                static_cast<float>(winStepTotalSamples_));
+    float env = 1.0f - (0.72f * progress);
+
+    const uint32_t attackSamplesRaw = (sampleRateHz_ * 4UL) / 1000UL;
+    const uint32_t releaseSamplesRaw = (sampleRateHz_ * 16UL) / 1000UL;
+    const uint32_t attackSamples = (attackSamplesRaw > 0U) ? attackSamplesRaw : 1U;
+    const uint32_t releaseSamples = (releaseSamplesRaw > 0U) ? releaseSamplesRaw : 1U;
+    if (winStepSamplesLeft_ < releaseSamples) {
+      const float releaseEnv = static_cast<float>(winStepSamplesLeft_) /
+                               static_cast<float>(releaseSamples);
+      if (releaseEnv < env) {
+        env = releaseEnv;
+      }
+    }
+    const uint32_t elapsedSamples = winStepTotalSamples_ - winStepSamplesLeft_;
+    if (elapsedSamples < attackSamples) {
+      const float attackEnv = static_cast<float>(elapsedSamples) /
+                              static_cast<float>(attackSamples);
+      if (attackEnv < env) {
+        env = attackEnv;
+      }
+    }
+
+    sampleF = (0.72f * sineWave) + (0.28f * squareWave);
+    sampleF += 0.18f * sinf(winPhase_ * 1.5f);
+    sampleF *= env;
+  }
+
+  if (winStepSamplesLeft_ > 0U) {
+    --winStepSamplesLeft_;
+  }
+
+  sampleF *= gain_;
+  sampleF = clampf(sampleF, -1.0f, 1.0f);
+
+  ++sampleClock_;
   return static_cast<int16_t>(sampleF * 32000.0f);
 }

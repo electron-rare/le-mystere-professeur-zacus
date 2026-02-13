@@ -13,7 +13,10 @@ class ScreenLink {
              uint16_t changeMinPeriodMs);
 
   void begin();
-  void update(const ScreenFrame& frame);
+  bool update(const ScreenFrame& frame, bool forceKeyframe = false);
+  uint32_t txFrameCount() const;
+  uint32_t txDropCount() const;
+  uint32_t lastTxMs() const;
 
  private:
   HardwareSerial& serial_;
@@ -49,4 +52,6 @@ class ScreenLink {
   uint8_t lastErrorCode_ = 0;
   uint32_t lastSequence_ = 0;
   uint32_t lastTxMs_ = 0;
+  uint32_t txFrameCount_ = 0U;
+  uint32_t txDropCount_ = 0U;
 };

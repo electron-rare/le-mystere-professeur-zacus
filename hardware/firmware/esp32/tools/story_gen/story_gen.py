@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""StorySpec YAML validator + C++ generator (PR1)."""
+"""StorySpec YAML validator + C++ generator (strict/idempotent)."""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -15,6 +16,19 @@ from typing import Any
 ALLOWED_TRIGGER = {"on_event", "after_ms", "immediate"}
 ALLOWED_EVENT = {"none", "unlock", "audio_done", "timer", "serial", "action"}
 ALLOWED_APP = {"LA_DETECTOR", "AUDIO_PACK", "SCREEN_SCENE", "MP3_GATE"}
+
+ROOT_FIELDS = {"id", "version", "initial_step", "app_bindings", "steps"}
+APP_BINDING_FIELDS = {"id", "app"}
+STEP_FIELDS = {
+    "step_id",
+    "screen_scene_id",
+    "audio_pack_id",
+    "actions",
+    "apps",
+    "mp3_gate_open",
+    "transitions",
+}
+TRANSITION_FIELDS = {"id", "trigger", "event_type", "event_name", "target_step_id", "after_ms", "priority"}
 
 EVENT_CPP = {
     "none": "StoryEventType::kNone",
@@ -42,9 +56,14 @@ class ValidationIssue:
     file: str
     field: str
     reason: str
+    code: str
 
     def format(self) -> str:
-        return f"{self.file}: line=n/a field={self.field}: {self.reason}"
+        return f"{self.file}: line=n/a code={self.code} field={self.field}: {self.reason}"
+
+
+def add_issue(issues: list[ValidationIssue], file: str, field: str, reason: str, code: str) -> None:
+    issues.append(ValidationIssue(file=file, field=field, reason=reason, code=code))
 
 
 def run_ruby_yaml_to_json(path: Path) -> Any:
@@ -61,7 +80,7 @@ def run_ruby_yaml_to_json(path: Path) -> Any:
             text=True,
         )
     except FileNotFoundError as exc:
-        raise RuntimeError("ruby introuvable (requis pour parser YAML en PR1)") from exc
+        raise RuntimeError("ruby introuvable (requis pour parser YAML)") from exc
 
     if result.returncode != 0:
         stderr = (result.stderr or "").strip()
@@ -77,66 +96,119 @@ def run_ruby_yaml_to_json(path: Path) -> Any:
         raise RuntimeError(f"JSON invalide depuis parser YAML ruby: {exc}") from exc
 
 
-def expect_type(obj: Any, t: type, file: str, field: str, issues: list[ValidationIssue]) -> bool:
-    if isinstance(obj, t):
+def expect_type(
+    obj: Any,
+    expected_type: type,
+    file: str,
+    field: str,
+    issues: list[ValidationIssue],
+    code: str,
+) -> bool:
+    if isinstance(obj, expected_type):
         return True
-    issues.append(ValidationIssue(file=file, field=field, reason=f"type attendu {t.__name__}, recu {type(obj).__name__}"))
+    add_issue(
+        issues,
+        file,
+        field,
+        f"type attendu {expected_type.__name__}, recu {type(obj).__name__}",
+        code,
+    )
     return False
 
 
-def expect_non_empty_string(obj: Any, file: str, field: str, issues: list[ValidationIssue]) -> str:
+def expect_non_empty_string(
+    obj: Any,
+    file: str,
+    field: str,
+    issues: list[ValidationIssue],
+    code: str,
+) -> str:
     if not isinstance(obj, str) or obj.strip() == "":
-        issues.append(ValidationIssue(file=file, field=field, reason="chaine non vide requise"))
+        add_issue(issues, file, field, "chaine non vide requise", code)
         return ""
     return obj.strip()
 
 
-def normalize_scenario(path: Path) -> tuple[dict[str, Any] | None, list[ValidationIssue]]:
+def check_unknown_keys(
+    raw: dict[str, Any],
+    allowed: set[str],
+    file: str,
+    field_prefix: str,
+    issues: list[ValidationIssue],
+    strict: bool,
+    code_prefix: str,
+) -> None:
+    if not strict:
+        return
+    extra = sorted(set(raw.keys()) - allowed)
+    for key in extra:
+        add_issue(
+            issues,
+            file,
+            f"{field_prefix}.{key}" if field_prefix else key,
+            f"champ inconnu '{key}'",
+            f"{code_prefix}_UNKNOWN_FIELD",
+        )
+
+
+def normalize_scenario(path: Path, strict: bool) -> tuple[dict[str, Any] | None, list[ValidationIssue]]:
     issues: list[ValidationIssue] = []
     file = path.as_posix()
+
     try:
         doc = run_ruby_yaml_to_json(path)
     except RuntimeError as exc:
-        return None, [ValidationIssue(file=file, field="root", reason=str(exc))]
+        return None, [ValidationIssue(file=file, field="root", reason=str(exc), code="YAML_PARSE_ERROR")]
 
-    if not expect_type(doc, dict, file, "root", issues):
+    if not expect_type(doc, dict, file, "root", issues, "ROOT_TYPE"):
         return None, issues
 
-    scenario_id = expect_non_empty_string(doc.get("id"), file, "id", issues)
-    version = doc.get("version")
-    if not isinstance(version, int):
-        issues.append(ValidationIssue(file=file, field="version", reason="entier requis"))
-        version = 0
-    initial_step = expect_non_empty_string(doc.get("initial_step"), file, "initial_step", issues)
+    check_unknown_keys(doc, ROOT_FIELDS, file, "", issues, strict, "ROOT")
+
+    scenario_id = expect_non_empty_string(doc.get("id"), file, "id", issues, "SCENARIO_ID")
+
+    version_raw = doc.get("version")
+    version = 0
+    if isinstance(version_raw, int):
+        version = version_raw
+    else:
+        add_issue(issues, file, "version", "entier requis", "SCENARIO_VERSION")
+
+    initial_step = expect_non_empty_string(doc.get("initial_step"), file, "initial_step", issues, "SCENARIO_INITIAL")
 
     app_bindings_raw = doc.get("app_bindings")
-    if not expect_type(app_bindings_raw, list, file, "app_bindings", issues):
+    if not expect_type(app_bindings_raw, list, file, "app_bindings", issues, "APP_BINDINGS_TYPE"):
         app_bindings_raw = []
 
     app_bindings: list[dict[str, str]] = []
     app_ids_seen: set[str] = set()
     for idx, item in enumerate(app_bindings_raw):
         field_prefix = f"app_bindings[{idx}]"
-        if not expect_type(item, dict, file, field_prefix, issues):
+        if not expect_type(item, dict, file, field_prefix, issues, "APP_BINDING_TYPE"):
             continue
-        app_id = expect_non_empty_string(item.get("id"), file, f"{field_prefix}.id", issues)
-        app_name = expect_non_empty_string(item.get("app"), file, f"{field_prefix}.app", issues)
+        check_unknown_keys(item, APP_BINDING_FIELDS, file, field_prefix, issues, strict, "APP_BINDING")
+
+        app_id = expect_non_empty_string(item.get("id"), file, f"{field_prefix}.id", issues, "APP_BINDING_ID")
+        app_name = expect_non_empty_string(item.get("app"), file, f"{field_prefix}.app", issues, "APP_BINDING_APP")
+
         if app_name and app_name not in ALLOWED_APP:
-            issues.append(
-                ValidationIssue(
-                    file=file,
-                    field=f"{field_prefix}.app",
-                    reason=f"valeur invalide '{app_name}', attendu {sorted(ALLOWED_APP)}",
-                )
+            add_issue(
+                issues,
+                file,
+                f"{field_prefix}.app",
+                f"valeur invalide '{app_name}', attendu {sorted(ALLOWED_APP)}",
+                "APP_BINDING_APP_INVALID",
             )
+
         if app_id:
             if app_id in app_ids_seen:
-                issues.append(ValidationIssue(file=file, field=f"{field_prefix}.id", reason="duplicata"))
+                add_issue(issues, file, f"{field_prefix}.id", "duplicata", "APP_BINDING_ID_DUP")
             app_ids_seen.add(app_id)
+
         app_bindings.append({"id": app_id, "app": app_name})
 
     steps_raw = doc.get("steps")
-    if not expect_type(steps_raw, list, file, "steps", issues):
+    if not expect_type(steps_raw, list, file, "steps", issues, "STEPS_TYPE"):
         steps_raw = []
 
     steps: list[dict[str, Any]] = []
@@ -144,111 +216,125 @@ def normalize_scenario(path: Path) -> tuple[dict[str, Any] | None, list[Validati
 
     for sidx, raw_step in enumerate(steps_raw):
         step_prefix = f"steps[{sidx}]"
-        if not expect_type(raw_step, dict, file, step_prefix, issues):
+        if not expect_type(raw_step, dict, file, step_prefix, issues, "STEP_TYPE"):
             continue
+        check_unknown_keys(raw_step, STEP_FIELDS, file, step_prefix, issues, strict, "STEP")
 
-        step_id = expect_non_empty_string(raw_step.get("step_id"), file, f"{step_prefix}.step_id", issues)
+        step_id = expect_non_empty_string(raw_step.get("step_id"), file, f"{step_prefix}.step_id", issues, "STEP_ID")
+
         screen_scene_id = raw_step.get("screen_scene_id", "")
         if not isinstance(screen_scene_id, str):
-            issues.append(ValidationIssue(file=file, field=f"{step_prefix}.screen_scene_id", reason="chaine requise"))
+            add_issue(issues, file, f"{step_prefix}.screen_scene_id", "chaine requise", "STEP_SCREEN_SCENE")
             screen_scene_id = ""
+
         audio_pack_id = raw_step.get("audio_pack_id", "")
         if not isinstance(audio_pack_id, str):
-            issues.append(ValidationIssue(file=file, field=f"{step_prefix}.audio_pack_id", reason="chaine requise"))
+            add_issue(issues, file, f"{step_prefix}.audio_pack_id", "chaine requise", "STEP_AUDIO_PACK")
             audio_pack_id = ""
 
         mp3_gate_open = raw_step.get("mp3_gate_open")
         if not isinstance(mp3_gate_open, bool):
-            issues.append(ValidationIssue(file=file, field=f"{step_prefix}.mp3_gate_open", reason="bool requis"))
+            add_issue(issues, file, f"{step_prefix}.mp3_gate_open", "bool requis", "STEP_GATE")
             mp3_gate_open = False
 
         if step_id:
             if step_id in step_ids:
-                issues.append(ValidationIssue(file=file, field=f"{step_prefix}.step_id", reason="duplicata"))
+                add_issue(issues, file, f"{step_prefix}.step_id", "duplicata", "STEP_ID_DUP")
             step_ids.add(step_id)
 
         actions_raw = raw_step.get("actions", [])
         if actions_raw is None:
             actions_raw = []
         if not isinstance(actions_raw, list):
-            issues.append(ValidationIssue(file=file, field=f"{step_prefix}.actions", reason="liste requise"))
+            add_issue(issues, file, f"{step_prefix}.actions", "liste requise", "STEP_ACTIONS_TYPE")
             actions_raw = []
         actions: list[str] = []
         for aidx, action in enumerate(actions_raw):
-            action_id = expect_non_empty_string(action, file, f"{step_prefix}.actions[{aidx}]", issues)
+            action_id = expect_non_empty_string(action, file, f"{step_prefix}.actions[{aidx}]", issues, "STEP_ACTION_ID")
             if action_id:
                 actions.append(action_id)
 
         apps_raw = raw_step.get("apps")
-        if not expect_type(apps_raw, list, file, f"{step_prefix}.apps", issues):
+        if not expect_type(apps_raw, list, file, f"{step_prefix}.apps", issues, "STEP_APPS_TYPE"):
             apps_raw = []
         apps: list[str] = []
         for aidx, app in enumerate(apps_raw):
-            app_id = expect_non_empty_string(app, file, f"{step_prefix}.apps[{aidx}]", issues)
+            app_id = expect_non_empty_string(app, file, f"{step_prefix}.apps[{aidx}]", issues, "STEP_APP_ID")
             if app_id:
                 if app_id not in app_ids_seen:
-                    issues.append(
-                        ValidationIssue(
-                            file=file,
-                            field=f"{step_prefix}.apps[{aidx}]",
-                            reason=f"binding inconnu '{app_id}'",
-                        )
+                    add_issue(
+                        issues,
+                        file,
+                        f"{step_prefix}.apps[{aidx}]",
+                        f"binding inconnu '{app_id}'",
+                        "STEP_APP_BINDING_UNKNOWN",
                     )
                 apps.append(app_id)
 
         transitions_raw = raw_step.get("transitions")
-        if not expect_type(transitions_raw, list, file, f"{step_prefix}.transitions", issues):
+        if not expect_type(transitions_raw, list, file, f"{step_prefix}.transitions", issues, "STEP_TRANSITIONS_TYPE"):
             transitions_raw = []
 
         transitions: list[dict[str, Any]] = []
         for tidx, raw_tr in enumerate(transitions_raw):
             tr_prefix = f"{step_prefix}.transitions[{tidx}]"
-            if not expect_type(raw_tr, dict, file, tr_prefix, issues):
+            if not expect_type(raw_tr, dict, file, tr_prefix, issues, "TRANSITION_TYPE"):
                 continue
+            check_unknown_keys(raw_tr, TRANSITION_FIELDS, file, tr_prefix, issues, strict, "TRANSITION")
 
-            trigger = expect_non_empty_string(raw_tr.get("trigger"), file, f"{tr_prefix}.trigger", issues)
+            trigger = expect_non_empty_string(raw_tr.get("trigger"), file, f"{tr_prefix}.trigger", issues, "TRANSITION_TRIGGER")
             if trigger and trigger not in ALLOWED_TRIGGER:
-                issues.append(
-                    ValidationIssue(
-                        file=file,
-                        field=f"{tr_prefix}.trigger",
-                        reason=f"valeur invalide '{trigger}', attendu {sorted(ALLOWED_TRIGGER)}",
-                    )
+                add_issue(
+                    issues,
+                    file,
+                    f"{tr_prefix}.trigger",
+                    f"valeur invalide '{trigger}', attendu {sorted(ALLOWED_TRIGGER)}",
+                    "TRANSITION_TRIGGER_INVALID",
                 )
 
-            event_type = expect_non_empty_string(raw_tr.get("event_type"), file, f"{tr_prefix}.event_type", issues)
+            event_type = expect_non_empty_string(raw_tr.get("event_type"), file, f"{tr_prefix}.event_type", issues, "TRANSITION_EVENT_TYPE")
             if event_type and event_type not in ALLOWED_EVENT:
-                issues.append(
-                    ValidationIssue(
-                        file=file,
-                        field=f"{tr_prefix}.event_type",
-                        reason=f"valeur invalide '{event_type}', attendu {sorted(ALLOWED_EVENT)}",
-                    )
+                add_issue(
+                    issues,
+                    file,
+                    f"{tr_prefix}.event_type",
+                    f"valeur invalide '{event_type}', attendu {sorted(ALLOWED_EVENT)}",
+                    "TRANSITION_EVENT_TYPE_INVALID",
                 )
 
-            event_name_value = raw_tr.get("event_name", "")
-            if event_name_value is None:
-                event_name_value = ""
-            if not isinstance(event_name_value, str):
-                issues.append(ValidationIssue(file=file, field=f"{tr_prefix}.event_name", reason="chaine requise"))
-                event_name_value = ""
-            event_name = event_name_value.strip()
+            event_name_raw = raw_tr.get("event_name", "")
+            if event_name_raw is None:
+                event_name_raw = ""
+            if not isinstance(event_name_raw, str):
+                add_issue(issues, file, f"{tr_prefix}.event_name", "chaine requise", "TRANSITION_EVENT_NAME")
+                event_name_raw = ""
+            event_name = event_name_raw.strip()
 
-            target_step_id = expect_non_empty_string(raw_tr.get("target_step_id"), file, f"{tr_prefix}.target_step_id", issues)
+            target_step_id = expect_non_empty_string(
+                raw_tr.get("target_step_id"),
+                file,
+                f"{tr_prefix}.target_step_id",
+                issues,
+                "TRANSITION_TARGET",
+            )
 
             after_ms = raw_tr.get("after_ms", 0)
             if not isinstance(after_ms, int) or after_ms < 0:
-                issues.append(ValidationIssue(file=file, field=f"{tr_prefix}.after_ms", reason="entier >= 0 requis"))
+                add_issue(issues, file, f"{tr_prefix}.after_ms", "entier >= 0 requis", "TRANSITION_AFTER")
                 after_ms = 0
 
             priority = raw_tr.get("priority", 0)
             if not isinstance(priority, int) or priority < 0 or priority > 255:
-                issues.append(ValidationIssue(file=file, field=f"{tr_prefix}.priority", reason="entier 0..255 requis"))
+                add_issue(issues, file, f"{tr_prefix}.priority", "entier 0..255 requis", "TRANSITION_PRIORITY")
                 priority = 0
 
             if trigger == "on_event" and event_type == "none":
-                issues.append(
-                    ValidationIssue(file=file, field=f"{tr_prefix}.event_type", reason="on_event requiert event_type != none")
+                add_issue(
+                    issues,
+                    file,
+                    f"{tr_prefix}.event_type",
+                    "on_event requiert event_type != none",
+                    "TRANSITION_EVENT_TYPE_NONE",
                 )
 
             tr_id = raw_tr.get("id")
@@ -280,17 +366,17 @@ def normalize_scenario(path: Path) -> tuple[dict[str, Any] | None, list[Validati
         )
 
     if initial_step and initial_step not in step_ids:
-        issues.append(ValidationIssue(file=file, field="initial_step", reason=f"step inconnu '{initial_step}'"))
+        add_issue(issues, file, "initial_step", f"step inconnu '{initial_step}'", "SCENARIO_INITIAL_UNKNOWN")
 
     for step in steps:
-        for idx, tr in enumerate(step["transitions"]):
+        for tidx, tr in enumerate(step["transitions"]):
             if tr["target_step_id"] not in step_ids:
-                issues.append(
-                    ValidationIssue(
-                        file=file,
-                        field=f"steps[{step['step_id']}].transitions[{idx}].target_step_id",
-                        reason=f"step cible inconnu '{tr['target_step_id']}'",
-                    )
+                add_issue(
+                    issues,
+                    file,
+                    f"steps[{step['step_id']}].transitions[{tidx}].target_step_id",
+                    f"step cible inconnu '{tr['target_step_id']}'",
+                    "TRANSITION_TARGET_UNKNOWN",
                 )
 
     scenario = {
@@ -301,16 +387,8 @@ def normalize_scenario(path: Path) -> tuple[dict[str, Any] | None, list[Validati
         "steps": steps,
         "source": file,
     }
+
     return (scenario if not issues else None), issues
-
-
-def sanitize_ident(text: str) -> str:
-    base = re.sub(r"[^A-Za-z0-9_]", "_", text)
-    if not base:
-        base = "ID"
-    if base[0].isdigit():
-        base = f"_{base}"
-    return base
 
 
 def cstr(value: str | None) -> str:
@@ -320,29 +398,68 @@ def cstr(value: str | None) -> str:
     return f'"{escaped}"'
 
 
-def generate_scenarios_h(scenarios: list[dict[str, Any]]) -> str:
-    return """#pragma once
+def scenario_spec_hash(scenarios: list[dict[str, Any]]) -> str:
+    payload = []
+    for scenario in scenarios:
+        payload.append(
+            {
+                "id": scenario["id"],
+                "version": scenario["version"],
+                "initial_step": scenario["initial_step"],
+                "app_bindings": scenario["app_bindings"],
+                "steps": scenario["steps"],
+            }
+        )
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
 
-#include <Arduino.h>
 
-#include "../core/scenario_def.h"
+def generated_banner(spec_hash: str, scenario_count: int) -> list[str]:
+    return [
+        "// AUTO-GENERATED FILE - DO NOT EDIT",
+        "// Generated by tools/story_gen/story_gen.py",
+        f"// spec_hash: {spec_hash}",
+        f"// scenarios: {scenario_count}",
+        "",
+    ]
 
-const ScenarioDef* generatedScenarioById(const char* id);
-const ScenarioDef* generatedScenarioDefault();
-uint8_t generatedScenarioCount();
-const char* generatedScenarioIdAt(uint8_t index);
-"""
+
+def generate_scenarios_h(spec_hash: str, scenarios: list[dict[str, Any]]) -> str:
+    lines = generated_banner(spec_hash, len(scenarios))
+    lines.extend(
+        [
+            "#pragma once",
+            "",
+            "#include <Arduino.h>",
+            "",
+            "#include \"../core/scenario_def.h\"",
+            "",
+            "const ScenarioDef* generatedScenarioById(const char* id);",
+            "const ScenarioDef* generatedScenarioDefault();",
+            "uint8_t generatedScenarioCount();",
+            "const char* generatedScenarioIdAt(uint8_t index);",
+            "const char* generatedScenarioSpecHash();",
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
-def generate_apps_h() -> str:
-    return """#pragma once
-
-#include "../core/scenario_def.h"
-
-const AppBindingDef* generatedAppBindingById(const char* id);
-uint8_t generatedAppBindingCount();
-const char* generatedAppBindingIdAt(uint8_t index);
-"""
+def generate_apps_h(spec_hash: str, scenarios: list[dict[str, Any]]) -> str:
+    lines = generated_banner(spec_hash, len(scenarios))
+    lines.extend(
+        [
+            "#pragma once",
+            "",
+            "#include \"../core/scenario_def.h\"",
+            "",
+            "const AppBindingDef* generatedAppBindingById(const char* id);",
+            "uint8_t generatedAppBindingCount();",
+            "const char* generatedAppBindingIdAt(uint8_t index);",
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def emit_step_arrays(lines: list[str], scenario_idx: int, steps: list[dict[str, Any]]) -> None:
@@ -355,6 +472,7 @@ def emit_step_arrays(lines: list[str], scenario_idx: int, steps: list[dict[str, 
             for action in actions:
                 lines.append(f"    {cstr(action)},")
             lines.append("};")
+
         apps = step["apps"]
         if apps:
             lines.append(f"constexpr const char* {prefix}Apps[] = {{")
@@ -366,15 +484,13 @@ def emit_step_arrays(lines: list[str], scenario_idx: int, steps: list[dict[str, 
         if transitions:
             lines.append(f"constexpr TransitionDef {prefix}Transitions[] = {{")
             for tr in transitions:
-                trigger_cpp = TRIGGER_CPP.get(tr["trigger"], "StoryTransitionTrigger::kOnEvent")
-                event_cpp = EVENT_CPP.get(tr["event_type"], "StoryEventType::kNone")
                 lines.append(
                     "    {"
                     + ", ".join(
                         [
                             cstr(tr["id"]),
-                            trigger_cpp,
-                            event_cpp,
+                            TRIGGER_CPP.get(tr["trigger"], "StoryTransitionTrigger::kOnEvent"),
+                            EVENT_CPP.get(tr["event_type"], "StoryEventType::kNone"),
                             cstr(tr["event_name"]),
                             f"{int(tr['after_ms'])}U",
                             cstr(tr["target_step_id"]),
@@ -386,13 +502,16 @@ def emit_step_arrays(lines: list[str], scenario_idx: int, steps: list[dict[str, 
             lines.append("};")
 
 
-def generate_scenarios_cpp(scenarios: list[dict[str, Any]]) -> str:
+def generate_scenarios_cpp(spec_hash: str, scenarios: list[dict[str, Any]]) -> str:
     lines: list[str] = []
-    lines.append('#include "scenarios_gen.h"')
-    lines.append("")
-    lines.append("#include <cstring>")
-    lines.append("")
-    lines.append("namespace {")
+    lines.extend(generated_banner(spec_hash, len(scenarios)))
+    lines.extend([
+        '#include "scenarios_gen.h"',
+        "",
+        "#include <cstring>",
+        "",
+        "namespace {",
+    ])
 
     for scenario_idx, scenario in enumerate(scenarios):
         emit_step_arrays(lines, scenario_idx, scenario["steps"])
@@ -446,6 +565,7 @@ def generate_scenarios_cpp(scenarios: list[dict[str, Any]]) -> str:
     lines.append("")
     lines.append("}  // namespace")
     lines.append("")
+
     lines.append("const ScenarioDef* generatedScenarioById(const char* id) {")
     lines.append("  if (id == nullptr || id[0] == '\\0') {")
     lines.append("    return generatedScenarioDefault();")
@@ -458,17 +578,17 @@ def generate_scenarios_cpp(scenarios: list[dict[str, Any]]) -> str:
     lines.append("  return nullptr;")
     lines.append("}")
     lines.append("")
+
     lines.append("const ScenarioDef* generatedScenarioDefault() {")
-    lines.append("  if (generatedScenarioCount() == 0U) {")
-    lines.append("    return nullptr;")
-    lines.append("  }")
-    lines.append("  return kGeneratedScenarios[0];")
+    lines.append("  return (generatedScenarioCount() == 0U) ? nullptr : kGeneratedScenarios[0];")
     lines.append("}")
     lines.append("")
+
     lines.append("uint8_t generatedScenarioCount() {")
     lines.append("  return static_cast<uint8_t>(sizeof(kGeneratedScenarios) / sizeof(kGeneratedScenarios[0]));")
     lines.append("}")
     lines.append("")
+
     lines.append("const char* generatedScenarioIdAt(uint8_t index) {")
     lines.append("  if (index >= generatedScenarioCount()) {")
     lines.append("    return nullptr;")
@@ -477,57 +597,73 @@ def generate_scenarios_cpp(scenarios: list[dict[str, Any]]) -> str:
     lines.append("  return (scenario != nullptr) ? scenario->id : nullptr;")
     lines.append("}")
     lines.append("")
+
+    lines.append("const char* generatedScenarioSpecHash() {")
+    lines.append(f"  return \"{spec_hash}\";")
+    lines.append("}")
+    lines.append("")
+
     return "\n".join(lines)
 
 
-def generate_apps_cpp(scenarios: list[dict[str, Any]]) -> str:
+def generate_apps_cpp(spec_hash: str, scenarios: list[dict[str, Any]]) -> str:
     binding_map: dict[str, str] = {}
     for scenario in scenarios:
         for binding in scenario["app_bindings"]:
             bid = binding["id"]
             app = binding["app"]
             if bid in binding_map and binding_map[bid] != app:
-                raise RuntimeError(f"binding '{bid}' declare avec 2 apps differents: {binding_map[bid]} vs {app}")
+                raise RuntimeError(
+                    f"binding '{bid}' declare avec 2 apps differents: {binding_map[bid]} vs {app}"
+                )
             binding_map[bid] = app
 
     sorted_bindings = sorted(binding_map.items(), key=lambda x: x[0])
 
     lines: list[str] = []
-    lines.append('#include "apps_gen.h"')
-    lines.append("")
-    lines.append("#include <cstring>")
-    lines.append("")
-    lines.append("namespace {")
-    lines.append("constexpr AppBindingDef kGeneratedAppBindings[] = {")
+    lines.extend(generated_banner(spec_hash, len(scenarios)))
+    lines.extend([
+        '#include "apps_gen.h"',
+        "",
+        "#include <cstring>",
+        "",
+        "namespace {",
+        "constexpr AppBindingDef kGeneratedAppBindings[] = {",
+    ])
+
     for bid, app in sorted_bindings:
         app_cpp = APP_CPP.get(app, "StoryAppType::kNone")
         lines.append(f"    {{{cstr(bid)}, {app_cpp}}},")
-    lines.append("};")
-    lines.append("}  // namespace")
-    lines.append("")
-    lines.append("const AppBindingDef* generatedAppBindingById(const char* id) {")
-    lines.append("  if (id == nullptr || id[0] == '\\0') {")
-    lines.append("    return nullptr;")
-    lines.append("  }")
-    lines.append("  for (const AppBindingDef& binding : kGeneratedAppBindings) {")
-    lines.append("    if (binding.id != nullptr && strcmp(binding.id, id) == 0) {")
-    lines.append("      return &binding;")
-    lines.append("    }")
-    lines.append("  }")
-    lines.append("  return nullptr;")
-    lines.append("}")
-    lines.append("")
-    lines.append("uint8_t generatedAppBindingCount() {")
-    lines.append("  return static_cast<uint8_t>(sizeof(kGeneratedAppBindings) / sizeof(kGeneratedAppBindings[0]));")
-    lines.append("}")
-    lines.append("")
-    lines.append("const char* generatedAppBindingIdAt(uint8_t index) {")
-    lines.append("  if (index >= generatedAppBindingCount()) {")
-    lines.append("    return nullptr;")
-    lines.append("  }")
-    lines.append("  return kGeneratedAppBindings[index].id;")
-    lines.append("}")
-    lines.append("")
+
+    lines.extend([
+        "};",
+        "}  // namespace",
+        "",
+        "const AppBindingDef* generatedAppBindingById(const char* id) {",
+        "  if (id == nullptr || id[0] == '\\0') {",
+        "    return nullptr;",
+        "  }",
+        "  for (const AppBindingDef& binding : kGeneratedAppBindings) {",
+        "    if (binding.id != nullptr && strcmp(binding.id, id) == 0) {",
+        "      return &binding;",
+        "    }",
+        "  }",
+        "  return nullptr;",
+        "}",
+        "",
+        "uint8_t generatedAppBindingCount() {",
+        "  return static_cast<uint8_t>(sizeof(kGeneratedAppBindings) / sizeof(kGeneratedAppBindings[0]));",
+        "}",
+        "",
+        "const char* generatedAppBindingIdAt(uint8_t index) {",
+        "  if (index >= generatedAppBindingCount()) {",
+        "    return nullptr;",
+        "  }",
+        "  return kGeneratedAppBindings[index].id;",
+        "}",
+        "",
+    ])
+
     return "\n".join(lines)
 
 
@@ -536,26 +672,43 @@ def write_file(path: Path, content: str) -> None:
     path.write_text(content + "\n", encoding="utf-8")
 
 
-def collect_scenarios(spec_dir: Path) -> tuple[list[dict[str, Any]], list[ValidationIssue]]:
+def collect_scenarios(spec_dir: Path, strict: bool) -> tuple[list[dict[str, Any]], list[ValidationIssue]]:
     scenarios: list[dict[str, Any]] = []
     issues: list[ValidationIssue] = []
 
     files = sorted(spec_dir.glob("*.yaml"))
     if not files:
-        issues.append(ValidationIssue(file=spec_dir.as_posix(), field="*.yaml", reason="aucun scenario trouve"))
+        issues.append(
+            ValidationIssue(
+                file=spec_dir.as_posix(),
+                field="*.yaml",
+                reason="aucun scenario trouve",
+                code="SCENARIO_NOT_FOUND",
+            )
+        )
         return [], issues
 
     scenario_ids: set[str] = set()
     for path in files:
-        scenario, scenario_issues = normalize_scenario(path)
+        scenario, scenario_issues = normalize_scenario(path, strict)
         if scenario_issues:
             issues.extend(scenario_issues)
             continue
         assert scenario is not None
-        if scenario["id"] in scenario_ids:
-            issues.append(ValidationIssue(file=path.as_posix(), field="id", reason=f"duplicata global '{scenario['id']}'"))
+
+        scenario_id = scenario["id"]
+        if scenario_id in scenario_ids:
+            issues.append(
+                ValidationIssue(
+                    file=path.as_posix(),
+                    field="id",
+                    reason=f"duplicata global '{scenario_id}'",
+                    code="SCENARIO_ID_DUP",
+                )
+            )
             continue
-        scenario_ids.add(scenario["id"])
+
+        scenario_ids.add(scenario_id)
         scenarios.append(scenario)
 
     return scenarios, issues
@@ -563,17 +716,18 @@ def collect_scenarios(spec_dir: Path) -> tuple[list[dict[str, Any]], list[Valida
 
 def cmd_validate(args: argparse.Namespace) -> int:
     spec_dir = Path(args.spec_dir)
-    scenarios, issues = collect_scenarios(spec_dir)
+    scenarios, issues = collect_scenarios(spec_dir, args.strict)
     if issues:
         for issue in issues:
             print(f"[story-validate] ERR {issue.format()}")
         return 1
+
     for scenario in scenarios:
         print(
             f"[story-validate] OK file={scenario['source']} id={scenario['id']} "
             f"steps={len(scenario['steps'])} bindings={len(scenario['app_bindings'])}"
         )
-    print(f"[story-validate] OK total={len(scenarios)}")
+    print(f"[story-validate] OK total={len(scenarios)} strict={1 if args.strict else 0}")
     return 0
 
 
@@ -581,25 +735,29 @@ def cmd_generate(args: argparse.Namespace) -> int:
     spec_dir = Path(args.spec_dir)
     out_dir = Path(args.out_dir)
 
-    scenarios, issues = collect_scenarios(spec_dir)
+    scenarios, issues = collect_scenarios(spec_dir, args.strict)
     if issues:
         for issue in issues:
             print(f"[story-gen] ERR {issue.format()}")
         return 1
 
     scenarios.sort(key=lambda sc: sc["id"])
+    spec_hash = scenario_spec_hash(scenarios)
 
-    scenarios_h = generate_scenarios_h(scenarios)
-    scenarios_cpp = generate_scenarios_cpp(scenarios)
-    apps_h = generate_apps_h()
-    apps_cpp = generate_apps_cpp(scenarios)
+    scenarios_h = generate_scenarios_h(spec_hash, scenarios)
+    scenarios_cpp = generate_scenarios_cpp(spec_hash, scenarios)
+    apps_h = generate_apps_h(spec_hash, scenarios)
+    apps_cpp = generate_apps_cpp(spec_hash, scenarios)
 
     write_file(out_dir / "scenarios_gen.h", scenarios_h)
     write_file(out_dir / "scenarios_gen.cpp", scenarios_cpp)
     write_file(out_dir / "apps_gen.h", apps_h)
     write_file(out_dir / "apps_gen.cpp", apps_cpp)
 
-    print(f"[story-gen] OK scenarios={len(scenarios)} out={out_dir.as_posix()}")
+    print(
+        f"[story-gen] OK scenarios={len(scenarios)} out={out_dir.as_posix()} "
+        f"strict={1 if args.strict else 0} spec_hash={spec_hash}"
+    )
     return 0
 
 
@@ -609,11 +767,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     validate_p = sub.add_parser("validate", help="validate YAML scenarios")
     validate_p.add_argument("--spec-dir", default="story_specs/scenarios")
+    validate_p.add_argument("--strict", action="store_true", help="reject unknown fields")
     validate_p.set_defaults(func=cmd_validate)
 
     generate_p = sub.add_parser("generate", help="generate C++ from YAML scenarios")
     generate_p.add_argument("--spec-dir", default="story_specs/scenarios")
     generate_p.add_argument("--out-dir", default="src/story/generated")
+    generate_p.add_argument("--strict", action="store_true", help="validate in strict mode before generate")
     generate_p.set_defaults(func=cmd_generate)
 
     return parser

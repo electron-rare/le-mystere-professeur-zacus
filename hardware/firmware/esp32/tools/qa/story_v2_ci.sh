@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT_DIR"
+
+echo "[qa-story-v2] validate(strict)"
+python3 tools/story_gen/story_gen.py validate --strict --spec-dir story_specs/scenarios
+
+echo "[qa-story-v2] generate(strict) pass#1"
+python3 tools/story_gen/story_gen.py generate --strict --spec-dir story_specs/scenarios --out-dir src/story/generated
+
+if ! git diff --quiet -- src/story/generated; then
+  echo "[qa-story-v2] generated files changed after pass#1"
+fi
+
+SNAPSHOT_DIR="$(mktemp -d)"
+cleanup() {
+  rm -rf "$SNAPSHOT_DIR"
+}
+trap cleanup EXIT
+cp src/story/generated/*.h src/story/generated/*.cpp "$SNAPSHOT_DIR"/
+
+echo "[qa-story-v2] generate(strict) pass#2 (idempotence)"
+python3 tools/story_gen/story_gen.py generate --strict --spec-dir story_specs/scenarios --out-dir src/story/generated
+
+if ! diff -ru "$SNAPSHOT_DIR" src/story/generated >/tmp/story_v2_idempotence.diff; then
+  echo "[qa-story-v2] ERROR: generation not idempotent"
+  cat /tmp/story_v2_idempotence.diff
+  exit 1
+fi
+
+echo "[qa-story-v2] build esp32dev"
+pio run -e esp32dev
+
+echo "[qa-story-v2] build esp8266_oled"
+pio run -e esp8266_oled
+
+echo "[qa-story-v2] build screen nodemcuv2"
+( cd screen_esp8266_hw630 && pio run -e nodemcuv2 )
+
+echo "[qa-story-v2] OK"

@@ -160,10 +160,10 @@ Notes:
 - Le mode test STORY est pilote uniquement par commandes serie (pas de raccourci clavier dedie).
 - `STORY_ARM` lance maintenant le scenario complet: armement + tentative de lecture `WIN`.
 - `STORY_STATUS` expose un `stage` explicite: `WAIT_UNLOCK`, `WIN_PENDING`, `WAIT_ETAPE2`, `ETAPE2_DONE`.
-- Le moteur STORY V2 est protege par le flag `kStoryV2EnabledDefault` (default `false`).
+- Le moteur STORY V2 est protege par le flag `kStoryV2EnabledDefault` (default `true`).
 - Si le flag V2 est OFF, `STORY_V2_EVENT/STEP/SCENARIO/VALIDATE/HEALTH/METRICS` repondent `OUT_OF_CONTEXT`.
 - Rollback runtime immediat: `STORY_V2_ENABLE OFF` (retour controleur legacy sans reflash).
-- Rollback release: conserver `kStoryV2EnabledDefault=false` puis recompiler/reflasher.
+- Rollback release: remettre `kStoryV2EnabledDefault=false` puis recompiler/reflasher.
 - Les delais par defaut sont configures dans `src/config.h`:
   - `kStoryEtape2DelayMs` (production, defaut 15 min)
   - `kStoryEtape2TestDelayMs` (test rapide)
@@ -173,6 +173,8 @@ Workflow auteur STORY V2:
 - `make story-validate` (strict)
 - `make story-gen` (strict + `spec_hash`)
 - `make qa-story-v2`
+- `make qa-story-v2-smoke` (debut sprint, flash + smoke serie)
+- `make qa-story-v2-smoke-fast` (sans flash)
 - checklist review sprint: `tools/qa/story_v2_review_checklist.md`
 - `pio run -e esp32dev`
 
@@ -271,6 +273,20 @@ Sans variable `PORT`, PlatformIO choisit automatiquement le port serie.
 Astuce detection ports:
 - `pio device list`
 - Runbook semi-auto Story V2: `tools/qa/live_story_v2_runbook.md`
+- Smoke debut sprint: `tools/qa/live_story_v2_smoke.sh`
+- Runbook release candidate: `tools/qa/live_story_v2_rc_runbook.md`
+- Handbook release/rollback: `RELEASE_STORY_V2.md`
+
+### CI / Review policy
+
+- Workflow GitHub Actions: `.github/workflows/firmware-story-v2.yml`
+- PR template avec gate STV2: `.github/PULL_REQUEST_TEMPLATE.md`
+- Checklist review ticketisee: `tools/qa/story_v2_review_checklist.md`
+- En CI:
+  - `make story-validate`
+  - `make story-gen`
+  - `bash tools/qa/story_v2_ci.sh` (mode strict/idempotence)
+  - builds firmware `esp32dev`, `esp8266_oled`, `screen:nodemcuv2`
 
 ## Lecteur audio evolue
 

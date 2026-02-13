@@ -25,6 +25,10 @@ Cette checklist couvre le comportement attendu du couple ESP32 + ESP8266 OLED.
    - `pio device monitor -e esp32dev --port <PORT_ESP32>`
    - `pio device monitor -e esp8266_oled --port <PORT_ESP8266>`
 
+Runbook live semi-automatique disponible:
+
+- `tools/qa/live_story_v2_runbook.md`
+
 ## 0) Tooling STORY V2 (hors carte)
 
 1. Validation stricte:

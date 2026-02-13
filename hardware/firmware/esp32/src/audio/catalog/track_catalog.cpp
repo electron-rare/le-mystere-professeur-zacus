@@ -38,7 +38,8 @@ bool readBounded(fs::File& file, uint8_t* out, size_t len, uint32_t timeoutMs) {
       if (static_cast<uint32_t>(millis() - startMs) >= timeoutMs) {
         break;
       }
-      delay(1);
+      // Keep metadata probing cooperative without forcing a full 1ms stall.
+      delay(0);
       continue;
     }
     out[pos++] = static_cast<uint8_t>(v);

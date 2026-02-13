@@ -52,6 +52,47 @@
 - PR S3: ESP8266 non-MP3 modular split
 - PR S4: Docs + QA + convergence
 
+## Action Board (Execution-Ready)
+1. **Start S1 immediately**
+- Implement in this order:
+  1) `LaDetectorRuntimeService` invariants/snapshot
+  2) `LaDetectorApp` hold/unlock lifecycle
+  3) anti-dup unlock emission
+  4) wiring in `StoryControllerV2`
+- Commit pattern:
+  - `feat(story): STV2-301 la runtime service`
+  - `feat(story): STV2-302 la detector app full-owned`
+
+2. **S2 StoryGen extension**
+- Extend schema/template first, then generator, then runtime validation.
+- Add strict validation errors for unknown/missing config keys.
+- Commit pattern:
+  - `feat(story-gen): STV2-303 app binding config for LA`
+  - `feat(story): STV2-304 validate generated LA config`
+
+3. **S3 ESP8266 non-MP3 modularization**
+- Move in this order:
+  1) `core/stat_parser.*`
+  2) `core/link_monitor.*`
+  3) `core/render_scheduler.*`
+  4) app selector path for `boot/ulock/link`
+- Keep `main.cpp` as orchestrator only.
+- Commit pattern:
+  - `refactor(screen): STV2-305 split non-mp3 core`
+  - `refactor(screen): STV2-306 modular non-mp3 apps`
+
+4. **S4 closure**
+- Run full Story checks and consolidate docs with exact runtime behavior.
+- Prepare convergence PR summary with evidence commands and outputs.
+
+## PR Commands (per milestone)
+- Create draft PR:
+  - `gh pr create --draft --base codex/esp32-audio-mozzi-20260213 --head feature/STV2-RC3-story-app-modular --title "<TITLE>" --body-file <BODY.md>`
+- Post status/evidence updates:
+  - `gh pr comment <PR_NUMBER> --body "<status update>"`
+- Switch draft -> ready:
+  - `gh pr ready <PR_NUMBER>`
+
 ## Mandatory Checks per PR
 - `make story-validate`
 - `make story-gen`
@@ -65,6 +106,12 @@
 - LA detector fully controlled via Story app runtime.
 - No duplicate UNLOCK under event storm.
 - ESP8266 non-MP3 recovers after reset in <2s.
+
+## Definition of Done (STV2 Branch)
+- `LA_detector` is fully app-owned in Story V2 path.
+- StoryGen supports `app_bindings[].config` for LA with strict validation.
+- ESP8266 non-MP3 flow is modularized and `main.cpp` stays orchestration-only.
+- Full Story matrix passes before requesting merge.
 
 ## Notes
 - Do not commit `reports/live_story_v2_smoke_*.log`.

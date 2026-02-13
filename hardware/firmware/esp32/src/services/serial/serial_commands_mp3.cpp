@@ -40,10 +40,6 @@ bool textEqualsIgnoreCase(const char* lhs, const char* rhs) {
   return (*lhs == '\0' && *rhs == '\0');
 }
 
-bool allowPlayback(const Mp3SerialRuntimeContext& ctx) {
-  return (ctx.allowPlaybackNow != nullptr) ? ctx.allowPlaybackNow() : false;
-}
-
 void printUiStatus(Print& out, const Mp3SerialRuntimeContext& ctx, const char* source) {
   if (ctx.printUiStatus != nullptr) {
     ctx.printUiStatus(source != nullptr ? source : "status");
@@ -146,7 +142,6 @@ bool serialProcessMp3Command(const SerialCommand& cmd,
     }
     if (textEqualsIgnoreCase(args, "START")) {
       player.requestCatalogScan(false);
-      player.update(nowMs, allowPlayback(ctx));
       if (ctx.printScanStatus != nullptr) {
         ctx.printScanStatus("start");
       }
@@ -155,7 +150,6 @@ bool serialProcessMp3Command(const SerialCommand& cmd,
     }
     if (textEqualsIgnoreCase(args, "REBUILD")) {
       player.requestCatalogScan(true);
-      player.update(nowMs, allowPlayback(ctx));
       if (ctx.printScanStatus != nullptr) {
         ctx.printScanStatus("rebuild");
       }
@@ -308,7 +302,6 @@ bool serialProcessMp3Command(const SerialCommand& cmd,
       const bool ok = player.loadPlayerState();
       if (ok) {
         player.requestStorageRefresh(false);
-        player.update(nowMs, allowPlayback(ctx));
       }
       serialDispatchReply(out, "MP3_STATE", ok ? SerialDispatchResult::kOk : SerialDispatchResult::kBusy, "load");
       return true;
@@ -329,7 +322,6 @@ bool serialProcessMp3Command(const SerialCommand& cmd,
       ctx.forceUsonFunctional("serial_mp3_unlock");
     }
     player.requestStorageRefresh(false);
-    player.update(nowMs, false);
     if (ctx.printStatus != nullptr) {
       ctx.printStatus("unlock");
     }
@@ -339,7 +331,6 @@ bool serialProcessMp3Command(const SerialCommand& cmd,
 
   if (serialTokenEquals(cmd, "MP3_REFRESH")) {
     player.requestStorageRefresh(true);
-    player.update(nowMs, allowPlayback(ctx));
     if (ctx.printStatus != nullptr) {
       ctx.printStatus("refresh");
     }
@@ -390,10 +381,16 @@ bool serialProcessMp3Command(const SerialCommand& cmd,
       return true;
     }
     player.requestStorageRefresh(false);
-    player.update(nowMs, allowPlayback(ctx));
+    if (!player.isSdReady()) {
+      serialDispatchReply(out, "MP3", SerialDispatchResult::kOutOfContext, "sd unavailable");
+      return true;
+    }
     const uint16_t count = player.trackCount();
-    if (!player.isSdReady() || count == 0U) {
-      serialDispatchReply(out, "MP3", SerialDispatchResult::kOutOfContext, "sd/tracks unavailable");
+    if (count == 0U) {
+      serialDispatchReply(out,
+                          "MP3",
+                          player.isScanBusy() ? SerialDispatchResult::kBusy : SerialDispatchResult::kOutOfContext,
+                          player.isScanBusy() ? "scan pending" : "no_tracks");
       return true;
     }
     if (trackNum > static_cast<int>(count)) {
@@ -484,7 +481,6 @@ bool serialProcessMp3Command(const SerialCommand& cmd,
       ctx.forceUsonFunctional("serial_mp3_fx");
     }
     player.requestStorageRefresh(false);
-    player.update(nowMs, allowPlayback(ctx));
     const uint32_t safeDuration = (durationMs > 0) ? static_cast<uint32_t>(durationMs)
                                                    : static_cast<uint32_t>(config::kMp3FxDefaultDurationMs);
     const bool ok = (ctx.triggerMp3Fx != nullptr) && ctx.triggerMp3Fx(effect, safeDuration, "serial_mp3_fx");

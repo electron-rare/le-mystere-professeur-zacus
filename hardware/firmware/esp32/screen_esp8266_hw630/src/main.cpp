@@ -10,7 +10,7 @@ namespace {
 
 constexpr uint8_t kLinkRx = D6;    // ESP8266 RX <- ESP32 TX (GPIO22)
 constexpr uint8_t kLinkTx = D5;    // Non utilise dans le profil actuel
-constexpr uint32_t kLinkBaud = 38400;
+constexpr uint32_t kLinkBaud = 19200;
 constexpr int kLinkRxBufferBytes = 256;
 constexpr int kLinkIsrBufferBytes = 2048;
 
@@ -19,14 +19,28 @@ constexpr uint8_t kScreenHeight = 64;
 constexpr int8_t kOledReset = -1;
 
 constexpr uint16_t kRenderPeriodMs = 250;
-constexpr uint16_t kLinkTimeoutMs = 10000;
-constexpr uint16_t kLinkDownConfirmMs = 1500;
+constexpr uint16_t kLinkTimeoutMs = 15000;
+constexpr uint16_t kLinkDownConfirmMs = 2500;
+constexpr uint32_t kLinkRecoverGraceMs = 30000;
+constexpr uint32_t kPeerRebootGraceMs = 8000;
+constexpr uint32_t kPeerUptimeRollbackSlackMs = 2000;
 constexpr uint16_t kDiagPeriodMs = 5000;
-constexpr uint16_t kBootVisualTestMs = 250;
+constexpr uint16_t kBootVisualTestMs = 400;
+constexpr uint16_t kBootSplashMinMs = 3600;
+constexpr uint8_t kOledInitRetries = 3;
+constexpr uint16_t kOledInitRetryDelayMs = 80;
 constexpr uint16_t kUnlockFrameMs = 2500;
 constexpr uint8_t kUnlockFrameCount = 6;
 constexpr uint8_t kInvalidPin = 0xFF;
 constexpr uint8_t kScopeHistoryLen = 64;
+
+constexpr uint8_t kStartupStageInactive = 0;
+constexpr uint8_t kStartupStageBootValidation = 1;
+
+constexpr uint8_t kAppStageULockWaiting = 0;
+constexpr uint8_t kAppStageULockListening = 1;
+constexpr uint8_t kAppStageUSonFunctional = 2;
+constexpr uint8_t kAppStageMp3 = 3;
 
 constexpr uint8_t kSpriteChip[8] = {0x3C, 0x7E, 0xDB, 0xA5, 0xA5, 0xDB, 0x7E, 0x3C};
 constexpr uint8_t kSpriteLock[8] = {0x18, 0x24, 0x24, 0x7E, 0x42, 0x5A, 0x42, 0x7E};
@@ -67,6 +81,15 @@ struct TelemetryState {
   uint8_t micLevelPercent = 0;   // 0..100
   bool micScopeEnabled = false;  // scope render only when source supports it
   uint8_t unlockHoldPercent = 0; // 0..100
+  uint8_t startupStage = kStartupStageInactive;
+  uint8_t appStage = kAppStageULockWaiting;
+  uint32_t frameSeq = 0;
+  uint8_t uiPage = 0;
+  uint8_t repeatMode = 0;
+  bool fxActive = false;
+  uint8_t backendMode = 0;
+  bool scanBusy = false;
+  uint8_t errorCode = 0;
   int8_t tuningOffset = 0;      // -8..+8 (left/right around LA)
   uint8_t tuningConfidence = 0; // 0..100
   uint32_t lastRxMs = 0;
@@ -83,7 +106,7 @@ bool g_linkWasAlive = false;
 uint32_t g_linkLossCount = 0;
 uint32_t g_parseErrorCount = 0;
 uint32_t g_rxOverflowCount = 0;
-char g_lineBuffer[128];
+char g_lineBuffer[220];
 uint8_t g_lineLen = 0;
 uint8_t g_oledSdaPin = kInvalidPin;
 uint8_t g_oledSclPin = kInvalidPin;
@@ -94,12 +117,22 @@ bool g_scopeFilled = false;
 uint32_t g_unlockSequenceStartMs = 0;
 uint32_t g_lastByteMs = 0;
 uint32_t g_linkDownSinceMs = 0;
+uint32_t g_linkLostSinceMs = 0;
+uint32_t g_peerRebootUntilMs = 0;
+uint32_t g_bootSplashUntilMs = 0;
 
 uint32_t latestLinkTickMs() {
   if (g_state.lastRxMs > g_lastByteMs) {
     return g_state.lastRxMs;
   }
   return g_lastByteMs;
+}
+
+uint32_t safeAgeMs(uint32_t nowMs, uint32_t tickMs) {
+  if (tickMs == 0U || nowMs < tickMs) {
+    return 0U;
+  }
+  return nowMs - tickMs;
 }
 
 bool isPhysicalLinkAlive(uint32_t nowMs) {
@@ -110,6 +143,9 @@ bool isPhysicalLinkAlive(uint32_t nowMs) {
   const uint32_t lastTickMs = latestLinkTickMs();
   if (lastTickMs == 0) {
     return false;
+  }
+  if (nowMs < lastTickMs) {
+    return true;
   }
   return (nowMs - lastTickMs) <= kLinkTimeoutMs;
 }
@@ -134,6 +170,10 @@ bool isLinkAlive(uint32_t nowMs) {
   }
 
   return (nowMs - g_linkDownSinceMs) < kLinkDownConfirmMs;
+}
+
+bool isPeerRebootGraceActive(uint32_t nowMs) {
+  return g_peerRebootUntilMs != 0U && static_cast<int32_t>(nowMs - g_peerRebootUntilMs) < 0;
 }
 
 int16_t textWidth(const char* text, uint8_t textSize) {
@@ -591,6 +631,36 @@ void drawMissionGrid(uint32_t nowMs, int16_t x, int16_t y, int16_t w, int16_t h)
   g_display.drawRect(cursor - 1, pathY - 1, 3, 3, SSD1306_WHITE);
 }
 
+const char* uiPageShortLabel(uint8_t page) {
+  switch (page) {
+    case 1:
+      return "BRW";
+    case 2:
+      return "QUE";
+    case 3:
+      return "SET";
+    case 0:
+    default:
+      return "NOW";
+  }
+}
+
+const char* repeatShortLabel(uint8_t repeatMode) {
+  return (repeatMode == 1U) ? "ONE" : "ALL";
+}
+
+const char* backendShortLabel(uint8_t backendMode) {
+  switch (backendMode) {
+    case 1:
+      return "AT";
+    case 2:
+      return "LEG";
+    case 0:
+    default:
+      return "AUTO";
+  }
+}
+
 void renderMp3Screen() {
   drawTitleBar("LECTEUR U-SON");
 
@@ -627,7 +697,26 @@ void renderMp3Screen() {
              static_cast<unsigned int>(g_state.key));
   }
   drawCenteredText(infoLine, 43, 1);
-  drawHorizontalGauge(12, 54, 104, 8, g_state.volumePercent);
+
+  char modeLine[32];
+  snprintf(modeLine,
+           sizeof(modeLine),
+           "%s %s %s%s%s",
+           uiPageShortLabel(g_state.uiPage),
+           repeatShortLabel(g_state.repeatMode),
+           backendShortLabel(g_state.backendMode),
+           g_state.fxActive ? " FX" : "",
+           g_state.scanBusy ? " SC" : "");
+  drawCenteredText(modeLine, 52, 1);
+  drawHorizontalGauge(12, 58, 104, 5, g_state.volumePercent);
+
+  if (g_state.errorCode != 0U) {
+    char errLine[10];
+    snprintf(errLine, sizeof(errLine), "E%u", static_cast<unsigned int>(g_state.errorCode));
+    g_display.setCursor(103, 0);
+    g_display.setTextSize(1);
+    g_display.print(errLine);
+  }
 }
 
 void renderULockWaitingScreen(uint32_t nowMs) {
@@ -650,6 +739,29 @@ void renderULockScreen(uint32_t nowMs) {
     return;
   }
   renderULockDetectScreen();
+}
+
+void renderStartupBootScreen(uint32_t nowMs) {
+  drawBrokenModuleGlitch(nowMs, 64, 32);
+
+  g_display.fillRect(0, 0, kScreenWidth, 12, SSD1306_WHITE);
+  g_display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
+  drawCenteredText("U-SON SCREEN", 2, 1);
+  g_display.setTextColor(SSD1306_WHITE);
+
+  g_display.fillRect(6, 15, 116, 30, SSD1306_BLACK);
+  g_display.drawRect(6, 15, 116, 30, SSD1306_WHITE);
+  drawCenteredDemoText("DECOUVERTE MODULE", 19, 1, nowMs, true);
+
+  char waitLine[24] = {};
+  const uint8_t dots = static_cast<uint8_t>((nowMs / 280U) % 4U);
+  snprintf(waitLine, sizeof(waitLine), "EN ATTENTE%.*s", static_cast<int>(dots), "...");
+  drawCenteredText(waitLine, 32, 1);
+
+  drawCenteredText("K1..K6 -> U_LOCK", 46, 1);
+  const uint16_t sweepPhase = static_cast<uint16_t>((nowMs / 35U) % 200U);
+  const uint8_t sweep = static_cast<uint8_t>((sweepPhase <= 100U) ? sweepPhase : (200U - sweepPhase));
+  drawHorizontalGauge(12, 54, 104, 8, sweep);
 }
 
 void renderUnlockSequenceScreen(uint32_t nowMs) {
@@ -748,7 +860,7 @@ void renderUnlockSequenceScreen(uint32_t nowMs) {
 
 void renderLinkDownScreen(uint32_t nowMs) {
   const uint32_t lastTickMs = latestLinkTickMs();
-  const uint32_t ageMs = (lastTickMs > 0) ? (nowMs - lastTickMs) : 0;
+  const uint32_t ageMs = safeAgeMs(nowMs, lastTickMs);
 
   drawTitleBar("U-SON SCREEN");
   drawCenteredText("LINK DOWN", 18, 2);
@@ -762,6 +874,31 @@ void renderLinkDownScreen(uint32_t nowMs) {
   drawCenteredText(lossLine, 54, 1);
 }
 
+void renderLinkRecoveringScreen(uint32_t nowMs) {
+  const uint32_t lastTickMs = latestLinkTickMs();
+  const uint32_t ageMs = safeAgeMs(nowMs, lastTickMs);
+
+  drawBrokenModuleGlitch(nowMs, 64, 32);
+  g_display.fillRect(0, 0, kScreenWidth, 12, SSD1306_WHITE);
+  g_display.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
+  drawCenteredText("U-SON SCREEN", 2, 1);
+  g_display.setTextColor(SSD1306_WHITE);
+
+  drawCenteredText("RECONNEXION MODULE", 18, 1);
+
+  char ageLine[26];
+  snprintf(ageLine, sizeof(ageLine), "Derniere trame %lus", static_cast<unsigned long>(ageMs / 1000UL));
+  drawCenteredText(ageLine, 32, 1);
+
+  char retryLine[22];
+  snprintf(retryLine, sizeof(retryLine), "Pertes %lu", static_cast<unsigned long>(g_linkLossCount));
+  drawCenteredText(retryLine, 43, 1);
+
+  const uint16_t sweepPhase = static_cast<uint16_t>((nowMs / 35U) % 200U);
+  const uint8_t sweep = static_cast<uint8_t>((sweepPhase <= 100U) ? sweepPhase : (200U - sweepPhase));
+  drawHorizontalGauge(12, 54, 104, 8, sweep);
+}
+
 void renderScreen(uint32_t nowMs, bool linkAlive) {
   if (!g_displayReady) {
     return;
@@ -770,22 +907,46 @@ void renderScreen(uint32_t nowMs, bool linkAlive) {
   g_display.clearDisplay();
   g_display.setTextColor(SSD1306_WHITE);
 
+  if (g_bootSplashUntilMs != 0U && static_cast<int32_t>(nowMs - g_bootSplashUntilMs) < 0) {
+    drawTitleBar("U-SON SCREEN");
+
+    char line[22] = {};
+    const uint8_t dots = static_cast<uint8_t>((nowMs / 280U) % 4U);
+    snprintf(line, sizeof(line), "Demarrage%.*s", static_cast<int>(dots), "...");
+    drawCenteredText(line, 20, 2);
+    drawCenteredText(g_linkEnabled ? "Init OLED + lien ESP32" : "Init OLED", 43, 1);
+
+    const uint16_t sweepPhase = static_cast<uint16_t>((nowMs / 35U) % 200U);
+    const uint8_t sweep = static_cast<uint8_t>((sweepPhase <= 100U) ? sweepPhase : (200U - sweepPhase));
+    drawHorizontalGauge(12, 54, 104, 8, sweep);
+
+    g_display.display();
+    return;
+  }
+
   if (!g_linkEnabled) {
     drawTitleBar("U-SON SCREEN");
     drawCenteredText("Liaison indisponible", 22, 1);
     drawCenteredText("Verifier cablage", 34, 1);
   } else if (!g_hasValidState) {
-    drawTitleBar("U-SON SCREEN");
-    drawCenteredText("Demarrage...", 18, 2);
-    drawCenteredText("En attente des donnees", 45, 1);
+    renderStartupBootScreen(nowMs);
   } else if (!linkAlive) {
-    renderLinkDownScreen(nowMs);
+    const bool recovering = isPeerRebootGraceActive(nowMs) || g_linkLostSinceMs == 0U ||
+                            (nowMs - g_linkLostSinceMs) < kLinkRecoverGraceMs;
+    if (recovering) {
+      renderLinkRecoveringScreen(nowMs);
+    } else {
+      renderLinkDownScreen(nowMs);
+    }
   } else {
-    if (g_state.mp3Mode) {
+    if (g_state.startupStage == kStartupStageBootValidation) {
+      renderStartupBootScreen(nowMs);
+    } else if (g_state.appStage == kAppStageMp3) {
       renderMp3Screen();
-    } else if (g_state.uLockMode) {
+    } else if (g_state.appStage == kAppStageULockWaiting ||
+               g_state.appStage == kAppStageULockListening) {
       renderULockScreen(nowMs);
-    } else if (g_state.uSonFunctional) {
+    } else if (g_state.appStage == kAppStageUSonFunctional) {
       renderUnlockSequenceScreen(nowMs);
     } else {
       drawTitleBar("U-SON SCREEN");
@@ -844,9 +1005,18 @@ bool parseFrame(const char* frame, TelemetryState* out) {
   unsigned int micLevelPercent = 0;
   unsigned int micScopeEnabled = 0;
   unsigned int unlockHoldPercent = 0;
+  unsigned int startupStage = 0;
+  unsigned int appStage = 0;
+  unsigned long frameSeq = 0;
+  unsigned int uiPage = 0;
+  unsigned int repeatMode = 0;
+  unsigned int fxActive = 0;
+  unsigned int backendMode = 0;
+  unsigned int scanBusy = 0;
+  unsigned int errorCode = 0;
 
   const int parsed = sscanf(frame,
-                            "STAT,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u,%u,%u,%u",
+                            "STAT,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u,%u,%u,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u",
                             &la,
                             &mp3,
                             &sd,
@@ -863,8 +1033,17 @@ bool parseFrame(const char* frame, TelemetryState* out) {
                             &uLockListening,
                             &micLevelPercent,
                             &micScopeEnabled,
-                            &unlockHoldPercent);
-  if (parsed < 5) {
+                            &unlockHoldPercent,
+                            &startupStage,
+                            &appStage,
+                            &frameSeq,
+                            &uiPage,
+                            &repeatMode,
+                            &fxActive,
+                            &backendMode,
+                            &scanBusy,
+                            &errorCode);
+  if (parsed < 19) {
     return false;
   }
 
@@ -915,6 +1094,40 @@ bool parseFrame(const char* frame, TelemetryState* out) {
   } else {
     out->unlockHoldPercent = 0;
   }
+
+  if (parsed >= 18) {
+    out->startupStage =
+        (startupStage == kStartupStageBootValidation) ? kStartupStageBootValidation
+                                                      : kStartupStageInactive;
+  } else {
+    out->startupStage = kStartupStageInactive;
+  }
+
+  if (parsed >= 19) {
+    if (appStage > kAppStageMp3) {
+      appStage = kAppStageULockWaiting;
+    }
+    out->appStage = static_cast<uint8_t>(appStage);
+  } else if (out->mp3Mode) {
+    out->appStage = kAppStageMp3;
+  } else if (out->uSonFunctional) {
+    out->appStage = kAppStageUSonFunctional;
+  } else if (out->uLockMode && out->uLockListening) {
+    out->appStage = kAppStageULockListening;
+  } else {
+    out->appStage = kAppStageULockWaiting;
+  }
+
+  if (parsed >= 20) {
+    out->frameSeq = static_cast<uint32_t>(frameSeq);
+  }
+  out->uiPage = (parsed >= 21) ? static_cast<uint8_t>(uiPage) : 0U;
+  out->repeatMode = (parsed >= 22) ? static_cast<uint8_t>(repeatMode) : 0U;
+  out->fxActive = (parsed >= 23) ? (fxActive != 0U) : false;
+  out->backendMode = (parsed >= 24) ? static_cast<uint8_t>(backendMode) : 0U;
+  out->scanBusy = (parsed >= 25) ? (scanBusy != 0U) : false;
+  out->errorCode = (parsed >= 26) ? static_cast<uint8_t>(errorCode) : 0U;
+
   out->lastRxMs = millis();
   return true;
 }
@@ -931,9 +1144,18 @@ void handleIncoming() {
       g_lineBuffer[g_lineLen] = '\0';
       TelemetryState parsed = g_state;
       if (parseFrame(g_lineBuffer, &parsed)) {
-        if (!g_state.uSonFunctional && parsed.uSonFunctional) {
+        if (g_hasValidState &&
+            (parsed.uptimeMs + kPeerUptimeRollbackSlackMs) < g_state.uptimeMs) {
+          g_peerRebootUntilMs = millis() + kPeerRebootGraceMs;
+          Serial.printf("[SCREEN] Peer reboot detecte: uptime %lu -> %lu\n",
+                        static_cast<unsigned long>(g_state.uptimeMs),
+                        static_cast<unsigned long>(parsed.uptimeMs));
+        }
+        if (g_state.appStage != kAppStageUSonFunctional &&
+            parsed.appStage == kAppStageUSonFunctional) {
           g_unlockSequenceStartMs = millis();
-        } else if (g_state.uSonFunctional && !parsed.uSonFunctional) {
+        } else if (g_state.appStage == kAppStageUSonFunctional &&
+                   parsed.appStage != kAppStageUSonFunctional) {
           g_unlockSequenceStartMs = 0;
         }
         pushScopeSample(parsed.micLevelPercent);
@@ -962,11 +1184,20 @@ void handleIncoming() {
 void initDisplay() {
   Serial.println("[SCREEN] OLED init...");
   for (const auto& candidate : kI2cCandidates) {
-    Serial.printf("[SCREEN] Test I2C %s\n", candidate.label);
-    if (initDisplayOnPins(candidate.sda, candidate.scl)) {
-      g_displayReady = true;
-      g_oledSdaPin = candidate.sda;
-      g_oledSclPin = candidate.scl;
+    for (uint8_t attempt = 1U; attempt <= kOledInitRetries; ++attempt) {
+      Serial.printf("[SCREEN] Test I2C %s try=%u/%u\n",
+                    candidate.label,
+                    static_cast<unsigned int>(attempt),
+                    static_cast<unsigned int>(kOledInitRetries));
+      if (initDisplayOnPins(candidate.sda, candidate.scl)) {
+        g_displayReady = true;
+        g_oledSdaPin = candidate.sda;
+        g_oledSclPin = candidate.scl;
+        break;
+      }
+      delay(kOledInitRetryDelayMs);
+    }
+    if (g_displayReady) {
       break;
     }
   }
@@ -988,6 +1219,7 @@ void initDisplay() {
     g_display.println("U-SON SCREEN");
     g_display.println("Boot...");
     g_display.display();
+    g_bootSplashUntilMs = millis() + static_cast<uint32_t>(kBootSplashMinMs);
 
     if (g_oledSdaPin == kLinkRx || g_oledSdaPin == kLinkTx ||
         g_oledSclPin == kLinkRx || g_oledSclPin == kLinkTx) {
@@ -1032,6 +1264,15 @@ void loop() {
     ++g_linkLossCount;
     g_stateDirty = true;
   }
+  if (linkAlive) {
+    if (g_linkLostSinceMs != 0U) {
+      g_stateDirty = true;
+    }
+    g_linkLostSinceMs = 0U;
+  } else if (g_linkLostSinceMs == 0U) {
+    g_linkLostSinceMs = nowMs;
+    g_stateDirty = true;
+  }
   if (linkAlive != g_linkWasAlive) {
     g_stateDirty = true;
   }
@@ -1045,7 +1286,7 @@ void loop() {
 
   if ((nowMs - g_lastDiagMs) >= kDiagPeriodMs) {
     const uint32_t lastTickMs = latestLinkTickMs();
-    const uint32_t ageMs = (lastTickMs > 0) ? (nowMs - lastTickMs) : 0;
+    const uint32_t ageMs = safeAgeMs(nowMs, lastTickMs);
     Serial.printf("[SCREEN] oled=%s link=%s phys=%s valid=%u age_ms=%lu losses=%lu parse_err=%lu rx_ovf=%lu sda=%u scl=%u addr=0x%02X\n",
                   g_displayReady ? "OK" : "KO",
                   g_linkEnabled ? (linkAlive ? "OK" : "DOWN") : "OFF",

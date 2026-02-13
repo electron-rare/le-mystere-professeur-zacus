@@ -3,13 +3,14 @@
 #include <Arduino.h>
 
 #include "../config.h"
-#include "../i2s_jingle_player.h"
-#include "../keypad_analog.h"
+#include "../audio/i2s_jingle_player.h"
+#include "../services/audio/async_audio_service.h"
+#include "../input/keypad_analog.h"
 #include "../la_detector.h"
-#include "../led_controller.h"
-#include "../mp3_player.h"
-#include "../screen_link.h"
-#include "../sine_dac.h"
+#include "../ui/led_controller.h"
+#include "../audio/mp3_player.h"
+#include "../screen/screen_link.h"
+#include "../audio/sine_dac.h"
 #include "runtime_mode.h"
 
 extern LedController g_led;
@@ -19,6 +20,7 @@ extern KeypadAnalog g_keypad;
 extern ScreenLink g_screen;
 extern Mp3Player g_mp3;
 extern I2sJinglePlayer g_unlockJinglePlayer;
+extern AsyncAudioService g_asyncAudio;
 
 extern RuntimeMode g_mode;
 extern bool g_laDetectionEnabled;
@@ -39,9 +41,12 @@ extern UnlockJingleState g_unlockJingle;
 struct BootAudioProtocolState {
   bool active = false;
   bool validated = false;
-  uint8_t replayCount = 0;
+  bool waitingAudio = false;
+  uint16_t replayCount = 0;
+  uint32_t startMs = 0;
   uint32_t deadlineMs = 0;
   uint32_t nextReminderMs = 0;
+  char cycleSourceTag[24] = {};
   char serialCmdBuffer[32] = {};
   uint8_t serialCmdLen = 0;
 };

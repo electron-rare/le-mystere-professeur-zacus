@@ -204,10 +204,17 @@ void LaDetector::captureFromAdc() {
 
 void LaDetector::captureFromI2s() {
   int16_t i2sBuffer[32];
+  const uint8_t maxSamplesPerLoop =
+      (config::kDetectMaxSamplesPerLoop == 0U) ? 1U : config::kDetectMaxSamplesPerLoop;
+  uint8_t samplesCaptured = 0U;
 
-  while (sampleIndex_ < config::kDetectN) {
+  while (sampleIndex_ < config::kDetectN && samplesCaptured < maxSamplesPerLoop) {
     const size_t remaining = static_cast<size_t>(config::kDetectN - sampleIndex_);
-    const size_t requested = (remaining < 32U) ? remaining : 32U;
+    const size_t loopBudget = static_cast<size_t>(maxSamplesPerLoop - samplesCaptured);
+    size_t requested = (remaining < 32U) ? remaining : 32U;
+    if (requested > loopBudget) {
+      requested = loopBudget;
+    }
     size_t bytesRead = 0;
     const esp_err_t readErr =
         i2s_read(i2sPort_, i2sBuffer, requested * sizeof(int16_t), &bytesRead, 0);
@@ -216,7 +223,8 @@ void LaDetector::captureFromI2s() {
     }
 
     const size_t samplesRead = bytesRead / sizeof(int16_t);
-    for (size_t i = 0; i < samplesRead && sampleIndex_ < config::kDetectN; ++i) {
+    for (size_t i = 0; i < samplesRead && sampleIndex_ < config::kDetectN && samplesCaptured < maxSamplesPerLoop;
+         ++i) {
       // Convert signed PCM16 to pseudo-ADC 12-bit range [0..4095].
       int32_t normalized = static_cast<int32_t>(i2sBuffer[i]) + 32768;
       if (normalized < 0) {
@@ -225,6 +233,7 @@ void LaDetector::captureFromI2s() {
         normalized = 65535;
       }
       samples_[sampleIndex_++] = static_cast<int16_t>(normalized >> 4);
+      ++samplesCaptured;
     }
   }
 }

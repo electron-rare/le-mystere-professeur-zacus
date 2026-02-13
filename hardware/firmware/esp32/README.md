@@ -18,6 +18,10 @@ Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
   - en `U_LOCK`: appui sur une touche pour lancer la detection du LA (440 Hz, micro onboard)
   - affichage OLED pendant detection: bargraphe volume + bargraphe accordage + scope micro (optionnel si `kUseI2SMicInput=true`)
   - apres cumul de 3 secondes de detection LA (continue ou repetee): pictogramme de validation, puis passage en `MODULE U-SON Fonctionnel`
+- scenario STORY:
+    - fin `U_LOCK`: sequence story unifiee `unlock -> WIN` (random `*WIN*`, fallback effet I2S WIN)
+    - puis `ETAPE_2` declenchee apres delai story (defaut 15 min)
+    - mode lecteur SD autorise seulement apres `ETAPE_2`
   - ensuite: activation detection SD, puis passage auto en `MODE LECTEUR U-SON` si SD + fichiers audio supportes
 - Touches: clavier analogique sur une seule entree ADC
 - Ecran distant: ESP8266 NodeMCU OLED via UART
@@ -31,14 +35,18 @@ Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
 - Compatibilite includes historiques: `src/app_state.h`
 - Codec ES8388 (wrapper `arduino-audio-driver`): `src/audio/codec_es8388_driver.h`, `src/audio/codec_es8388_driver.cpp`
 - Config hardware/audio: `src/config.h`
-- Lecteur audio SD_MMC + I2S (multi-format): `src/mp3_player.h`, `src/mp3_player.cpp`
-- Touches analogiques: `src/keypad_analog.h`, `src/keypad_analog.cpp`
-- Lien ecran ESP8266: `src/screen_link.h`, `src/screen_link.cpp`
+- Lecteur audio SD_MMC + I2S (multi-format): `src/audio/mp3_player.h`, `src/audio/mp3_player.cpp`
+- Generation tonalite/jingle: `src/audio/sine_dac.h`, `src/audio/sine_dac.cpp`, `src/audio/i2s_jingle_player.h`, `src/audio/i2s_jingle_player.cpp`
+- Touches analogiques: `src/input/keypad_analog.h`, `src/input/keypad_analog.cpp`
+- UI LED: `src/ui/led_controller.h`, `src/ui/led_controller.cpp`
+- Lien ecran ESP8266: `src/screen/screen_link.h`, `src/screen/screen_link.cpp`, `src/screen/screen_frame.h`
+- Moteur de scenario STORY: `src/story/story_engine.h`, `src/story/story_engine.cpp`
 - Memo board A252: `README_A252.md`
 - Cablage: `WIRING.md`
 - Validation terrain: `TESTING.md`
 - Commandes de travail: `Makefile`
 - Assets LittleFS (sons internes): `data/`
+- Archives non actives: `old/` (ex: sources audio de travail)
 
 ## GPIO utilises (A252)
 
@@ -60,28 +68,23 @@ Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
 
 ## Actions des touches
 
-### Protocole validation audio boot
+### Protocole boot audio
 
-- Au demarrage, un FX audio I2S est joue puis la validation boot s'ouvre.
-- Pendant cette phase, les commandes de mode normal sont bloquees jusqu'a validation/saut/timeout.
-- Timeout auto: `kBootAudioValidationTimeoutMs` (par defaut 12000 ms).
-- Relectures max: `kBootAudioValidationMaxReplays` (par defaut 3).
+- Au demarrage, le firmware lit un FX boot LittleFS (par defaut `uson_boot_arcade_lowmono.mp3`, cible ~20 s).
+- Ensuite il lance un scan radio I2S continu (bruit FM/recherche) en boucle.
+- Pendant cette phase, les commandes de mode normal sont bloquees.
+- Le passage a l'app suivante se fait sur appui d'une touche `K1..K6`.
+- Un timeout auto est possible si `kBootAudioValidationTimeoutMs > 0` dans `src/config.h`
+  (par defaut `0`, donc timeout desactive).
 
 Touches actives:
 
-- `K1` : valider le rendu audio boot (`OK`)
-- `K2` : rejouer le FX boot
-- `K3` : declarer `KO` + rejouer le FX boot
-- `K4` : jouer un tone test `440 Hz` (debug sortie audio)
-- `K5` : jouer une sequence diag `220 -> 440 -> 880 Hz`
-- `K6` : ignorer la validation (`SKIP`)
+- `K1..K6` : passage a l'etape suivante (detection LA)
 
 Commandes serie (moniteur ESP32):
 
-- `BOOT_OK`
-- `BOOT_REPLAY`
-- `BOOT_KO`
-- `BOOT_SKIP`
+- `BOOT_NEXT`
+- `BOOT_REPLAY` (relit l'intro + relance le scan radio)
 - `BOOT_STATUS`
 - `BOOT_HELP`
 - `BOOT_TEST_TONE`
@@ -93,17 +96,38 @@ Commandes serie (moniteur ESP32):
 - `BOOT_FS_INFO` (etat/capacite LittleFS)
 - `BOOT_FS_LIST` (liste des fichiers LittleFS)
 - `BOOT_FS_TEST` (joue le FX boot detecte depuis LittleFS)
-- `BOOT_REOPEN` (relance le FX boot + reouvre la fenetre de validation sans reset)
+- `BOOT_REOPEN` (relance intro + scan sans reset)
 - `CODEC_STATUS` (etat codec I2C + volumes de sortie lus)
 - `CODEC_DUMP` ou `CODEC_DUMP 0x00 0x31` (dump registres codec)
 - `CODEC_RD 0x2E` / `CODEC_WR 0x2E 0x10` (lecture/ecriture registre brut)
 - `CODEC_VOL 70` (volume codec + gain logiciel lecteur a 70%)
 - `CODEC_VOL_RAW 0x12` (force volume brut registres 0x2E..0x31)
-- Alias courts acceptes: `OK`, `REPLAY`, `KO`, `SKIP`, `STATUS`, `HELP`, `PAINV`, `FS_INFO`, `FS_LIST`, `FSTEST`
+- Les aliases historiques sont desactives: utiliser uniquement les commandes canoniques `PREFIXE_ACTION`.
 
-Le firmware publie aussi un rappel de statut periodique (`left=... replay=...`) tant que la validation est active.
+Le firmware publie un rappel periodique tant que l'attente touche est active.
 Hors fenetre boot: les commandes BOOT qui declenchent de l'audio sont autorisees uniquement en `U_LOCK`.
 En `U-SON`/`MP3`, seules les commandes de statut restent autorisees (`BOOT_STATUS`, `BOOT_HELP`, `BOOT_PA_STATUS`, `BOOT_FS_INFO`, `BOOT_FS_LIST`).
+
+### Scenario STORY (serial)
+
+Commandes scenario (moniteur ESP32):
+
+- `STORY_STATUS`
+- `STORY_HELP`
+- `STORY_RESET`
+- `STORY_ARM`
+- `STORY_TEST_ON` / `STORY_TEST_OFF`
+- `STORY_TEST_DELAY <ms>` (borne 100..300000)
+- `STORY_FORCE_ETAPE2`
+
+Notes:
+
+- Le mode test STORY est pilote uniquement par commandes serie (pas de raccourci clavier dedie).
+- `STORY_ARM` lance maintenant le scenario complet: armement + tentative de lecture `WIN`.
+- `STORY_STATUS` expose un `stage` explicite: `WAIT_UNLOCK`, `WIN_PENDING`, `WAIT_ETAPE2`, `ETAPE2_DONE`.
+- Les delais par defaut sont configures dans `src/config.h`:
+  - `kStoryEtape2DelayMs` (production, defaut 15 min)
+  - `kStoryEtape2TestDelayMs` (test rapide)
 
 ### Mode U_LOCK (au boot, detection SD bloquee)
 
@@ -116,8 +140,8 @@ En `U-SON`/`MP3`, seules les commandes de statut restent autorisees (`BOOT_STATU
 ### Module U-SON fonctionnel (apres detection du LA)
 
 - `K1` : LA detect on/off
-- `K2` : tone test I2S `440 Hz`
-- `K3` : sequence diag I2S `220 -> 440 -> 880 Hz`
+- `K2` : FX FM sweep I2S (asynchrone)
+- `K3` : FX sonar I2S (asynchrone)
 - `K4` : replay FX boot I2S
 - `K5` : demande refresh SD
 - `K6` : lance une calibration micro serie (30 s)
@@ -178,8 +202,25 @@ Depuis la racine de ce dossier (`hardware/firmware/esp32`):
    - `pio run -e esp8266_oled`
    - `pio run -e esp8266_oled -t upload --upload-port /dev/ttyUSB1`
    - `pio device monitor -e esp8266_oled --port /dev/ttyUSB1`
+   - (sous-projet ecran) `cd screen_esp8266_hw630 && pio run -e nodemcuv2`
 
 Sans variable `PORT`, PlatformIO choisit automatiquement le port serie.
+
+### Test live (ordre recommande)
+
+1. Brancher l'ESP32 en USB.
+2. Uploader ESP32:
+   - `pio run -e esp32dev -t upload --upload-port <PORT_ESP32>`
+   - optionnel assets: `pio run -e esp32dev -t uploadfs --upload-port <PORT_ESP32>`
+3. Brancher l'ESP8266 OLED en USB.
+4. Uploader ESP8266:
+   - `pio run -e esp8266_oled -t upload --upload-port <PORT_ESP8266>`
+5. Ouvrir les moniteurs:
+   - `pio device monitor -e esp32dev --port <PORT_ESP32>`
+   - `pio device monitor -e esp8266_oled --port <PORT_ESP8266>`
+
+Astuce detection ports:
+- `pio device list`
 
 ## Lecteur audio evolue
 
@@ -196,11 +237,11 @@ Le lecteur:
 Sons internes:
 
 - Le boot tente d'abord un FX depuis `LittleFS`:
-  - priorite: chemin configure `kBootFxLittleFsPath` (defaut `/boot.mp3`)
+  - priorite: chemin configure `kBootFxLittleFsPath` (defaut `/uson_boot_arcade_lowmono.mp3`)
   - puis auto-detection: `/boot.mp3`, `/boot.wav`, `/boot.aac`, `/boot.flac`, `/boot.opus`, `/boot.ogg`
   - fallback final: premier fichier audio supporte trouve dans la racine LittleFS
 - Si absent/invalide, fallback automatique sur le bruit radio I2S genere.
-- Les sons longs restent recommandes sur SD (`SD_MMC`).
+- Profil recommande: `uson_boot_arcade_lowmono.mp3` narratif ~20 s en LittleFS.
 
 ## Calibration touches analogiques
 
@@ -229,7 +270,8 @@ Reglage live (sans reflash):
 - `KEY_TEST_STATUS` : etat `OK/KO` + min/max `raw` par touche
 - `KEY_TEST_RESET` : remet l'auto-test a zero
 - `KEY_TEST_STOP` : arrete l'auto-test
-- `FS_INFO` / `FS_LIST` / `FSTEST` : debug LittleFS et test lecture FX boot
+- `BOOT_FS_INFO` / `BOOT_FS_LIST` / `BOOT_FS_TEST` : debug LittleFS et test lecture FX boot
+- `STORY_STATUS` / `STORY_TEST_ON` / `STORY_TEST_OFF` / `STORY_TEST_DELAY` / `STORY_ARM` / `STORY_FORCE_ETAPE2` : pilotage scenario STORY
 - `CODEC_STATUS` / `CODEC_DUMP` : debug codec I2C ES8388
 - `CODEC_RD reg` / `CODEC_WR reg val` : lecture/ecriture registre codec
 - `CODEC_VOL pct` / `CODEC_VOL_RAW raw [out2]` : reglage volume sortie codec

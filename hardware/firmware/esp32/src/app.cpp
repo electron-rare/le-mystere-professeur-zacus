@@ -17,11 +17,58 @@
 #include <SD_MMC.h>
 
 #include "app.h"
+#include "audio/effects/audio_effect_id.h"
+#include "audio/fm_radio_scan_fx.h"
+#include "controllers/boot_protocol_controller.h"
+#include "controllers/story_controller.h"
 #include "runtime/app_scheduler.h"
 #include "runtime/runtime_state.h"
+#include "services/audio/audio_service.h"
+#include "services/input/input_service.h"
+#include "services/serial/serial_router.h"
+#include "story/story_engine.h"
+#include "ui/player_ui_model.h"
 
 constexpr char kUnlockJingleRtttl[] =
     "zac_unlock:d=16,o=6,b=118:e,p,b,p,e7,8p,e7,b,e7";
+constexpr uint32_t kBootLoopScanMinMs = 10000U;
+constexpr uint32_t kBootLoopScanMaxMs = 40000U;
+constexpr uint32_t kULockSearchSonarCueMs = 420U;
+constexpr uint32_t kFxWinDurationMs = 1800U;
+constexpr uint32_t kFxMorseDurationMs = 3200U;
+constexpr uint32_t kFxSonarDurationMs = 2600U;
+constexpr uint32_t kFxFmDurationMs = 2600U;
+
+struct BootRadioScanState {
+  bool restoreMicCapture = false;
+  uint32_t lastLogMs = 0;
+};
+
+BootRadioScanState g_bootRadioScan;
+FmRadioScanFx g_bootRadioScanFx(config::kPinI2SBclk,
+                                config::kPinI2SLrc,
+                                config::kPinI2SDout,
+                                config::kI2sOutputPort);
+
+StoryEngine::Options makeStoryOptions() {
+  StoryEngine::Options options;
+  options.etape2DelayMs = config::kStoryEtape2DelayMs;
+  options.etape2TestDelayMs = config::kStoryEtape2TestDelayMs;
+  return options;
+}
+StoryEngine g_story(makeStoryOptions());
+
+struct ULockSearchAudioCueState {
+  bool pending = false;
+  bool active = false;
+  bool restoreMicCapture = false;
+  uint32_t untilMs = 0;
+};
+
+ULockSearchAudioCueState g_uLockSearchAudioCue;
+uint32_t g_screenFrameSeq = 0U;
+PlayerUiModel g_playerUi;
+String g_mp3BrowsePath = "/";
 
 void setBootAudioPaEnabled(bool enabled, const char* source);
 void printBootAudioOutputInfo(const char* source);
@@ -36,11 +83,140 @@ bool playAudioFromFsBlocking(fs::FS& storage,
 bool resolveBootLittleFsPath(String* outPath);
 bool playBootLittleFsFx(const char* source);
 void playBootAudioPrimaryFx(const char* source);
+bool resolveRandomFsPathContaining(fs::FS& storage, const char* token, String* outPath);
+bool playRandomLittleFsTokenFx(const char* token,
+                               const char* source,
+                               float gain,
+                               uint32_t maxDurationMs,
+                               String* outPath = nullptr);
+bool playRandomTokenFx(const char* token,
+                       const char* source,
+                       bool allowSdFallback,
+                       uint32_t maxDurationMs = config::kBootFxLittleFsMaxDurationMs);
+void playRtttlJingleBlocking(const char* song, float gain, const char* source);
+const char* effectLabel(FmRadioScanFx::Effect effect);
+bool playGeneratedI2sFxBlocking(FmRadioScanFx::Effect effect,
+                                uint32_t durationMs,
+                                float gain,
+                                const char* source);
+bool startAudioFromFsAsync(fs::FS& storage,
+                           const char* path,
+                           float gain,
+                           uint32_t maxDurationMs,
+                           const char* source);
+bool startBootAudioPrimaryFxAsync(const char* source);
+bool startRandomTokenFxAsync(const char* token,
+                             const char* source,
+                             bool allowSdFallback,
+                             uint32_t maxDurationMs = config::kBootFxLittleFsMaxDurationMs);
+void updateAsyncAudioService(uint32_t nowMs);
+void resetStoryTimeline(const char* source);
+void armStoryTimelineAfterUnlock(uint32_t nowMs);
+bool isMp3GateOpen();
+void updateStoryTimeline(uint32_t nowMs);
+bool startBootRadioScan(const char* source);
+void stopBootRadioScan(const char* source);
+void updateBootRadioScan(uint32_t nowMs);
+void continueAfterBootProtocol(const char* source);
+void startBootAudioLoopCycle(uint32_t nowMs, const char* source);
+void startBootAudioValidationProtocol(uint32_t nowMs);
+void updateBootAudioValidationProtocol(uint32_t nowMs);
+void startMicCalibration(uint32_t nowMs, const char* reason);
 bool processCodecDebugCommand(const char* cmd);
 void printCodecDebugHelp();
 void printMp3DebugHelp();
 bool processMp3DebugCommand(const char* cmd, uint32_t nowMs);
+void printStoryDebugHelp();
+bool processStoryDebugCommand(const char* cmd, uint32_t nowMs);
 void updateMp3FormatTest(uint32_t nowMs);
+PlayerUiPage currentPlayerUiPage();
+bool setPlayerUiPage(PlayerUiPage page);
+bool parsePlayerUiPageToken(const char* token, PlayerUiPage* outPage);
+uint8_t encodeBackendForScreen();
+uint8_t encodeMp3ErrorForScreen();
+void printMp3ScanStatus(const char* source);
+void printMp3BrowseList(const char* source, const char* path, uint16_t offset, uint16_t limit);
+bool parseBackendModeToken(const char* token, PlayerBackendMode* outMode);
+const char* currentBrowsePath();
+const char* mp3FxModeLabel(Mp3FxMode mode);
+const char* mp3FxEffectLabel(Mp3FxEffect effect);
+bool parseMp3FxEffectToken(const char* token, Mp3FxEffect* outEffect);
+bool triggerMp3Fx(Mp3FxEffect effect, uint32_t durationMs, const char* source);
+void handleBootAudioProtocolKey(uint8_t key, uint32_t nowMs);
+void handleKeySelfTestPress(uint8_t key, uint16_t raw);
+void handleKeyPress(uint8_t key);
+bool serviceInputDuringBlockingAudio(uint32_t nowMs, const char* source);
+void sendScreenFrameSnapshot(uint32_t nowMs, uint8_t keyForScreen);
+void requestULockSearchSonarCue(const char* source);
+void cancelULockSearchSonarCue(const char* source);
+void serviceULockSearchSonarCue(uint32_t nowMs);
+void onSerialCommand(const char* cmd, uint32_t nowMs, void* ctx);
+bool isCanonicalSerialCommand(const char* cmd);
+bool commandMatches(const char* cmd, const char* token);
+
+InputService& inputService() {
+  static InputService service(g_keypad);
+  return service;
+}
+
+AudioService& audioService() {
+  static AudioService service(g_asyncAudio, g_bootRadioScanFx, g_mp3);
+  return service;
+}
+
+bool startStoryRandomTokenBaseHook(const char* token,
+                                   const char* source,
+                                   bool allowSdFallback,
+                                   uint32_t maxDurationMs) {
+  return startRandomTokenFxAsync(token, source, allowSdFallback, maxDurationMs);
+}
+
+bool startStoryFallbackBaseFxHook(AudioEffectId effect,
+                                  uint32_t durationMs,
+                                  float gain,
+                                  const char* source) {
+  return audioService().startBaseFx(effect, gain, durationMs, source);
+}
+
+StoryController& storyController() {
+  static StoryController::Hooks hooks = []() {
+    StoryController::Hooks out;
+    out.startRandomTokenBase = startStoryRandomTokenBaseHook;
+    out.startFallbackBaseFx = startStoryFallbackBaseFxHook;
+    out.fallbackGain = config::kUnlockI2sJingleGain;
+    out.winToken = "WIN";
+    out.etape2Token = "ETAPE_2";
+    out.winMaxDurationMs = 6000U;
+    out.etape2MaxDurationMs = 6000U;
+    out.winFallbackDurationMs = kFxWinDurationMs;
+    out.etape2FallbackDurationMs = kFxWinDurationMs;
+    return out;
+  }();
+  static StoryController controller(g_story, audioService(), hooks);
+  return controller;
+}
+
+bool bootControllerIsActiveHook() {
+  return g_bootAudioProtocol.active;
+}
+
+BootProtocolController& bootProtocolController() {
+  static BootProtocolController::Hooks hooks = []() {
+    BootProtocolController::Hooks out;
+    out.start = startBootAudioValidationProtocol;
+    out.update = updateBootAudioValidationProtocol;
+    out.onKey = handleBootAudioProtocolKey;
+    out.isActive = bootControllerIsActiveHook;
+    return out;
+  }();
+  static BootProtocolController controller(hooks);
+  return controller;
+}
+
+SerialRouter& serialRouter() {
+  static SerialRouter router(Serial);
+  return router;
+}
 
 const char* micHealthLabel(bool detectionEnabled, float micRms, uint16_t micMin, uint16_t micMax) {
   if (!detectionEnabled) {
@@ -90,6 +266,169 @@ uint8_t unlockHoldPercent(uint32_t holdMs, bool uLockListening) {
     return 100;
   }
   return static_cast<uint8_t>((holdMs * 100U) / config::kLaUnlockHoldMs);
+}
+
+PlayerUiPage currentPlayerUiPage() {
+  return g_playerUi.page();
+}
+
+bool setPlayerUiPage(PlayerUiPage page) {
+  g_playerUi.setPage(page);
+  return true;
+}
+
+bool parsePlayerUiPageToken(const char* token, PlayerUiPage* outPage) {
+  if (token == nullptr || outPage == nullptr) {
+    return false;
+  }
+  if (strcmp(token, "NOW") == 0 || strcmp(token, "NOWPLAY") == 0 ||
+      strcmp(token, "NOWPLAYING") == 0) {
+    *outPage = PlayerUiPage::kNowPlaying;
+    return true;
+  }
+  if (strcmp(token, "BROWSE") == 0 || strcmp(token, "BROWSER") == 0) {
+    *outPage = PlayerUiPage::kBrowser;
+    return true;
+  }
+  if (strcmp(token, "QUEUE") == 0) {
+    *outPage = PlayerUiPage::kQueue;
+    return true;
+  }
+  if (strcmp(token, "SET") == 0 || strcmp(token, "SETTINGS") == 0) {
+    *outPage = PlayerUiPage::kSettings;
+    return true;
+  }
+  return false;
+}
+
+const char* currentBrowsePath() {
+  if (g_mp3BrowsePath.isEmpty()) {
+    g_mp3BrowsePath = "/";
+  }
+  return g_mp3BrowsePath.c_str();
+}
+
+bool parseBackendModeToken(const char* token, PlayerBackendMode* outMode) {
+  if (token == nullptr || outMode == nullptr) {
+    return false;
+  }
+  if (strcmp(token, "AUTO") == 0 || strcmp(token, "AUTO_FALLBACK") == 0) {
+    *outMode = PlayerBackendMode::kAutoFallback;
+    return true;
+  }
+  if (strcmp(token, "AUDIO_TOOLS") == 0 || strcmp(token, "AUDIO_TOOLS_ONLY") == 0) {
+    *outMode = PlayerBackendMode::kAudioToolsOnly;
+    return true;
+  }
+  if (strcmp(token, "LEGACY") == 0 || strcmp(token, "LEGACY_ONLY") == 0) {
+    *outMode = PlayerBackendMode::kLegacyOnly;
+    return true;
+  }
+  return false;
+}
+
+uint8_t encodeBackendForScreen() {
+  return static_cast<uint8_t>(g_mp3.activeBackend());
+}
+
+uint8_t encodeMp3ErrorForScreen() {
+  const char* error = g_mp3.lastBackendError();
+  if (error == nullptr || error[0] == '\0' || strcmp(error, "OK") == 0) {
+    return 0U;
+  }
+  if (strcmp(error, "UNSUPPORTED") == 0) {
+    return 1U;
+  }
+  if (strcmp(error, "OPEN_FAIL") == 0) {
+    return 2U;
+  }
+  if (strcmp(error, "I2S_FAIL") == 0) {
+    return 3U;
+  }
+  if (strcmp(error, "DEC_FAIL") == 0) {
+    return 4U;
+  }
+  if (strcmp(error, "OOM") == 0) {
+    return 5U;
+  }
+  if (strcmp(error, "RUNTIME") == 0) {
+    return 6U;
+  }
+  return 99U;
+}
+
+void printMp3ScanStatus(const char* source) {
+  const CatalogStats stats = g_mp3.catalogStats();
+  Serial.printf("[MP3_SCAN] %s busy=%u tracks=%u folders=%u scan_ms=%lu indexed=%u metadata_best=%u\n",
+                source,
+                g_mp3.isScanBusy() ? 1U : 0U,
+                static_cast<unsigned int>(stats.tracks),
+                static_cast<unsigned int>(stats.folders),
+                static_cast<unsigned long>(stats.scanMs),
+                stats.indexed ? 1U : 0U,
+                stats.metadataBestEffort ? 1U : 0U);
+}
+
+void printMp3BrowseList(const char* source, const char* path, uint16_t offset, uint16_t limit) {
+  const char* safePath = (path == nullptr || path[0] == '\0') ? "/" : path;
+  if (!g_mp3.isSdReady()) {
+    Serial.printf("[MP3_BROWSE] %s OUT_OF_CONTEXT sd=0\n", source);
+    return;
+  }
+  const uint16_t total = g_mp3.listTracks(safePath, offset, limit, Serial);
+  Serial.printf("[MP3_BROWSE] %s path=%s total=%u offset=%u limit=%u\n",
+                source,
+                safePath,
+                static_cast<unsigned int>(total),
+                static_cast<unsigned int>(offset),
+                static_cast<unsigned int>(limit));
+}
+
+void sendScreenFrameSnapshot(uint32_t nowMs, uint8_t keyForScreen) {
+  const bool laDetected =
+      (g_mode == RuntimeMode::kSignal) && g_laDetectionEnabled && g_laDetector.isDetected();
+  const bool uLockMode = (g_mode == RuntimeMode::kSignal) && !g_uSonFunctional;
+  const bool uLockListening = uLockMode && g_uLockListening;
+  const bool uSonFunctional = (g_mode == RuntimeMode::kSignal) && g_uSonFunctional;
+  const float micRms = g_laDetector.micRms();
+  const uint8_t micLevelPercent = micLevelPercentFromRms(micRms);
+
+  ScreenFrame frame;
+  frame.laDetected = laDetected;
+  frame.mp3Playing = g_mp3.isPlaying();
+  frame.sdReady = g_mp3.isSdReady();
+  frame.mp3Mode = (g_mode == RuntimeMode::kMp3);
+  frame.uLockMode = uLockMode;
+  frame.uLockListening = uLockListening;
+  frame.uSonFunctional = uSonFunctional;
+  frame.key = keyForScreen;
+  frame.track = g_mp3.currentTrackNumber();
+  frame.trackCount = g_mp3.trackCount();
+  frame.volumePercent = g_mp3.volumePercent();
+  frame.micLevelPercent = micLevelPercent;
+  frame.tuningOffset = uLockListening ? g_laDetector.tuningOffset() : 0;
+  frame.tuningConfidence = uLockListening ? g_laDetector.tuningConfidence() : 0;
+  frame.micScopeEnabled = config::kScreenEnableMicScope && config::kUseI2SMicInput;
+  frame.unlockHoldPercent = unlockHoldPercent(g_laHoldAccumMs, uLockListening);
+  frame.startupStage = g_bootAudioProtocol.active ? 1U : 0U;
+  frame.uiPage = static_cast<uint8_t>(currentPlayerUiPage());
+  frame.repeatMode = static_cast<uint8_t>(g_mp3.repeatMode());
+  frame.fxActive = g_mp3.isFxActive();
+  frame.backendMode = encodeBackendForScreen();
+  frame.scanBusy = g_mp3.isScanBusy();
+  frame.errorCode = encodeMp3ErrorForScreen();
+
+  if (frame.mp3Mode) {
+    frame.appStage = 3U;
+  } else if (!uSonFunctional) {
+    frame.appStage = uLockListening ? 1U : 0U;
+  } else {
+    frame.appStage = 2U;
+  }
+
+  frame.sequence = ++g_screenFrameSeq;
+  frame.nowMs = nowMs;
+  g_screen.update(frame);
 }
 
 void stopUnlockJingle(bool restoreMicCapture) {
@@ -207,8 +546,19 @@ void playBootI2sNoiseFx() {
   float crackle = 0.0f;
   uint32_t sweepCycle = 0;
   uint32_t sweepPosInCycle = 0;
+  bool interruptedByBootKey = false;
+  bool stalled = false;
+  uint32_t nextBootKeyPollSample = 0U;
 
   for (uint32_t i = 0; i < totalSamples; ++i) {
+    if (i >= nextBootKeyPollSample) {
+      nextBootKeyPollSample = i + 192U;
+      if (serviceInputDuringBlockingAudio(millis(), "boot_noise_fx")) {
+        interruptedByBootKey = true;
+        break;
+      }
+    }
+
     uint32_t envPermille = 1000U;
     if (attackSamples > 0U && i < attackSamples) {
       envPermille = (i * 1000U) / attackSamples;
@@ -277,8 +627,17 @@ void playBootI2sNoiseFx() {
 
     const int16_t sample = static_cast<int16_t>(sampleF * 23000.0f);
     int16_t stereo[2] = {sample, sample};
+    uint16_t waitGuard = 0U;
     while (!output.ConsumeSample(stereo)) {
       delayMicroseconds(40);
+      ++waitGuard;
+      if (waitGuard >= 1500U) {
+        stalled = true;
+        break;
+      }
+    }
+    if (stalled) {
+      break;
     }
 
     ++sweepPosInCycle;
@@ -293,7 +652,74 @@ void playBootI2sNoiseFx() {
   if (shouldRestoreMicCapture) {
     g_laDetector.setCaptureEnabled(true);
   }
-  Serial.println("[AUDIO] Boot noise I2S done.");
+  const char* outcome = stalled ? "stalled" : (interruptedByBootKey ? "interrupted" : "done");
+  Serial.printf("[AUDIO] Boot noise I2S %s.\n", outcome);
+}
+
+void stopBootRadioScan(const char* source) {
+  if (!g_bootRadioScanFx.isActive()) {
+    return;
+  }
+
+  g_bootRadioScanFx.stop();
+
+  if (g_bootRadioScan.restoreMicCapture && config::kUseI2SMicInput && g_mode == RuntimeMode::kSignal &&
+      g_laDetectionEnabled) {
+    g_laDetector.setCaptureEnabled(true);
+  }
+
+  g_bootRadioScan.restoreMicCapture = false;
+  g_bootRadioScan.lastLogMs = 0;
+  Serial.printf("[AUDIO] %s radio scan stop.\n", source);
+}
+
+bool startBootRadioScan(const char* source) {
+  stopBootRadioScan("boot_radio_restart");
+
+  const uint32_t sampleRate =
+      (config::kBootI2sNoiseSampleRateHz > 0U) ? static_cast<uint32_t>(config::kBootI2sNoiseSampleRateHz)
+                                               : 22050U;
+
+  g_bootRadioScan.restoreMicCapture =
+      config::kUseI2SMicInput && g_mode == RuntimeMode::kSignal && g_laDetectionEnabled;
+  if (g_bootRadioScan.restoreMicCapture) {
+    g_laDetector.setCaptureEnabled(false);
+  }
+
+  setBootAudioPaEnabled(true, source);
+  printBootAudioOutputInfo(source);
+
+  g_bootRadioScanFx.setGain(config::kBootI2sNoiseGain);
+  g_bootRadioScanFx.setSampleRate(sampleRate);
+  if (!g_bootRadioScanFx.start(FmRadioScanFx::Effect::kFmSweep)) {
+    if (g_bootRadioScan.restoreMicCapture) {
+      g_laDetector.setCaptureEnabled(true);
+    }
+    g_bootRadioScan.restoreMicCapture = false;
+    Serial.printf("[AUDIO] %s radio scan start failed.\n", source);
+    return false;
+  }
+
+  g_bootRadioScan.lastLogMs = millis();
+
+  Serial.printf("[AUDIO] %s radio scan start (Mozzi+AudioTools) sr=%luHz chunk=%ums\n",
+                source,
+                static_cast<unsigned long>(sampleRate),
+                static_cast<unsigned int>(config::kBootRadioScanChunkMs));
+  return true;
+}
+
+void updateBootRadioScan(uint32_t nowMs) {
+  if (!g_bootRadioScanFx.isActive()) {
+    return;
+  }
+
+  g_bootRadioScanFx.update(nowMs, config::kBootRadioScanChunkMs);
+
+  if (static_cast<int32_t>(nowMs - g_bootRadioScan.lastLogMs) >= 0) {
+    Serial.println("[AUDIO] radio scan active (attente touche).");
+    g_bootRadioScan.lastLogMs = nowMs + 4000U;
+  }
 }
 
 void setBootAudioPaEnabled(bool enabled, const char* source) {
@@ -549,6 +975,44 @@ void listLittleFsRoot(const char* source) {
                 static_cast<unsigned int>(count));
 }
 
+bool serviceInputDuringBlockingAudio(uint32_t nowMs, const char* source) {
+  static uint32_t nextScreenKeepAliveMs = 0U;
+  if (static_cast<int32_t>(nowMs - nextScreenKeepAliveMs) >= 0) {
+    sendScreenFrameSnapshot(nowMs, 0U);
+    nextScreenKeepAliveMs = nowMs + 120U;
+  }
+
+  g_keypad.update(nowMs);
+
+  static bool dispatchGuard = false;
+  if (dispatchGuard) {
+    return false;
+  }
+
+  uint8_t pressedKey = 0;
+  uint16_t pressedRaw = 0;
+  if (!g_keypad.consumePress(&pressedKey, &pressedRaw)) {
+    return false;
+  }
+
+  Serial.printf("[KEY] K%u raw=%u (%s)\n",
+                static_cast<unsigned int>(pressedKey),
+                static_cast<unsigned int>(pressedRaw),
+                source);
+  dispatchGuard = true;
+  if (g_bootAudioProtocol.active) {
+    handleBootAudioProtocolKey(pressedKey, nowMs);
+  } else if (g_keySelfTest.active) {
+    handleKeySelfTestPress(pressedKey, pressedRaw);
+  } else {
+    handleKeyPress(pressedKey);
+  }
+  dispatchGuard = false;
+  sendScreenFrameSnapshot(nowMs, pressedKey);
+  nextScreenKeepAliveMs = nowMs + 120U;
+  return true;
+}
+
 bool playAudioFromFsBlocking(fs::FS& storage,
                              const char* path,
                              float gain,
@@ -608,12 +1072,18 @@ bool playAudioFromFsBlocking(fs::FS& storage,
 
   const uint32_t startMs = millis();
   bool timeout = false;
+  bool interruptedByBootKey = false;
   while (decoder->isRunning()) {
     if (!decoder->loop()) {
       break;
     }
-    if (maxDurationMs > 0U && static_cast<uint32_t>(millis() - startMs) >= maxDurationMs) {
+    const uint32_t nowMs = millis();
+    if (maxDurationMs > 0U && static_cast<uint32_t>(nowMs - startMs) >= maxDurationMs) {
       timeout = true;
+      break;
+    }
+    if (serviceInputDuringBlockingAudio(nowMs, source)) {
+      interruptedByBootKey = true;
       break;
     }
     delay(0);
@@ -626,12 +1096,13 @@ bool playAudioFromFsBlocking(fs::FS& storage,
     g_laDetector.setCaptureEnabled(true);
   }
 
+  const char* status = timeout ? "timeout" : (interruptedByBootKey ? "interrupted" : "done");
   Serial.printf("[AUDIO_FS] %s %s [%s]: %s\n",
                 source,
-                timeout ? "timeout" : "done",
+                status,
                 bootFsCodecLabel(codec),
                 path);
-  return !timeout;
+  return !timeout && !interruptedByBootKey;
 }
 
 bool playBootLittleFsFx(const char* source) {
@@ -656,6 +1127,337 @@ bool playBootLittleFsFx(const char* source) {
                                  source);
 }
 
+bool resolveRandomFsPathContaining(fs::FS& storage, const char* token, String* outPath) {
+  if (outPath == nullptr || token == nullptr || token[0] == '\0') {
+    return false;
+  }
+  outPath->remove(0);
+
+  String needle(token);
+  needle.toLowerCase();
+  if (needle.isEmpty()) {
+    return false;
+  }
+
+  fs::File root = storage.open("/");
+  if (!root || !root.isDirectory()) {
+    return false;
+  }
+
+  uint32_t matches = 0;
+  fs::File file = root.openNextFile();
+  while (file) {
+    if (!file.isDirectory()) {
+      String name = String(file.name());
+      if (!name.startsWith("/")) {
+        name = "/" + name;
+      }
+      if (isSupportedBootFsAudioPath(name.c_str())) {
+        String lowerName = name;
+        lowerName.toLowerCase();
+        if (lowerName.indexOf(needle) >= 0) {
+          ++matches;
+          if (matches == 1U || random(0L, static_cast<long>(matches)) == 0L) {
+            *outPath = name;
+          }
+        }
+      }
+    }
+    file.close();
+    file = root.openNextFile();
+  }
+  root.close();
+  return !outPath->isEmpty();
+}
+
+bool playRandomLittleFsTokenFx(const char* token,
+                               const char* source,
+                               float gain,
+                               uint32_t maxDurationMs,
+                               String* outPath) {
+  if (!g_littleFsReady) {
+    return false;
+  }
+
+  String path;
+  if (!resolveRandomFsPathContaining(LittleFS, token, &path)) {
+    return false;
+  }
+
+  if (outPath != nullptr) {
+    *outPath = path;
+  }
+  Serial.printf("[AUDIO_FS] %s random '%s' from LittleFS: %s\n",
+                source,
+                token,
+                path.c_str());
+  return playAudioFromFsBlocking(LittleFS, path.c_str(), gain, maxDurationMs, source);
+}
+
+bool playRandomTokenFx(const char* token,
+                       const char* source,
+                       bool allowSdFallback,
+                       uint32_t maxDurationMs) {
+  String path;
+  if (playRandomLittleFsTokenFx(token,
+                                source,
+                                config::kBootFxLittleFsGain,
+                                maxDurationMs,
+                                &path)) {
+    return true;
+  }
+
+  if (!allowSdFallback) {
+    return false;
+  }
+
+  if (!g_mp3.isSdReady()) {
+    g_mp3.requestStorageRefresh();
+    g_mp3.update(millis(), false);
+  }
+  if (!g_mp3.isSdReady()) {
+    return false;
+  }
+
+  if (!resolveRandomFsPathContaining(SD_MMC, token, &path)) {
+    return false;
+  }
+  Serial.printf("[AUDIO_FS] %s random '%s' from SD: %s\n",
+                source,
+                token,
+                path.c_str());
+  return playAudioFromFsBlocking(SD_MMC,
+                                 path.c_str(),
+                                 config::kBootFxLittleFsGain,
+                                 maxDurationMs,
+                                 source);
+}
+
+bool startAudioFromFsAsync(fs::FS& storage,
+                           const char* path,
+                           float gain,
+                           uint32_t maxDurationMs,
+                           const char* source) {
+  if (path == nullptr || path[0] == '\0') {
+    return false;
+  }
+  if (!storage.exists(path)) {
+    Serial.printf("[AUDIO_ASYNC] %s missing file: %s\n", source, path);
+    return false;
+  }
+
+  setBootAudioPaEnabled(true, source);
+  printBootAudioOutputInfo(source);
+  if (!audioService().startBaseFs(storage, path, gain, maxDurationMs, source)) {
+    Serial.printf("[AUDIO_ASYNC] %s start failed: %s\n", source, path);
+    return false;
+  }
+  Serial.printf("[AUDIO_ASYNC] %s start fs: %s\n", source, path);
+  return true;
+}
+
+bool startBootAudioPrimaryFxAsync(const char* source) {
+  if (config::kPreferLittleFsBootFx && g_littleFsReady) {
+    String path;
+    if (resolveBootLittleFsPath(&path)) {
+      if (startAudioFromFsAsync(LittleFS,
+                                path.c_str(),
+                                config::kBootFxLittleFsGain,
+                                config::kBootFxLittleFsMaxDurationMs,
+                                source)) {
+        return true;
+      }
+    }
+  }
+
+  if (!config::kEnableBootI2sNoiseFx) {
+    return false;
+  }
+
+  setBootAudioPaEnabled(true, source);
+  printBootAudioOutputInfo(source);
+  const uint32_t durationMs =
+      (config::kBootI2sNoiseDurationMs > 0U) ? static_cast<uint32_t>(config::kBootI2sNoiseDurationMs)
+                                             : 1100U;
+  const bool ok =
+      audioService().startBaseFx(AudioEffectId::kFmSweep, config::kBootI2sNoiseGain, durationMs, source);
+  if (ok) {
+    Serial.printf("[AUDIO_ASYNC] %s fallback effect=%s dur=%lu ms\n",
+                  source,
+                  effectLabel(FmRadioScanFx::Effect::kFmSweep),
+                  static_cast<unsigned long>(durationMs));
+  }
+  return ok;
+}
+
+bool startRandomTokenFxAsync(const char* token,
+                             const char* source,
+                             bool allowSdFallback,
+                             uint32_t maxDurationMs) {
+  if (token == nullptr || token[0] == '\0') {
+    return false;
+  }
+
+  String path;
+  if (g_littleFsReady && resolveRandomFsPathContaining(LittleFS, token, &path)) {
+    Serial.printf("[AUDIO_ASYNC] %s random '%s' from LittleFS: %s\n",
+                  source,
+                  token,
+                  path.c_str());
+    return startAudioFromFsAsync(LittleFS,
+                                 path.c_str(),
+                                 config::kBootFxLittleFsGain,
+                                 maxDurationMs,
+                                 source);
+  }
+
+  if (!allowSdFallback) {
+    return false;
+  }
+
+  if (!g_mp3.isSdReady()) {
+    g_mp3.requestStorageRefresh();
+    g_mp3.update(millis(), false);
+  }
+  if (!g_mp3.isSdReady()) {
+    return false;
+  }
+
+  if (!resolveRandomFsPathContaining(SD_MMC, token, &path)) {
+    return false;
+  }
+  Serial.printf("[AUDIO_ASYNC] %s random '%s' from SD: %s\n",
+                source,
+                token,
+                path.c_str());
+  return startAudioFromFsAsync(SD_MMC,
+                               path.c_str(),
+                               config::kBootFxLittleFsGain,
+                               maxDurationMs,
+                               source);
+}
+
+void updateAsyncAudioService(uint32_t nowMs) {
+  audioService().update(nowMs);
+}
+
+void playRtttlJingleBlocking(const char* song, float gain, const char* source) {
+  if (song == nullptr || song[0] == '\0') {
+    return;
+  }
+
+  const bool shouldRestoreMicCapture =
+      config::kUseI2SMicInput && g_mode == RuntimeMode::kSignal && g_laDetectionEnabled;
+  if (shouldRestoreMicCapture) {
+    g_laDetector.setCaptureEnabled(false);
+  }
+  setBootAudioPaEnabled(true, source);
+  printBootAudioOutputInfo(source);
+
+  if (!g_unlockJinglePlayer.start(song, gain)) {
+    if (shouldRestoreMicCapture) {
+      g_laDetector.setCaptureEnabled(true);
+    }
+    Serial.printf("[AUDIO] %s RTTTL start failed.\n", source);
+    return;
+  }
+
+  const uint32_t timeoutMs = millis() + 8000U;
+  bool interruptedByInput = false;
+  while (g_unlockJinglePlayer.isActive()) {
+    g_unlockJinglePlayer.update();
+    const uint32_t nowMs = millis();
+    if (static_cast<int32_t>(nowMs - timeoutMs) >= 0) {
+      Serial.printf("[AUDIO] %s RTTTL timeout.\n", source);
+      break;
+    }
+    if (serviceInputDuringBlockingAudio(nowMs, source)) {
+      interruptedByInput = true;
+      break;
+    }
+    delay(0);
+  }
+  g_unlockJinglePlayer.stop();
+
+  if (shouldRestoreMicCapture) {
+    g_laDetector.setCaptureEnabled(true);
+  }
+  if (interruptedByInput) {
+    Serial.printf("[AUDIO] %s RTTTL interrupted.\n", source);
+  }
+}
+
+const char* effectLabel(FmRadioScanFx::Effect effect) {
+  return audioEffectLabel(effect);
+}
+
+bool playGeneratedI2sFxBlocking(FmRadioScanFx::Effect effect,
+                                uint32_t durationMs,
+                                float gain,
+                                const char* source) {
+  if (durationMs == 0U) {
+    return true;
+  }
+
+  const bool shouldRestoreMicCapture =
+      config::kUseI2SMicInput && g_mode == RuntimeMode::kSignal && g_laDetectionEnabled;
+  if (shouldRestoreMicCapture) {
+    g_laDetector.setCaptureEnabled(false);
+  }
+
+  setBootAudioPaEnabled(true, source);
+  printBootAudioOutputInfo(source);
+  g_bootRadioScanFx.setGain(gain);
+  g_bootRadioScanFx.setSampleRate(
+      (config::kBootI2sNoiseSampleRateHz > 0U) ? static_cast<uint32_t>(config::kBootI2sNoiseSampleRateHz)
+                                               : 22050U);
+  bool ok = g_bootRadioScanFx.start(effect);
+  bool interruptedByInput = false;
+  if (ok) {
+    const uint32_t deadlineMs = millis() + durationMs;
+    while (g_bootRadioScanFx.isActive()) {
+      const uint32_t nowMs = millis();
+      if (static_cast<int32_t>(nowMs - deadlineMs) >= 0) {
+        break;
+      }
+      g_bootRadioScanFx.update(nowMs, config::kBootRadioScanChunkMs);
+      if (serviceInputDuringBlockingAudio(nowMs, source)) {
+        interruptedByInput = true;
+        break;
+      }
+      delay(0);
+    }
+    g_bootRadioScanFx.stop();
+  }
+
+  if (shouldRestoreMicCapture) {
+    g_laDetector.setCaptureEnabled(true);
+  }
+
+  Serial.printf("[AUDIO_FX] %s effect=%s %s dur=%lums\n",
+                source,
+                effectLabel(effect),
+                ok ? (interruptedByInput ? "interrupted" : "done") : "failed",
+                static_cast<unsigned long>(durationMs));
+  return ok && !interruptedByInput;
+}
+
+void resetStoryTimeline(const char* source) {
+  storyController().reset(source);
+}
+
+void armStoryTimelineAfterUnlock(uint32_t nowMs) {
+  storyController().onUnlock(nowMs, "unlock");
+}
+
+bool isMp3GateOpen() {
+  return storyController().isMp3GateOpen();
+}
+
+void updateStoryTimeline(uint32_t nowMs) {
+  storyController().update(nowMs);
+}
+
 void playBootAudioPrimaryFx(const char* source) {
   if (config::kPreferLittleFsBootFx) {
     if (playBootLittleFsFx(source)) {
@@ -673,8 +1475,7 @@ void extendBootAudioProtocolWindow(uint32_t nowMs) {
   if (!g_bootAudioProtocol.active) {
     return;
   }
-  g_bootAudioProtocol.deadlineMs = nowMs + config::kBootAudioValidationTimeoutMs;
-  g_bootAudioProtocol.nextReminderMs = nowMs + 2500U;
+  g_bootAudioProtocol.nextReminderMs = nowMs + static_cast<uint32_t>(config::kBootProtocolPromptPeriodMs);
 }
 
 void playBootI2sToneFx(float freqHz, uint16_t durationMs, float gain, const char* source) {
@@ -717,8 +1518,19 @@ void playBootI2sToneFx(float freqHz, uint16_t durationMs, float gain, const char
   const uint32_t releaseSamples = (releaseSamplesCalc > 0U) ? releaseSamplesCalc : 1U;
   const float phaseInc = kTwoPi * (freqHz / static_cast<float>(sampleRate));
   float phase = 0.0f;
+  bool interruptedByInput = false;
+  bool stalled = false;
+  uint32_t nextInputPollSample = 0U;
 
   for (uint32_t i = 0; i < totalSamples; ++i) {
+    if (i >= nextInputPollSample) {
+      nextInputPollSample = i + 192U;
+      if (serviceInputDuringBlockingAudio(millis(), source)) {
+        interruptedByInput = true;
+        break;
+      }
+    }
+
     float env = 1.0f;
     if (i < attackSamples) {
       env = static_cast<float>(i) / static_cast<float>(attackSamples);
@@ -734,8 +1546,17 @@ void playBootI2sToneFx(float freqHz, uint16_t durationMs, float gain, const char
     const float sampleF = sinf(phase) * env;
     const int16_t sample = static_cast<int16_t>(sampleF * 24000.0f);
     int16_t stereo[2] = {sample, sample};
+    uint16_t waitGuard = 0U;
     while (!output.ConsumeSample(stereo)) {
       delayMicroseconds(40);
+      ++waitGuard;
+      if (waitGuard >= 1500U) {
+        stalled = true;
+        break;
+      }
+    }
+    if (stalled) {
+      break;
     }
 
     phase += phaseInc;
@@ -750,31 +1571,109 @@ void playBootI2sToneFx(float freqHz, uint16_t durationMs, float gain, const char
     g_laDetector.setCaptureEnabled(true);
   }
 
-  Serial.printf("[AUDIO_DBG] %s tone done freq=%.1fHz gain=%.2f dur=%ums\n",
+  const char* outcome = stalled ? "stalled" : (interruptedByInput ? "interrupted" : "done");
+  Serial.printf("[AUDIO_DBG] %s tone %s freq=%.1fHz gain=%.2f dur=%ums\n",
                 source,
+                outcome,
                 static_cast<double>(freqHz),
                 static_cast<double>(gain),
                 static_cast<unsigned int>(durationMs));
 }
 
+void cooperativeDelayWithInput(uint16_t delayMs, const char* source) {
+  const uint32_t deadlineMs = millis() + static_cast<uint32_t>(delayMs);
+  while (static_cast<int32_t>(millis() - deadlineMs) < 0) {
+    if (serviceInputDuringBlockingAudio(millis(), source)) {
+      return;
+    }
+    delay(0);
+  }
+}
+
 void playBootAudioDiagSequence() {
   Serial.println("[AUDIO_DBG] Diag sequence: 220Hz -> 440Hz -> 880Hz");
   playBootI2sToneFx(220.0f, 260U, 0.28f, "diag_220");
-  delay(70);
+  cooperativeDelayWithInput(70U, "diag_wait_1");
   playBootI2sToneFx(440.0f, 260U, 0.46f, "diag_440");
-  delay(70);
+  cooperativeDelayWithInput(70U, "diag_wait_2");
   playBootI2sToneFx(880.0f, 260U, 0.64f, "diag_880");
 }
 
+uint32_t randomBootLoopScanDurationMs() {
+  const long minMs = static_cast<long>(kBootLoopScanMinMs);
+  const long maxMsExclusive = static_cast<long>(kBootLoopScanMaxMs + 1U);
+  return static_cast<uint32_t>(random(minMs, maxMsExclusive));
+}
+
+void armBootAudioLoopScanWindow(uint32_t nowMs, const char* source) {
+  const uint32_t scanDurationMs = randomBootLoopScanDurationMs();
+  g_bootAudioProtocol.deadlineMs = nowMs + scanDurationMs;
+  Serial.printf("[BOOT_PROTO] %s scan window=%lu ms (10..40s)\n",
+                source,
+                static_cast<unsigned long>(scanDurationMs));
+}
+
+void startBootAudioLoopCycle(uint32_t nowMs, const char* source) {
+  if (!g_bootAudioProtocol.active) {
+    return;
+  }
+
+  ++g_bootAudioProtocol.replayCount;
+  Serial.printf("[BOOT_PROTO] LOOP #%u via=%s\n",
+                static_cast<unsigned int>(g_bootAudioProtocol.replayCount),
+                source);
+
+  g_bootAudioProtocol.waitingAudio = false;
+  g_bootAudioProtocol.cycleSourceTag[0] = '\0';
+  if (source != nullptr && source[0] != '\0') {
+    snprintf(g_bootAudioProtocol.cycleSourceTag,
+             sizeof(g_bootAudioProtocol.cycleSourceTag),
+             "%s",
+             source);
+  }
+
+  stopBootRadioScan("boot_proto_cycle");
+  audioService().stopBase("boot_proto_cycle");
+
+  bool startedAudio = startRandomTokenFxAsync("BOOT", source, false);
+  if (!startedAudio) {
+    Serial.println("[BOOT_PROTO] Aucun fichier contenant 'BOOT': fallback FX standard.");
+    startedAudio = startBootAudioPrimaryFxAsync(source);
+  }
+  if (!g_bootAudioProtocol.active) {
+    Serial.printf("[BOOT_PROTO] LOOP aborted after key action (%s)\n", source);
+    return;
+  }
+
+  if (startedAudio) {
+    g_bootAudioProtocol.waitingAudio = true;
+    g_bootAudioProtocol.deadlineMs = 0U;
+    g_bootAudioProtocol.nextReminderMs =
+        nowMs + static_cast<uint32_t>(config::kBootProtocolPromptPeriodMs);
+    return;
+  }
+
+  if (!startBootRadioScan(source)) {
+    g_bootAudioProtocol.deadlineMs = millis() + 5000U;
+    Serial.println("[BOOT_PROTO] Radio scan KO, retry auto dans 5s.");
+    return;
+  }
+
+  const uint32_t afterAudioNowMs = millis();
+  armBootAudioLoopScanWindow(afterAudioNowMs, source);
+  g_bootAudioProtocol.nextReminderMs =
+      afterAudioNowMs + static_cast<uint32_t>(config::kBootProtocolPromptPeriodMs);
+}
+
 void printBootAudioProtocolHelp() {
-  Serial.println("[BOOT_PROTO] Touches: K1=OK, K2=REPLAY, K3=KO+REPLAY, K4=TONE, K5=DIAG, K6=SKIP");
+  Serial.println("[BOOT_PROTO] Boucle auto: random '*boot*' + scan radio I2S (10..40s), puis repeat.");
+  Serial.println("[BOOT_PROTO] Touches: K1..K6 = NEXT (lance U_LOCK ecoute)");
   Serial.println(
-      "[BOOT_PROTO] Serial: BOOT_OK | BOOT_REPLAY | BOOT_KO | BOOT_SKIP | BOOT_STATUS | BOOT_HELP");
+      "[BOOT_PROTO] Serial: BOOT_NEXT | BOOT_REPLAY | BOOT_STATUS | BOOT_HELP | BOOT_REOPEN");
   Serial.println(
       "[BOOT_PROTO] Serial: BOOT_TEST_TONE | BOOT_TEST_DIAG | BOOT_PA_ON | BOOT_PA_OFF | BOOT_PA_STATUS | BOOT_PA_INV");
   Serial.println("[BOOT_PROTO] Serial: BOOT_FS_INFO | BOOT_FS_LIST | BOOT_FS_TEST");
-  Serial.println("[BOOT_PROTO] Serial: BOOT_REOPEN (relance FX+fenetre sans reset)");
-  Serial.println("[BOOT_PROTO] Alias: OK | REPLAY | KO | SKIP | STATUS | HELP | PAINV | FS_INFO | FS_LIST | FSTEST");
+  Serial.println("[BOOT_PROTO] Serial FX: BOOT_FX_FM | BOOT_FX_SONAR | BOOT_FX_MORSE | BOOT_FX_WIN");
   Serial.println("[BOOT_PROTO] Codec debug: CODEC_STATUS | CODEC_DUMP | CODEC_RD/WR | CODEC_VOL");
 }
 
@@ -785,18 +1684,126 @@ const char* runtimeModeLabel() {
   return g_uSonFunctional ? "U-SON" : "U_LOCK";
 }
 
+enum class StartupStage : uint8_t {
+  kInactive = 0,
+  kBootValidation = 1,
+};
+
+enum class AppStage : uint8_t {
+  kULockWaiting = 0,
+  kULockListening = 1,
+  kUSonFunctional = 2,
+  kMp3 = 3,
+};
+
+StartupStage currentStartupStage() {
+  if (g_bootAudioProtocol.active) {
+    return StartupStage::kBootValidation;
+  }
+  return StartupStage::kInactive;
+}
+
+AppStage currentAppStage() {
+  if (g_mode == RuntimeMode::kMp3) {
+    return AppStage::kMp3;
+  }
+  if (!g_uSonFunctional) {
+    return g_uLockListening ? AppStage::kULockListening : AppStage::kULockWaiting;
+  }
+  return AppStage::kUSonFunctional;
+}
+
 bool isUlockContext() {
   return g_mode == RuntimeMode::kSignal && !g_uSonFunctional;
 }
 
-uint32_t bootAudioProtocolTimeLeftMs(uint32_t nowMs) {
-  if (!g_bootAudioProtocol.active) {
-    return 0;
+void continueAfterBootProtocol(const char* source) {
+  if (g_mode != RuntimeMode::kSignal || g_uSonFunctional || g_uLockListening) {
+    return;
   }
-  if (static_cast<int32_t>(g_bootAudioProtocol.deadlineMs - nowMs) <= 0) {
-    return 0;
+
+  g_uLockListening = true;
+  g_laDetectionEnabled = true;
+  resetLaHoldProgress();
+  g_laDetector.setCaptureEnabled(true);
+  if (config::kEnableMicCalibrationOnSignalEntry) {
+    startMicCalibration(millis(), source);
   }
-  return g_bootAudioProtocol.deadlineMs - nowMs;
+  requestULockSearchSonarCue(source);
+  Serial.printf("[MODE] U_LOCK -> detection LA activee (%s)\n", source);
+}
+
+void requestULockSearchSonarCue(const char* source) {
+  if (g_uLockSearchAudioCue.active) {
+    return;
+  }
+  g_uLockSearchAudioCue.pending = true;
+  Serial.printf("[AUDIO_FX] Sonar cue queued (%s)\n", source);
+}
+
+void cancelULockSearchSonarCue(const char* source) {
+  if (!g_uLockSearchAudioCue.pending && !g_uLockSearchAudioCue.active) {
+    return;
+  }
+
+  if (g_uLockSearchAudioCue.active) {
+    g_bootRadioScanFx.stop();
+    if (g_uLockSearchAudioCue.restoreMicCapture && g_mode == RuntimeMode::kSignal &&
+        g_laDetectionEnabled) {
+      g_laDetector.setCaptureEnabled(true);
+    }
+  }
+
+  g_uLockSearchAudioCue.pending = false;
+  g_uLockSearchAudioCue.active = false;
+  g_uLockSearchAudioCue.restoreMicCapture = false;
+  g_uLockSearchAudioCue.untilMs = 0U;
+  Serial.printf("[AUDIO_FX] Sonar cue canceled (%s)\n", source);
+}
+
+void serviceULockSearchSonarCue(uint32_t nowMs) {
+  if (g_uLockSearchAudioCue.active) {
+    if (g_bootAudioProtocol.active || g_mode != RuntimeMode::kSignal || g_uSonFunctional || !g_uLockListening ||
+        static_cast<int32_t>(nowMs - g_uLockSearchAudioCue.untilMs) >= 0) {
+      cancelULockSearchSonarCue("ulock_search_done");
+      return;
+    }
+    g_bootRadioScanFx.update(nowMs, config::kBootRadioScanChunkMs);
+    return;
+  }
+
+  if (!g_uLockSearchAudioCue.pending || g_bootAudioProtocol.active) {
+    return;
+  }
+  if (g_mode != RuntimeMode::kSignal || g_uSonFunctional || !g_uLockListening) {
+    cancelULockSearchSonarCue("ulock_search_out_of_context");
+    return;
+  }
+
+  g_uLockSearchAudioCue.pending = false;
+  g_uLockSearchAudioCue.restoreMicCapture =
+      config::kUseI2SMicInput && g_mode == RuntimeMode::kSignal && g_laDetectionEnabled;
+  if (g_uLockSearchAudioCue.restoreMicCapture) {
+    g_laDetector.setCaptureEnabled(false);
+  }
+
+  g_bootRadioScanFx.setGain(config::kUnlockI2sJingleGain);
+  g_bootRadioScanFx.setSampleRate(
+      (config::kBootI2sNoiseSampleRateHz > 0U) ? static_cast<uint32_t>(config::kBootI2sNoiseSampleRateHz)
+                                               : 22050U);
+  if (!g_bootRadioScanFx.start(FmRadioScanFx::Effect::kSonar)) {
+    if (g_uLockSearchAudioCue.restoreMicCapture) {
+      g_laDetector.setCaptureEnabled(true);
+    }
+    g_uLockSearchAudioCue.restoreMicCapture = false;
+    Serial.println("[AUDIO_FX] Sonar cue start failed.");
+    return;
+  }
+
+  g_uLockSearchAudioCue.active = true;
+  g_uLockSearchAudioCue.untilMs = nowMs + kULockSearchSonarCueMs;
+  Serial.printf("[AUDIO_FX] Sonar cue start dur=%lu ms\n",
+                static_cast<unsigned long>(kULockSearchSonarCueMs));
 }
 
 void printBootAudioProtocolStatus(uint32_t nowMs, const char* source) {
@@ -807,11 +1814,27 @@ void printBootAudioProtocolStatus(uint32_t nowMs, const char* source) {
     return;
   }
 
-  Serial.printf("[BOOT_PROTO] STATUS via=%s left=%lu ms replay=%u/%u\n",
+  uint32_t leftMs = 0;
+  if (g_bootAudioProtocol.deadlineMs != 0U &&
+      static_cast<int32_t>(g_bootAudioProtocol.deadlineMs - nowMs) > 0) {
+    leftMs = g_bootAudioProtocol.deadlineMs - nowMs;
+  }
+
+  uint32_t timeoutLeftMs = 0;
+  if (config::kBootAudioValidationTimeoutMs > 0U && g_bootAudioProtocol.startMs != 0U) {
+    const uint32_t elapsedMs = nowMs - g_bootAudioProtocol.startMs;
+    if (elapsedMs < config::kBootAudioValidationTimeoutMs) {
+      timeoutLeftMs = config::kBootAudioValidationTimeoutMs - elapsedMs;
+    }
+  }
+
+  Serial.printf("[BOOT_PROTO] STATUS via=%s waiting_key=1 loops=%u scan=%u left=%lus timeout_left=%lus mode=%s\n",
                 source,
-                static_cast<unsigned long>(bootAudioProtocolTimeLeftMs(nowMs)),
                 static_cast<unsigned int>(g_bootAudioProtocol.replayCount),
-                static_cast<unsigned int>(config::kBootAudioValidationMaxReplays));
+                g_bootRadioScanFx.isActive() ? 1U : 0U,
+                static_cast<unsigned long>(leftMs / 1000UL),
+                static_cast<unsigned long>(timeoutLeftMs / 1000UL),
+                runtimeModeLabel());
 }
 
 void finishBootAudioValidationProtocol(const char* reason, bool validated) {
@@ -819,13 +1842,23 @@ void finishBootAudioValidationProtocol(const char* reason, bool validated) {
     return;
   }
 
+  stopBootRadioScan("boot_proto_finish");
+  audioService().stopAll("boot_proto_finish");
   g_bootAudioProtocol.active = false;
   g_bootAudioProtocol.validated = validated;
+  g_bootAudioProtocol.waitingAudio = false;
+  g_bootAudioProtocol.startMs = 0;
+  g_bootAudioProtocol.deadlineMs = 0;
   g_bootAudioProtocol.nextReminderMs = 0;
-  Serial.printf("[BOOT_PROTO] DONE status=%s reason=%s replay=%u\n",
+  g_bootAudioProtocol.cycleSourceTag[0] = '\0';
+  Serial.printf("[BOOT_PROTO] DONE status=%s reason=%s loops=%u\n",
                 validated ? "VALIDATED" : "BYPASS",
                 reason,
                 static_cast<unsigned int>(g_bootAudioProtocol.replayCount));
+
+  if (validated) {
+    continueAfterBootProtocol(reason);
+  }
 }
 
 void replayBootAudioProtocolFx(uint32_t nowMs, const char* source) {
@@ -833,18 +1866,8 @@ void replayBootAudioProtocolFx(uint32_t nowMs, const char* source) {
     return;
   }
 
-  if (g_bootAudioProtocol.replayCount >= config::kBootAudioValidationMaxReplays) {
-    Serial.println("[BOOT_PROTO] REPLAY refuse: max atteint.");
-    return;
-  }
-
-  ++g_bootAudioProtocol.replayCount;
-  Serial.printf("[BOOT_PROTO] REPLAY #%u via %s\n",
-                static_cast<unsigned int>(g_bootAudioProtocol.replayCount),
-                source);
-  playBootAudioPrimaryFx(source);
-  g_bootAudioProtocol.deadlineMs = nowMs + config::kBootAudioValidationTimeoutMs;
-  g_bootAudioProtocol.nextReminderMs = nowMs + 2500U;
+  Serial.printf("[BOOT_PROTO] REPLAY via %s\n", source);
+  startBootAudioLoopCycle(nowMs, source);
   printBootAudioProtocolStatus(nowMs, source);
 }
 
@@ -855,15 +1878,18 @@ void startBootAudioValidationProtocol(uint32_t nowMs) {
 
   g_bootAudioProtocol.active = true;
   g_bootAudioProtocol.validated = false;
+  g_bootAudioProtocol.waitingAudio = false;
   g_bootAudioProtocol.replayCount = 0;
-  g_bootAudioProtocol.deadlineMs = nowMs + config::kBootAudioValidationTimeoutMs;
-  g_bootAudioProtocol.nextReminderMs = nowMs + 2500U;
+  g_bootAudioProtocol.startMs = nowMs;
+  g_bootAudioProtocol.deadlineMs = 0;
+  g_bootAudioProtocol.nextReminderMs = nowMs + static_cast<uint32_t>(config::kBootProtocolPromptPeriodMs);
+  g_bootAudioProtocol.cycleSourceTag[0] = '\0';
   g_bootAudioProtocol.serialCmdLen = 0;
   g_bootAudioProtocol.serialCmdBuffer[0] = '\0';
 
-  Serial.printf("[BOOT_PROTO] START timeout=%lu ms max_replays=%u\n",
-                static_cast<unsigned long>(config::kBootAudioValidationTimeoutMs),
-                static_cast<unsigned int>(config::kBootAudioValidationMaxReplays));
+  Serial.printf("[BOOT_PROTO] START timeout=%lu ms (attente touche)\n",
+                static_cast<unsigned long>(config::kBootAudioValidationTimeoutMs));
+  startBootAudioLoopCycle(nowMs, "boot_proto_start");
   printBootAudioProtocolStatus(nowMs, "start");
   printBootAudioProtocolHelp();
 }
@@ -895,6 +1921,9 @@ void processBootAudioSerialCommand(const char* rawCmd, uint32_t nowMs) {
   if (processCodecDebugCommand(cmd)) {
     return;
   }
+  if (processStoryDebugCommand(cmd, nowMs)) {
+    return;
+  }
   if (processMp3DebugCommand(cmd, nowMs)) {
     return;
   }
@@ -919,55 +1948,169 @@ void processBootAudioSerialCommand(const char* rawCmd, uint32_t nowMs) {
 
   if (strcmp(cmd, "BOOT_REOPEN") == 0 || strcmp(cmd, "BOOT_REARM") == 0 || strcmp(cmd, "BOOT_START") == 0) {
     if (protocolActive) {
-      Serial.println("[BOOT_PROTO] REOPEN ignore: protocole deja actif.");
-      printBootAudioProtocolStatus(nowMs, "serial_boot_reopen_active");
+      Serial.println("[BOOT_PROTO] REOPEN: protocole actif, redemarre la boucle.");
+      replayBootAudioProtocolFx(nowMs, "serial_boot_reopen_active");
       return;
     }
-    Serial.println("[BOOT_PROTO] REOPEN: replay FX boot + rearm protocole.");
-    playBootAudioPrimaryFx("serial_boot_reopen");
-    startBootAudioValidationProtocol(millis());
+    Serial.println("[BOOT_PROTO] REOPEN: rearm protocole.");
+    startBootAudioValidationProtocol(nowMs);
     return;
   }
 
-  if (strcmp(cmd, "BOOT_OK") == 0 || strcmp(cmd, "OK") == 0 || strcmp(cmd, "VALID") == 0) {
+  if (strcmp(cmd, "BOOT_NEXT") == 0 || strcmp(cmd, "NEXT") == 0 || strcmp(cmd, "BOOT_OK") == 0 ||
+      strcmp(cmd, "OK") == 0 || strcmp(cmd, "VALID") == 0 || strcmp(cmd, "BOOT_SKIP") == 0 ||
+      strcmp(cmd, "SKIP") == 0) {
     if (!protocolActive) {
-      Serial.println("[BOOT_PROTO] BOOT_OK ignore: protocole inactif (utiliser BOOT_REOPEN).");
+      Serial.println("[BOOT_PROTO] BOOT_NEXT ignore: protocole inactif (utiliser BOOT_REOPEN).");
       return;
     }
-    finishBootAudioValidationProtocol("serial_boot_ok", true);
+    finishBootAudioValidationProtocol("serial_boot_next", true);
     return;
   }
+
   if (strcmp(cmd, "BOOT_REPLAY") == 0 || strcmp(cmd, "REPLAY") == 0 || strcmp(cmd, "R") == 0) {
     if (protocolActive) {
       replayBootAudioProtocolFx(nowMs, "serial_boot_replay");
     } else {
-      Serial.println("[BOOT_PROTO] REPLAY hors protocole: test manuel FX boot.");
-      playBootAudioPrimaryFx("serial_boot_replay_manual");
+      Serial.println("[BOOT_PROTO] REPLAY hors protocole: test manuel boucle boot.");
+      if (!startRandomTokenFxAsync("BOOT", "serial_boot_replay_manual", false)) {
+        startBootAudioPrimaryFxAsync("serial_boot_replay_manual");
+      }
       printBootAudioProtocolStatus(nowMs, "serial_boot_replay_manual");
     }
     return;
   }
   if (strcmp(cmd, "BOOT_KO") == 0 || strcmp(cmd, "KO") == 0 || strcmp(cmd, "NOK") == 0) {
     if (protocolActive) {
-      Serial.println("[BOOT_PROTO] KO recu (serial), relecture.");
+      Serial.println("[BOOT_PROTO] KO recu (serial), relecture intro.");
       replayBootAudioProtocolFx(nowMs, "serial_boot_ko");
     } else {
       Serial.println("[BOOT_PROTO] KO hors protocole: test manuel FX boot.");
-      playBootAudioPrimaryFx("serial_boot_ko_manual");
+      if (!startRandomTokenFxAsync("BOOT", "serial_boot_ko_manual", false)) {
+        startBootAudioPrimaryFxAsync("serial_boot_ko_manual");
+      }
       printBootAudioProtocolStatus(nowMs, "serial_boot_ko_manual");
     }
     return;
   }
   if (strcmp(cmd, "BOOT_TEST_TONE") == 0 || strcmp(cmd, "TONE") == 0) {
-    playBootI2sToneFx(440.0f, 700U, 0.68f, "serial_test_tone");
-    extendBootAudioProtocolWindow(millis());
-    printBootAudioProtocolStatus(millis(), "serial_test_tone");
+    if (protocolActive) {
+      stopBootRadioScan("serial_test_tone");
+    }
+    const bool started = audioService().startBaseFx(AudioEffectId::kFmSweep,
+                                                    0.30f,
+                                                    900U,
+                                                    "serial_test_tone");
+    if (protocolActive && started) {
+      g_bootAudioProtocol.waitingAudio = true;
+      g_bootAudioProtocol.deadlineMs = 0U;
+      snprintf(g_bootAudioProtocol.cycleSourceTag,
+               sizeof(g_bootAudioProtocol.cycleSourceTag),
+               "%s",
+               "serial_test_tone");
+    }
+    extendBootAudioProtocolWindow(nowMs);
+    printBootAudioProtocolStatus(nowMs, "serial_test_tone");
     return;
   }
   if (strcmp(cmd, "BOOT_TEST_DIAG") == 0 || strcmp(cmd, "DIAG") == 0) {
-    playBootAudioDiagSequence();
-    extendBootAudioProtocolWindow(millis());
-    printBootAudioProtocolStatus(millis(), "serial_test_diag");
+    if (protocolActive) {
+      stopBootRadioScan("serial_test_diag");
+    }
+    const bool started = audioService().startBaseFx(AudioEffectId::kSonar,
+                                                    0.28f,
+                                                    1500U,
+                                                    "serial_test_diag");
+    if (protocolActive && started) {
+      g_bootAudioProtocol.waitingAudio = true;
+      g_bootAudioProtocol.deadlineMs = 0U;
+      snprintf(g_bootAudioProtocol.cycleSourceTag,
+               sizeof(g_bootAudioProtocol.cycleSourceTag),
+               "%s",
+               "serial_test_diag");
+    }
+    extendBootAudioProtocolWindow(nowMs);
+    printBootAudioProtocolStatus(nowMs, "serial_test_diag");
+    return;
+  }
+  if (strcmp(cmd, "BOOT_FX_FM") == 0 || strcmp(cmd, "FX_FM") == 0) {
+    if (protocolActive) {
+      stopBootRadioScan("serial_fx_fm");
+    }
+    const bool started = audioService().startBaseFx(AudioEffectId::kFmSweep,
+                                                    config::kBootI2sNoiseGain,
+                                                    kFxFmDurationMs,
+                                                    "serial_fx_fm");
+    if (protocolActive && started) {
+      g_bootAudioProtocol.waitingAudio = true;
+      g_bootAudioProtocol.deadlineMs = 0U;
+      snprintf(g_bootAudioProtocol.cycleSourceTag,
+               sizeof(g_bootAudioProtocol.cycleSourceTag),
+               "%s",
+               "serial_fx_fm");
+    }
+    extendBootAudioProtocolWindow(nowMs);
+    printBootAudioProtocolStatus(nowMs, "serial_fx_fm");
+    return;
+  }
+  if (strcmp(cmd, "BOOT_FX_SONAR") == 0 || strcmp(cmd, "FX_SONAR") == 0) {
+    if (protocolActive) {
+      stopBootRadioScan("serial_fx_sonar");
+    }
+    const bool started = audioService().startBaseFx(AudioEffectId::kSonar,
+                                                    config::kBootI2sNoiseGain,
+                                                    kFxSonarDurationMs,
+                                                    "serial_fx_sonar");
+    if (protocolActive && started) {
+      g_bootAudioProtocol.waitingAudio = true;
+      g_bootAudioProtocol.deadlineMs = 0U;
+      snprintf(g_bootAudioProtocol.cycleSourceTag,
+               sizeof(g_bootAudioProtocol.cycleSourceTag),
+               "%s",
+               "serial_fx_sonar");
+    }
+    extendBootAudioProtocolWindow(nowMs);
+    printBootAudioProtocolStatus(nowMs, "serial_fx_sonar");
+    return;
+  }
+  if (strcmp(cmd, "BOOT_FX_MORSE") == 0 || strcmp(cmd, "FX_MORSE") == 0) {
+    if (protocolActive) {
+      stopBootRadioScan("serial_fx_morse");
+    }
+    const bool started = audioService().startBaseFx(AudioEffectId::kMorse,
+                                                    config::kUnlockI2sJingleGain,
+                                                    kFxMorseDurationMs,
+                                                    "serial_fx_morse");
+    if (protocolActive && started) {
+      g_bootAudioProtocol.waitingAudio = true;
+      g_bootAudioProtocol.deadlineMs = 0U;
+      snprintf(g_bootAudioProtocol.cycleSourceTag,
+               sizeof(g_bootAudioProtocol.cycleSourceTag),
+               "%s",
+               "serial_fx_morse");
+    }
+    extendBootAudioProtocolWindow(nowMs);
+    printBootAudioProtocolStatus(nowMs, "serial_fx_morse");
+    return;
+  }
+  if (strcmp(cmd, "BOOT_FX_WIN") == 0 || strcmp(cmd, "FX_WIN") == 0) {
+    if (protocolActive) {
+      stopBootRadioScan("serial_fx_win");
+    }
+    const bool started = audioService().startBaseFx(AudioEffectId::kWin,
+                                                    config::kUnlockI2sJingleGain,
+                                                    kFxWinDurationMs,
+                                                    "serial_fx_win");
+    if (protocolActive && started) {
+      g_bootAudioProtocol.waitingAudio = true;
+      g_bootAudioProtocol.deadlineMs = 0U;
+      snprintf(g_bootAudioProtocol.cycleSourceTag,
+               sizeof(g_bootAudioProtocol.cycleSourceTag),
+               "%s",
+               "serial_fx_win");
+    }
+    extendBootAudioProtocolWindow(nowMs);
+    printBootAudioProtocolStatus(nowMs, "serial_fx_win");
     return;
   }
   if (strcmp(cmd, "BOOT_PA_ON") == 0 || strcmp(cmd, "PAON") == 0) {
@@ -1001,15 +2144,29 @@ void processBootAudioSerialCommand(const char* rawCmd, uint32_t nowMs) {
     return;
   }
   if (strcmp(cmd, "BOOT_FS_TEST") == 0 || strcmp(cmd, "FSTEST") == 0) {
-    playBootLittleFsFx("serial_boot_fs_test");
-    return;
-  }
-  if (strcmp(cmd, "BOOT_SKIP") == 0 || strcmp(cmd, "SKIP") == 0) {
-    if (!protocolActive) {
-      Serial.println("[BOOT_PROTO] BOOT_SKIP ignore: protocole inactif.");
-      return;
+    if (protocolActive) {
+      stopBootRadioScan("serial_boot_fs_test");
     }
-    finishBootAudioValidationProtocol("serial_boot_skip", false);
+    String path;
+    bool started = false;
+    if (resolveBootLittleFsPath(&path)) {
+      started = startAudioFromFsAsync(LittleFS,
+                                      path.c_str(),
+                                      config::kBootFxLittleFsGain,
+                                      config::kBootFxLittleFsMaxDurationMs,
+                                      "serial_boot_fs_test");
+    }
+    if (!started) {
+      started = startBootAudioPrimaryFxAsync("serial_boot_fs_test");
+    }
+    if (protocolActive && started) {
+      g_bootAudioProtocol.waitingAudio = true;
+      g_bootAudioProtocol.deadlineMs = 0U;
+      snprintf(g_bootAudioProtocol.cycleSourceTag,
+               sizeof(g_bootAudioProtocol.cycleSourceTag),
+               "%s",
+               "serial_boot_fs_test");
+    }
     return;
   }
   if (strcmp(cmd, "BOOT_STATUS") == 0 || strcmp(cmd, "STATUS") == 0 || strcmp(cmd, "?") == 0) {
@@ -1051,35 +2208,20 @@ void pollBootAudioProtocolSerial(uint32_t nowMs) {
 }
 
 void handleBootAudioProtocolKey(uint8_t key, uint32_t nowMs) {
+  (void)nowMs;
   if (!g_bootAudioProtocol.active) {
     return;
   }
 
   switch (key) {
     case 1:
-      finishBootAudioValidationProtocol("key_k1_ok", true);
-      break;
     case 2:
-      replayBootAudioProtocolFx(nowMs, "key_k2_replay");
-      break;
     case 3:
-      Serial.println("[BOOT_PROTO] KO recu (K3), relecture.");
-      replayBootAudioProtocolFx(nowMs, "key_k3_ko");
-      break;
     case 4:
-      Serial.println("[BOOT_PROTO] K4 test tone 440Hz.");
-      playBootI2sToneFx(440.0f, 700U, 0.68f, "key_k4_tone");
-      extendBootAudioProtocolWindow(millis());
-      printBootAudioProtocolStatus(millis(), "key_k4_tone");
-      break;
     case 5:
-      Serial.println("[BOOT_PROTO] K5 diag sequence.");
-      playBootAudioDiagSequence();
-      extendBootAudioProtocolWindow(millis());
-      printBootAudioProtocolStatus(millis(), "key_k5_diag");
-      break;
     case 6:
-      finishBootAudioValidationProtocol("key_k6_skip", false);
+      Serial.printf("[BOOT_PROTO] K%u -> U_LOCK ecoute\n", static_cast<unsigned int>(key));
+      finishBootAudioValidationProtocol("key_next", true);
       break;
     default:
       Serial.printf("[BOOT_PROTO] K%u ignoree (attendu K1/K2/K3/K4/K5/K6)\n",
@@ -1093,17 +2235,65 @@ void updateBootAudioValidationProtocol(uint32_t nowMs) {
     return;
   }
 
-  pollBootAudioProtocolSerial(nowMs);
-  if (static_cast<int32_t>(nowMs - g_bootAudioProtocol.deadlineMs) >= 0) {
-    Serial.println("[BOOT_PROTO] TIMEOUT -> SKIP auto.");
-    finishBootAudioValidationProtocol("timeout_auto_skip", false);
+  if (config::kBootAudioValidationTimeoutMs > 0U && g_bootAudioProtocol.startMs != 0U &&
+      static_cast<uint32_t>(nowMs - g_bootAudioProtocol.startMs) >= config::kBootAudioValidationTimeoutMs) {
+    Serial.printf("[BOOT_PROTO] Timeout auto atteint (%lu ms) -> passage U_LOCK ecoute.\n",
+                  static_cast<unsigned long>(config::kBootAudioValidationTimeoutMs));
+    finishBootAudioValidationProtocol("timeout_auto", true);
     return;
+  }
+
+  updateAsyncAudioService(nowMs);
+  if (!g_bootAudioProtocol.active) {
+    return;
+  }
+
+  if (g_bootAudioProtocol.waitingAudio) {
+    if (audioService().isBaseBusy()) {
+      return;
+    }
+    g_bootAudioProtocol.waitingAudio = false;
+
+    const char* cycleSource =
+        (g_bootAudioProtocol.cycleSourceTag[0] != '\0') ? g_bootAudioProtocol.cycleSourceTag
+                                                        : "boot_proto_audio_done";
+    if (!startBootRadioScan(cycleSource)) {
+      g_bootAudioProtocol.deadlineMs = nowMs + 5000U;
+      Serial.println("[BOOT_PROTO] Radio scan KO, retry auto dans 5s.");
+      return;
+    }
+    armBootAudioLoopScanWindow(nowMs, cycleSource);
+    g_bootAudioProtocol.nextReminderMs =
+        nowMs + static_cast<uint32_t>(config::kBootProtocolPromptPeriodMs);
+    return;
+  }
+
+  updateBootRadioScan(nowMs);
+  if (!g_bootAudioProtocol.active) {
+    return;
+  }
+
+  if (!g_bootRadioScanFx.isActive()) {
+    if (g_bootAudioProtocol.deadlineMs == 0U ||
+        static_cast<int32_t>(nowMs - g_bootAudioProtocol.deadlineMs) >= 0) {
+      startBootAudioLoopCycle(nowMs, "boot_proto_recover");
+      if (!g_bootAudioProtocol.active) {
+        return;
+      }
+    }
+  } else if (g_bootAudioProtocol.deadlineMs != 0U &&
+             static_cast<int32_t>(nowMs - g_bootAudioProtocol.deadlineMs) >= 0) {
+    startBootAudioLoopCycle(nowMs, "boot_proto_cycle");
+    if (!g_bootAudioProtocol.active) {
+      return;
+    }
   }
 
   if (static_cast<int32_t>(nowMs - g_bootAudioProtocol.nextReminderMs) >= 0) {
     printBootAudioProtocolStatus(nowMs, "tick");
-    Serial.println("[BOOT_PROTO] Attente validation: K1 OK, K2 replay, K4 tone, K5 diag.");
-    g_bootAudioProtocol.nextReminderMs = nowMs + 2500U;
+    Serial.println("[BOOT_PROTO] Attente touche: K1..K6 pour lancer U_LOCK ecoute.");
+    g_bootAudioProtocol.nextReminderMs =
+        nowMs + static_cast<uint32_t>(config::kBootProtocolPromptPeriodMs);
   }
 }
 
@@ -1386,10 +2576,56 @@ bool processCodecDebugCommand(const char* cmd) {
   return false;
 }
 
+const char* mp3FxModeLabel(Mp3FxMode mode) {
+  return (mode == Mp3FxMode::kDucking) ? "DUCKING" : "OVERLAY";
+}
+
+const char* mp3FxEffectLabel(Mp3FxEffect effect) {
+  return audioEffectLabel(effect);
+}
+
+bool parseMp3FxEffectToken(const char* token, Mp3FxEffect* outEffect) {
+  return parseAudioEffectToken(token, outEffect);
+}
+
+bool triggerMp3Fx(Mp3FxEffect effect, uint32_t durationMs, const char* source) {
+  if (durationMs == 0U) {
+    durationMs = config::kMp3FxDefaultDurationMs;
+  }
+  if (durationMs < 250U) {
+    durationMs = 250U;
+  } else if (durationMs > 12000U) {
+    durationMs = 12000U;
+  }
+
+  if (!g_mp3.isPlaying()) {
+    Serial.printf("[MP3_FX] %s refuse: MP3 non actif.\n", source);
+    return false;
+  }
+
+  const bool ok =
+      audioService().startOverlayFx(effect, g_mp3.fxOverlayGain(), durationMs, source);
+  Serial.printf("[MP3_FX] %s effect=%s mode=%s duck=%u%% mix=%u%% dur=%lu ms %s\n",
+                source,
+                mp3FxEffectLabel(effect),
+                mp3FxModeLabel(g_mp3.fxMode()),
+                static_cast<unsigned int>(g_mp3.fxDuckingGain() * 100.0f),
+                static_cast<unsigned int>(g_mp3.fxOverlayGain() * 100.0f),
+                static_cast<unsigned long>(durationMs),
+                ok ? "OK" : "KO");
+  return ok;
+}
+
 void printMp3DebugHelp() {
   Serial.println("[MP3_DBG] Cmd: MP3_STATUS | MP3_UNLOCK | MP3_REFRESH | MP3_LIST");
   Serial.println("[MP3_DBG] Cmd: MP3_NEXT | MP3_PREV | MP3_RESTART | MP3_PLAY n");
   Serial.println("[MP3_DBG] Cmd: MP3_TEST_START [ms] | MP3_TEST_STOP");
+  Serial.println("[MP3_DBG] Cmd: MP3_FX_MODE DUCK|OVERLAY | MP3_FX_GAIN duck% mix%");
+  Serial.println("[MP3_DBG] Cmd: MP3_FX FM|SONAR|MORSE|WIN [ms] | MP3_FX_STOP");
+  Serial.println("[MP3_DBG] Cmd: MP3_BACKEND STATUS|SET AUTO|AUDIO_TOOLS|LEGACY");
+  Serial.println("[MP3_DBG] Cmd: MP3_SCAN START|STATUS|CANCEL|REBUILD");
+  Serial.println("[MP3_DBG] Cmd: MP3_BROWSE LS [path] | MP3_BROWSE CD <path> | MP3_PLAY_PATH <path>");
+  Serial.println("[MP3_DBG] Cmd: MP3_UI PAGE NOW|BROWSE|QUEUE|SET | MP3_STATE SAVE|LOAD|RESET");
 }
 
 void stopMp3FormatTest(const char* reason) {
@@ -1419,8 +2655,10 @@ void forceUsonFunctionalForMp3Debug(const char* source) {
 
 void printMp3Status(const char* source) {
   const String current = g_mp3.currentTrackName();
+  const CatalogStats stats = g_mp3.catalogStats();
+  const PlayerUiPage page = currentPlayerUiPage();
   Serial.printf(
-      "[MP3_DBG] %s mode=%s u_son=%u sd=%u tracks=%u cur=%u play=%u pause=%u repeat=%s vol=%u%% file=%s\n",
+      "[MP3_DBG] %s mode=%s u_son=%u sd=%u tracks=%u cur=%u play=%u pause=%u repeat=%s vol=%u%% fx_mode=%s fx=%u(%s,%lums) duck=%u%% mix=%u%% backend=%s/%s err=%s scan_busy=%u scan_ms=%lu ui=%s browse=%s file=%s\n",
       source,
       runtimeModeLabel(),
       g_uSonFunctional ? 1U : 0U,
@@ -1431,6 +2669,19 @@ void printMp3Status(const char* source) {
       g_mp3.isPaused() ? 1U : 0U,
       g_mp3.repeatModeLabel(),
       static_cast<unsigned int>(g_mp3.volumePercent()),
+      g_mp3.fxModeLabel(),
+      g_mp3.isFxActive() ? 1U : 0U,
+      g_mp3.fxEffectLabel(),
+      static_cast<unsigned long>(g_mp3.fxRemainingMs()),
+      static_cast<unsigned int>(g_mp3.fxDuckingGain() * 100.0f),
+      static_cast<unsigned int>(g_mp3.fxOverlayGain() * 100.0f),
+      g_mp3.backendModeLabel(),
+      g_mp3.activeBackendLabel(),
+      g_mp3.lastBackendError(),
+      g_mp3.isScanBusy() ? 1U : 0U,
+      static_cast<unsigned long>(stats.scanMs),
+      playerUiPageLabel(page),
+      currentBrowsePath(),
       current.isEmpty() ? "-" : current.c_str());
   if (g_mp3FormatTest.active) {
     Serial.printf("[MP3_TEST] active tested=%u/%u ok=%u fail=%u dwell=%lu ms\n",
@@ -1449,39 +2700,7 @@ void printMp3SupportedSdList(uint32_t nowMs, const char* source) {
     Serial.printf("[MP3_DBG] %s list refused: SD non montee.\n", source);
     return;
   }
-
-  fs::File root = SD_MMC.open("/");
-  if (!root || !root.isDirectory()) {
-    Serial.printf("[MP3_DBG] %s list refused: root SD inaccessible.\n", source);
-    return;
-  }
-
-  uint16_t count = 0;
-  Serial.printf("[MP3_DBG] %s list tracks:\n", source);
-  fs::File file = root.openNextFile();
-  while (file) {
-    if (!file.isDirectory()) {
-      String path = String(file.name());
-      if (!path.startsWith("/")) {
-        path = "/" + path;
-      }
-      const BootFsCodec codec = bootFsCodecFromPath(path.c_str());
-      if (codec != BootFsCodec::kUnknown) {
-        ++count;
-        Serial.printf("[MP3_DBG]   %u [%s] %s size=%u\n",
-                      static_cast<unsigned int>(count),
-                      bootFsCodecLabel(codec),
-                      path.c_str(),
-                      static_cast<unsigned int>(file.size()));
-      }
-    }
-    file.close();
-    file = root.openNextFile();
-  }
-  root.close();
-  Serial.printf("[MP3_DBG] %s list done count=%u\n",
-                source,
-                static_cast<unsigned int>(count));
+  printMp3BrowseList(source, currentBrowsePath(), 0U, 24U);
 }
 
 bool processMp3DebugCommand(const char* cmd, uint32_t nowMs) {
@@ -1496,6 +2715,174 @@ bool processMp3DebugCommand(const char* cmd, uint32_t nowMs) {
 
   if (strcmp(cmd, "MP3_STATUS") == 0 || strcmp(cmd, "MSTAT") == 0) {
     printMp3Status("status");
+    return true;
+  }
+
+  if (commandMatches(cmd, "MP3_BACKEND")) {
+    const char* arg = cmd + strlen("MP3_BACKEND");
+    while (*arg == ' ') {
+      ++arg;
+    }
+
+    if (arg[0] == '\0' || strcmp(arg, "STATUS") == 0) {
+      Serial.printf("[MP3_BACKEND] mode=%s active=%s err=%s\n",
+                    g_mp3.backendModeLabel(),
+                    g_mp3.activeBackendLabel(),
+                    g_mp3.lastBackendError());
+      return true;
+    }
+
+    char modeToken[24] = {};
+    if (sscanf(arg, "SET %23s", modeToken) == 1) {
+      PlayerBackendMode mode = PlayerBackendMode::kAutoFallback;
+      if (!parseBackendModeToken(modeToken, &mode)) {
+        Serial.printf("[MP3_BACKEND] BAD_ARGS mode=%s (AUTO|AUDIO_TOOLS|LEGACY)\n", modeToken);
+        return true;
+      }
+      g_mp3.setBackendMode(mode);
+      Serial.printf("[MP3_BACKEND] SET mode=%s\n", g_mp3.backendModeLabel());
+      printMp3Status("backend_set");
+      return true;
+    }
+
+    Serial.printf("[MP3_BACKEND] BAD_ARGS cmd=%s\n", cmd);
+    return true;
+  }
+
+  if (commandMatches(cmd, "MP3_SCAN")) {
+    const char* arg = cmd + strlen("MP3_SCAN");
+    while (*arg == ' ') {
+      ++arg;
+    }
+    if (arg[0] == '\0' || strcmp(arg, "STATUS") == 0) {
+      printMp3ScanStatus("status");
+      return true;
+    }
+    if (strcmp(arg, "START") == 0 || strcmp(arg, "REBUILD") == 0) {
+      g_mp3.requestStorageRefresh();
+      g_mp3.update(nowMs, g_mode == RuntimeMode::kMp3);
+      printMp3ScanStatus(strcmp(arg, "REBUILD") == 0 ? "rebuild" : "start");
+      return true;
+    }
+    if (strcmp(arg, "CANCEL") == 0) {
+      Serial.println("[MP3_SCAN] OUT_OF_CONTEXT scan is synchronous.");
+      return true;
+    }
+    Serial.printf("[MP3_SCAN] BAD_ARGS op=%s (START|STATUS|CANCEL|REBUILD)\n", arg);
+    return true;
+  }
+
+  if (commandMatches(cmd, "MP3_BROWSE")) {
+    const char* arg = cmd + strlen("MP3_BROWSE");
+    while (*arg == ' ') {
+      ++arg;
+    }
+    if (strncmp(arg, "LS", 2) == 0 && (arg[2] == '\0' || arg[2] == ' ')) {
+      const char* path = arg + 2;
+      while (*path == ' ') {
+        ++path;
+      }
+      printMp3BrowseList("ls", (path[0] == '\0') ? currentBrowsePath() : path, 0U, 12U);
+      return true;
+    }
+    if (strncmp(arg, "CD", 2) == 0 && (arg[2] == ' ' || arg[2] == '\0')) {
+      const char* path = arg + 2;
+      while (*path == ' ') {
+        ++path;
+      }
+      if (path[0] == '\0') {
+        Serial.println("[MP3_BROWSE] BAD_ARGS path required");
+        return true;
+      }
+      String normalizedPath(path);
+      if (!normalizedPath.startsWith("/")) {
+        normalizedPath = "/" + normalizedPath;
+      }
+      const uint16_t count = g_mp3.countTracks(normalizedPath.c_str());
+      if (count == 0U) {
+        Serial.printf("[MP3_BROWSE] NOT_FOUND path=%s\n", normalizedPath.c_str());
+        return true;
+      }
+      g_mp3BrowsePath = normalizedPath;
+      g_playerUi.setPage(PlayerUiPage::kBrowser);
+      Serial.printf("[MP3_BROWSE] CD path=%s count=%u\n",
+                    g_mp3BrowsePath.c_str(),
+                    static_cast<unsigned int>(count));
+      return true;
+    }
+    Serial.printf("[MP3_BROWSE] BAD_ARGS cmd=%s\n", cmd);
+    return true;
+  }
+
+  if (commandMatches(cmd, "MP3_PLAY_PATH")) {
+    const char* path = cmd + strlen("MP3_PLAY_PATH");
+    while (*path == ' ') {
+      ++path;
+    }
+    if (path[0] == '\0') {
+      Serial.println("[MP3_DBG] BAD_ARGS MP3_PLAY_PATH <path>");
+      return true;
+    }
+    if (!g_mp3.playPath(path)) {
+      Serial.printf("[MP3_DBG] NOT_FOUND path=%s\n", path);
+      return true;
+    }
+    printMp3Status("play_path");
+    return true;
+  }
+
+  if (commandMatches(cmd, "MP3_UI")) {
+    const char* arg = cmd + strlen("MP3_UI");
+    while (*arg == ' ') {
+      ++arg;
+    }
+    if (arg[0] == '\0' || strcmp(arg, "STATUS") == 0) {
+      Serial.printf("[MP3_UI] page=%s cursor=%u offset=%u\n",
+                    playerUiPageLabel(g_playerUi.page()),
+                    static_cast<unsigned int>(g_playerUi.cursor()),
+                    static_cast<unsigned int>(g_playerUi.offset()));
+      return true;
+    }
+
+    char pageToken[16] = {};
+    if (sscanf(arg, "PAGE %15s", pageToken) == 1) {
+      PlayerUiPage page = PlayerUiPage::kNowPlaying;
+      if (!parsePlayerUiPageToken(pageToken, &page)) {
+        Serial.printf("[MP3_UI] BAD_ARGS page=%s (NOW|BROWSE|QUEUE|SET)\n", pageToken);
+        return true;
+      }
+      setPlayerUiPage(page);
+      Serial.printf("[MP3_UI] PAGE %s\n", playerUiPageLabel(g_playerUi.page()));
+      return true;
+    }
+
+    Serial.printf("[MP3_UI] BAD_ARGS cmd=%s\n", cmd);
+    return true;
+  }
+
+  if (commandMatches(cmd, "MP3_STATE")) {
+    const char* arg = cmd + strlen("MP3_STATE");
+    while (*arg == ' ') {
+      ++arg;
+    }
+    if (strcmp(arg, "SAVE") == 0) {
+      Serial.printf("[MP3_STATE] SAVE %s\n", g_mp3.savePlayerState() ? "OK" : "FAILED");
+      return true;
+    }
+    if (strcmp(arg, "LOAD") == 0) {
+      const bool ok = g_mp3.loadPlayerState();
+      if (ok) {
+        g_mp3.requestStorageRefresh();
+        g_mp3.update(nowMs, g_mode == RuntimeMode::kMp3);
+      }
+      Serial.printf("[MP3_STATE] LOAD %s\n", ok ? "OK" : "FAILED");
+      return true;
+    }
+    if (strcmp(arg, "RESET") == 0) {
+      Serial.printf("[MP3_STATE] RESET %s\n", g_mp3.resetPlayerState() ? "OK" : "FAILED");
+      return true;
+    }
+    Serial.printf("[MP3_STATE] BAD_ARGS op=%s (SAVE|LOAD|RESET)\n", arg);
     return true;
   }
 
@@ -1557,13 +2944,70 @@ bool processMp3DebugCommand(const char* cmd, uint32_t nowMs) {
       return true;
     }
 
-    uint16_t guard = 0;
-    while (g_mp3.currentTrackNumber() != static_cast<uint16_t>(trackNum) && guard < (count + 1U)) {
-      g_mp3.nextTrack();
-      ++guard;
+    if (!g_mp3.selectTrackByIndex(static_cast<uint16_t>(trackNum - 1), true)) {
+      Serial.printf("[MP3_DBG] MP3_PLAY failed: idx=%d\n", trackNum - 1);
+      return true;
     }
-    g_mp3.restartTrack();
     printMp3Status("play");
+    return true;
+  }
+
+  if (strcmp(cmd, "MP3_FX_STOP") == 0 || strcmp(cmd, "MFX STOP") == 0) {
+    audioService().stopOverlay("serial_mp3_fx_stop");
+    printMp3Status("fx_stop");
+    return true;
+  }
+
+  char modeToken[16] = {};
+  if (sscanf(cmd, "MP3_FX_MODE %15s", modeToken) == 1 || sscanf(cmd, "MFX MODE %15s", modeToken) == 1) {
+    if (strcmp(modeToken, "DUCK") == 0 || strcmp(modeToken, "DUCKING") == 0) {
+      g_mp3.setFxMode(Mp3FxMode::kDucking);
+      Serial.println("[MP3_FX] mode=DUCKING");
+      printMp3Status("fx_mode");
+      return true;
+    }
+    if (strcmp(modeToken, "OVERLAY") == 0 || strcmp(modeToken, "MIX") == 0) {
+      g_mp3.setFxMode(Mp3FxMode::kOverlay);
+      Serial.println("[MP3_FX] mode=OVERLAY");
+      printMp3Status("fx_mode");
+      return true;
+    }
+    Serial.println("[MP3_FX] MP3_FX_MODE invalide: DUCK|OVERLAY.");
+    return true;
+  }
+
+  int duckPct = -1;
+  int mixPct = -1;
+  if (sscanf(cmd, "MP3_FX_GAIN %d %d", &duckPct, &mixPct) == 2 ||
+      sscanf(cmd, "MFX GAIN %d %d", &duckPct, &mixPct) == 2) {
+    if (duckPct < 0 || duckPct > 100 || mixPct < 0 || mixPct > 100) {
+      Serial.println("[MP3_FX] MP3_FX_GAIN invalide: 0..100 0..100.");
+      return true;
+    }
+    g_mp3.setFxDuckingGain(static_cast<float>(duckPct) / 100.0f);
+    g_mp3.setFxOverlayGain(static_cast<float>(mixPct) / 100.0f);
+    printMp3Status("fx_gain");
+    return true;
+  }
+
+  char fxToken[16] = {};
+  int fxDurationMs = 0;
+  if (sscanf(cmd, "MP3_FX %15s %d", fxToken, &fxDurationMs) >= 1 ||
+      sscanf(cmd, "MFX %15s %d", fxToken, &fxDurationMs) >= 1) {
+    Mp3FxEffect effect = Mp3FxEffect::kFmSweep;
+    if (!parseMp3FxEffectToken(fxToken, &effect)) {
+      Serial.println("[MP3_FX] MP3_FX invalide: FM|SONAR|MORSE|WIN [ms].");
+      return true;
+    }
+
+    forceUsonFunctionalForMp3Debug("serial_mp3_fx");
+    g_mp3.requestStorageRefresh();
+    g_mp3.update(nowMs, g_mode == RuntimeMode::kMp3);
+    triggerMp3Fx(effect,
+                 (fxDurationMs > 0) ? static_cast<uint32_t>(fxDurationMs)
+                                    : static_cast<uint32_t>(config::kMp3FxDefaultDurationMs),
+                 "serial_mp3_fx");
+    printMp3Status("fx");
     return true;
   }
 
@@ -1594,12 +3038,7 @@ bool processMp3DebugCommand(const char* cmd, uint32_t nowMs) {
     g_mp3FormatTest.stageStartMs = nowMs;
     g_mp3FormatTest.stageResultLogged = false;
 
-    uint16_t guard = 0;
-    while (g_mp3.currentTrackNumber() > 1U && guard < (g_mp3.trackCount() + 1U)) {
-      g_mp3.previousTrack();
-      ++guard;
-    }
-    g_mp3.restartTrack();
+    g_mp3.selectTrackByIndex(0U, true);
 
     Serial.printf("[MP3_TEST] START tracks=%u dwell=%lu ms\n",
                   static_cast<unsigned int>(g_mp3FormatTest.totalTracks),
@@ -1656,9 +3095,57 @@ void updateMp3FormatTest(uint32_t nowMs) {
   }
 
   g_mp3.nextTrack();
-  g_mp3.restartTrack();
   g_mp3FormatTest.stageStartMs = nowMs;
   g_mp3FormatTest.stageResultLogged = false;
+}
+
+void printStoryDebugHelp() {
+  Serial.println("[STORY] Flow: UNLOCK -> WIN -> attente -> ETAPE_2 -> gate MP3 ouvert.");
+  Serial.println("[STORY] Cmd: STORY_STATUS | STORY_RESET | STORY_ARM | STORY_FORCE_ETAPE2");
+  Serial.println("[STORY] Cmd: STORY_TEST_ON | STORY_TEST_OFF | STORY_TEST_DELAY <ms>");
+}
+
+bool processStoryDebugCommand(const char* cmd, uint32_t nowMs) {
+  if (strcmp(cmd, "STORY_STATUS") == 0 || strcmp(cmd, "SSTATUS") == 0) {
+    storyController().printStatus(nowMs, "serial_story_status");
+    return true;
+  }
+  if (strcmp(cmd, "STORY_HELP") == 0 || strcmp(cmd, "SHELP") == 0) {
+    printStoryDebugHelp();
+    return true;
+  }
+  if (strcmp(cmd, "STORY_RESET") == 0 || strcmp(cmd, "SRESET") == 0) {
+    storyController().reset("serial_story_reset");
+    return true;
+  }
+  if (strcmp(cmd, "STORY_ARM") == 0 || strcmp(cmd, "SARM") == 0) {
+    armStoryTimelineAfterUnlock(nowMs);
+    storyController().printStatus(nowMs, "serial_story_arm");
+    return true;
+  }
+  if (strcmp(cmd, "STORY_FORCE_ETAPE2") == 0 || strcmp(cmd, "SETAPE2") == 0) {
+    storyController().forceEtape2DueNow(nowMs, "serial_story_force");
+    updateStoryTimeline(nowMs);
+    storyController().printStatus(nowMs, "serial_story_force");
+    return true;
+  }
+  if (strcmp(cmd, "STORY_TEST_ON") == 0 || strcmp(cmd, "STEST ON") == 0) {
+    storyController().setTestMode(true, nowMs, "serial_story_test_on");
+    return true;
+  }
+  if (strcmp(cmd, "STORY_TEST_OFF") == 0 || strcmp(cmd, "STEST OFF") == 0) {
+    storyController().setTestMode(false, nowMs, "serial_story_test_off");
+    return true;
+  }
+
+  uint32_t delayMs = 0U;
+  if (sscanf(cmd, "STORY_TEST_DELAY %lu", &delayMs) == 1 ||
+      sscanf(cmd, "STEST DELAY %lu", &delayMs) == 1) {
+    storyController().setTestDelayMs(delayMs, nowMs, "serial_story_test_delay");
+    return true;
+  }
+
+  return false;
 }
 
 void printKeyTuneHelp() {
@@ -1666,9 +3153,12 @@ void printKeyTuneHelp() {
   Serial.println("[KEY_TUNE] Cmd: KEY_SET K4 1500 | KEY_SET K6 2200 | KEY_SET REL 3920");
   Serial.println("[KEY_TUNE] Cmd: KEY_SET_ALL k1 k2 k3 k4 k5 k6 rel");
   Serial.println("[KEY_TUNE] Cmd: KEY_TEST_START | KEY_TEST_STATUS | KEY_TEST_RESET | KEY_TEST_STOP");
-  Serial.println("[KEY_TUNE] Cmd: FS_INFO | FS_LIST | FSTEST");
+  Serial.println("[KEY_TUNE] Cmd: BOOT_FS_INFO | BOOT_FS_LIST | BOOT_FS_TEST");
+  Serial.println("[KEY_TUNE] Cmd: BOOT_FX_FM | BOOT_FX_SONAR | BOOT_FX_MORSE | BOOT_FX_WIN");
+  Serial.println(
+      "[KEY_TUNE] Cmd: STORY_STATUS | STORY_TEST_ON/OFF | STORY_TEST_DELAY | STORY_ARM | STORY_FORCE_ETAPE2");
   Serial.println("[KEY_TUNE] Cmd: CODEC_STATUS | CODEC_DUMP | CODEC_RD/WR | CODEC_VOL");
-  Serial.println("[KEY_TUNE] Cmd: MP3_STATUS | MP3_UNLOCK | MP3_REFRESH | MP3_LIST | MP3_TEST_START");
+  Serial.println("[KEY_TUNE] Cmd: MP3_STATUS | MP3_UNLOCK | MP3_REFRESH | MP3_LIST | MP3_TEST_START | MP3_FX");
 }
 
 void processKeyTuneSerialCommand(const char* rawCmd, uint32_t nowMs) {
@@ -1695,7 +3185,8 @@ void processKeyTuneSerialCommand(const char* rawCmd, uint32_t nowMs) {
     return;
   }
 
-  const bool bootAlias = strcmp(cmd, "OK") == 0 || strcmp(cmd, "VALID") == 0 ||
+  const bool bootAlias = strcmp(cmd, "NEXT") == 0 || strcmp(cmd, "OK") == 0 ||
+                         strcmp(cmd, "VALID") == 0 ||
                          strcmp(cmd, "REPLAY") == 0 || strcmp(cmd, "R") == 0 ||
                          strcmp(cmd, "KO") == 0 || strcmp(cmd, "NOK") == 0 ||
                          strcmp(cmd, "SKIP") == 0 || strcmp(cmd, "STATUS") == 0 ||
@@ -1704,13 +3195,18 @@ void processKeyTuneSerialCommand(const char* rawCmd, uint32_t nowMs) {
                          strcmp(cmd, "DIAG") == 0 || strcmp(cmd, "PA") == 0 ||
                          strcmp(cmd, "PAON") == 0 || strcmp(cmd, "PAOFF") == 0 ||
                          strcmp(cmd, "PAINV") == 0 || strcmp(cmd, "FS_INFO") == 0 ||
-                         strcmp(cmd, "FS_LIST") == 0 || strcmp(cmd, "FSTEST") == 0;
+                         strcmp(cmd, "FS_LIST") == 0 || strcmp(cmd, "FSTEST") == 0 ||
+                         strcmp(cmd, "FX_FM") == 0 || strcmp(cmd, "FX_SONAR") == 0 ||
+                         strcmp(cmd, "FX_MORSE") == 0 || strcmp(cmd, "FX_WIN") == 0;
   if (strncmp(cmd, "BOOT_", 5U) == 0 || bootAlias) {
     processBootAudioSerialCommand(cmd, nowMs);
     return;
   }
 
   if (processCodecDebugCommand(cmd)) {
+    return;
+  }
+  if (processStoryDebugCommand(cmd, nowMs)) {
     return;
   }
   if (processMp3DebugCommand(cmd, nowMs)) {
@@ -1860,6 +3356,87 @@ void pollKeyTuneSerial(uint32_t nowMs) {
       g_keyTune.serialCmdLen = 0;
     }
   }
+}
+
+bool commandMatches(const char* cmd, const char* token) {
+  if (cmd == nullptr || token == nullptr) {
+    return false;
+  }
+  const size_t tokenLen = strlen(token);
+  if (strncmp(cmd, token, tokenLen) != 0) {
+    return false;
+  }
+  return cmd[tokenLen] == '\0' || cmd[tokenLen] == ' ';
+}
+
+bool isCanonicalSerialCommand(const char* cmd) {
+  static const char* kCanonicalCommands[] = {
+      "BOOT_STATUS", "BOOT_HELP",   "BOOT_NEXT",       "BOOT_REPLAY", "BOOT_REOPEN",
+      "BOOT_TEST_TONE",             "BOOT_TEST_DIAG",  "BOOT_PA_ON",  "BOOT_PA_OFF",
+      "BOOT_PA_STATUS",             "BOOT_PA_INV",     "BOOT_FS_INFO","BOOT_FS_LIST",
+      "BOOT_FS_TEST",               "BOOT_FX_FM",      "BOOT_FX_SONAR","BOOT_FX_MORSE",
+      "BOOT_FX_WIN",                "STORY_STATUS",    "STORY_HELP",  "STORY_RESET",
+      "STORY_ARM",                  "STORY_FORCE_ETAPE2", "STORY_TEST_ON",
+      "STORY_TEST_OFF",             "STORY_TEST_DELAY","MP3_HELP",    "MP3_STATUS",
+      "MP3_UNLOCK",
+      "MP3_REFRESH",                "MP3_LIST",        "MP3_NEXT",    "MP3_PREV",
+      "MP3_RESTART",                "MP3_PLAY",        "MP3_FX_MODE", "MP3_FX_GAIN",
+      "MP3_FX",                     "MP3_FX_STOP",     "MP3_TEST_START", "MP3_TEST_STOP",
+      "MP3_BACKEND",                "MP3_SCAN",        "MP3_BROWSE",  "MP3_PLAY_PATH",
+      "MP3_UI",                     "MP3_STATE",
+      "KEY_HELP",                   "KEY_STATUS",      "KEY_RAW_ON",  "KEY_RAW_OFF",
+      "KEY_RESET",                  "KEY_SET",         "KEY_SET_ALL", "KEY_TEST_START",
+      "KEY_TEST_STATUS",            "KEY_TEST_RESET",  "KEY_TEST_STOP", "CODEC_HELP",
+      "CODEC_STATUS",               "CODEC_DUMP",      "CODEC_RD",    "CODEC_WR",
+      "CODEC_VOL",                  "CODEC_VOL_RAW",
+  };
+
+  for (const char* token : kCanonicalCommands) {
+    if (commandMatches(cmd, token)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void onSerialCommand(const char* cmd, uint32_t nowMs, void* ctx) {
+  (void)ctx;
+  if (cmd == nullptr || cmd[0] == '\0') {
+    return;
+  }
+  if (!isCanonicalSerialCommand(cmd)) {
+    Serial.printf("[SERIAL] UNKNOWN (canonique attendu): %s\n", cmd);
+    return;
+  }
+
+  if (strncmp(cmd, "BOOT_", 5U) == 0) {
+    processBootAudioSerialCommand(cmd, nowMs);
+    return;
+  }
+  if (strncmp(cmd, "STORY_", 6U) == 0) {
+    if (!processStoryDebugCommand(cmd, nowMs)) {
+      Serial.printf("[SERIAL] UNKNOWN STORY: %s\n", cmd);
+    }
+    return;
+  }
+  if (strncmp(cmd, "MP3_", 4U) == 0) {
+    if (!processMp3DebugCommand(cmd, nowMs)) {
+      Serial.printf("[SERIAL] UNKNOWN MP3: %s\n", cmd);
+    }
+    return;
+  }
+  if (strncmp(cmd, "KEY_", 4U) == 0) {
+    processKeyTuneSerialCommand(cmd, nowMs);
+    return;
+  }
+  if (strncmp(cmd, "CODEC_", 6U) == 0) {
+    if (!processCodecDebugCommand(cmd)) {
+      Serial.printf("[SERIAL] UNKNOWN CODEC: %s\n", cmd);
+    }
+    return;
+  }
+
+  Serial.printf("[SERIAL] UNKNOWN PREFIX: %s\n", cmd);
 }
 
 void updateKeyTuneRawStream(uint32_t nowMs) {
@@ -2028,6 +3605,7 @@ AppSchedulerInputs makeSchedulerInputs() {
   input.unlockJingleActive = g_unlockJingle.active;
   input.sdReady = g_mp3.isSdReady();
   input.hasTracks = g_mp3.hasTracks();
+  input.mp3GateOpen = isMp3GateOpen();
   input.laDetectionEnabled = g_laDetectionEnabled;
   input.sineEnabled = config::kEnableSineDac;
   input.bootProtocolActive = g_bootAudioProtocol.active;
@@ -2044,6 +3622,7 @@ void applyRuntimeMode(RuntimeMode newMode, bool force = false) {
   if (g_mode == RuntimeMode::kMp3) {
     stopUnlockJingle(false);
     stopMicCalibration(millis(), "mode_mp3");
+    cancelULockSearchSonarCue("mode_mp3");
     g_laDetectionEnabled = false;
     g_laDetector.setCaptureEnabled(false);
     g_sine.setEnabled(false);
@@ -2053,7 +3632,9 @@ void applyRuntimeMode(RuntimeMode newMode, bool force = false) {
   } else {
     stopUnlockJingle(false);
     g_uSonFunctional = false;
+    cancelULockSearchSonarCue("mode_signal");
     g_uLockListening = !config::kULockRequireKeyToStartDetection;
+    resetStoryTimeline(changed ? "mode_signal" : "boot_signal");
     resetLaHoldProgress();
     g_laDetectionEnabled = g_uLockListening;
     g_laDetector.setCaptureEnabled(g_uLockListening);
@@ -2073,22 +3654,55 @@ void applyRuntimeMode(RuntimeMode newMode, bool force = false) {
 
 void handleKeyPress(uint8_t key) {
   if (g_mode == RuntimeMode::kMp3) {
+    g_playerUi.setBrowserBounds(g_mp3.trackCount());
+    const PlayerUiPage page = currentPlayerUiPage();
+
     switch (key) {
       case 1:
-        g_mp3.togglePause();
-        Serial.printf("[KEY] K1 MP3 %s\n", g_mp3.isPaused() ? "PAUSE" : "PLAY");
+        if (page == PlayerUiPage::kBrowser) {
+          if (g_mp3.selectTrackByIndex(g_playerUi.cursor(), true)) {
+            Serial.printf("[KEY] K1 SELECT %u/%u\n",
+                          static_cast<unsigned int>(g_mp3.currentTrackNumber()),
+                          static_cast<unsigned int>(g_mp3.trackCount()));
+          } else {
+            Serial.printf("[KEY] K1 SELECT refuse idx=%u\n",
+                          static_cast<unsigned int>(g_playerUi.cursor()));
+          }
+        } else if (page == PlayerUiPage::kSettings) {
+          g_mp3.cycleRepeatMode();
+          Serial.printf("[KEY] K1 REPEAT %s\n", g_mp3.repeatModeLabel());
+        } else {
+          g_mp3.togglePause();
+          Serial.printf("[KEY] K1 MP3 %s\n", g_mp3.isPaused() ? "PAUSE" : "PLAY");
+        }
         break;
       case 2:
-        g_mp3.previousTrack();
-        Serial.printf("[KEY] K2 PREV %u/%u\n",
-                      static_cast<unsigned int>(g_mp3.currentTrackNumber()),
-                      static_cast<unsigned int>(g_mp3.trackCount()));
+        if (page == PlayerUiPage::kNowPlaying) {
+          g_mp3.previousTrack();
+          Serial.printf("[KEY] K2 PREV %u/%u\n",
+                        static_cast<unsigned int>(g_mp3.currentTrackNumber()),
+                        static_cast<unsigned int>(g_mp3.trackCount()));
+        } else {
+          UiAction action;
+          action.source = UiActionSource::kKeyShort;
+          action.key = 2U;
+          g_playerUi.applyAction(action);
+          Serial.printf("[KEY] K2 CURSOR %u\n", static_cast<unsigned int>(g_playerUi.cursor()));
+        }
         break;
       case 3:
-        g_mp3.nextTrack();
-        Serial.printf("[KEY] K3 NEXT %u/%u\n",
-                      static_cast<unsigned int>(g_mp3.currentTrackNumber()),
-                      static_cast<unsigned int>(g_mp3.trackCount()));
+        if (page == PlayerUiPage::kNowPlaying) {
+          g_mp3.nextTrack();
+          Serial.printf("[KEY] K3 NEXT %u/%u\n",
+                        static_cast<unsigned int>(g_mp3.currentTrackNumber()),
+                        static_cast<unsigned int>(g_mp3.trackCount()));
+        } else {
+          UiAction action;
+          action.source = UiActionSource::kKeyShort;
+          action.key = 3U;
+          g_playerUi.applyAction(action);
+          Serial.printf("[KEY] K3 CURSOR %u\n", static_cast<unsigned int>(g_playerUi.cursor()));
+        }
         break;
       case 4:
         g_mp3.setGain(g_mp3.gain() - 0.05f);
@@ -2099,8 +3713,13 @@ void handleKeyPress(uint8_t key) {
         Serial.printf("[KEY] K5 VOL+ %u%%\n", static_cast<unsigned int>(g_mp3.volumePercent()));
         break;
       case 6:
-        g_mp3.cycleRepeatMode();
-        Serial.printf("[KEY] K6 REPEAT %s\n", g_mp3.repeatModeLabel());
+        {
+          UiAction action;
+          action.source = UiActionSource::kKeyShort;
+          action.key = 6U;
+          g_playerUi.applyAction(action);
+          Serial.printf("[KEY] K6 PAGE %s\n", playerUiPageLabel(g_playerUi.page()));
+        }
         break;
       default:
         break;
@@ -2117,6 +3736,7 @@ void handleKeyPress(uint8_t key) {
       if (config::kEnableMicCalibrationOnSignalEntry) {
         startMicCalibration(millis(), "key_start_ulock_detect");
       }
+      requestULockSearchSonarCue("key_start_ulock_detect");
       Serial.printf("[MODE] U_LOCK -> detection LA activee (K%u)\n",
                     static_cast<unsigned int>(key));
       return;
@@ -2137,16 +3757,16 @@ void handleKeyPress(uint8_t key) {
       Serial.printf("[KEY] K1 LA DETECT %s\n", g_laDetectionEnabled ? "ON" : "OFF");
       break;
     case 2:
-      Serial.println("[KEY] K2 I2S tone 440Hz.");
-      playBootI2sToneFx(440.0f, 650U, 0.68f, "key_k2_i2s_tone");
+      Serial.println("[KEY] K2 I2S FM sweep (async).");
+      audioService().startBaseFx(AudioEffectId::kFmSweep, 0.30f, 900U, "key_k2_i2s_fx");
       break;
     case 3:
-      Serial.println("[KEY] K3 I2S diag sequence.");
-      playBootAudioDiagSequence();
+      Serial.println("[KEY] K3 I2S sonar (async).");
+      audioService().startBaseFx(AudioEffectId::kSonar, 0.28f, 1300U, "key_k3_i2s_fx");
       break;
     case 4:
       Serial.println("[KEY] K4 I2S boot FX replay.");
-      playBootAudioPrimaryFx("key_k4_replay");
+      startBootAudioPrimaryFxAsync("key_k4_replay");
       break;
     case 5:
       g_mp3.requestStorageRefresh();
@@ -2167,7 +3787,7 @@ void App::setup() {
 
   g_led.begin();
   g_laDetector.begin();
-  g_keypad.begin();
+  inputService().begin();
   if (config::kUseI2SMicInput) {
     randomSeed(static_cast<uint32_t>(micros()));
   } else {
@@ -2182,7 +3802,13 @@ void App::setup() {
   }
   setupInternalLittleFs();
   g_mp3.begin();
+  g_mp3.setFxMode(config::kMp3FxOverlayModeDefault ? Mp3FxMode::kOverlay : Mp3FxMode::kDucking);
+  g_mp3.setFxDuckingGain(config::kMp3FxDuckingGainDefault);
+  g_mp3.setFxOverlayGain(config::kMp3FxOverlayGainDefault);
+  g_playerUi.reset();
+  g_mp3BrowsePath = "/";
   g_screen.begin();
+  sendScreenFrameSnapshot(millis(), 0U);
   g_paEnableActiveHigh = config::kPinAudioPaEnableActiveHigh;
   if (config::kBootAudioPaTogglePulse && config::kPinAudioPaEnable >= 0) {
     setBootAudioPaEnabled(false, "boot_pa_pulse_off");
@@ -2192,8 +3818,8 @@ void App::setup() {
   printBootAudioOutputInfo("boot_setup");
   g_sine.setEnabled(false);
   applyRuntimeMode(schedulerSelectRuntimeMode(makeSchedulerInputs()), true);
-  playBootAudioPrimaryFx("boot_setup");
-  startBootAudioValidationProtocol(millis());
+  serialRouter().setDispatcher(onSerialCommand, nullptr);
+  bootProtocolController().start(millis());
 
   Serial.println("[BOOT] U-SON / ESP32 Audio Kit A252 pret.");
   if (config::kDisableBoardRgbLeds) {
@@ -2202,33 +3828,51 @@ void App::setup() {
   Serial.printf("[MIC] Source: %s\n",
                 config::kUseI2SMicInput ? "I2S codec onboard (DIN GPIO35)" : "ADC externe GPIO34");
   Serial.println("[KEYMAP][MP3] K1 play/pause, K2 prev, K3 next, K4 vol-, K5 vol+, K6 repeat");
-  Serial.println("[BOOT] Sans SD: MODE U_LOCK, appuyer une touche pour lancer la detection LA.");
+  Serial.println("[BOOT] Boucle attente: random '*boot*' puis scan radio I2S 10..40s.");
+  Serial.println("[BOOT] Appui touche pendant attente: lancement U_LOCK ecoute (detection LA).");
   Serial.println("[BOOT] Puis MODULE U-SON Fonctionnel apres detection LA.");
+  Serial.println("[STORY] Fin U_LOCK: lecture random '*WIN*' (fallback effet synth WIN).");
+  Serial.println("[STORY] Fin U-SON: lecture random '*ETAPE_2*' a T+15min apres unlock.");
   Serial.println("[BOOT] En U_LOCK: detection SD desactivee jusqu'au mode U-SON Fonctionnel.");
   if (config::kEnableBootAudioValidationProtocol) {
-    Serial.println("[KEYMAP][BOOT_PROTO] K1=OK, K2=REPLAY, K3=KO+REPLAY, K4=TONE, K5=DIAG, K6=SKIP");
+    Serial.println("[KEYMAP][BOOT_PROTO] K1..K6=NEXT | Serial: BOOT_NEXT, BOOT_REPLAY, BOOT_REOPEN");
+    Serial.println("[KEYMAP][BOOT_PROTO] FX: BOOT_FX_FM | BOOT_FX_SONAR | BOOT_FX_MORSE | BOOT_FX_WIN");
   }
   Serial.println(
       "[KEY_TUNE] Serial: KEY_STATUS | KEY_RAW_ON/OFF | KEY_SET Kx/REL v | KEY_TEST_START/STATUS/RESET/STOP");
+  Serial.println("[KEY_TUNE] Serial: BOOT_FX_FM | BOOT_FX_SONAR | BOOT_FX_MORSE | BOOT_FX_WIN");
   Serial.println(
       "[MP3_DBG] Serial: MP3_STATUS | MP3_UNLOCK | MP3_REFRESH | MP3_LIST | MP3_PLAY n | MP3_TEST_START [ms]");
-  Serial.println("[FS] Serial: FS_INFO | FS_LIST | FSTEST");
+  Serial.println("[MP3_DBG] Serial: MP3_FX_MODE DUCK|OVERLAY | MP3_FX_GAIN duck mix | MP3_FX FM|SONAR|MORSE|WIN [ms]");
+  Serial.println(
+      "[MP3_DBG] Serial: MP3_BACKEND STATUS|SET AUTO|AUDIO_TOOLS|LEGACY | MP3_SCAN START|STATUS|CANCEL|REBUILD");
+  Serial.println(
+      "[MP3_DBG] Serial: MP3_BROWSE LS [path] | MP3_BROWSE CD <path> | MP3_PLAY_PATH <path> | MP3_UI PAGE ... | MP3_STATE SAVE|LOAD|RESET");
+  Serial.println("[FS] Serial: BOOT_FS_INFO | BOOT_FS_LIST | BOOT_FS_TEST");
   Serial.printf("[FS] Boot FX path: %s (%s)\n",
                 config::kBootFxLittleFsPath,
                 config::kPreferLittleFsBootFx ? "preferred" : "disabled");
+  Serial.printf("[MP3_FX] default mode=%s duck=%u%% mix=%u%% dur=%u ms\n",
+                g_mp3.fxModeLabel(),
+                static_cast<unsigned int>(g_mp3.fxDuckingGain() * 100.0f),
+                static_cast<unsigned int>(g_mp3.fxOverlayGain() * 100.0f),
+                static_cast<unsigned int>(config::kMp3FxDefaultDurationMs));
   Serial.println("[KEYMAP][SIGNAL] actifs seulement apres unlock: K1 LA on/off, K2 tone 440 I2S, K3 diag I2S, K4 replay FX I2S, K5 refresh SD, K6 cal micro");
 }
 
 void App::loop() {
-  const uint32_t nowMs = millis();
+  uint32_t nowMs = millis();
+  updateAsyncAudioService(nowMs);
+  nowMs = millis();
+  updateStoryTimeline(nowMs);
+  serialRouter().update(nowMs);
+  nowMs = millis();
   AppSchedulerInputs schedulerInput = makeSchedulerInputs();
   AppBrickSchedule schedule = schedulerBuildBricks(schedulerInput);
 
   if (schedule.runBootProtocol) {
-    updateBootAudioValidationProtocol(nowMs);
-  }
-  if (schedule.runSerialConsole) {
-    pollKeyTuneSerial(nowMs);
+    bootProtocolController().update(nowMs);
+    nowMs = millis();
   }
 
   schedulerInput = makeSchedulerInputs();
@@ -2240,9 +3884,12 @@ void App::loop() {
 
   if (schedule.runMp3Service) {
     g_mp3.update(nowMs, schedule.allowMp3Playback);
+    g_playerUi.setBrowserBounds(g_mp3.trackCount());
+    nowMs = millis();
   }
   applyRuntimeMode(schedulerSelectRuntimeMode(makeSchedulerInputs()));
   updateMp3FormatTest(nowMs);
+  nowMs = millis();
 
   const AppBrickSchedule postModeSchedule = schedulerBuildBricks(makeSchedulerInputs());
   if (postModeSchedule.runSineDac) {
@@ -2251,27 +3898,30 @@ void App::loop() {
   if (postModeSchedule.runLaDetector) {
     g_laDetector.update(nowMs);
   }
-  g_keypad.update(nowMs);
+  inputService().update(nowMs);
 
   static uint8_t screenKey = 0;
   static uint32_t screenKeyUntilMs = 0;
-  uint8_t pressedKey = 0;
-  uint16_t pressedRaw = 0;
-  if (g_keypad.consumePress(&pressedKey, &pressedRaw)) {
-    Serial.printf("[KEY] K%u raw=%u\n", static_cast<unsigned int>(pressedKey), pressedRaw);
+  KeyEvent keyEvent;
+  if (inputService().consumePress(&keyEvent)) {
+    Serial.printf("[KEY] K%u raw=%u\n",
+                  static_cast<unsigned int>(keyEvent.key),
+                  static_cast<unsigned int>(keyEvent.raw));
     if (g_bootAudioProtocol.active) {
-      handleBootAudioProtocolKey(pressedKey, nowMs);
+      bootProtocolController().onKey(keyEvent.key, nowMs);
     } else if (g_keySelfTest.active) {
-      handleKeySelfTestPress(pressedKey, pressedRaw);
+      handleKeySelfTestPress(keyEvent.key, keyEvent.raw);
     } else {
-      handleKeyPress(pressedKey);
+      handleKeyPress(keyEvent.key);
     }
-    screenKey = pressedKey;
+    nowMs = millis();
+    screenKey = keyEvent.key;
     screenKeyUntilMs = nowMs + 1200;
   }
   if (screenKey != 0 && static_cast<int32_t>(nowMs - screenKeyUntilMs) >= 0) {
     screenKey = 0;
   }
+  serviceULockSearchSonarCue(nowMs);
   updateKeyTuneRawStream(nowMs);
 
   const bool laDetected =
@@ -2301,17 +3951,16 @@ void App::loop() {
 
   if (uLockListeningBeforeUnlock && g_laHoldAccumMs >= config::kLaUnlockHoldMs) {
     g_uSonFunctional = true;
+    cancelULockSearchSonarCue("unlock");
     resetLaHoldProgress();
+    armStoryTimelineAfterUnlock(nowMs);
     g_mp3.requestStorageRefresh();
-    startUnlockJingle(nowMs);
     Serial.println("[MODE] MODULE U-SON Fonctionnel (LA detecte)");
     Serial.println("[SD] Detection SD activee.");
   }
 
   const bool uLockMode = (g_mode == RuntimeMode::kSignal) && !g_uSonFunctional;
   const bool uLockListening = uLockMode && g_uLockListening;
-  const bool uSonFunctional = (g_mode == RuntimeMode::kSignal) && g_uSonFunctional;
-  const uint8_t laHoldPercent = uLockListening ? laHoldPercentBeforeUnlock : 0;
   const int8_t tuningOffset = uLockListening ? g_laDetector.tuningOffset() : 0;
   const uint8_t tuningConfidence = uLockListening ? g_laDetector.tuningConfidence() : 0;
   const float micRms = g_laDetector.micRms();
@@ -2370,21 +4019,5 @@ void App::loop() {
     g_led.updateRandom(nowMs);
   }
 
-  g_screen.update(laDetected,
-                  g_mp3.isPlaying(),
-                  g_mp3.isSdReady(),
-                  g_mode == RuntimeMode::kMp3,
-                  uLockMode,
-                  uLockListening,
-                  uSonFunctional,
-                  screenKey,
-                  g_mp3.currentTrackNumber(),
-                  g_mp3.trackCount(),
-                  g_mp3.volumePercent(),
-                  micLevelPercent,
-                  tuningOffset,
-                  tuningConfidence,
-                  config::kScreenEnableMicScope && config::kUseI2SMicInput,
-                  laHoldPercent,
-                  nowMs);
+  sendScreenFrameSnapshot(nowMs, screenKey);
 }

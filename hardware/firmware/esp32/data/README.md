@@ -4,13 +4,13 @@ Mettre ici les sons internes a flasher dans la partition LittleFS.
 
 ## Fichier boot recommande
 
-- Nom conseille: `boot.<ext>`
+- Nom conseille: `uson_boot_arcade_lowmono.mp3`
 - Extensions supportees: `.mp3`, `.wav`, `.aac`, `.flac`, `.opus`, `.ogg`
 - Resolution runtime:
-  - chemin configure `kBootFxLittleFsPath` (par defaut `/boot.mp3`)
+  - chemin configure `kBootFxLittleFsPath` (par defaut `/uson_boot_arcade_lowmono.mp3`)
   - puis auto-detection `/boot.*`
   - puis premier fichier audio supporte trouve a la racine LittleFS
-- Duree conseillee: 0.8s a 3.0s
+- Duree conseillee (profil actuel): ~20 s (intro radio + voix)
 - Debit conseille (fichiers compressees): 64 a 128 kbps mono/stereo
 
 ## Flash LittleFS

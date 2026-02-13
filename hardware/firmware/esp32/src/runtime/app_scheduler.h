@@ -8,6 +8,7 @@ struct AppSchedulerInputs {
   bool unlockJingleActive = false;
   bool sdReady = false;
   bool hasTracks = false;
+  bool mp3GateOpen = true;
   bool laDetectionEnabled = false;
   bool sineEnabled = false;
   bool bootProtocolActive = false;

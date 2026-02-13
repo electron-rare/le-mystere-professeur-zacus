@@ -5,6 +5,9 @@ Kit d’enquête pour anniversaire (9–11 ans), ambiance laboratoire / campus s
 ## Aperçu visuel
 ![Vue d'ensemble du dépôt](docs/assets/repo-map.svg)
 
+## Aperçu visuel
+![Vue d'ensemble du dépôt](docs/assets/repo-map.svg)
+
 ## Contenu
 ### 1) Kit Maître du jeu
 Dossier : `kit-maitre-du-jeu/`
@@ -43,7 +46,7 @@ Dossier : `hardware/`
 - **Hardware/firmware** : flux `U_LOCK`/`U-SON`/MP3 opérationnel et documenté (`hardware/firmware/esp32/`).
 
 ## Licence (open source)
-- Contenus creatifs (documents, PDFs, PNG, SVG, textes de jeu) : **CC BY-SA 4.0**
+- Contenus créatifs (documents, PDFs, PNG, SVG, textes de jeu) : **CC BY-SA 4.0**
 - Code (firmware, scripts) : **GPL-3.0-or-later**
 Voir `LICENSE.md` et `LICENSES/`.
 

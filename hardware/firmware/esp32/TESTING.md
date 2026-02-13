@@ -30,6 +30,8 @@ Runbook live semi-automatique disponible:
 - `tools/qa/live_story_v2_runbook.md`
 - `tools/qa/live_story_v2_smoke.sh` (smoke debut sprint)
 - `tools/qa/live_story_v2_rc_runbook.md` (release candidate)
+- `tools/qa/mp3_rc_smoke.sh` (smoke RC MP3)
+- `tools/qa/mp3_rc_runbook.md` (runbook RC MP3)
 
 ## 0) Tooling STORY V2 (hors carte)
 
@@ -39,6 +41,7 @@ Runbook live semi-automatique disponible:
    - `make story-gen`
 3. Verifier idempotence + build matrix:
    - `make qa-story-v2`
+   - `pio run -e esp32_release`
 4. Attendu:
    - aucun diff apres generation repetee
    - hash spec visible dans `src/story/generated/*.h` et `src/story/generated/*.cpp`
@@ -303,9 +306,24 @@ Rollback (si anomalie en live):
    - `state=DONE`
    - `tracks>0` si des fichiers supportes sont presents
 5. Envoyer `MP3_SCAN_PROGRESS`:
-   - verifier `depth/stack/folders/files/tracks`
+   - verifier `state/pending/reason/depth/stack/folders/files/tracks/ticks/budget`
 6. Envoyer `MP3_BACKEND_STATUS`:
    - verifier compteurs `attempts/fail/retries/fallback`
+
+## 7b) UI MP3 NOW/BROWSE/QUEUE/SET
+
+1. Envoyer `MP3_UI_STATUS`:
+   - verifier `page`, `cursor`, `offset`, `browse`, `queue_off`, `set_idx`
+2. Envoyer successivement:
+   - `MP3_UI PAGE NOW`
+   - `MP3_UI PAGE BROWSE`
+   - `MP3_UI PAGE QUEUE`
+   - `MP3_UI PAGE SET`
+3. Envoyer `MP3_QUEUE_PREVIEW 5` et verifier la cohérence avec `queue_off`.
+4. En mode MP3, verifier les touches:
+   - `K6` change de page
+   - `K2/K3` naviguent en BROWSE/QUEUE/SET
+   - `K1` applique l'action settings en page `SET` (`REPEAT`, `BACKEND`, `SCAN`)
 
 ## 8) Diagnostics runtime/screen (serie)
 

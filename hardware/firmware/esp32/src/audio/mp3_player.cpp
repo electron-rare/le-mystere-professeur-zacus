@@ -705,7 +705,13 @@ void Mp3Player::updateScan(uint32_t nowMs) {
 
     if (isDir) {
       if (scanCtx_.currentDepth < kScanMaxDepth) {
-        pushScanDir(path.c_str(), static_cast<uint8_t>(scanCtx_.currentDepth + 1U));
+        if (!pushScanDir(path.c_str(), static_cast<uint8_t>(scanCtx_.currentDepth + 1U))) {
+          Serial.printf("[MP3] Catalog scan queue overflow at '%s' (max=%u).\n",
+                        path.c_str(),
+                        static_cast<unsigned int>(kScanDirStackMax));
+          finalizeScan(nowMs, false, false);
+          return;
+        }
       }
       continue;
     }

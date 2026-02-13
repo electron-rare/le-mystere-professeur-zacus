@@ -9,6 +9,7 @@ Fichiers :
 - `plan-stations-et-mise-en-place.md`
 - `distribution-des-roles.md`
 - `guide-anti-chaos.md`
+- `generer-un-scenario.md`
 
 Bonus :
 - `stations/` (4–8 stations possibles, modulaires)

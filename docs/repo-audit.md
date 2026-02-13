@@ -8,7 +8,7 @@ Périmètre: **contenu documentaire + structure fichiers**, sans modification fi
 - Le dépôt est globalement bien structuré en 3 piliers: `kit-maitre-du-jeu/`, `printables/`, `hardware/`.
 - La zone la plus mature côté exécution est le firmware ESP32/ESP8266 (documenté et outillé).
 - Le principal point de cohérence identifié concernait les chemins printables documentés mais absents.
-- Aucune image versionnée (`png/jpg/svg/webp/gif`) n'a été trouvée à ce stade.
+- Les images PNG printables sont désormais centralisées sous `printables/export/png/`.
 
 ## Couverture de revue
 
@@ -41,11 +41,11 @@ Commande utilisée:
 - `rg --files | rg -i '\\.(png|jpe?g|gif|webp|svg|bmp)$'`
 
 Résultat:
-- Aucun fichier image détecté dans les fichiers versionnés.
+- Des previews PNG sont bien versionnées, avec un classement thématique dans `printables/export/png/`.
 
 Conséquence:
-- Pas d'audit visuel possible sur des assets exportés.
-- Recommandé: ajouter des previews PNG sous `printables/export/png/` pour revue PR.
+- La revue visuelle des imprimables est possible directement depuis le dépôt.
+- Recommandé: maintenir ce classement à chaque nouvel export.
 
 ## Corrections de cohérence appliquées
 
@@ -58,6 +58,7 @@ Conséquence:
    - `printables/invitations/export/pdf/`
    - `printables/invitations/export/png/`
 3. Ajout de README ciblés dans les nouveaux dossiers printables.
+4. Regroupement des PNG du dossier `printables/` vers `printables/export/png/` avec sous-dossiers (`general`, `fiche-enquete`, `personnages`, `zones`).
 
 ## Recommandations immédiates (hors firmware)
 

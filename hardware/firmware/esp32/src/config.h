@@ -59,6 +59,7 @@ constexpr uint16_t kBootProtocolPromptPeriodMs = 3000;
 constexpr uint16_t kBootRadioScanChunkMs = 18;
 constexpr uint32_t kStoryEtape2DelayMs = 15UL * 60UL * 1000UL;
 constexpr uint32_t kStoryEtape2TestDelayMs = 5000U;
+constexpr bool kStoryV2EnabledDefault = false;
 constexpr bool kEnableInternalLittleFs = true;
 constexpr bool kInternalLittleFsFormatOnFail = false;
 constexpr bool kPreferLittleFsBootFx = true;

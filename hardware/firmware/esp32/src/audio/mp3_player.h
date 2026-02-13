@@ -7,6 +7,7 @@
 #include "mp3_fx_overlay_output.h"
 #include "player/audio_tools_backend.h"
 #include "player/player_backend.h"
+#include "../services/storage/catalog_scan_service.h"
 
 class AudioFileSourceFS;
 class AudioGenerator;
@@ -41,7 +42,10 @@ class Mp3Player {
   void nextTrack();
   void previousTrack();
   void cycleRepeatMode();
-  void requestStorageRefresh();
+  void requestStorageRefresh(bool forceRebuild = false);
+  void requestCatalogScan(bool forceRebuild);
+  bool cancelCatalogScan();
+  const char* scanStateLabel() const;
   void setGain(float gain);
   float gain() const;
   uint8_t volumePercent() const;
@@ -93,11 +97,17 @@ class Mp3Player {
 
  private:
   static constexpr uint16_t kStateSaveDebounceMs = 1200;
+  static constexpr uint8_t kScanDirStackMax = 24;
 
   bool mountStorage(uint32_t nowMs);
   void unmountStorage(uint32_t nowMs);
   void refreshStorage(uint32_t nowMs);
-  void scanTracks();
+  void beginScanIfRequested(uint32_t nowMs);
+  void updateScan(uint32_t nowMs);
+  void finalizeScan(uint32_t nowMs, bool success, bool loadedFromIndex);
+  bool pushScanDir(const char* path, uint8_t depth);
+  bool popScanDir(String* outPath, uint8_t* outDepth);
+  void clearScanContext();
   void updateDeferredStateSave(uint32_t nowMs);
   bool startLegacyTrack();
   bool startAudioToolsTrack();
@@ -139,6 +149,16 @@ class Mp3Player {
   bool scanBusy_ = false;
   CatalogStats catalogStats_;
   TrackCatalog catalog_;
+  CatalogScanService scanService_;
+  struct ScanContext {
+    bool active = false;
+    bool limitReached = false;
+    uint8_t stackSize = 0U;
+    uint8_t currentDepth = 0U;
+    char stackPath[kScanDirStackMax][120] = {};
+    uint8_t stackDepth[kScanDirStackMax] = {};
+    fs::File currentDir;
+  } scanCtx_;
   AudioCodec activeCodec_ = AudioCodec::kUnknown;
   bool stateDirty_ = false;
   uint32_t nextStateSaveMs_ = 0;

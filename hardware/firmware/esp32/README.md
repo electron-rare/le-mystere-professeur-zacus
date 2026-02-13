@@ -29,7 +29,8 @@ Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
 ## Fichiers principaux
 
 - Entree minimale Arduino: `src/main.cpp`
-- Orchestrateur applicatif: `src/app.h`, `src/app.cpp`
+- Entree App minimale: `src/app.h`, `src/app.cpp`
+- Orchestrateur applicatif: `src/app/app_orchestrator.h`, `src/app/app_orchestrator.cpp`
 - Ordonnanceur des briques actives/inactives: `src/runtime/app_scheduler.h`, `src/runtime/app_scheduler.cpp`
 - Etat runtime partage (objets + etats): `src/runtime/runtime_state.h`, `src/runtime/runtime_state.cpp`
 - Compatibilite includes historiques: `src/app_state.h`
@@ -40,7 +41,19 @@ Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
 - Touches analogiques: `src/input/keypad_analog.h`, `src/input/keypad_analog.cpp`
 - UI LED: `src/ui/led_controller.h`, `src/ui/led_controller.cpp`
 - Lien ecran ESP8266: `src/screen/screen_link.h`, `src/screen/screen_link.cpp`, `src/screen/screen_frame.h`
-- Moteur de scenario STORY: `src/story/story_engine.h`, `src/story/story_engine.cpp`
+- Sync ecran (seq + envoi trames): `src/services/screen/screen_sync_service.h`, `src/services/screen/screen_sync_service.cpp`
+- Runtime boot: `src/controllers/boot/boot_protocol_runtime.h`, `src/controllers/boot/boot_protocol_runtime.cpp`
+- Runtime story legacy: `src/controllers/story/story_controller.h`, `src/controllers/story/story_controller.cpp`
+- Runtime story V2: `src/controllers/story/story_controller_v2.h`, `src/controllers/story/story_controller_v2.cpp`
+- Moteur STORY legacy: `src/story/story_engine.h`, `src/story/story_engine.cpp`
+- Moteur STORY V2: `src/story/core/story_engine_v2.h`, `src/story/core/story_engine_v2.cpp`
+- Mini apps STORY V2: `src/story/apps/*`
+- Scenarios/ressources V2: `src/story/scenarios/*`, `src/story/resources/*`, `src/story/core/scenario_def.h`
+- Code STORY genere: `src/story/generated/*`
+- Specs STORY auteur: `story_specs/schema/*`, `story_specs/templates/*`, `story_specs/scenarios/*`
+- Generateur STORY: `tools/story_gen/story_gen.py`
+- Guide scenario STORY: `src/story/README.md`
+- Service scan catalogue SD non bloquant: `src/services/storage/catalog_scan_service.h`, `src/services/storage/catalog_scan_service.cpp`
 - Memo board A252: `README_A252.md`
 - Cablage: `WIRING.md`
 - Validation terrain: `TESTING.md`
@@ -119,15 +132,35 @@ Commandes scenario (moniteur ESP32):
 - `STORY_TEST_ON` / `STORY_TEST_OFF`
 - `STORY_TEST_DELAY <ms>` (borne 100..300000)
 - `STORY_FORCE_ETAPE2`
+- `STORY_V2_STATUS`
+- `STORY_V2_LIST`
+- `STORY_V2_VALIDATE`
+- `STORY_V2_HEALTH`
+- `STORY_V2_ENABLE [STATUS|ON|OFF]`
+- `STORY_V2_TRACE [ON|OFF|STATUS]`
+- `STORY_V2_EVENT <name>`
+- `STORY_V2_STEP <id>`
+- `STORY_V2_SCENARIO <id>`
 
 Notes:
 
 - Le mode test STORY est pilote uniquement par commandes serie (pas de raccourci clavier dedie).
 - `STORY_ARM` lance maintenant le scenario complet: armement + tentative de lecture `WIN`.
 - `STORY_STATUS` expose un `stage` explicite: `WAIT_UNLOCK`, `WIN_PENDING`, `WAIT_ETAPE2`, `ETAPE2_DONE`.
+- Le moteur STORY V2 est protege par le flag `kStoryV2EnabledDefault` (default `false`).
+- Si le flag V2 est OFF, `STORY_V2_EVENT/STEP/SCENARIO/VALIDATE/HEALTH` repondent `OUT_OF_CONTEXT`.
 - Les delais par defaut sont configures dans `src/config.h`:
   - `kStoryEtape2DelayMs` (production, defaut 15 min)
   - `kStoryEtape2TestDelayMs` (test rapide)
+
+Workflow auteur STORY V2:
+
+- `make story-validate` (strict)
+- `make story-gen` (strict + `spec_hash`)
+- `make qa-story-v2`
+- `pio run -e esp32dev`
+
+Un nouveau scenario est ajoute via `story_specs/scenarios/*.yaml`, puis generation C++ dans `src/story/generated/*`.
 
 ### Mode U_LOCK (au boot, detection SD bloquee)
 
@@ -227,12 +260,20 @@ Astuce detection ports:
 Le lecteur:
 
 - detecte/monte la SD automatiquement
-- rescane les pistes supportees en racine: `.mp3`, `.wav`, `.aac`, `.flac`, `.opus`, `.ogg`
+- indexe les pistes supportees de facon recursive (profondeur max 4): `.mp3`, `.wav`, `.aac`, `.flac`, `.opus`, `.ogg`
+- execute le scan en mode non bloquant (budget runtime par tick) pour garder clavier/ecran/serie reactifs
 - force un rescan immediat sur `K5` (mode SIGNAL)
 - gere une playlist triee
 - enchaine automatiquement les pistes
 - supporte repeat `ALL/ONE`
 - expose piste courante + volume vers l'ecran ESP8266
+
+Commandes MP3 utiles:
+
+- `MP3_SCAN STATUS` : etat scan (`IDLE/REQUESTED/RUNNING/DONE/FAILED/CANCELED`)
+- `MP3_SCAN START` : scan incremental (index prioritaire)
+- `MP3_SCAN REBUILD` : rebuild force sans index
+- `MP3_SCAN CANCEL` : annule un scan en cours
 
 Sons internes:
 
@@ -272,6 +313,7 @@ Reglage live (sans reflash):
 - `KEY_TEST_STOP` : arrete l'auto-test
 - `BOOT_FS_INFO` / `BOOT_FS_LIST` / `BOOT_FS_TEST` : debug LittleFS et test lecture FX boot
 - `STORY_STATUS` / `STORY_TEST_ON` / `STORY_TEST_OFF` / `STORY_TEST_DELAY` / `STORY_ARM` / `STORY_FORCE_ETAPE2` : pilotage scenario STORY
+- `STORY_V2_ENABLE` / `STORY_V2_TRACE` / `STORY_V2_STATUS` / `STORY_V2_LIST` / `STORY_V2_VALIDATE` / `STORY_V2_HEALTH` / `STORY_V2_EVENT` / `STORY_V2_STEP` / `STORY_V2_SCENARIO` : debug/migration STORY V2
 - `CODEC_STATUS` / `CODEC_DUMP` : debug codec I2C ES8388
 - `CODEC_RD reg` / `CODEC_WR reg val` : lecture/ecriture registre codec
 - `CODEC_VOL pct` / `CODEC_VOL_RAW raw [out2]` : reglage volume sortie codec

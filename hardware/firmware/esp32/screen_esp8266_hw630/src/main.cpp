@@ -3,6 +3,7 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 
@@ -105,7 +106,10 @@ bool g_hasValidState = false;
 bool g_linkWasAlive = false;
 uint32_t g_linkLossCount = 0;
 uint32_t g_parseErrorCount = 0;
+uint32_t g_crcErrorCount = 0;
 uint32_t g_rxOverflowCount = 0;
+uint32_t g_seqGapCount = 0;
+uint32_t g_seqRollbackCount = 0;
 char g_lineBuffer[220];
 uint8_t g_lineLen = 0;
 uint8_t g_oledSdaPin = kInvalidPin;
@@ -983,6 +987,21 @@ bool initDisplayOnPins(uint8_t sda, uint8_t scl) {
   return false;
 }
 
+uint8_t crc8(const uint8_t* data, size_t len) {
+  uint8_t crc = 0x00U;
+  for (size_t i = 0; i < len; ++i) {
+    crc ^= data[i];
+    for (uint8_t bit = 0U; bit < 8U; ++bit) {
+      if ((crc & 0x80U) != 0U) {
+        crc = static_cast<uint8_t>((crc << 1U) ^ 0x07U);
+      } else {
+        crc <<= 1U;
+      }
+    }
+  }
+  return crc;
+}
+
 bool parseFrame(const char* frame, TelemetryState* out) {
   if (strncmp(frame, "STAT,", 5) != 0) {
     return false;
@@ -1014,9 +1033,10 @@ bool parseFrame(const char* frame, TelemetryState* out) {
   unsigned int backendMode = 0;
   unsigned int scanBusy = 0;
   unsigned int errorCode = 0;
+  unsigned int frameCrc = 0;
 
   const int parsed = sscanf(frame,
-                            "STAT,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u,%u,%u,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u",
+                            "STAT,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u,%u,%u,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%x",
                             &la,
                             &mp3,
                             &sd,
@@ -1042,9 +1062,23 @@ bool parseFrame(const char* frame, TelemetryState* out) {
                             &fxActive,
                             &backendMode,
                             &scanBusy,
-                            &errorCode);
+                            &errorCode,
+                            &frameCrc);
   if (parsed < 19) {
     return false;
+  }
+  if (parsed >= 27) {
+    const char* lastComma = strrchr(frame, ',');
+    if (lastComma == nullptr) {
+      return false;
+    }
+    const size_t payloadLen = static_cast<size_t>(lastComma - frame);
+    const uint8_t computed = crc8(reinterpret_cast<const uint8_t*>(frame), payloadLen);
+    const uint8_t expected = static_cast<uint8_t>(frameCrc & 0xFFU);
+    if (computed != expected) {
+      ++g_crcErrorCount;
+      return false;
+    }
   }
 
   out->laDetected = (la != 0U);
@@ -1157,6 +1191,13 @@ void handleIncoming() {
         } else if (g_state.appStage == kAppStageUSonFunctional &&
                    parsed.appStage != kAppStageUSonFunctional) {
           g_unlockSequenceStartMs = 0;
+        }
+        if (g_hasValidState) {
+          if (parsed.frameSeq < g_state.frameSeq) {
+            ++g_seqRollbackCount;
+          } else if (parsed.frameSeq > (g_state.frameSeq + 1U)) {
+            g_seqGapCount += (parsed.frameSeq - g_state.frameSeq - 1U);
+          }
         }
         pushScopeSample(parsed.micLevelPercent);
         g_state = parsed;
@@ -1287,7 +1328,7 @@ void loop() {
   if ((nowMs - g_lastDiagMs) >= kDiagPeriodMs) {
     const uint32_t lastTickMs = latestLinkTickMs();
     const uint32_t ageMs = safeAgeMs(nowMs, lastTickMs);
-    Serial.printf("[SCREEN] oled=%s link=%s phys=%s valid=%u age_ms=%lu losses=%lu parse_err=%lu rx_ovf=%lu sda=%u scl=%u addr=0x%02X\n",
+    Serial.printf("[SCREEN] oled=%s link=%s phys=%s valid=%u age_ms=%lu losses=%lu parse_err=%lu crc_err=%lu rx_ovf=%lu seq_gap=%lu seq_rb=%lu sda=%u scl=%u addr=0x%02X\n",
                   g_displayReady ? "OK" : "KO",
                   g_linkEnabled ? (linkAlive ? "OK" : "DOWN") : "OFF",
                   g_linkEnabled ? (physicalAlive ? "OK" : "DOWN") : "OFF",
@@ -1295,7 +1336,10 @@ void loop() {
                   static_cast<unsigned long>(ageMs),
                   static_cast<unsigned long>(g_linkLossCount),
                   static_cast<unsigned long>(g_parseErrorCount),
+                  static_cast<unsigned long>(g_crcErrorCount),
                   static_cast<unsigned long>(g_rxOverflowCount),
+                  static_cast<unsigned long>(g_seqGapCount),
+                  static_cast<unsigned long>(g_seqRollbackCount),
                   static_cast<unsigned int>(g_oledSdaPin),
                   static_cast<unsigned int>(g_oledSclPin),
                   static_cast<unsigned int>(g_oledAddress));

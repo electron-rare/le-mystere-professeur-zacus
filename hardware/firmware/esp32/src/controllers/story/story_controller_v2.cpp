@@ -71,6 +71,8 @@ bool StoryControllerV2::setScenario(const char* scenarioId, uint32_t nowMs, cons
     appContext.startRandomTokenBase = hooks_.startRandomTokenBase;
     appContext.startFallbackBaseFx = hooks_.startFallbackBaseFx;
     appContext.applyAction = hooks_.applyAction;
+    appContext.laRuntime = hooks_.laRuntime;
+    appContext.onUnlockRuntimeApplied = hooks_.onUnlockRuntimeApplied;
     if (!appHost_.begin(appContext)) {
       Serial.printf("[STORY_V2] app host begin failed (%s)\n", source);
       return false;

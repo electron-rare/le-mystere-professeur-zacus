@@ -2,6 +2,20 @@
 
 Ce firmware transforme une carte ESP8266 (HW-630) en ecran de statut pour l'ESP32.
 
+## Structure logicielle (RC2)
+
+Le code ecran est decoupe en modules pour faciliter l'evolution par app:
+
+- `src/core/telemetry_state.h`: modele de telemetrie (`STAT`)
+- `src/core/stat_parser.*`: parser `STAT` + validation CRC
+- `src/core/link_monitor.*`: etat lien serie + watchdog/recovery
+- `src/core/render_scheduler.*`: selection non bloquante de l'app ecran
+- `src/apps/screen_app.h`: contrat `matches()/render()`
+- `src/apps/boot_app.*`, `src/apps/link_app.*`, `src/apps/mp3_app.*`, `src/apps/ulock_app.*`
+- `src/main.cpp`: orchestration setup/loop + rendu concret
+
+Ce decoupage garde la compatibilite protocole tout en permettant d'ajouter de nouvelles apps ecran sans reouvrir un monolithe unique.
+
 ## Affichage
 
 - `MODE U_LOCK` initial: module casse avec effet glitch (sans texte)

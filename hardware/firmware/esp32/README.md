@@ -54,12 +54,14 @@ Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
 - Runtime boot: `src/controllers/boot/boot_protocol_runtime.h`, `src/controllers/boot/boot_protocol_runtime.cpp`
 - Runtime story legacy: `src/controllers/story/story_controller.h`, `src/controllers/story/story_controller.cpp`
 - Runtime story V2: `src/controllers/story/story_controller_v2.h`, `src/controllers/story/story_controller_v2.cpp`
+- Service runtime LA (hold/unlock non bloquant): `src/services/la/la_detector_runtime_service.h`, `src/services/la/la_detector_runtime_service.cpp`
 - Moteur STORY legacy: `src/story/story_engine.h`, `src/story/story_engine.cpp`
 - Moteur STORY V2: `src/story/core/story_engine_v2.h`, `src/story/core/story_engine_v2.cpp`
 - Mini apps STORY V2: `src/story/apps/*`
 - Scenarios/ressources V2: `src/story/scenarios/*`, `src/story/resources/*`, `src/story/core/scenario_def.h`
 - Code STORY genere: `src/story/generated/*`
 - Specs STORY auteur: `story_specs/schema/*`, `story_specs/templates/*`, `story_specs/scenarios/*`
+- Prompts auteurs STORY: `story_specs/prompts/*`
 - Generateur STORY: `tools/story_gen/story_gen.py`
 - Guide scenario STORY: `src/story/README.md`
 - Guide rapide auteur scenario V2: `GENERER_UN_SCENARIO_STORY_V2.md`
@@ -179,6 +181,17 @@ Workflow auteur STORY V2:
 - `pio run -e esp32dev`
 
 Un nouveau scenario est ajoute via `story_specs/scenarios/*.yaml`, puis generation C++ dans `src/story/generated/*`.
+
+Scenarios compilés actuels (selection runtime):
+
+- `DEFAULT`
+- `EXAMPLE_UNLOCK_EXPRESS`
+- `EXEMPLE_UNLOCK_EXPRESS_DONE`
+- `SPECTRE_RADIO_LAB` (optionnel RC2)
+
+Selection serie:
+
+- `STORY_V2_SCENARIO SPECTRE_RADIO_LAB`
 
 ### Mode U_LOCK (au boot, detection SD bloquee)
 

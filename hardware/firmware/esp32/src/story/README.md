@@ -18,6 +18,7 @@ Le flux par defaut migre est:
 - schema logique: `story_specs/schema/story_spec_v1.yaml`
 - template auteur: `story_specs/templates/scenario.template.yaml`
 - scenario migre PR1: `story_specs/scenarios/default_unlock_win_etape2.yaml`
+- scenario additionnel RC2: `story_specs/scenarios/spectre_radio_lab.yaml`
 
 Le runtime V2 charge uniquement le code genere:
 
@@ -25,6 +26,11 @@ Le runtime V2 charge uniquement le code genere:
 - `src/story/generated/scenarios_gen.cpp`
 - `src/story/generated/apps_gen.h`
 - `src/story/generated/apps_gen.cpp`
+
+Le generateur expose aussi la config app LA:
+
+- `LaDetectorAppConfigDef`
+- `generatedLaDetectorConfigByBindingId(const char* id)`
 
 ## Mini Apps FSM
 
@@ -44,6 +50,14 @@ Apps PR1:
 - `AudioPackApp`
 - `ScreenSceneApp`
 - `Mp3GateApp`
+
+Evolution RC2:
+
+- `LaDetectorApp` devient full-owned pour l'unlock V2 (hold + emission event).
+- config par binding YAML via `app_bindings[].config` (LA uniquement):
+  - `hold_ms`
+  - `unlock_event`
+  - `require_listening`
 
 Host:
 
@@ -66,6 +80,7 @@ Validation:
 
 - mode strict (`--strict`) active par defaut via `Makefile`
 - verifie structure, IDs, transitions, bindings app
+- verifie la config `LA_DETECTOR` (`hold_ms` / `unlock_event` / `require_listening`)
 - rejette aussi les champs inconnus
 - retour erreurs stable `file + field + reason + code`
 
@@ -107,10 +122,11 @@ Compat legacy conservee pendant PR1 via feature flag:
 
 1. copier `story_specs/templates/scenario.template.yaml`
 2. renseigner steps/transitions/apps
-3. `make story-validate`
-4. `make story-gen`
-5. `make qa-story-v2`
-6. `pio run -e esp32dev`
+3. optionnel: creer le prompt auteur associe dans `story_specs/prompts/*.prompt.md`
+4. `make story-validate`
+5. `make story-gen`
+6. `make qa-story-v2`
+7. `pio run -e esp32dev`
 
 Aucune modification du moteur V2 n'est requise pour un nouveau flux tant que le scenario reste dans le contrat StorySpec V1.
 

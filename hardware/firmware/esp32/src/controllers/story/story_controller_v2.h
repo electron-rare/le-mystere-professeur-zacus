@@ -4,6 +4,7 @@
 
 #include "../../audio/effects/audio_effect_id.h"
 #include "../../services/audio/audio_service.h"
+#include "../../services/la/la_detector_runtime_service.h"
 #include "../../story/apps/story_app_host.h"
 #include "../../story/core/story_engine_v2.h"
 #include "../../story/resources/action_registry.h"
@@ -52,6 +53,8 @@ class StoryControllerV2 {
                                 float gain,
                                 const char* source) = nullptr;
     void (*applyAction)(const StoryActionDef& action, uint32_t nowMs, const char* source) = nullptr;
+    LaDetectorRuntimeService* laRuntime = nullptr;
+    void (*onUnlockRuntimeApplied)(uint32_t nowMs, const char* source) = nullptr;
   };
 
   struct Options {

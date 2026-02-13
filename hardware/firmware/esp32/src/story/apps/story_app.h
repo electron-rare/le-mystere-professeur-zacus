@@ -4,6 +4,7 @@
 
 #include "../../audio/effects/audio_effect_id.h"
 #include "../../services/audio/audio_service.h"
+#include "../../services/la/la_detector_runtime_service.h"
 #include "../core/scenario_def.h"
 #include "../resources/action_registry.h"
 
@@ -18,6 +19,8 @@ struct StoryAppContext {
                               float gain,
                               const char* source) = nullptr;
   void (*applyAction)(const StoryActionDef& action, uint32_t nowMs, const char* source) = nullptr;
+  LaDetectorRuntimeService* laRuntime = nullptr;
+  void (*onUnlockRuntimeApplied)(uint32_t nowMs, const char* source) = nullptr;
 };
 
 struct StoryStepContext {

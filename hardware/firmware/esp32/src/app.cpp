@@ -17,6 +17,7 @@
 #include <SD_MMC.h>
 
 #include "app.h"
+#include "audio/fm_radio_scan_fx.h"
 #include "runtime/app_scheduler.h"
 #include "runtime/runtime_state.h"
 
@@ -29,21 +30,15 @@ constexpr uint32_t kBootLoopScanMaxMs = 40000U;
 constexpr uint32_t kEtape2DelayAfterUnlockMs = 15UL * 60UL * 1000UL;
 
 struct BootRadioScanState {
-  AudioOutputI2S* output = nullptr;
-  bool active = false;
   bool restoreMicCapture = false;
-  uint32_t sampleRateHz = config::kBootI2sNoiseSampleRateHz;
-  float sweepPhase = 0.0f;
-  float tonePhase = 0.0f;
-  float noiseHistory = 0.0f;
-  float crackle = 0.0f;
-  uint32_t sweepCycle = 0;
-  uint32_t sweepPosInCycle = 0;
-  uint32_t sampleClock = 0;
   uint32_t lastLogMs = 0;
 };
 
 BootRadioScanState g_bootRadioScan;
+FmRadioScanFx g_bootRadioScanFx(config::kPinI2SBclk,
+                                config::kPinI2SLrc,
+                                config::kPinI2SDout,
+                                config::kI2sOutputPort);
 
 struct StoryTimelineState {
   bool unlockArmed = false;
@@ -346,23 +341,17 @@ void playBootI2sNoiseFx() {
 }
 
 void stopBootRadioScan(const char* source) {
-  if (!g_bootRadioScan.active && g_bootRadioScan.output == nullptr) {
+  if (!g_bootRadioScanFx.isActive()) {
     return;
   }
 
-  if (g_bootRadioScan.output != nullptr) {
-    g_bootRadioScan.output->flush();
-    g_bootRadioScan.output->stop();
-    delete g_bootRadioScan.output;
-    g_bootRadioScan.output = nullptr;
-  }
+  g_bootRadioScanFx.stop();
 
   if (g_bootRadioScan.restoreMicCapture && config::kUseI2SMicInput && g_mode == RuntimeMode::kSignal &&
       g_laDetectionEnabled) {
     g_laDetector.setCaptureEnabled(true);
   }
 
-  g_bootRadioScan.active = false;
   g_bootRadioScan.restoreMicCapture = false;
   g_bootRadioScan.lastLogMs = 0;
   Serial.printf("[AUDIO] %s radio scan stop.\n", source);
@@ -374,7 +363,6 @@ bool startBootRadioScan(const char* source) {
   const uint32_t sampleRate =
       (config::kBootI2sNoiseSampleRateHz > 0U) ? static_cast<uint32_t>(config::kBootI2sNoiseSampleRateHz)
                                                : 22050U;
-  g_bootRadioScan.sampleRateHz = sampleRate;
 
   g_bootRadioScan.restoreMicCapture =
       config::kUseI2SMicInput && g_mode == RuntimeMode::kSignal && g_laDetectionEnabled;
@@ -385,27 +373,9 @@ bool startBootRadioScan(const char* source) {
   setBootAudioPaEnabled(true, source);
   printBootAudioOutputInfo(source);
 
-  AudioOutputI2S* output =
-      new (std::nothrow) AudioOutputI2S(static_cast<int>(config::kI2sOutputPort), AudioOutputI2S::EXTERNAL_I2S);
-  if (output == nullptr) {
-    if (g_bootRadioScan.restoreMicCapture) {
-      g_laDetector.setCaptureEnabled(true);
-    }
-    g_bootRadioScan.restoreMicCapture = false;
-    Serial.printf("[AUDIO] %s radio scan alloc failed.\n", source);
-    return false;
-  }
-
-  output->SetPinout(static_cast<int>(config::kPinI2SBclk),
-                    static_cast<int>(config::kPinI2SLrc),
-                    static_cast<int>(config::kPinI2SDout));
-  output->SetOutputModeMono(true);
-  output->SetGain(config::kBootI2sNoiseGain);
-  output->SetRate(static_cast<int>(sampleRate));
-  output->SetBitsPerSample(16);
-  output->SetChannels(2);
-  if (!output->begin()) {
-    delete output;
+  g_bootRadioScanFx.setGain(config::kBootI2sNoiseGain);
+  g_bootRadioScanFx.setSampleRate(sampleRate);
+  if (!g_bootRadioScanFx.start()) {
     if (g_bootRadioScan.restoreMicCapture) {
       g_laDetector.setCaptureEnabled(true);
     }
@@ -414,18 +384,9 @@ bool startBootRadioScan(const char* source) {
     return false;
   }
 
-  g_bootRadioScan.output = output;
-  g_bootRadioScan.active = true;
-  g_bootRadioScan.sweepPhase = 0.0f;
-  g_bootRadioScan.tonePhase = 0.0f;
-  g_bootRadioScan.noiseHistory = 0.0f;
-  g_bootRadioScan.crackle = 0.0f;
-  g_bootRadioScan.sweepCycle = static_cast<uint32_t>(random(0L, 2L));
-  g_bootRadioScan.sweepPosInCycle = static_cast<uint32_t>(random(0L, static_cast<long>(sampleRate)));
-  g_bootRadioScan.sampleClock = 0;
   g_bootRadioScan.lastLogMs = millis();
 
-  Serial.printf("[AUDIO] %s radio scan start sr=%luHz chunk=%ums\n",
+  Serial.printf("[AUDIO] %s radio scan start (Mozzi+AudioTools) sr=%luHz chunk=%ums\n",
                 source,
                 static_cast<unsigned long>(sampleRate),
                 static_cast<unsigned int>(config::kBootRadioScanChunkMs));
@@ -433,109 +394,11 @@ bool startBootRadioScan(const char* source) {
 }
 
 void updateBootRadioScan(uint32_t nowMs) {
-  if (!g_bootRadioScan.active || g_bootRadioScan.output == nullptr) {
+  if (!g_bootRadioScanFx.isActive()) {
     return;
   }
 
-  const uint32_t sampleRate = g_bootRadioScan.sampleRateHz;
-  if (sampleRate == 0U) {
-    return;
-  }
-
-  uint32_t chunkSamples = (sampleRate * static_cast<uint32_t>(config::kBootRadioScanChunkMs)) / 1000UL;
-  if (chunkSamples < 96U) {
-    chunkSamples = 96U;
-  }
-
-  constexpr float kTwoPi = 6.28318530718f;
-  constexpr float kSweepStartHz = 120.0f;
-  constexpr float kSweepEndHz = 3600.0f;
-  constexpr float kStationBaseHz = 690.0f;
-  constexpr float kStationSpanHz = 210.0f;
-  const uint32_t sweepPeriodSamples = (sampleRate * 520UL) / 1000UL;
-  const uint32_t toneBurstPeriodSamples = (sampleRate / 19U) + 1U;
-  const uint32_t dropoutPeriodSamples = (sampleRate / 25U) + 1U;
-
-  for (uint32_t i = 0; i < chunkSamples; ++i) {
-    float sweepT =
-        (sweepPeriodSamples > 0U)
-            ? (static_cast<float>(g_bootRadioScan.sweepPosInCycle) / static_cast<float>(sweepPeriodSamples))
-            : 0.0f;
-    if ((g_bootRadioScan.sweepCycle & 1U) != 0U) {
-      sweepT = 1.0f - sweepT;
-    }
-    const bool stationWindow = (sweepT > 0.28f && sweepT < 0.42f) || (sweepT > 0.68f && sweepT < 0.82f);
-
-    const float sweepHz = stationWindow
-                              ? (kStationBaseHz + (kStationSpanHz * sinf(kTwoPi * (sweepT * 2.0f))))
-                              : (kSweepStartHz + (kSweepEndHz - kSweepStartHz) * sweepT);
-    g_bootRadioScan.sweepPhase += kTwoPi * (sweepHz / static_cast<float>(sampleRate));
-    if (g_bootRadioScan.sweepPhase >= kTwoPi) {
-      g_bootRadioScan.sweepPhase -= kTwoPi;
-    }
-
-    const float rawNoise = static_cast<float>(random(-32768L, 32767L)) / 32768.0f;
-    const float hiss = rawNoise - (g_bootRadioScan.noiseHistory * 0.92f);
-    g_bootRadioScan.noiseHistory = rawNoise;
-
-    if (random(0L, 1000L) < 8L) {
-      g_bootRadioScan.crackle = static_cast<float>(random(-32768L, 32767L)) / 16384.0f;
-    }
-    const float crackleSample = g_bootRadioScan.crackle;
-    g_bootRadioScan.crackle *= 0.82f;
-
-    const float toneLfo = sinf(kTwoPi * 5.8f * (static_cast<float>(g_bootRadioScan.sampleClock) / sampleRate));
-    const float toneHz = 900.0f + (560.0f * toneLfo);
-    g_bootRadioScan.tonePhase += kTwoPi * (toneHz / static_cast<float>(sampleRate));
-    if (g_bootRadioScan.tonePhase >= kTwoPi) {
-      g_bootRadioScan.tonePhase -= kTwoPi;
-    }
-
-    const bool toneBurstOn = ((g_bootRadioScan.sampleClock / toneBurstPeriodSamples) % 11U) < 2U;
-    const bool dropout = ((g_bootRadioScan.sampleClock / dropoutPeriodSamples) % 17U) == 8U;
-    const float am = 0.40f +
-                     0.60f *
-                         sinf(kTwoPi * 9.5f * (static_cast<float>(g_bootRadioScan.sampleClock) / sampleRate));
-
-    float sampleF = 0.0f;
-    sampleF += stationWindow ? 0.32f * sinf(g_bootRadioScan.sweepPhase) : 0.55f * sinf(g_bootRadioScan.sweepPhase);
-    sampleF += stationWindow ? 0.24f * hiss : 0.62f * hiss;
-    sampleF += 0.22f * crackleSample;
-    if (toneBurstOn) {
-      sampleF += 0.24f * sinf(g_bootRadioScan.tonePhase);
-    }
-    if (stationWindow) {
-      sampleF += 0.18f * sinf(g_bootRadioScan.tonePhase * 0.47f);
-    }
-    sampleF *= am;
-    if (dropout) {
-      sampleF *= 0.18f;
-    }
-
-    if (sampleF > 1.0f) {
-      sampleF = 1.0f;
-    } else if (sampleF < -1.0f) {
-      sampleF = -1.0f;
-    }
-
-    const int16_t sample = static_cast<int16_t>(sampleF * 23000.0f);
-    int16_t stereo[2] = {sample, sample};
-    uint8_t guard = 0;
-    while (!g_bootRadioScan.output->ConsumeSample(stereo)) {
-      delayMicroseconds(35);
-      ++guard;
-      if (guard >= 64U) {
-        break;
-      }
-    }
-
-    ++g_bootRadioScan.sampleClock;
-    ++g_bootRadioScan.sweepPosInCycle;
-    if (g_bootRadioScan.sweepPosInCycle >= sweepPeriodSamples && sweepPeriodSamples > 0U) {
-      g_bootRadioScan.sweepPosInCycle = 0;
-      ++g_bootRadioScan.sweepCycle;
-    }
-  }
+  g_bootRadioScanFx.update(nowMs, config::kBootRadioScanChunkMs);
 
   if (static_cast<int32_t>(nowMs - g_bootRadioScan.lastLogMs) >= 0) {
     Serial.println("[AUDIO] radio scan active (attente touche).");
@@ -1316,7 +1179,7 @@ void printBootAudioProtocolStatus(uint32_t nowMs, const char* source) {
   Serial.printf("[BOOT_PROTO] STATUS via=%s waiting_key=1 loops=%u scan=%u left=%lus mode=%s\n",
                 source,
                 static_cast<unsigned int>(g_bootAudioProtocol.replayCount),
-                g_bootRadioScan.active ? 1U : 0U,
+                g_bootRadioScanFx.isActive() ? 1U : 0U,
                 static_cast<unsigned long>(leftMs / 1000UL),
                 runtimeModeLabel());
 }
@@ -1612,7 +1475,7 @@ void updateBootAudioValidationProtocol(uint32_t nowMs) {
     return;
   }
 
-  if (!g_bootRadioScan.active) {
+  if (!g_bootRadioScanFx.isActive()) {
     if (g_bootAudioProtocol.deadlineMs == 0U ||
         static_cast<int32_t>(nowMs - g_bootAudioProtocol.deadlineMs) >= 0) {
       startBootAudioLoopCycle(nowMs, "boot_proto_recover");

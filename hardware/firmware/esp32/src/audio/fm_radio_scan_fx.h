@@ -2,12 +2,15 @@
 
 #include <Arduino.h>
 
-class AudioOutputI2S;
+namespace audio_tools {
+class I2SStream;
+}
+struct FmRadioScanSynth;
 
 class FmRadioScanFx {
  public:
   FmRadioScanFx(uint8_t bclkPin, uint8_t wsPin, uint8_t doutPin, uint8_t i2sPort);
-  ~FmRadioScanFx();
+  ~FmRadioScanFx() = default;
 
   void setGain(float gain);
   void setSampleRate(uint32_t sampleRateHz);
@@ -20,21 +23,25 @@ class FmRadioScanFx {
   bool playBlocking(uint32_t durationMs, uint16_t chunkMs = 22U);
 
  private:
+  bool writeFrameBuffer(const int16_t* interleavedStereo, size_t frameCount);
   void resetSynthesisState();
   int16_t nextSample();
+
+  static constexpr uint16_t kSynthRateHz = 22050U;
 
   uint8_t bclkPin_;
   uint8_t wsPin_;
   uint8_t doutPin_;
   uint8_t i2sPort_;
 
-  AudioOutputI2S* output_ = nullptr;
+  audio_tools::I2SStream* i2sStream_ = nullptr;
+  FmRadioScanSynth* synth_ = nullptr;
   bool active_ = false;
   float gain_ = 0.18f;
   uint32_t sampleRateHz_ = 22050U;
 
-  float sweepPhase_ = 0.0f;
-  float beatPhase_ = 0.0f;
+  float sweepLfoPhase_ = 0.0f;
+  float driftLfoPhase_ = 0.0f;
   float noiseLp_ = 0.0f;
   float crackle_ = 0.0f;
   float stationBlend_ = 0.0f;

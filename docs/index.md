@@ -5,11 +5,14 @@
 - Scénario canon : `game/scenarios/zacus_v1.yaml`
 - Printables & workflow : `printables/` + `printables/WORKFLOW.md`
 - Audio canon : `audio/manifests/zacus_v1_audio.yaml` + `game/prompts/audio/`
+- Brief scénarios : `docs/_generated/SCENARIO_BRIEF.md`
 - Maintenance : `docs/maintenance-repo.md`, `docs/repo-audit.md`, `docs/repo-status.md`
 
 ## Guides à consulter
 - Quickstart (déploiement terrain) : `docs/QUICKSTART.md`
 - Styleguide (ton & structure) : `docs/STYLEGUIDE.md`
+- Workflows (validate/export) : `docs/WORKFLOWS.md`
+- Glossaire des identifiants : `docs/GLOSSARY.md`
 - Contribuer (workflow & licence) : `CONTRIBUTING.md`
 
 ## Astuce

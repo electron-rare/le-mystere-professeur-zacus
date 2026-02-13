@@ -1,0 +1,72 @@
+manifest_id: zacus_v1_printables
+version: 1
+scenario_id: zacus_v1
+items:
+  - id: invitation_a6_recto
+    category: invitation
+    format: a6
+    sides: recto
+    prompt: src/prompts/invitation_recto.md
+  - id: invitation_a6_verso
+    category: invitation
+    format: a6
+    sides: verso
+    prompt: src/prompts/invitation_verso.md
+  - id: carte_personnage_a6
+    category: personnage
+    format: a6
+    prompt: src/prompts/card_personnage.md
+  - id: carte_lieu_a6
+    category: lieu
+    format: a6
+    prompt: src/prompts/card_lieu.md
+  - id: carte_objet_a6
+    category: indice
+    format: a6
+    prompt: src/prompts/card_objet.md
+  - id: fiche_enquete_a4
+    category: fiche_enquete
+    format: a4
+    prompt: src/prompts/fiche_enquete.md
+  - id: badge_detective_a6
+    category: badge
+    format: a6
+    prompt: src/prompts/badge_detective.md
+  - id: regles_a4
+    category: regles
+    format: a4
+    prompt: src/prompts/regles.md
+  - id: hotline_a4
+    category: hotline
+    format: a4
+    prompt: src/prompts/hotline.md
+  - id: affiches_zone_a4_z1
+    category: zone
+    format: a4
+    variant: Z1
+    prompt: src/prompts/zone_affiche.md
+  - id: affiches_zone_a4_z2
+    category: zone
+    format: a4
+    variant: Z2
+    prompt: src/prompts/zone_affiche.md
+  - id: affiches_zone_a4_z3
+    category: zone
+    format: a4
+    variant: Z3
+    prompt: src/prompts/zone_affiche.md
+  - id: affiches_zone_a4_z4
+    category: zone
+    format: a4
+    variant: Z4
+    prompt: src/prompts/zone_affiche.md
+  - id: affiches_zone_a4_z5
+    category: zone
+    format: a4
+    variant: Z5
+    prompt: src/prompts/zone_affiche.md
+  - id: affiches_zone_a4_z6
+    category: zone
+    format: a4
+    variant: Z6
+    prompt: src/prompts/zone_affiche.md

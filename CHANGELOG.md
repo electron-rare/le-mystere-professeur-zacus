@@ -1,13 +1,11 @@
 # Changelog
 
 ## [Unreleased]
-- Kit MJ : script minute-par-minute, solution complète, checklist matériel, plan des stations, guide anti-chaos et distribution des rôles prêts à l’usage pour 6–14 enfants pendant 60–90 minutes.
-- Printables : structure `src/` + `export/{pdf,png}/` maintenue, prompts graphiques dans `src/prompts/`, workflow documenté dans `WORKFLOW.md`, et réorganisation des aperçus (`printables/export/png/{general,fiche-enquete,personnages,zones}`).
-- Game & audio : scénario canon `game/scenarios/zacus_v1.yaml` (canon, solution unique), manifestes audio `audio/manifests/zacus_v1_audio.yaml` et prompts narratifs (`game/prompts/audio/intro.md`, `incident.md`, `accusation.md`, `solution.md`).
-- Outils : scripts de validation `tools/scenario/validate_scenario.py` et `tools/audio/validate_manifest.py` pour sécuriser chaque nouvelle piste narrative ou audio.
-- Documentation & guides : `docs/QUICKSTART.md`, `docs/STYLEGUIDE.md`, `docs/index.md`, `docs/repo-status.md`, et `printables/WORKFLOW.md` donnent un chemin clair pour déployer le kit, rédiger les scénarios et maintenir la cohérence.
-- Licences : texte homogène CC BY-NC 4.0 pour les contenus créatifs et MIT pour les codes, avec les fichiers associés (`LICENSES/CC-BY-NC-4.0.txt`, `LICENSES/MIT.txt`), et `README.md` + `CONTRIBUTING.md` + `LICENSE.md` alignés sur cette répartition.
-- Références annexes : `include-humain-IA/` (et `include-humain-IA/version-finale/`) renommés pour la portabilité, et la section `docs/repo-status.md` mise à jour pour documenter ces changements.
+- Workflow : nouvelle exportation `tools/scenario/export_md.py` et briefs Markdown (kit + `docs/_generated/SCENARIO_BRIEF.md`) alignés sur `game/scenarios/zacus_v1.yaml`.
+- Printables : manifeste `printables/manifests/zacus_v1_printables.yaml`, prompts dédiés pour chaque asset et `tools/printables/validate_manifest.py` pour éviter les trous entre IDs et fichiers.
+- Documentation : AGENTS, WORKFLOWS, GLOSSARY, Quickstart, index et le Makefile rappellent que le YAML est la single source of truth et listent les commandes standard de validation/export.
+- Tooling : `tools/scenario/validate_scenario.py`, `tools/audio/validate_manifest.py`, `tools/scenario/export_md.py` et `tools/printables/validate_manifest.py` accompagnés par `Makefile` facilitent la maintenance.
+- Automation : workflow GitHub `.github/workflows/validate.yml` installe PyYAML puis lance les validations de scénario, audio et printables.
 
 ## [0.2.0] - 2026-02-12
 

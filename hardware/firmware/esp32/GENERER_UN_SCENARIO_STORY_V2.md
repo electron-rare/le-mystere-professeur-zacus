@@ -25,13 +25,14 @@ Crée un nouveau fichier dans `story_specs/scenarios/`, par exemple:
 Exemple prêt à l'emploi dans le repo:
 
 - `story_specs/scenarios/example_unlock_express.yaml`
+- `story_specs/scenarios/example_unlock_express_done.yaml`
 
 ## 2) Définir la structure minimale
 
 Dans le YAML, renseigne au minimum:
 
 - `id` (identifiant unique)
-- `version: 1`
+- `version` (utiliser la version supportée par le générateur; dans ce repo les exemples sont en `2`)
 - `initial_step`
 - `app_bindings`
 - `steps`

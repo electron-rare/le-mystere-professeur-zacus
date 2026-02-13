@@ -67,3 +67,7 @@ Voir `CONTRIBUTING.md`.
 Voir `CHANGELOG.md`.
 ## Mainteneur
 L’électron rare
+
+
+## Exemples transverses
+- Index exemples: `examples/README.md`

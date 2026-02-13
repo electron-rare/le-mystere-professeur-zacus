@@ -26,6 +26,26 @@ enum class RepeatMode : uint8_t {
   kOne = 1,
 };
 
+struct Mp3ScanProgress {
+  bool active = false;
+  bool limitReached = false;
+  uint8_t depth = 0U;
+  uint8_t stackSize = 0U;
+  uint16_t foldersScanned = 0U;
+  uint16_t filesScanned = 0U;
+  uint16_t tracksAccepted = 0U;
+};
+
+struct Mp3BackendRuntimeStats {
+  uint32_t startAttempts = 0U;
+  uint32_t startSuccess = 0U;
+  uint32_t startFailures = 0U;
+  uint32_t retriesScheduled = 0U;
+  uint32_t fallbackCount = 0U;
+  uint32_t legacyStarts = 0U;
+  uint32_t audioToolsStarts = 0U;
+};
+
 class Mp3Player {
  public:
   Mp3Player(uint8_t i2sBclk,
@@ -84,6 +104,8 @@ class Mp3Player {
 
   CatalogStats catalogStats() const;
   bool isScanBusy() const;
+  Mp3ScanProgress scanProgress() const;
+  Mp3BackendRuntimeStats backendStats() const;
   const TrackEntry* trackEntryByNumber(uint16_t oneBasedNumber) const;
   uint16_t listTracks(const char* prefix,
                       uint16_t offset,
@@ -147,6 +169,7 @@ class Mp3Player {
   RepeatMode repeatMode_ = RepeatMode::kAll;
   bool forceRescan_ = false;
   bool scanBusy_ = false;
+  Mp3ScanProgress scanProgress_;
   CatalogStats catalogStats_;
   TrackCatalog catalog_;
   CatalogScanService scanService_;
@@ -168,6 +191,7 @@ class Mp3Player {
   PlayerBackendId activeBackend_ = PlayerBackendId::kNone;
   bool fallbackUsed_ = false;
   char backendError_[24] = "OK";
+  Mp3BackendRuntimeStats backendStats_;
   AudioToolsBackend audioTools_;
 
   Mp3FxMode fxMode_ = Mp3FxMode::kDucking;

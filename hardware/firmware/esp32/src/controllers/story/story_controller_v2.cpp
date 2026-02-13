@@ -31,6 +31,20 @@ bool sameEventSignature(const StoryEvent& lhs, const StoryEvent& rhs) {
   return lhs.type == rhs.type && lhs.value == rhs.value && sameText(lhs.name, rhs.name);
 }
 
+const char* traceLevelLabelLocal(StoryControllerV2::TraceLevel level) {
+  switch (level) {
+    case StoryControllerV2::TraceLevel::kErr:
+      return "ERR";
+    case StoryControllerV2::TraceLevel::kInfo:
+      return "INFO";
+    case StoryControllerV2::TraceLevel::kDebug:
+      return "DEBUG";
+    case StoryControllerV2::TraceLevel::kOff:
+    default:
+      return "OFF";
+  }
+}
+
 }  // namespace
 
 StoryControllerV2::StoryControllerV2(AudioService& audio, const Hooks& hooks, const Options& options)
@@ -113,6 +127,10 @@ void StoryControllerV2::update(uint32_t nowMs) {
   }
 
   appHost_.update(nowMs, makeAppEventSink("app_update"));
+  const StorySnapshot beforeTick = engine_.snapshot();
+  if (beforeTick.queuedEvents > maxQueueDepth_) {
+    maxQueueDepth_ = beforeTick.queuedEvents;
+  }
 
   const char* currentStep = stepId();
   if (currentStep != nullptr && sameText(currentStep, options_.waitEtape2StepId) &&
@@ -124,7 +142,12 @@ void StoryControllerV2::update(uint32_t nowMs) {
 
   engine_.update(nowMs);
   if (engine_.consumeStepChanged()) {
+    ++transitionCount_;
     applyCurrentStep(nowMs, "step_changed");
+  }
+  const StorySnapshot afterTick = engine_.snapshot();
+  if (afterTick.queuedEvents > maxQueueDepth_) {
+    maxQueueDepth_ = afterTick.queuedEvents;
   }
 }
 
@@ -179,6 +202,7 @@ bool StoryControllerV2::jumpToStep(const char* stepId, uint32_t nowMs, const cha
   }
   const bool ok = engine_.jumpToStep(stepId, source, nowMs);
   if (ok) {
+    ++transitionCount_;
     applyCurrentStep(nowMs, source);
   }
   return ok;
@@ -235,6 +259,29 @@ StoryControllerV2::StoryControllerV2Snapshot StoryControllerV2::snapshot(bool en
   return out;
 }
 
+StoryControllerV2::StoryMetricsSnapshot StoryControllerV2::metricsSnapshot() const {
+  StoryMetricsSnapshot out = {};
+  out.eventsPosted = postedEventsCount_;
+  out.eventsAccepted = acceptedEventsCount_;
+  out.eventsRejected = rejectedEventsCount_;
+  out.stormDropped = droppedStormEvents_;
+  out.queueDropped = engine_.droppedEvents();
+  out.transitions = transitionCount_;
+  out.maxQueueDepth = maxQueueDepth_;
+  out.lastAppHostError = appHost_.lastError();
+  out.lastEngineError = engine_.lastError();
+  return out;
+}
+
+void StoryControllerV2::resetMetrics() {
+  postedEventsCount_ = 0U;
+  acceptedEventsCount_ = 0U;
+  rejectedEventsCount_ = 0U;
+  droppedStormEvents_ = 0U;
+  transitionCount_ = 0U;
+  maxQueueDepth_ = 0U;
+}
+
 const char* StoryControllerV2::healthLabel(bool enabled, uint32_t nowMs) const {
   const StoryControllerV2Snapshot snap = snapshot(enabled, nowMs);
   if (!snap.enabled) {
@@ -254,12 +301,32 @@ const char* StoryControllerV2::healthLabel(bool enabled, uint32_t nowMs) const {
 }
 
 void StoryControllerV2::setTraceEnabled(bool enabled) {
-  traceEnabled_ = enabled;
-  Serial.printf("[STORY_V2] trace=%u\n", traceEnabled_ ? 1U : 0U);
+  setTraceLevel(enabled ? TraceLevel::kDebug : TraceLevel::kOff);
 }
 
 bool StoryControllerV2::traceEnabled() const {
-  return traceEnabled_;
+  return traceLevel_ != TraceLevel::kOff;
+}
+
+bool StoryControllerV2::setTraceLevel(TraceLevel level) {
+  if (traceLevel_ == level) {
+    return false;
+  }
+  traceLevel_ = level;
+  Serial.printf("[STORY_V2] trace_level=%s\n", traceLevelLabelLocal(traceLevel_));
+  return true;
+}
+
+StoryControllerV2::TraceLevel StoryControllerV2::traceLevel() const {
+  return traceLevel_;
+}
+
+const char* StoryControllerV2::traceLevelLabel() const {
+  return traceLevelLabel(traceLevel_);
+}
+
+const char* StoryControllerV2::traceLevelLabel(TraceLevel level) {
+  return traceLevelLabelLocal(level);
 }
 
 void StoryControllerV2::printScenarioList(const char* source) const {
@@ -338,9 +405,11 @@ bool StoryControllerV2::postEvent(StoryEventType type,
 bool StoryControllerV2::postEventInternal(const StoryEvent& event,
                                           const char* source,
                                           bool notifyApps) {
+  ++postedEventsCount_;
   if (isDuplicateStormEvent(event)) {
     ++droppedStormEvents_;
-    if (traceEnabled_) {
+    ++rejectedEventsCount_;
+    if (traceLevel_ == TraceLevel::kDebug) {
       Serial.printf("[STORY_V2][TRACE] drop storm event type=%u name=%s queue=%u dropped=%lu\n",
                     static_cast<unsigned int>(event.type),
                     event.name,
@@ -356,20 +425,26 @@ bool StoryControllerV2::postEventInternal(const StoryEvent& event,
 
   const bool ok = engine_.postEvent(event);
   if (!ok) {
+    ++rejectedEventsCount_;
     Serial.printf("[STORY_V2] postEvent failed type=%u name=%s (%s)\n",
                   static_cast<unsigned int>(event.type),
                   event.name,
                   source != nullptr ? source : "-");
   } else {
+    ++acceptedEventsCount_;
     lastPostedEvent_ = event;
     hasLastPostedEvent_ = true;
     lastPostedEventAtMs_ = event.atMs;
-    if (traceEnabled_) {
+    const StorySnapshot snap = engine_.snapshot();
+    if (snap.queuedEvents > maxQueueDepth_) {
+      maxQueueDepth_ = snap.queuedEvents;
+    }
+    if (traceLevel_ == TraceLevel::kDebug) {
       Serial.printf("[STORY_V2][TRACE] post event type=%u name=%s via=%s queue=%u\n",
                     static_cast<unsigned int>(event.type),
                     event.name,
                     source != nullptr ? source : "-",
-                    static_cast<unsigned int>(engine_.snapshot().queuedEvents));
+                    static_cast<unsigned int>(snap.queuedEvents));
     }
   }
   return ok;
@@ -415,7 +490,7 @@ void StoryControllerV2::resetRuntimeState() {
   safeCopy(activeScreenSceneId_, sizeof(activeScreenSceneId_), nullptr);
   hasLastPostedEvent_ = false;
   lastPostedEventAtMs_ = 0U;
-  droppedStormEvents_ = 0U;
+  resetMetrics();
   appHost_.stopAll("reset");
 }
 

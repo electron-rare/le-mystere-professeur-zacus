@@ -10,6 +10,13 @@
 
 class StoryControllerV2 {
  public:
+  enum class TraceLevel : uint8_t {
+    kOff = 0,
+    kErr = 1,
+    kInfo = 2,
+    kDebug = 3,
+  };
+
   struct StoryControllerV2Snapshot {
     bool enabled = false;
     bool running = false;
@@ -21,6 +28,18 @@ class StoryControllerV2 {
     const char* engineError = "OK";
     uint32_t etape2DueMs = 0U;
     bool testMode = false;
+  };
+
+  struct StoryMetricsSnapshot {
+    uint32_t eventsPosted = 0U;
+    uint32_t eventsAccepted = 0U;
+    uint32_t eventsRejected = 0U;
+    uint32_t stormDropped = 0U;
+    uint32_t queueDropped = 0U;
+    uint32_t transitions = 0U;
+    uint8_t maxQueueDepth = 0U;
+    const char* lastAppHostError = "OK";
+    const char* lastEngineError = "OK";
   };
 
   struct Hooks {
@@ -63,9 +82,15 @@ class StoryControllerV2 {
   void printScenarioList(const char* source) const;
   bool validateActiveScenario(const char* source) const;
   StoryControllerV2Snapshot snapshot(bool enabled, uint32_t nowMs) const;
+  StoryMetricsSnapshot metricsSnapshot() const;
+  void resetMetrics();
   const char* healthLabel(bool enabled, uint32_t nowMs) const;
   void setTraceEnabled(bool enabled);
   bool traceEnabled() const;
+  bool setTraceLevel(TraceLevel level);
+  TraceLevel traceLevel() const;
+  const char* traceLevelLabel() const;
+  static const char* traceLevelLabel(TraceLevel level);
 
   const char* scenarioId() const;
   const char* stepId() const;
@@ -98,11 +123,16 @@ class StoryControllerV2 {
   uint32_t testDelayMs_ = 5000U;
   uint32_t etape2DueMs_ = 0U;
   bool etape2DuePosted_ = false;
-  bool traceEnabled_ = false;
+  TraceLevel traceLevel_ = TraceLevel::kOff;
   StoryEvent lastPostedEvent_ = {};
   bool hasLastPostedEvent_ = false;
   uint32_t lastPostedEventAtMs_ = 0U;
   uint32_t droppedStormEvents_ = 0U;
+  uint32_t postedEventsCount_ = 0U;
+  uint32_t acceptedEventsCount_ = 0U;
+  uint32_t rejectedEventsCount_ = 0U;
+  uint32_t transitionCount_ = 0U;
+  uint8_t maxQueueDepth_ = 0U;
   char activeScreenSceneId_[24] = {};
   char scenarioId_[20] = {};
 };

@@ -28,12 +28,21 @@ enum class RepeatMode : uint8_t {
 
 struct Mp3ScanProgress {
   bool active = false;
+  bool pendingRequest = false;
+  bool forceRebuild = false;
   bool limitReached = false;
   uint8_t depth = 0U;
   uint8_t stackSize = 0U;
   uint16_t foldersScanned = 0U;
   uint16_t filesScanned = 0U;
   uint16_t tracksAccepted = 0U;
+  uint16_t entriesThisTick = 0U;
+  uint16_t entryBudgetHits = 0U;
+  uint32_t ticks = 0U;
+  uint32_t elapsedMs = 0U;
+  uint16_t tickBudgetMs = 0U;
+  uint16_t tickEntryBudget = 0U;
+  char reason[24] = "IDLE";
 };
 
 struct Mp3BackendRuntimeStats {

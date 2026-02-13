@@ -23,8 +23,10 @@ const char* playerUiPageLabel(PlayerUiPage page) {
 void PlayerUiModel::reset() {
   page_ = PlayerUiPage::kNowPlaying;
   browserCount_ = 0;
-  cursor_ = 0;
-  offset_ = 0;
+  browserCursor_ = 0;
+  browserOffset_ = 0;
+  queueOffset_ = 0;
+  settingsIndex_ = 0;
   dirty_ = true;
 }
 
@@ -56,16 +58,36 @@ void PlayerUiModel::applyAction(const UiAction& action) {
   switch (action.key) {
     case 2:
       if (isLong) {
-        moveCursor(-1);
-      } else if (page_ != PlayerUiPage::kNowPlaying) {
-        moveCursor(-1);
+        if (page_ == PlayerUiPage::kBrowser) {
+          moveBrowserCursor(-1);
+        } else if (page_ == PlayerUiPage::kQueue) {
+          moveQueueOffset(-1);
+        } else if (page_ == PlayerUiPage::kSettings) {
+          moveSettings(-1);
+        }
+      } else if (page_ == PlayerUiPage::kBrowser) {
+        moveBrowserCursor(-1);
+      } else if (page_ == PlayerUiPage::kQueue) {
+        moveQueueOffset(-1);
+      } else if (page_ == PlayerUiPage::kSettings) {
+        moveSettings(-1);
       }
       break;
     case 3:
       if (isLong) {
-        moveCursor(1);
-      } else if (page_ != PlayerUiPage::kNowPlaying) {
-        moveCursor(1);
+        if (page_ == PlayerUiPage::kBrowser) {
+          moveBrowserCursor(1);
+        } else if (page_ == PlayerUiPage::kQueue) {
+          moveQueueOffset(1);
+        } else if (page_ == PlayerUiPage::kSettings) {
+          moveSettings(1);
+        }
+      } else if (page_ == PlayerUiPage::kBrowser) {
+        moveBrowserCursor(1);
+      } else if (page_ == PlayerUiPage::kQueue) {
+        moveQueueOffset(1);
+      } else if (page_ == PlayerUiPage::kSettings) {
+        moveSettings(1);
       }
       break;
     case 6:
@@ -83,8 +105,11 @@ void PlayerUiModel::applyAction(const UiAction& action) {
 PlayerUiSnapshot PlayerUiModel::snapshot() const {
   PlayerUiSnapshot out;
   out.page = page_;
-  out.cursor = cursor_;
-  out.offset = offset_;
+  out.cursor = cursor();
+  out.offset = offset();
+  out.browseCount = browserCount_;
+  out.queueOffset = queueOffset_;
+  out.settingsIndex = settingsIndex_;
   out.dirty = dirty_;
   return out;
 }
@@ -94,11 +119,43 @@ PlayerUiPage PlayerUiModel::page() const {
 }
 
 uint16_t PlayerUiModel::cursor() const {
-  return cursor_;
+  switch (page_) {
+    case PlayerUiPage::kBrowser:
+      return browserCursor_;
+    case PlayerUiPage::kQueue:
+      return queueOffset_;
+    case PlayerUiPage::kSettings:
+      return settingsIndex_;
+    case PlayerUiPage::kNowPlaying:
+    default:
+      return 0U;
+  }
 }
 
 uint16_t PlayerUiModel::offset() const {
-  return offset_;
+  switch (page_) {
+    case PlayerUiPage::kBrowser:
+      return browserOffset_;
+    case PlayerUiPage::kQueue:
+      return queueOffset_;
+    case PlayerUiPage::kSettings:
+      return 0U;
+    case PlayerUiPage::kNowPlaying:
+    default:
+      return 0U;
+  }
+}
+
+uint16_t PlayerUiModel::browseCount() const {
+  return browserCount_;
+}
+
+uint16_t PlayerUiModel::queueOffset() const {
+  return queueOffset_;
+}
+
+uint8_t PlayerUiModel::settingsIndex() const {
+  return settingsIndex_;
 }
 
 bool PlayerUiModel::consumeDirty() {
@@ -108,44 +165,66 @@ bool PlayerUiModel::consumeDirty() {
 }
 
 void PlayerUiModel::clampBrowser() {
-  if (page_ != PlayerUiPage::kBrowser) {
-    cursor_ = 0;
-    offset_ = 0;
-    return;
-  }
   if (browserCount_ == 0U) {
-    cursor_ = 0;
-    offset_ = 0;
+    browserCursor_ = 0;
+    browserOffset_ = 0;
     return;
   }
-  if (cursor_ >= browserCount_) {
-    cursor_ = static_cast<uint16_t>(browserCount_ - 1U);
+  if (browserCursor_ >= browserCount_) {
+    browserCursor_ = static_cast<uint16_t>(browserCount_ - 1U);
     dirty_ = true;
   }
-  if (cursor_ < offset_) {
-    offset_ = cursor_;
+  if (browserCursor_ < browserOffset_) {
+    browserOffset_ = browserCursor_;
     dirty_ = true;
-  } else if (cursor_ >= static_cast<uint16_t>(offset_ + kBrowserPageSize)) {
-    offset_ = static_cast<uint16_t>(cursor_ - (kBrowserPageSize - 1U));
+  } else if (browserCursor_ >= static_cast<uint16_t>(browserOffset_ + kBrowserPageSize)) {
+    browserOffset_ = static_cast<uint16_t>(browserCursor_ - (kBrowserPageSize - 1U));
     dirty_ = true;
   }
 }
 
-void PlayerUiModel::moveCursor(int16_t delta) {
-  if (page_ != PlayerUiPage::kBrowser || browserCount_ == 0U) {
+void PlayerUiModel::moveBrowserCursor(int16_t delta) {
+  if (browserCount_ == 0U) {
     return;
   }
-  int32_t next = static_cast<int32_t>(cursor_) + static_cast<int32_t>(delta);
+  int32_t next = static_cast<int32_t>(browserCursor_) + static_cast<int32_t>(delta);
   if (next < 0) {
     next = 0;
   } else if (next >= static_cast<int32_t>(browserCount_)) {
     next = static_cast<int32_t>(browserCount_ - 1U);
   }
-  if (static_cast<uint16_t>(next) != cursor_) {
-    cursor_ = static_cast<uint16_t>(next);
+  if (static_cast<uint16_t>(next) != browserCursor_) {
+    browserCursor_ = static_cast<uint16_t>(next);
     dirty_ = true;
   }
   clampBrowser();
+}
+
+void PlayerUiModel::moveQueueOffset(int16_t delta) {
+  const uint16_t maxOffset = (browserCount_ > 0U) ? static_cast<uint16_t>(browserCount_ - 1U) : 0U;
+  int32_t next = static_cast<int32_t>(queueOffset_) + static_cast<int32_t>(delta);
+  if (next < 0) {
+    next = 0;
+  } else if (next > static_cast<int32_t>(maxOffset)) {
+    next = static_cast<int32_t>(maxOffset);
+  }
+  if (static_cast<uint16_t>(next) != queueOffset_) {
+    queueOffset_ = static_cast<uint16_t>(next);
+    dirty_ = true;
+  }
+}
+
+void PlayerUiModel::moveSettings(int8_t delta) {
+  int16_t next = static_cast<int16_t>(settingsIndex_) + static_cast<int16_t>(delta);
+  if (next < 0) {
+    next = 0;
+  } else if (next > 2) {
+    next = 2;
+  }
+  if (static_cast<uint8_t>(next) != settingsIndex_) {
+    settingsIndex_ = static_cast<uint8_t>(next);
+    dirty_ = true;
+  }
 }
 
 void PlayerUiModel::nextPage() {

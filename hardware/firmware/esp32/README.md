@@ -54,12 +54,14 @@ Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
 - Runtime boot: `src/controllers/boot/boot_protocol_runtime.h`, `src/controllers/boot/boot_protocol_runtime.cpp`
 - Runtime story legacy: `src/controllers/story/story_controller.h`, `src/controllers/story/story_controller.cpp`
 - Runtime story V2: `src/controllers/story/story_controller_v2.h`, `src/controllers/story/story_controller_v2.cpp`
+- Service runtime LA (hold/unlock non bloquant): `src/services/la/la_detector_runtime_service.h`, `src/services/la/la_detector_runtime_service.cpp`
 - Moteur STORY legacy: `src/story/story_engine.h`, `src/story/story_engine.cpp`
 - Moteur STORY V2: `src/story/core/story_engine_v2.h`, `src/story/core/story_engine_v2.cpp`
 - Mini apps STORY V2: `src/story/apps/*`
 - Scenarios/ressources V2: `src/story/scenarios/*`, `src/story/resources/*`, `src/story/core/scenario_def.h`
 - Code STORY genere: `src/story/generated/*`
 - Specs STORY auteur: `story_specs/schema/*`, `story_specs/templates/*`, `story_specs/scenarios/*`
+- Prompts auteurs STORY: `story_specs/prompts/*`
 - Generateur STORY: `tools/story_gen/story_gen.py`
 - Guide scenario STORY: `src/story/README.md`
 - Guide rapide auteur scenario V2: `GENERER_UN_SCENARIO_STORY_V2.md`
@@ -176,9 +178,21 @@ Workflow auteur STORY V2:
 - `make qa-story-v2-smoke` (debut sprint, flash + smoke serie)
 - `make qa-story-v2-smoke-fast` (sans flash)
 - checklist review sprint: `tools/qa/story_v2_review_checklist.md`
-- `pio run -e esp32dev`
+- `pio run -e esp32dev` (profil dev, Story V2 ON)
+- `pio run -e esp32_release` (profil release, Story V2 OFF)
 
 Un nouveau scenario est ajoute via `story_specs/scenarios/*.yaml`, puis generation C++ dans `src/story/generated/*`.
+
+Scenarios compilés actuels (selection runtime):
+
+- `DEFAULT`
+- `EXAMPLE_UNLOCK_EXPRESS`
+- `EXEMPLE_UNLOCK_EXPRESS_DONE`
+- `SPECTRE_RADIO_LAB` (optionnel RC2)
+
+Selection serie:
+
+- `STORY_V2_SCENARIO SPECTRE_RADIO_LAB`
 
 ### Mode U_LOCK (au boot, detection SD bloquee)
 
@@ -201,11 +215,12 @@ Un nouveau scenario est ajoute via `story_specs/scenarios/*.yaml`, puis generati
 ### Mode lecteur (SD detectee)
 
 - `K1` : play/pause
-- `K2` : piste precedente
-- `K3` : piste suivante
+- `K2` : piste precedente (page NOW) / navigation (pages BROWSE|QUEUE|SET)
+- `K3` : piste suivante (page NOW) / navigation (pages BROWSE|QUEUE|SET)
 - `K4` : volume -
 - `K5` : volume +
-- `K6` : repeat `ALL/ONE`
+- `K6` : changer de page UI (`NOW -> BROWSE -> QUEUE -> SET`)
+- En page `SET`, `K1` applique l'action selectionnee (`REPEAT`, `BACKEND`, `SCAN`)
 
 Le firmware bascule automatiquement selon la SD:
 - SD presente + pistes audio supportees: `MODE LECTEUR U-SON`
@@ -246,7 +261,9 @@ Depuis la racine de ce dossier (`hardware/firmware/esp32`):
 
 1. ESP32 principal:
    - `pio run -e esp32dev`
+   - `pio run -e esp32_release`
    - `pio run -e esp32dev -t upload --upload-port /dev/ttyUSB0`
+   - `pio run -e esp32_release -t upload --upload-port /dev/ttyUSB0`
    - `pio run -e esp32dev -t uploadfs --upload-port /dev/ttyUSB0`
    - `pio device monitor -e esp32dev --port /dev/ttyUSB0`
 2. ESP8266 OLED:
@@ -275,6 +292,8 @@ Astuce detection ports:
 - Runbook semi-auto Story V2: `tools/qa/live_story_v2_runbook.md`
 - Smoke debut sprint: `tools/qa/live_story_v2_smoke.sh`
 - Runbook release candidate: `tools/qa/live_story_v2_rc_runbook.md`
+- Smoke RC MP3: `tools/qa/mp3_rc_smoke.sh`
+- Runbook RC MP3: `tools/qa/mp3_rc_runbook.md`
 - Handbook release/rollback: `RELEASE_STORY_V2.md`
 
 ### CI / Review policy
@@ -286,7 +305,7 @@ Astuce detection ports:
   - `make story-validate`
   - `make story-gen`
   - `bash tools/qa/story_v2_ci.sh` (mode strict/idempotence)
-  - builds firmware `esp32dev`, `esp8266_oled`, `screen:nodemcuv2`
+  - builds firmware `esp32dev`, `esp32_release`, `esp8266_oled`, `screen:nodemcuv2`
 
 ## Lecteur audio evolue
 
@@ -307,8 +326,11 @@ Commandes MP3 utiles:
 - `MP3_SCAN START` : scan incremental (index prioritaire)
 - `MP3_SCAN REBUILD` : rebuild force sans index
 - `MP3_SCAN CANCEL` : annule un scan en cours
-- `MP3_SCAN_PROGRESS` : progression scan live (depth/stack/folders/files/tracks/limit)
+- `MP3_SCAN_PROGRESS` : progression scan live (state/pending/reason/depth/files/tracks/ticks/budget)
 - `MP3_BACKEND_STATUS` : compteurs runtime backend (attempts/fail/retry/fallback)
+- `MP3_UI_STATUS` : etat UI courant (`page/cursor/offset/browse/queue_off/set_idx`)
+- `MP3_QUEUE_PREVIEW [n]` : projection des prochaines pistes
+- `MP3_CAPS` : capacites codec/backend exposees au runtime
 
 Sons internes:
 

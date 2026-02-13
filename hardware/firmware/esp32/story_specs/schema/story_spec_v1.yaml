@@ -22,6 +22,13 @@ scenario_fields:
       fields:
         id: string
         app: enum[LA_DETECTOR, AUDIO_PACK, SCREEN_SCENE, MP3_GATE]
+        config:
+          optional: true
+          when: app=LA_DETECTOR
+          fields:
+            hold_ms: integer (100..60000)
+            unlock_event: string (default=UNLOCK)
+            require_listening: bool (default=true)
   steps:
     type: list
     item:
@@ -61,3 +68,4 @@ notes:
   - Les IDs sont sensibles à la casse côté C++.
   - Pour trigger=on_event, event_type doit être différent de none.
   - Les transitions pointent uniquement vers des steps du même scénario.
+  - `app_bindings[].config` est additif et actuellement supporté uniquement pour `LA_DETECTOR`.

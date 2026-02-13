@@ -46,6 +46,10 @@ class ScreenLink {
   uint8_t lastStartupStage_ = 0;
   uint8_t lastAppStage_ = 0;
   uint8_t lastUiPage_ = 0;
+  uint16_t lastUiCursor_ = 0;
+  uint16_t lastUiOffset_ = 0;
+  uint16_t lastUiCount_ = 0;
+  uint16_t lastQueueCount_ = 0;
   uint8_t lastRepeatMode_ = 0;
   bool lastFxActive_ = false;
   uint8_t lastBackendMode_ = 0;

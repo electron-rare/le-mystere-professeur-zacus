@@ -18,7 +18,8 @@ ALLOWED_EVENT = {"none", "unlock", "audio_done", "timer", "serial", "action"}
 ALLOWED_APP = {"LA_DETECTOR", "AUDIO_PACK", "SCREEN_SCENE", "MP3_GATE"}
 
 ROOT_FIELDS = {"id", "version", "initial_step", "app_bindings", "steps"}
-APP_BINDING_FIELDS = {"id", "app"}
+APP_BINDING_FIELDS = {"id", "app", "config"}
+LA_APP_CONFIG_FIELDS = {"hold_ms", "unlock_event", "require_listening"}
 STEP_FIELDS = {
     "step_id",
     "screen_scene_id",
@@ -180,7 +181,7 @@ def normalize_scenario(path: Path, strict: bool) -> tuple[dict[str, Any] | None,
     if not expect_type(app_bindings_raw, list, file, "app_bindings", issues, "APP_BINDINGS_TYPE"):
         app_bindings_raw = []
 
-    app_bindings: list[dict[str, str]] = []
+    app_bindings: list[dict[str, Any]] = []
     app_ids_seen: set[str] = set()
     for idx, item in enumerate(app_bindings_raw):
         field_prefix = f"app_bindings[{idx}]"
@@ -200,12 +201,82 @@ def normalize_scenario(path: Path, strict: bool) -> tuple[dict[str, Any] | None,
                 "APP_BINDING_APP_INVALID",
             )
 
+        config_obj: dict[str, Any] | None = None
+        config_raw = item.get("config")
+        if config_raw is not None:
+            if not isinstance(config_raw, dict):
+                add_issue(issues, file, f"{field_prefix}.config", "objet requis", "APP_BINDING_CONFIG_TYPE")
+            elif app_name != "LA_DETECTOR":
+                add_issue(
+                    issues,
+                    file,
+                    f"{field_prefix}.config",
+                    "config supporte uniquement pour LA_DETECTOR",
+                    "APP_BINDING_CONFIG_UNSUPPORTED",
+                )
+            else:
+                check_unknown_keys(
+                    config_raw,
+                    LA_APP_CONFIG_FIELDS,
+                    file,
+                    f"{field_prefix}.config",
+                    issues,
+                    strict,
+                    "APP_BINDING_CONFIG",
+                )
+                hold_ms = config_raw.get("hold_ms", 3000)
+                if not isinstance(hold_ms, int) or hold_ms < 100 or hold_ms > 60000:
+                    add_issue(
+                        issues,
+                        file,
+                        f"{field_prefix}.config.hold_ms",
+                        "entier 100..60000 requis",
+                        "APP_BINDING_CONFIG_HOLD_MS",
+                    )
+                    hold_ms = 3000
+
+                unlock_event = config_raw.get("unlock_event", "UNLOCK")
+                if not isinstance(unlock_event, str) or unlock_event.strip() == "":
+                    add_issue(
+                        issues,
+                        file,
+                        f"{field_prefix}.config.unlock_event",
+                        "chaine non vide requise",
+                        "APP_BINDING_CONFIG_UNLOCK_EVENT",
+                    )
+                    unlock_event = "UNLOCK"
+                unlock_event = unlock_event.strip()
+
+                require_listening = config_raw.get("require_listening", True)
+                if not isinstance(require_listening, bool):
+                    add_issue(
+                        issues,
+                        file,
+                        f"{field_prefix}.config.require_listening",
+                        "bool requis",
+                        "APP_BINDING_CONFIG_REQUIRE_LISTENING",
+                    )
+                    require_listening = True
+
+                config_obj = {
+                    "hold_ms": int(hold_ms),
+                    "unlock_event": unlock_event,
+                    "require_listening": require_listening,
+                }
+
+        if app_name == "LA_DETECTOR" and config_obj is None:
+            config_obj = {
+                "hold_ms": 3000,
+                "unlock_event": "UNLOCK",
+                "require_listening": True,
+            }
+
         if app_id:
             if app_id in app_ids_seen:
                 add_issue(issues, file, f"{field_prefix}.id", "duplicata", "APP_BINDING_ID_DUP")
             app_ids_seen.add(app_id)
 
-        app_bindings.append({"id": app_id, "app": app_name})
+        app_bindings.append({"id": app_id, "app": app_name, "config": config_obj})
 
     steps_raw = doc.get("steps")
     if not expect_type(steps_raw, list, file, "steps", issues, "STEPS_TYPE"):
@@ -451,11 +522,22 @@ def generate_apps_h(spec_hash: str, scenarios: list[dict[str, Any]]) -> str:
         [
             "#pragma once",
             "",
+            "#include <Arduino.h>",
+            "",
             "#include \"../core/scenario_def.h\"",
+            "",
+            "struct LaDetectorAppConfigDef {",
+            "  const char* bindingId;",
+            "  bool hasConfig;",
+            "  uint32_t holdMs;",
+            "  const char* unlockEvent;",
+            "  bool requireListening;",
+            "};",
             "",
             "const AppBindingDef* generatedAppBindingById(const char* id);",
             "uint8_t generatedAppBindingCount();",
             "const char* generatedAppBindingIdAt(uint8_t index);",
+            "const LaDetectorAppConfigDef* generatedLaDetectorConfigByBindingId(const char* id);",
             "",
         ]
     )
@@ -607,16 +689,18 @@ def generate_scenarios_cpp(spec_hash: str, scenarios: list[dict[str, Any]]) -> s
 
 
 def generate_apps_cpp(spec_hash: str, scenarios: list[dict[str, Any]]) -> str:
-    binding_map: dict[str, str] = {}
+    binding_map: dict[str, dict[str, Any]] = {}
     for scenario in scenarios:
         for binding in scenario["app_bindings"]:
             bid = binding["id"]
             app = binding["app"]
-            if bid in binding_map and binding_map[bid] != app:
+            config = binding.get("config")
+            normalized = {"app": app, "config": config}
+            if bid in binding_map and binding_map[bid] != normalized:
                 raise RuntimeError(
-                    f"binding '{bid}' declare avec 2 apps differents: {binding_map[bid]} vs {app}"
+                    f"binding '{bid}' declare avec 2 configurations differentes"
                 )
-            binding_map[bid] = app
+            binding_map[bid] = normalized
 
     sorted_bindings = sorted(binding_map.items(), key=lambda x: x[0])
 
@@ -631,9 +715,40 @@ def generate_apps_cpp(spec_hash: str, scenarios: list[dict[str, Any]]) -> str:
         "constexpr AppBindingDef kGeneratedAppBindings[] = {",
     ])
 
-    for bid, app in sorted_bindings:
+    for bid, payload in sorted_bindings:
+        app = payload["app"]
         app_cpp = APP_CPP.get(app, "StoryAppType::kNone")
         lines.append(f"    {{{cstr(bid)}, {app_cpp}}},")
+
+    lines.append("};")
+    lines.append("constexpr LaDetectorAppConfigDef kGeneratedLaConfigs[] = {")
+    for bid, payload in sorted_bindings:
+        app = payload["app"]
+        config = payload.get("config")
+        if app != "LA_DETECTOR":
+            continue
+        hold_ms = 3000
+        unlock_event = "UNLOCK"
+        require_listening = True
+        has_config = False
+        if isinstance(config, dict):
+            hold_ms = int(config.get("hold_ms", hold_ms))
+            unlock_event = str(config.get("unlock_event", unlock_event))
+            require_listening = bool(config.get("require_listening", require_listening))
+            has_config = True
+        lines.append(
+            "    {"
+            + ", ".join(
+                [
+                    cstr(bid),
+                    "true" if has_config else "false",
+                    f"{hold_ms}U",
+                    cstr(unlock_event),
+                    "true" if require_listening else "false",
+                ]
+            )
+            + "},"
+        )
 
     lines.extend([
         "};",
@@ -660,6 +775,18 @@ def generate_apps_cpp(spec_hash: str, scenarios: list[dict[str, Any]]) -> str:
         "    return nullptr;",
         "  }",
         "  return kGeneratedAppBindings[index].id;",
+        "}",
+        "",
+        "const LaDetectorAppConfigDef* generatedLaDetectorConfigByBindingId(const char* id) {",
+        "  if (id == nullptr || id[0] == '\\0') {",
+        "    return nullptr;",
+        "  }",
+        "  for (const LaDetectorAppConfigDef& cfg : kGeneratedLaConfigs) {",
+        "    if (cfg.bindingId != nullptr && strcmp(cfg.bindingId, id) == 0) {",
+        "      return &cfg;",
+        "    }",
+        "  }",
+        "  return nullptr;",
         "}",
         "",
     ])

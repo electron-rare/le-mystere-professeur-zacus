@@ -17,6 +17,18 @@ void Mp3Controller::applyUiAction(const UiAction& action) {
   ui_.applyAction(action);
 }
 
+const char* Mp3Controller::browsePath() const {
+  return browsePath_.isEmpty() ? "/" : browsePath_.c_str();
+}
+
+void Mp3Controller::setBrowsePath(const char* path) {
+  if (path == nullptr || path[0] == '\0') {
+    browsePath_ = "/";
+    return;
+  }
+  browsePath_ = path;
+}
+
 void Mp3Controller::printUiStatus(Print& out, const char* source) const {
   const char* safeSource = (source != nullptr && source[0] != '\0') ? source : "status";
   out.printf("[MP3_UI] %s page=%s cursor=%u offset=%u browse=%u queue_off=%u set_idx=%u tracks=%u\n",
@@ -28,6 +40,93 @@ void Mp3Controller::printUiStatus(Print& out, const char* source) const {
              static_cast<unsigned int>(ui_.queueOffset()),
              static_cast<unsigned int>(ui_.settingsIndex()),
              static_cast<unsigned int>(player_.trackCount()));
+}
+
+void Mp3Controller::printScanStatus(Print& out, const char* source) const {
+  const char* safeSource = (source != nullptr && source[0] != '\0') ? source : "status";
+  const CatalogStats stats = player_.catalogStats();
+  const Mp3ScanProgress progress = player_.scanProgress();
+  out.printf("[MP3_SCAN] %s state=%s busy=%u tracks=%u folders=%u scan_ms=%lu indexed=%u metadata_best=%u\n",
+             safeSource,
+             player_.scanStateLabel(),
+             player_.isScanBusy() ? 1U : 0U,
+             static_cast<unsigned int>(stats.tracks),
+             static_cast<unsigned int>(stats.folders),
+             static_cast<unsigned long>(stats.scanMs),
+             stats.indexed ? 1U : 0U,
+             stats.metadataBestEffort ? 1U : 0U);
+  out.printf("[MP3_SCAN] %s pending=%u force=%u reason=%s ticks=%lu elapsed=%lu budget_ms=%u entry_budget=%u\n",
+             safeSource,
+             progress.pendingRequest ? 1U : 0U,
+             progress.forceRebuild ? 1U : 0U,
+             progress.reason,
+             static_cast<unsigned long>(progress.ticks),
+             static_cast<unsigned long>(progress.elapsedMs),
+             static_cast<unsigned int>(progress.tickBudgetMs),
+             static_cast<unsigned int>(progress.tickEntryBudget));
+}
+
+void Mp3Controller::printScanProgress(Print& out, const char* source) const {
+  const char* safeSource = (source != nullptr && source[0] != '\0') ? source : "status";
+  const Mp3ScanProgress progress = player_.scanProgress();
+  const CatalogStats stats = player_.catalogStats();
+  out.printf(
+      "[MP3_SCAN_PROGRESS] %s state=%s active=%u pending=%u force=%u reason=%s depth=%u stack=%u folders=%u files=%u tracks=%u limit=%u tick_entries=%u tick_hits=%u ticks=%lu elapsed=%lu scan_ms=%lu\n",
+      safeSource,
+      player_.scanStateLabel(),
+      progress.active ? 1U : 0U,
+      progress.pendingRequest ? 1U : 0U,
+      progress.forceRebuild ? 1U : 0U,
+      progress.reason,
+      static_cast<unsigned int>(progress.depth),
+      static_cast<unsigned int>(progress.stackSize),
+      static_cast<unsigned int>(progress.foldersScanned),
+      static_cast<unsigned int>(progress.filesScanned),
+      static_cast<unsigned int>(progress.tracksAccepted),
+      progress.limitReached ? 1U : 0U,
+      static_cast<unsigned int>(progress.entriesThisTick),
+      static_cast<unsigned int>(progress.entryBudgetHits),
+      static_cast<unsigned long>(progress.ticks),
+      static_cast<unsigned long>(progress.elapsedMs),
+      static_cast<unsigned long>(stats.scanMs));
+}
+
+void Mp3Controller::printBackendStatus(Print& out, const char* source) const {
+  const char* safeSource = (source != nullptr && source[0] != '\0') ? source : "status";
+  const Mp3BackendRuntimeStats stats = player_.backendStats();
+  out.printf(
+      "[MP3_BACKEND_STATUS] %s mode=%s active=%s err=%s attempts=%lu success=%lu fail=%lu retries=%lu fallback=%lu legacy=%lu tools=%lu\n",
+      safeSource,
+      player_.backendModeLabel(),
+      player_.activeBackendLabel(),
+      player_.lastBackendError(),
+      static_cast<unsigned long>(stats.startAttempts),
+      static_cast<unsigned long>(stats.startSuccess),
+      static_cast<unsigned long>(stats.startFailures),
+      static_cast<unsigned long>(stats.retriesScheduled),
+      static_cast<unsigned long>(stats.fallbackCount),
+      static_cast<unsigned long>(stats.legacyStarts),
+      static_cast<unsigned long>(stats.audioToolsStarts));
+}
+
+void Mp3Controller::printBrowseList(Print& out,
+                                    const char* source,
+                                    const char* path,
+                                    uint16_t offset,
+                                    uint16_t limit) const {
+  const char* safeSource = (source != nullptr && source[0] != '\0') ? source : "list";
+  const char* safePath = (path == nullptr || path[0] == '\0') ? "/" : path;
+  if (!player_.isSdReady()) {
+    out.printf("[MP3_BROWSE] %s OUT_OF_CONTEXT sd=0\n", safeSource);
+    return;
+  }
+  const uint16_t total = player_.listTracks(safePath, offset, limit, out);
+  out.printf("[MP3_BROWSE] %s path=%s total=%u offset=%u limit=%u\n",
+             safeSource,
+             safePath,
+             static_cast<unsigned int>(total),
+             static_cast<unsigned int>(offset),
+             static_cast<unsigned int>(limit));
 }
 
 void Mp3Controller::printQueuePreview(Print& out, uint8_t count, const char* source) const {

@@ -78,7 +78,6 @@ struct StoryAudioCaptureGuardState {
 };
 StoryAudioCaptureGuardState g_storyAudioCaptureGuard;
 PlayerUiModel g_playerUi;
-String g_mp3BrowsePath = "/";
 struct LoopBudgetState {
   uint32_t lastWarnMs = 0U;
   uint32_t maxLoopMs = 0U;
@@ -145,6 +144,7 @@ const char* mp3FxModeLabel(Mp3FxMode mode);
 const char* mp3FxEffectLabel(Mp3FxEffect effect);
 bool parseMp3FxEffectToken(const char* token, Mp3FxEffect* outEffect);
 bool triggerMp3Fx(Mp3FxEffect effect, uint32_t durationMs, const char* source);
+void printMp3UiStatusHook(const char* source);
 void printLoopBudgetStatus(const char* source, uint32_t nowMs);
 void resetLoopBudgetStats(uint32_t nowMs, const char* source);
 void printScreenLinkStatus(const char* source, uint32_t nowMs);
@@ -446,10 +446,7 @@ bool parsePlayerUiPageToken(const char* token, PlayerUiPage* outPage) {
 }
 
 const char* currentBrowsePath() {
-  if (g_mp3BrowsePath.isEmpty()) {
-    g_mp3BrowsePath = "/";
-  }
-  return g_mp3BrowsePath.c_str();
+  return mp3Controller().browsePath();
 }
 
 bool parseBackendModeToken(const char* token, PlayerBackendMode* outMode) {
@@ -514,83 +511,19 @@ uint8_t encodeMp3ErrorForScreen() {
 }
 
 void printMp3ScanStatus(const char* source) {
-  const CatalogStats stats = g_mp3.catalogStats();
-  const Mp3ScanProgress progress = g_mp3.scanProgress();
-  Serial.printf("[MP3_SCAN] %s state=%s busy=%u tracks=%u folders=%u scan_ms=%lu indexed=%u metadata_best=%u\n",
-                source,
-                g_mp3.scanStateLabel(),
-                g_mp3.isScanBusy() ? 1U : 0U,
-                static_cast<unsigned int>(stats.tracks),
-                static_cast<unsigned int>(stats.folders),
-                static_cast<unsigned long>(stats.scanMs),
-                stats.indexed ? 1U : 0U,
-                stats.metadataBestEffort ? 1U : 0U);
-  Serial.printf(
-      "[MP3_SCAN] %s pending=%u force=%u reason=%s ticks=%lu elapsed=%lu budget_ms=%u entry_budget=%u\n",
-      source,
-      progress.pendingRequest ? 1U : 0U,
-      progress.forceRebuild ? 1U : 0U,
-      progress.reason,
-      static_cast<unsigned long>(progress.ticks),
-      static_cast<unsigned long>(progress.elapsedMs),
-      static_cast<unsigned int>(progress.tickBudgetMs),
-      static_cast<unsigned int>(progress.tickEntryBudget));
+  mp3Controller().printScanStatus(Serial, source);
 }
 
 void printMp3ScanProgress(const char* source) {
-  const Mp3ScanProgress progress = g_mp3.scanProgress();
-  const CatalogStats stats = g_mp3.catalogStats();
-  Serial.printf(
-      "[MP3_SCAN_PROGRESS] %s state=%s active=%u pending=%u force=%u reason=%s depth=%u stack=%u folders=%u files=%u tracks=%u limit=%u tick_entries=%u tick_hits=%u ticks=%lu elapsed=%lu scan_ms=%lu\n",
-      source,
-      g_mp3.scanStateLabel(),
-      progress.active ? 1U : 0U,
-      progress.pendingRequest ? 1U : 0U,
-      progress.forceRebuild ? 1U : 0U,
-      progress.reason,
-      static_cast<unsigned int>(progress.depth),
-      static_cast<unsigned int>(progress.stackSize),
-      static_cast<unsigned int>(progress.foldersScanned),
-      static_cast<unsigned int>(progress.filesScanned),
-      static_cast<unsigned int>(progress.tracksAccepted),
-      progress.limitReached ? 1U : 0U,
-      static_cast<unsigned int>(progress.entriesThisTick),
-      static_cast<unsigned int>(progress.entryBudgetHits),
-      static_cast<unsigned long>(progress.ticks),
-      static_cast<unsigned long>(progress.elapsedMs),
-      static_cast<unsigned long>(stats.scanMs));
+  mp3Controller().printScanProgress(Serial, source);
 }
 
 void printMp3BackendStatus(const char* source) {
-  const Mp3BackendRuntimeStats stats = g_mp3.backendStats();
-  Serial.printf(
-      "[MP3_BACKEND_STATUS] %s mode=%s active=%s err=%s attempts=%lu success=%lu fail=%lu retries=%lu fallback=%lu legacy=%lu tools=%lu\n",
-      source,
-      g_mp3.backendModeLabel(),
-      g_mp3.activeBackendLabel(),
-      g_mp3.lastBackendError(),
-      static_cast<unsigned long>(stats.startAttempts),
-      static_cast<unsigned long>(stats.startSuccess),
-      static_cast<unsigned long>(stats.startFailures),
-      static_cast<unsigned long>(stats.retriesScheduled),
-      static_cast<unsigned long>(stats.fallbackCount),
-      static_cast<unsigned long>(stats.legacyStarts),
-      static_cast<unsigned long>(stats.audioToolsStarts));
+  mp3Controller().printBackendStatus(Serial, source);
 }
 
 void printMp3BrowseList(const char* source, const char* path, uint16_t offset, uint16_t limit) {
-  const char* safePath = (path == nullptr || path[0] == '\0') ? "/" : path;
-  if (!g_mp3.isSdReady()) {
-    Serial.printf("[MP3_BROWSE] %s OUT_OF_CONTEXT sd=0\n", source);
-    return;
-  }
-  const uint16_t total = g_mp3.listTracks(safePath, offset, limit, Serial);
-  Serial.printf("[MP3_BROWSE] %s path=%s total=%u offset=%u limit=%u\n",
-                source,
-                safePath,
-                static_cast<unsigned int>(total),
-                static_cast<unsigned int>(offset),
-                static_cast<unsigned int>(limit));
+  mp3Controller().printBrowseList(Serial, source, path, offset, limit);
 }
 
 void sendScreenFrameSnapshot(uint32_t nowMs, uint8_t keyForScreen) {
@@ -2321,11 +2254,7 @@ bool allowMp3PlaybackNowHook() {
 }
 
 void setBrowsePathHook(const char* path) {
-  if (path == nullptr || path[0] == '\0') {
-    g_mp3BrowsePath = "/";
-    return;
-  }
-  g_mp3BrowsePath = path;
+  mp3Controller().setBrowsePath(path);
 }
 
 void stopOverlayFxHook(const char* reason) {
@@ -2334,6 +2263,10 @@ void stopOverlayFxHook(const char* reason) {
 
 void forceUsonFunctionalHook(const char* source) {
   forceUsonFunctionalForMp3Debug(source);
+}
+
+void printMp3UiStatusHook(const char* source) {
+  mp3Controller().printUiStatus(Serial, source);
 }
 
 void printMp3QueuePreviewHook(uint8_t count, const char* source) {
@@ -2519,6 +2452,7 @@ Mp3SerialRuntimeContext makeMp3SerialRuntimeContext() {
   context.currentBrowsePath = currentBrowsePath;
   context.setBrowsePath = setBrowsePathHook;
   context.printHelp = printMp3DebugHelp;
+  context.printUiStatus = printMp3UiStatusHook;
   context.printStatus = printMp3Status;
   context.printScanStatus = printMp3ScanStatus;
   context.printScanProgress = printMp3ScanProgress;
@@ -3183,7 +3117,7 @@ void app_orchestrator::setup() {
   g_mp3.setFxDuckingGain(config::kMp3FxDuckingGainDefault);
   g_mp3.setFxOverlayGain(config::kMp3FxOverlayGainDefault);
   g_playerUi.reset();
-  g_mp3BrowsePath = "/";
+  mp3Controller().setBrowsePath("/");
   g_screen.begin();
   screenSyncService().reset();
   sendScreenFrameSnapshot(millis(), 0U);

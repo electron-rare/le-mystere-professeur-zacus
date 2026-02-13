@@ -2,9 +2,15 @@
 
 #include <Arduino.h>
 
+struct SerialCommand {
+  const char* line = nullptr;
+  const char* token = nullptr;
+  const char* args = nullptr;
+};
+
 class SerialRouter {
  public:
-  using DispatchFn = void (*)(const char* cmd, uint32_t nowMs, void* ctx);
+  using DispatchFn = void (*)(const SerialCommand& cmd, uint32_t nowMs, void* ctx);
 
   explicit SerialRouter(HardwareSerial& serial);
 
@@ -12,11 +18,13 @@ class SerialRouter {
   void update(uint32_t nowMs);
 
  private:
-  static void normalize(char* line);
+  static void trim(char* line);
+  static void extractToken(const char* line, char* outToken, size_t outTokenLen, const char** outArgs);
 
   HardwareSerial& serial_;
   DispatchFn dispatcher_ = nullptr;
   void* dispatcherCtx_ = nullptr;
   char buffer_[192] = {};
+  char token_[64] = {};
   uint8_t len_ = 0;
 };

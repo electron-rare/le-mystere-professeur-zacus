@@ -14,16 +14,17 @@ Ce firmware transforme une carte ESP8266 (HW-630) en ecran de statut pour l'ESP3
 
 ## Protocole UART
 
-Trame texte envoyee par l'ESP32 (format etendu):
+Trame texte envoyee par l'ESP32 (format etendu v2):
 
-`STAT,<la>,<mp3>,<sd>,<uptime_ms>,<key>,<mode_mp3>,<track>,<track_count>,<volume_pct>,<u_lock>,<u_son_functional>,<tuning_offset>,<tuning_confidence>,<u_lock_listening>,<mic_level_pct>,<mic_scope>,<unlock_hold_pct>\n`
+`STAT,<la>,<mp3>,<sd>,<uptime_ms>,<key>,<mode_mp3>,<track>,<track_count>,<volume_pct>,<u_lock>,<u_son_functional>,<tuning_offset>,<tuning_confidence>,<u_lock_listening>,<mic_level_pct>,<mic_scope>,<unlock_hold_pct>,<startup_stage>,<app_stage>,<seq>,<ui_page>,<repeat_mode>,<fx_active>,<backend_mode>,<scan_busy>,<error_code>,<crc8_hex>\n`
 
 Exemple:
 
-`STAT,1,0,0,12345,2,0,0,0,0,1,0,-2,68,1,42,1,57`
+`STAT,1,0,0,12345,2,0,0,0,0,1,0,-2,68,1,42,1,57,1,0,77,1,0,0,1,0,0,5A`
 
 Compatibilite:
-- le firmware ecran reste compatible avec l'ancien format court `STAT` (les champs additionnels sont optionnels).
+- le parser ecran accepte encore les trames `STAT` sans CRC (format legacy).
+- si CRC present, la trame est validee et rejetee si checksum invalide.
 
 ## Cablage
 

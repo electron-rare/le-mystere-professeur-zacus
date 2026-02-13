@@ -26,6 +26,7 @@ extern RuntimeMode g_mode;
 extern bool g_laDetectionEnabled;
 extern bool g_uSonFunctional;
 extern bool g_uLockListening;
+extern bool g_storyV2Enabled;
 extern uint32_t g_laHoldAccumMs;
 extern uint32_t g_lastLoopMs;
 extern bool g_paEnableActiveHigh;

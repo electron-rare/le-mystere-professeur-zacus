@@ -338,6 +338,10 @@ bool TrackCatalog::appendFallbackPath(const char* path, uint32_t sizeBytes) {
   return addTrackEntry(entry);
 }
 
+void TrackCatalog::sort() {
+  sortEntries();
+}
+
 uint16_t TrackCatalog::size() const {
   return count_;
 }

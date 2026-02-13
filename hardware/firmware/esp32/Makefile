@@ -7,7 +7,7 @@ SOAK_MINUTES ?= 20
 POLL_SECONDS ?= 15
 TRACE_LEVEL ?= INFO
 
-.PHONY: help build build-esp32 build-screen story-validate story-gen qa-story-v2 qa-story-v2-smoke qa-story-v2-smoke-fast qa-story-v2-rc qa-mp3-rc-smoke upload-esp32 upload-screen uploadfs-esp32 erasefs-esp32 monitor-esp32 monitor-screen clean
+.PHONY: help build build-esp32 build-screen story-validate story-gen qa-story-v2 qa-story-v2-smoke qa-story-v2-smoke-fast qa-story-v2-rc qa-mp3-rc-smoke qa-mp3-client-demo upload-esp32 upload-screen uploadfs-esp32 erasefs-esp32 monitor-esp32 monitor-screen clean
 
 help:
 	@echo "Targets:"
@@ -24,6 +24,7 @@ help:
 	@echo "  make qa-story-v2-smoke-fast # Story V2 smoke without flashing"
 	@echo "  make qa-story-v2-rc         # Story V2 release-candidate matrix + soak"
 	@echo "  make qa-mp3-rc-smoke        # MP3 RC static smoke (build matrix + command checklist)"
+	@echo "  make qa-mp3-client-demo     # MP3 client presentation smoke + contract checks"
 	@echo "  make upload-screen    # Flash ESP8266 (optional SCREEN_PORT=/dev/ttyUSB1)"
 	@echo "  make monitor-esp32    # Serial monitor ESP32 (optional ESP32_PORT=...)"
 	@echo "  make monitor-screen   # Serial monitor ESP8266 (optional SCREEN_PORT=...)"
@@ -51,6 +52,9 @@ qa-story-v2-rc:
 
 qa-mp3-rc-smoke:
 	bash tools/qa/mp3_rc_smoke.sh
+
+qa-mp3-client-demo:
+	bash tools/qa/mp3_client_demo_smoke.sh
 
 build-esp32:
 	$(PIO) run -e $(ESP32_ENV)

@@ -25,9 +25,13 @@
 - [ ] command latency acceptable under scan load
 - [ ] keyboard remains responsive during scan/audio
 - [ ] screen remains stable and recovers after reset/relink
+- [ ] `MP3_BACKEND_STATUS` inclut `last_fallback_reason` + compteurs `tools_*` / `legacy_*`
+- [ ] `MP3_CAPS` expose des capacites runtime dynamiques (pas de promesse hardcodee)
 
 ## Evidence
 
 - [ ] `tools/qa/mp3_rc_smoke.sh` output attached
+- [ ] `tools/qa/mp3_client_demo_smoke.sh` output attached
 - [ ] live USB runbook executed (`tools/qa/mp3_rc_runbook.md`)
+- [ ] checklist operateur client verifiee (`tools/qa/mp3_client_live_checklist.md`)
 - [ ] anomalies classified (Critique/Majeure/Mineure)

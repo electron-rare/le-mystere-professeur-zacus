@@ -53,6 +53,7 @@ Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
 - Specs STORY auteur: `story_specs/schema/*`, `story_specs/templates/*`, `story_specs/scenarios/*`
 - Generateur STORY: `tools/story_gen/story_gen.py`
 - Guide scenario STORY: `src/story/README.md`
+- Guide rapide auteur scenario V2: `GENERER_UN_SCENARIO_STORY_V2.md`
 - Service scan catalogue SD non bloquant: `src/services/storage/catalog_scan_service.h`, `src/services/storage/catalog_scan_service.cpp`
 - Memo board A252: `README_A252.md`
 - Cablage: `WIRING.md`

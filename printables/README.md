@@ -3,7 +3,11 @@
 Organisation :
 - `src/` = sources éditables
 - `export/pdf/` = prêts à imprimer
-- `export/png/` = previews
+- `export/png/` = previews versionnés
+  - `general/` = affiches, fiches et cartes hors sous-thèmes
+  - `fiche-enquete/` = actes de la fiche d'enquête
+  - `personnages/` = cartes personnages
+  - `zones/` = visuels des zones
 
 Convention de nommage recommandée :
 - `a6` / `a5` / `a4`
@@ -18,6 +22,6 @@ Exemples :
 Ordre d’impression : voir `ordre-dimpression.md`.
 
 ## État actuel
-- Structure prête : `src/`, `export/pdf/`, `export/png/`.
+- Structure alignée : `src/`, `export/pdf/`, `export/png/`.
+- Préviews PNG regroupées dans `export/png/` par sous-dossiers thématiques.
 - Invitations initialisées : `invitations/src/` et `invitations/export/{pdf,png}/`.
-- Aucun asset image versionné pour l'instant (préviews à ajouter au fil des PR).

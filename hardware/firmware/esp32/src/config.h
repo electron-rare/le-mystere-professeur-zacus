@@ -60,7 +60,7 @@ constexpr uint16_t kBootRadioScanChunkMs = 18;
 constexpr bool kEnableInternalLittleFs = true;
 constexpr bool kInternalLittleFsFormatOnFail = false;
 constexpr bool kPreferLittleFsBootFx = true;
-constexpr char kBootFxLittleFsPath[] = "/boot.mp3";
+constexpr char kBootFxLittleFsPath[] = "/uson_boot_arcade_lowmono.mp3";
 constexpr float kBootFxLittleFsGain = 0.24f;
 constexpr uint32_t kBootFxLittleFsMaxDurationMs = 22000;
 

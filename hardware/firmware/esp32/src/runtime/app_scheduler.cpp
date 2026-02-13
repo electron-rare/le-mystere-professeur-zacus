@@ -6,7 +6,7 @@ RuntimeMode schedulerSelectRuntimeMode(const AppSchedulerInputs& input) {
     return RuntimeMode::kSignal;
   }
 
-  if (input.sdReady && input.hasTracks) {
+  if (input.mp3GateOpen && input.sdReady && input.hasTracks) {
     return RuntimeMode::kMp3;
   }
   return RuntimeMode::kSignal;

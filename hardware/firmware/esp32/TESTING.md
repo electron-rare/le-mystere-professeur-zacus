@@ -17,7 +17,7 @@ Cette checklist couvre le comportement attendu du couple ESP32 + ESP8266 OLED.
    - `[MODE] U_LOCK (appuyer touche pour detecter LA)`
    - pas de montage SD immediat
    - `[BOOT_PROTO] START ...`
-   - intro audio `boot.mp3` puis scan radio I2S
+   - intro audio LittleFS (par defaut `uson_boot_arcade_lowmono.mp3`) puis scan radio I2S
    - `[KEYMAP][BOOT_PROTO] K1..K6=NEXT ...`
 3. Verifier l'OLED:
    - pictogramme casse + attente appui touche

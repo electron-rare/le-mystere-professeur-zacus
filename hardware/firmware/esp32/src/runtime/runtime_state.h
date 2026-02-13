@@ -39,7 +39,7 @@ extern UnlockJingleState g_unlockJingle;
 struct BootAudioProtocolState {
   bool active = false;
   bool validated = false;
-  uint8_t replayCount = 0;
+  uint16_t replayCount = 0;
   uint32_t deadlineMs = 0;
   uint32_t nextReminderMs = 0;
   char serialCmdBuffer[32] = {};

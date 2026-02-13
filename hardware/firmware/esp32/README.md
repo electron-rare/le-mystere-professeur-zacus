@@ -62,7 +62,7 @@ Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
 
 ### Protocole boot audio
 
-- Au demarrage, le firmware lit un fichier `boot.mp3` (LittleFS, cible ~20 s).
+- Au demarrage, le firmware lit un FX boot LittleFS (par defaut `uson_boot_arcade_lowmono.mp3`, cible ~20 s).
 - Ensuite il lance un scan radio I2S continu (bruit FM/recherche) en boucle.
 - Pendant cette phase, les commandes de mode normal sont bloquees.
 - Le passage a l'app suivante se fait sur appui d'une touche `K1..K6` (pas de timeout auto).
@@ -189,11 +189,11 @@ Le lecteur:
 Sons internes:
 
 - Le boot tente d'abord un FX depuis `LittleFS`:
-  - priorite: chemin configure `kBootFxLittleFsPath` (defaut `/boot.mp3`)
+  - priorite: chemin configure `kBootFxLittleFsPath` (defaut `/uson_boot_arcade_lowmono.mp3`)
   - puis auto-detection: `/boot.mp3`, `/boot.wav`, `/boot.aac`, `/boot.flac`, `/boot.opus`, `/boot.ogg`
   - fallback final: premier fichier audio supporte trouve dans la racine LittleFS
 - Si absent/invalide, fallback automatique sur le bruit radio I2S genere.
-- Profil recommande: `boot.mp3` narratif ~20 s en LittleFS.
+- Profil recommande: `uson_boot_arcade_lowmono.mp3` narratif ~20 s en LittleFS.
 
 ## Calibration touches analogiques
 

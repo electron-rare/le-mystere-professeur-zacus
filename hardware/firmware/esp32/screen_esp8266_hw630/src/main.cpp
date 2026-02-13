@@ -28,6 +28,14 @@ constexpr uint8_t kUnlockFrameCount = 6;
 constexpr uint8_t kInvalidPin = 0xFF;
 constexpr uint8_t kScopeHistoryLen = 64;
 
+constexpr uint8_t kStartupStageInactive = 0;
+constexpr uint8_t kStartupStageBootValidation = 1;
+
+constexpr uint8_t kAppStageULockWaiting = 0;
+constexpr uint8_t kAppStageULockListening = 1;
+constexpr uint8_t kAppStageUSonFunctional = 2;
+constexpr uint8_t kAppStageMp3 = 3;
+
 constexpr uint8_t kSpriteChip[8] = {0x3C, 0x7E, 0xDB, 0xA5, 0xA5, 0xDB, 0x7E, 0x3C};
 constexpr uint8_t kSpriteLock[8] = {0x18, 0x24, 0x24, 0x7E, 0x42, 0x5A, 0x42, 0x7E};
 constexpr uint8_t kSpriteStar[8] = {0x18, 0x99, 0x5A, 0x3C, 0x3C, 0x5A, 0x99, 0x18};
@@ -67,6 +75,8 @@ struct TelemetryState {
   uint8_t micLevelPercent = 0;   // 0..100
   bool micScopeEnabled = false;  // scope render only when source supports it
   uint8_t unlockHoldPercent = 0; // 0..100
+  uint8_t startupStage = kStartupStageInactive;
+  uint8_t appStage = kAppStageULockWaiting;
   int8_t tuningOffset = 0;      // -8..+8 (left/right around LA)
   uint8_t tuningConfidence = 0; // 0..100
   uint32_t lastRxMs = 0;
@@ -652,6 +662,16 @@ void renderULockScreen(uint32_t nowMs) {
   renderULockDetectScreen();
 }
 
+void renderStartupBootScreen(uint32_t nowMs) {
+  drawProtoTitleBar();
+  drawCenteredText("SEQUENCE DEMARRAGE", 15, 1);
+  drawCenteredText("SON + SCAN RADIO", 27, 1);
+  drawCenteredText("ACTION: K1..K6", 39, 1);
+  const uint16_t phase = static_cast<uint16_t>((nowMs / 35U) % 200U);
+  const uint8_t sweep = static_cast<uint8_t>((phase <= 100U) ? phase : (200U - phase));
+  drawHorizontalGauge(12, 54, 104, 8, sweep);
+}
+
 void renderUnlockSequenceScreen(uint32_t nowMs) {
   if (g_unlockSequenceStartMs == 0) {
     g_unlockSequenceStartMs = nowMs;
@@ -781,11 +801,14 @@ void renderScreen(uint32_t nowMs, bool linkAlive) {
   } else if (!linkAlive) {
     renderLinkDownScreen(nowMs);
   } else {
-    if (g_state.mp3Mode) {
+    if (g_state.startupStage == kStartupStageBootValidation) {
+      renderStartupBootScreen(nowMs);
+    } else if (g_state.appStage == kAppStageMp3) {
       renderMp3Screen();
-    } else if (g_state.uLockMode) {
+    } else if (g_state.appStage == kAppStageULockWaiting ||
+               g_state.appStage == kAppStageULockListening) {
       renderULockScreen(nowMs);
-    } else if (g_state.uSonFunctional) {
+    } else if (g_state.appStage == kAppStageUSonFunctional) {
       renderUnlockSequenceScreen(nowMs);
     } else {
       drawTitleBar("U-SON SCREEN");
@@ -844,9 +867,11 @@ bool parseFrame(const char* frame, TelemetryState* out) {
   unsigned int micLevelPercent = 0;
   unsigned int micScopeEnabled = 0;
   unsigned int unlockHoldPercent = 0;
+  unsigned int startupStage = 0;
+  unsigned int appStage = 0;
 
   const int parsed = sscanf(frame,
-                            "STAT,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u,%u,%u,%u",
+                            "STAT,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u,%u,%u,%u,%u,%u",
                             &la,
                             &mp3,
                             &sd,
@@ -863,7 +888,9 @@ bool parseFrame(const char* frame, TelemetryState* out) {
                             &uLockListening,
                             &micLevelPercent,
                             &micScopeEnabled,
-                            &unlockHoldPercent);
+                            &unlockHoldPercent,
+                            &startupStage,
+                            &appStage);
   if (parsed < 5) {
     return false;
   }
@@ -915,6 +942,30 @@ bool parseFrame(const char* frame, TelemetryState* out) {
   } else {
     out->unlockHoldPercent = 0;
   }
+
+  if (parsed >= 18) {
+    out->startupStage =
+        (startupStage == kStartupStageBootValidation) ? kStartupStageBootValidation
+                                                      : kStartupStageInactive;
+  } else {
+    out->startupStage = kStartupStageInactive;
+  }
+
+  if (parsed >= 19) {
+    if (appStage > kAppStageMp3) {
+      appStage = kAppStageULockWaiting;
+    }
+    out->appStage = static_cast<uint8_t>(appStage);
+  } else if (out->mp3Mode) {
+    out->appStage = kAppStageMp3;
+  } else if (out->uSonFunctional) {
+    out->appStage = kAppStageUSonFunctional;
+  } else if (out->uLockMode && out->uLockListening) {
+    out->appStage = kAppStageULockListening;
+  } else {
+    out->appStage = kAppStageULockWaiting;
+  }
+
   out->lastRxMs = millis();
   return true;
 }
@@ -931,9 +982,11 @@ void handleIncoming() {
       g_lineBuffer[g_lineLen] = '\0';
       TelemetryState parsed = g_state;
       if (parseFrame(g_lineBuffer, &parsed)) {
-        if (!g_state.uSonFunctional && parsed.uSonFunctional) {
+        if (g_state.appStage != kAppStageUSonFunctional &&
+            parsed.appStage == kAppStageUSonFunctional) {
           g_unlockSequenceStartMs = millis();
-        } else if (g_state.uSonFunctional && !parsed.uSonFunctional) {
+        } else if (g_state.appStage == kAppStageUSonFunctional &&
+                   parsed.appStage != kAppStageUSonFunctional) {
           g_unlockSequenceStartMs = 0;
         }
         pushScopeSample(parsed.micLevelPercent);

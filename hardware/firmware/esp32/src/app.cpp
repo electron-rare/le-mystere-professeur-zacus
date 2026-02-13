@@ -22,6 +22,11 @@
 
 constexpr char kUnlockJingleRtttl[] =
     "zac_unlock:d=16,o=6,b=118:e,p,b,p,e7,8p,e7,b,e7";
+constexpr char kWinFallbackJingleRtttl[] =
+    "win_8bit:d=16,o=6,b=180:e6,g6,b6,e7,p,e7,d7,b6,g6,e6,2c7";
+constexpr uint32_t kBootLoopScanMinMs = 10000U;
+constexpr uint32_t kBootLoopScanMaxMs = 40000U;
+constexpr uint32_t kEtape2DelayAfterUnlockMs = 15UL * 60UL * 1000UL;
 
 struct BootRadioScanState {
   AudioOutputI2S* output = nullptr;
@@ -40,6 +45,15 @@ struct BootRadioScanState {
 
 BootRadioScanState g_bootRadioScan;
 
+struct StoryTimelineState {
+  bool unlockArmed = false;
+  bool etape2Played = false;
+  uint32_t unlockMs = 0;
+  uint32_t etape2DueMs = 0;
+};
+
+StoryTimelineState g_storyTimeline;
+
 void setBootAudioPaEnabled(bool enabled, const char* source);
 void printBootAudioOutputInfo(const char* source);
 void printLittleFsInfo(const char* source);
@@ -53,10 +67,23 @@ bool playAudioFromFsBlocking(fs::FS& storage,
 bool resolveBootLittleFsPath(String* outPath);
 bool playBootLittleFsFx(const char* source);
 void playBootAudioPrimaryFx(const char* source);
+bool resolveRandomFsPathContaining(fs::FS& storage, const char* token, String* outPath);
+bool playRandomLittleFsTokenFx(const char* token,
+                               const char* source,
+                               float gain,
+                               uint32_t maxDurationMs,
+                               String* outPath = nullptr);
+bool playRandomTokenFx(const char* token, const char* source, bool allowSdFallback);
+void playRtttlJingleBlocking(const char* song, float gain, const char* source);
+void resetStoryTimeline(const char* source);
+void armStoryTimelineAfterUnlock(uint32_t nowMs);
+bool isMp3GateOpen();
+void updateStoryTimeline(uint32_t nowMs);
 bool startBootRadioScan(const char* source);
 void stopBootRadioScan(const char* source);
 void updateBootRadioScan(uint32_t nowMs);
 void continueAfterBootProtocol(const char* source);
+void startBootAudioLoopCycle(uint32_t nowMs, const char* source);
 void startMicCalibration(uint32_t nowMs, const char* reason);
 bool processCodecDebugCommand(const char* cmd);
 void printCodecDebugHelp();
@@ -876,6 +903,183 @@ bool playBootLittleFsFx(const char* source) {
                                  source);
 }
 
+bool resolveRandomFsPathContaining(fs::FS& storage, const char* token, String* outPath) {
+  if (outPath == nullptr || token == nullptr || token[0] == '\0') {
+    return false;
+  }
+  outPath->remove(0);
+
+  String needle(token);
+  needle.toLowerCase();
+  if (needle.isEmpty()) {
+    return false;
+  }
+
+  fs::File root = storage.open("/");
+  if (!root || !root.isDirectory()) {
+    return false;
+  }
+
+  uint32_t matches = 0;
+  fs::File file = root.openNextFile();
+  while (file) {
+    if (!file.isDirectory()) {
+      String name = String(file.name());
+      if (!name.startsWith("/")) {
+        name = "/" + name;
+      }
+      if (isSupportedBootFsAudioPath(name.c_str())) {
+        String lowerName = name;
+        lowerName.toLowerCase();
+        if (lowerName.indexOf(needle) >= 0) {
+          ++matches;
+          if (matches == 1U || random(0L, static_cast<long>(matches)) == 0L) {
+            *outPath = name;
+          }
+        }
+      }
+    }
+    file.close();
+    file = root.openNextFile();
+  }
+  root.close();
+  return !outPath->isEmpty();
+}
+
+bool playRandomLittleFsTokenFx(const char* token,
+                               const char* source,
+                               float gain,
+                               uint32_t maxDurationMs,
+                               String* outPath) {
+  if (!g_littleFsReady) {
+    return false;
+  }
+
+  String path;
+  if (!resolveRandomFsPathContaining(LittleFS, token, &path)) {
+    return false;
+  }
+
+  if (outPath != nullptr) {
+    *outPath = path;
+  }
+  Serial.printf("[AUDIO_FS] %s random '%s' from LittleFS: %s\n",
+                source,
+                token,
+                path.c_str());
+  return playAudioFromFsBlocking(LittleFS, path.c_str(), gain, maxDurationMs, source);
+}
+
+bool playRandomTokenFx(const char* token, const char* source, bool allowSdFallback) {
+  String path;
+  if (playRandomLittleFsTokenFx(token,
+                                source,
+                                config::kBootFxLittleFsGain,
+                                config::kBootFxLittleFsMaxDurationMs,
+                                &path)) {
+    return true;
+  }
+
+  if (!allowSdFallback) {
+    return false;
+  }
+
+  if (!g_mp3.isSdReady()) {
+    g_mp3.requestStorageRefresh();
+    g_mp3.update(millis(), false);
+  }
+  if (!g_mp3.isSdReady()) {
+    return false;
+  }
+
+  if (!resolveRandomFsPathContaining(SD_MMC, token, &path)) {
+    return false;
+  }
+  Serial.printf("[AUDIO_FS] %s random '%s' from SD: %s\n",
+                source,
+                token,
+                path.c_str());
+  return playAudioFromFsBlocking(SD_MMC,
+                                 path.c_str(),
+                                 config::kBootFxLittleFsGain,
+                                 config::kBootFxLittleFsMaxDurationMs,
+                                 source);
+}
+
+void playRtttlJingleBlocking(const char* song, float gain, const char* source) {
+  if (song == nullptr || song[0] == '\0') {
+    return;
+  }
+
+  const bool shouldRestoreMicCapture =
+      config::kUseI2SMicInput && g_mode == RuntimeMode::kSignal && g_laDetectionEnabled;
+  if (shouldRestoreMicCapture) {
+    g_laDetector.setCaptureEnabled(false);
+  }
+  setBootAudioPaEnabled(true, source);
+  printBootAudioOutputInfo(source);
+
+  if (!g_unlockJinglePlayer.start(song, gain)) {
+    if (shouldRestoreMicCapture) {
+      g_laDetector.setCaptureEnabled(true);
+    }
+    Serial.printf("[AUDIO] %s RTTTL start failed.\n", source);
+    return;
+  }
+
+  const uint32_t timeoutMs = millis() + 8000U;
+  while (g_unlockJinglePlayer.isActive()) {
+    g_unlockJinglePlayer.update();
+    if (static_cast<int32_t>(millis() - timeoutMs) >= 0) {
+      Serial.printf("[AUDIO] %s RTTTL timeout.\n", source);
+      break;
+    }
+    delay(0);
+  }
+  g_unlockJinglePlayer.stop();
+
+  if (shouldRestoreMicCapture) {
+    g_laDetector.setCaptureEnabled(true);
+  }
+}
+
+void resetStoryTimeline(const char* source) {
+  g_storyTimeline.unlockArmed = false;
+  g_storyTimeline.etape2Played = false;
+  g_storyTimeline.unlockMs = 0;
+  g_storyTimeline.etape2DueMs = 0;
+  Serial.printf("[STORY] reset (%s)\n", source);
+}
+
+void armStoryTimelineAfterUnlock(uint32_t nowMs) {
+  g_storyTimeline.unlockArmed = true;
+  g_storyTimeline.etape2Played = false;
+  g_storyTimeline.unlockMs = nowMs;
+  g_storyTimeline.etape2DueMs = nowMs + kEtape2DelayAfterUnlockMs;
+  Serial.printf("[STORY] unlock armed: ETAPE_2 due in %lus\n",
+                static_cast<unsigned long>(kEtape2DelayAfterUnlockMs / 1000UL));
+}
+
+bool isMp3GateOpen() {
+  return !g_storyTimeline.unlockArmed || g_storyTimeline.etape2Played;
+}
+
+void updateStoryTimeline(uint32_t nowMs) {
+  if (!g_storyTimeline.unlockArmed || g_storyTimeline.etape2Played) {
+    return;
+  }
+  if (static_cast<int32_t>(nowMs - g_storyTimeline.etape2DueMs) < 0) {
+    return;
+  }
+
+  Serial.println("[STORY] ETAPE_2 trigger (T+15min after unlock).");
+  const bool played = playRandomTokenFx("ETAPE_2", "story_etape2", true);
+  if (!played) {
+    Serial.println("[STORY] ETAPE_2 absent: passage sans audio.");
+  }
+  g_storyTimeline.etape2Played = true;
+}
+
 void playBootAudioPrimaryFx(const char* source) {
   if (config::kPreferLittleFsBootFx) {
     if (playBootLittleFsFx(source)) {
@@ -985,8 +1189,52 @@ void playBootAudioDiagSequence() {
   playBootI2sToneFx(880.0f, 260U, 0.64f, "diag_880");
 }
 
+uint32_t randomBootLoopScanDurationMs() {
+  const long minMs = static_cast<long>(kBootLoopScanMinMs);
+  const long maxMsExclusive = static_cast<long>(kBootLoopScanMaxMs + 1U);
+  return static_cast<uint32_t>(random(minMs, maxMsExclusive));
+}
+
+void armBootAudioLoopScanWindow(uint32_t nowMs, const char* source) {
+  const uint32_t scanDurationMs = randomBootLoopScanDurationMs();
+  g_bootAudioProtocol.deadlineMs = nowMs + scanDurationMs;
+  Serial.printf("[BOOT_PROTO] %s scan window=%lu ms (10..40s)\n",
+                source,
+                static_cast<unsigned long>(scanDurationMs));
+}
+
+void startBootAudioLoopCycle(uint32_t nowMs, const char* source) {
+  (void)nowMs;
+  if (!g_bootAudioProtocol.active) {
+    return;
+  }
+
+  ++g_bootAudioProtocol.replayCount;
+  Serial.printf("[BOOT_PROTO] LOOP #%u via=%s\n",
+                static_cast<unsigned int>(g_bootAudioProtocol.replayCount),
+                source);
+
+  stopBootRadioScan("boot_proto_cycle");
+  if (!playRandomTokenFx("BOOT", source, false)) {
+    Serial.println("[BOOT_PROTO] Aucun fichier contenant 'BOOT': fallback FX standard.");
+    playBootAudioPrimaryFx(source);
+  }
+
+  if (!startBootRadioScan(source)) {
+    g_bootAudioProtocol.deadlineMs = millis() + 5000U;
+    Serial.println("[BOOT_PROTO] Radio scan KO, retry auto dans 5s.");
+    return;
+  }
+
+  const uint32_t afterAudioNowMs = millis();
+  armBootAudioLoopScanWindow(afterAudioNowMs, source);
+  g_bootAudioProtocol.nextReminderMs =
+      afterAudioNowMs + static_cast<uint32_t>(config::kBootProtocolPromptPeriodMs);
+}
+
 void printBootAudioProtocolHelp() {
-  Serial.println("[BOOT_PROTO] Touches: K1..K6 = NEXT (passage a l'app suivante)");
+  Serial.println("[BOOT_PROTO] Boucle auto: random '*boot*' + scan radio I2S (10..40s), puis repeat.");
+  Serial.println("[BOOT_PROTO] Touches: K1..K6 = NEXT (lance U_LOCK ecoute)");
   Serial.println(
       "[BOOT_PROTO] Serial: BOOT_NEXT | BOOT_REPLAY | BOOT_STATUS | BOOT_HELP | BOOT_REOPEN");
   Serial.println(
@@ -1001,6 +1249,35 @@ const char* runtimeModeLabel() {
     return "MP3";
   }
   return g_uSonFunctional ? "U-SON" : "U_LOCK";
+}
+
+enum class StartupStage : uint8_t {
+  kInactive = 0,
+  kBootValidation = 1,
+};
+
+enum class AppStage : uint8_t {
+  kULockWaiting = 0,
+  kULockListening = 1,
+  kUSonFunctional = 2,
+  kMp3 = 3,
+};
+
+StartupStage currentStartupStage() {
+  if (g_bootAudioProtocol.active) {
+    return StartupStage::kBootValidation;
+  }
+  return StartupStage::kInactive;
+}
+
+AppStage currentAppStage() {
+  if (g_mode == RuntimeMode::kMp3) {
+    return AppStage::kMp3;
+  }
+  if (!g_uSonFunctional) {
+    return g_uLockListening ? AppStage::kULockListening : AppStage::kULockWaiting;
+  }
+  return AppStage::kUSonFunctional;
 }
 
 bool isUlockContext() {
@@ -1023,7 +1300,6 @@ void continueAfterBootProtocol(const char* source) {
 }
 
 void printBootAudioProtocolStatus(uint32_t nowMs, const char* source) {
-  (void)nowMs;
   if (!g_bootAudioProtocol.active) {
     Serial.printf("[BOOT_PROTO] STATUS via=%s inactive validated=%u\n",
                   source,
@@ -1031,11 +1307,17 @@ void printBootAudioProtocolStatus(uint32_t nowMs, const char* source) {
     return;
   }
 
-  Serial.printf("[BOOT_PROTO] STATUS via=%s waiting_key=1 replay=%u/%u scan=%u mode=%s\n",
+  uint32_t leftMs = 0;
+  if (g_bootAudioProtocol.deadlineMs != 0U &&
+      static_cast<int32_t>(g_bootAudioProtocol.deadlineMs - nowMs) > 0) {
+    leftMs = g_bootAudioProtocol.deadlineMs - nowMs;
+  }
+
+  Serial.printf("[BOOT_PROTO] STATUS via=%s waiting_key=1 loops=%u scan=%u left=%lus mode=%s\n",
                 source,
                 static_cast<unsigned int>(g_bootAudioProtocol.replayCount),
-                static_cast<unsigned int>(config::kBootAudioValidationMaxReplays),
                 g_bootRadioScan.active ? 1U : 0U,
+                static_cast<unsigned long>(leftMs / 1000UL),
                 runtimeModeLabel());
 }
 
@@ -1047,8 +1329,9 @@ void finishBootAudioValidationProtocol(const char* reason, bool validated) {
   stopBootRadioScan("boot_proto_finish");
   g_bootAudioProtocol.active = false;
   g_bootAudioProtocol.validated = validated;
+  g_bootAudioProtocol.deadlineMs = 0;
   g_bootAudioProtocol.nextReminderMs = 0;
-  Serial.printf("[BOOT_PROTO] DONE status=%s reason=%s replay=%u\n",
+  Serial.printf("[BOOT_PROTO] DONE status=%s reason=%s loops=%u\n",
                 validated ? "VALIDATED" : "BYPASS",
                 reason,
                 static_cast<unsigned int>(g_bootAudioProtocol.replayCount));
@@ -1063,19 +1346,8 @@ void replayBootAudioProtocolFx(uint32_t nowMs, const char* source) {
     return;
   }
 
-  if (g_bootAudioProtocol.replayCount >= config::kBootAudioValidationMaxReplays) {
-    Serial.println("[BOOT_PROTO] REPLAY refuse: max atteint.");
-    return;
-  }
-
-  ++g_bootAudioProtocol.replayCount;
-  Serial.printf("[BOOT_PROTO] REPLAY #%u via %s\n",
-                static_cast<unsigned int>(g_bootAudioProtocol.replayCount),
-                source);
-  stopBootRadioScan("boot_proto_replay");
-  playBootAudioPrimaryFx(source);
-  startBootRadioScan("boot_proto_replay");
-  g_bootAudioProtocol.nextReminderMs = nowMs + static_cast<uint32_t>(config::kBootProtocolPromptPeriodMs);
+  Serial.printf("[BOOT_PROTO] REPLAY via %s\n", source);
+  startBootAudioLoopCycle(nowMs, source);
   printBootAudioProtocolStatus(nowMs, source);
 }
 
@@ -1092,10 +1364,9 @@ void startBootAudioValidationProtocol(uint32_t nowMs) {
   g_bootAudioProtocol.serialCmdLen = 0;
   g_bootAudioProtocol.serialCmdBuffer[0] = '\0';
 
-  Serial.printf("[BOOT_PROTO] START timeout=%lu ms max_replays=%u (attente touche)\n",
-                static_cast<unsigned long>(config::kBootAudioValidationTimeoutMs),
-                static_cast<unsigned int>(config::kBootAudioValidationMaxReplays));
-  startBootRadioScan("boot_proto_start");
+  Serial.printf("[BOOT_PROTO] START timeout=%lu ms (attente touche)\n",
+                static_cast<unsigned long>(config::kBootAudioValidationTimeoutMs));
+  startBootAudioLoopCycle(nowMs, "boot_proto_start");
   printBootAudioProtocolStatus(nowMs, "start");
   printBootAudioProtocolHelp();
 }
@@ -1151,13 +1422,12 @@ void processBootAudioSerialCommand(const char* rawCmd, uint32_t nowMs) {
 
   if (strcmp(cmd, "BOOT_REOPEN") == 0 || strcmp(cmd, "BOOT_REARM") == 0 || strcmp(cmd, "BOOT_START") == 0) {
     if (protocolActive) {
-      Serial.println("[BOOT_PROTO] REOPEN: protocole actif, relance intro+scan.");
+      Serial.println("[BOOT_PROTO] REOPEN: protocole actif, redemarre la boucle.");
       replayBootAudioProtocolFx(nowMs, "serial_boot_reopen_active");
       return;
     }
-    Serial.println("[BOOT_PROTO] REOPEN: replay FX boot + rearm protocole.");
-    playBootAudioPrimaryFx("serial_boot_reopen");
-    startBootAudioValidationProtocol(millis());
+    Serial.println("[BOOT_PROTO] REOPEN: rearm protocole.");
+    startBootAudioValidationProtocol(nowMs);
     return;
   }
 
@@ -1176,8 +1446,10 @@ void processBootAudioSerialCommand(const char* rawCmd, uint32_t nowMs) {
     if (protocolActive) {
       replayBootAudioProtocolFx(nowMs, "serial_boot_replay");
     } else {
-      Serial.println("[BOOT_PROTO] REPLAY hors protocole: test manuel FX boot.");
-      playBootAudioPrimaryFx("serial_boot_replay_manual");
+      Serial.println("[BOOT_PROTO] REPLAY hors protocole: test manuel boucle boot.");
+      if (!playRandomTokenFx("BOOT", "serial_boot_replay_manual", false)) {
+        playBootAudioPrimaryFx("serial_boot_replay_manual");
+      }
       printBootAudioProtocolStatus(nowMs, "serial_boot_replay_manual");
     }
     return;
@@ -1188,7 +1460,9 @@ void processBootAudioSerialCommand(const char* rawCmd, uint32_t nowMs) {
       replayBootAudioProtocolFx(nowMs, "serial_boot_ko");
     } else {
       Serial.println("[BOOT_PROTO] KO hors protocole: test manuel FX boot.");
-      playBootAudioPrimaryFx("serial_boot_ko_manual");
+      if (!playRandomTokenFx("BOOT", "serial_boot_ko_manual", false)) {
+        playBootAudioPrimaryFx("serial_boot_ko_manual");
+      }
       printBootAudioProtocolStatus(nowMs, "serial_boot_ko_manual");
     }
     return;
@@ -1199,10 +1473,12 @@ void processBootAudioSerialCommand(const char* rawCmd, uint32_t nowMs) {
     }
     playBootI2sToneFx(440.0f, 700U, 0.68f, "serial_test_tone");
     if (protocolActive) {
-      startBootRadioScan("serial_test_tone_resume");
+      if (startBootRadioScan("serial_test_tone_resume")) {
+        armBootAudioLoopScanWindow(millis(), "serial_test_tone_resume");
+      }
     }
-    extendBootAudioProtocolWindow(millis());
-    printBootAudioProtocolStatus(millis(), "serial_test_tone");
+    extendBootAudioProtocolWindow(nowMs);
+    printBootAudioProtocolStatus(nowMs, "serial_test_tone");
     return;
   }
   if (strcmp(cmd, "BOOT_TEST_DIAG") == 0 || strcmp(cmd, "DIAG") == 0) {
@@ -1211,10 +1487,12 @@ void processBootAudioSerialCommand(const char* rawCmd, uint32_t nowMs) {
     }
     playBootAudioDiagSequence();
     if (protocolActive) {
-      startBootRadioScan("serial_test_diag_resume");
+      if (startBootRadioScan("serial_test_diag_resume")) {
+        armBootAudioLoopScanWindow(millis(), "serial_test_diag_resume");
+      }
     }
-    extendBootAudioProtocolWindow(millis());
-    printBootAudioProtocolStatus(millis(), "serial_test_diag");
+    extendBootAudioProtocolWindow(nowMs);
+    printBootAudioProtocolStatus(nowMs, "serial_test_diag");
     return;
   }
   if (strcmp(cmd, "BOOT_PA_ON") == 0 || strcmp(cmd, "PAON") == 0) {
@@ -1253,7 +1531,9 @@ void processBootAudioSerialCommand(const char* rawCmd, uint32_t nowMs) {
     }
     playBootLittleFsFx("serial_boot_fs_test");
     if (protocolActive) {
-      startBootRadioScan("serial_boot_fs_test_resume");
+      if (startBootRadioScan("serial_boot_fs_test_resume")) {
+        armBootAudioLoopScanWindow(millis(), "serial_boot_fs_test_resume");
+      }
     }
     return;
   }
@@ -1308,7 +1588,7 @@ void handleBootAudioProtocolKey(uint8_t key, uint32_t nowMs) {
     case 4:
     case 5:
     case 6:
-      Serial.printf("[BOOT_PROTO] K%u -> NEXT\n", static_cast<unsigned int>(key));
+      Serial.printf("[BOOT_PROTO] K%u -> U_LOCK ecoute\n", static_cast<unsigned int>(key));
       finishBootAudioValidationProtocol("key_next", true);
       break;
     default:
@@ -1332,9 +1612,25 @@ void updateBootAudioValidationProtocol(uint32_t nowMs) {
     return;
   }
 
+  if (!g_bootRadioScan.active) {
+    if (g_bootAudioProtocol.deadlineMs == 0U ||
+        static_cast<int32_t>(nowMs - g_bootAudioProtocol.deadlineMs) >= 0) {
+      startBootAudioLoopCycle(nowMs, "boot_proto_recover");
+      if (!g_bootAudioProtocol.active) {
+        return;
+      }
+    }
+  } else if (g_bootAudioProtocol.deadlineMs != 0U &&
+             static_cast<int32_t>(nowMs - g_bootAudioProtocol.deadlineMs) >= 0) {
+    startBootAudioLoopCycle(nowMs, "boot_proto_cycle");
+    if (!g_bootAudioProtocol.active) {
+      return;
+    }
+  }
+
   if (static_cast<int32_t>(nowMs - g_bootAudioProtocol.nextReminderMs) >= 0) {
     printBootAudioProtocolStatus(nowMs, "tick");
-    Serial.println("[BOOT_PROTO] Attente touche: K1..K6 pour passer a l'app suivante.");
+    Serial.println("[BOOT_PROTO] Attente touche: K1..K6 pour lancer U_LOCK ecoute.");
     g_bootAudioProtocol.nextReminderMs =
         nowMs + static_cast<uint32_t>(config::kBootProtocolPromptPeriodMs);
   }
@@ -2262,6 +2558,7 @@ AppSchedulerInputs makeSchedulerInputs() {
   input.unlockJingleActive = g_unlockJingle.active;
   input.sdReady = g_mp3.isSdReady();
   input.hasTracks = g_mp3.hasTracks();
+  input.mp3GateOpen = isMp3GateOpen();
   input.laDetectionEnabled = g_laDetectionEnabled;
   input.sineEnabled = config::kEnableSineDac;
   input.bootProtocolActive = g_bootAudioProtocol.active;
@@ -2288,6 +2585,7 @@ void applyRuntimeMode(RuntimeMode newMode, bool force = false) {
     stopUnlockJingle(false);
     g_uSonFunctional = false;
     g_uLockListening = !config::kULockRequireKeyToStartDetection;
+    resetStoryTimeline(changed ? "mode_signal" : "boot_signal");
     resetLaHoldProgress();
     g_laDetectionEnabled = g_uLockListening;
     g_laDetector.setCaptureEnabled(g_uLockListening);
@@ -2426,7 +2724,6 @@ void App::setup() {
   printBootAudioOutputInfo("boot_setup");
   g_sine.setEnabled(false);
   applyRuntimeMode(schedulerSelectRuntimeMode(makeSchedulerInputs()), true);
-  playBootAudioPrimaryFx("boot_setup");
   startBootAudioValidationProtocol(millis());
 
   Serial.println("[BOOT] U-SON / ESP32 Audio Kit A252 pret.");
@@ -2436,9 +2733,11 @@ void App::setup() {
   Serial.printf("[MIC] Source: %s\n",
                 config::kUseI2SMicInput ? "I2S codec onboard (DIN GPIO35)" : "ADC externe GPIO34");
   Serial.println("[KEYMAP][MP3] K1 play/pause, K2 prev, K3 next, K4 vol-, K5 vol+, K6 repeat");
-  Serial.println("[BOOT] Intro: lecture boot.mp3 puis scan radio I2S en attente d'une touche.");
-  Serial.println("[BOOT] Appui touche pendant boot: passage direct a la detection LA.");
+  Serial.println("[BOOT] Boucle attente: random '*boot*' puis scan radio I2S 10..40s.");
+  Serial.println("[BOOT] Appui touche pendant attente: lancement U_LOCK ecoute (detection LA).");
   Serial.println("[BOOT] Puis MODULE U-SON Fonctionnel apres detection LA.");
+  Serial.println("[STORY] Fin U_LOCK: lecture random '*WIN*' (fallback jingle 8-bit WIN).");
+  Serial.println("[STORY] Fin U-SON: lecture random '*ETAPE_2*' a T+15min apres unlock.");
   Serial.println("[BOOT] En U_LOCK: detection SD desactivee jusqu'au mode U-SON Fonctionnel.");
   if (config::kEnableBootAudioValidationProtocol) {
     Serial.println("[KEYMAP][BOOT_PROTO] K1..K6=NEXT | Serial: BOOT_NEXT, BOOT_REPLAY, BOOT_REOPEN");
@@ -2456,6 +2755,7 @@ void App::setup() {
 
 void App::loop() {
   const uint32_t nowMs = millis();
+  updateStoryTimeline(nowMs);
   AppSchedulerInputs schedulerInput = makeSchedulerInputs();
   AppBrickSchedule schedule = schedulerBuildBricks(schedulerInput);
 
@@ -2537,8 +2837,14 @@ void App::loop() {
   if (uLockListeningBeforeUnlock && g_laHoldAccumMs >= config::kLaUnlockHoldMs) {
     g_uSonFunctional = true;
     resetLaHoldProgress();
+    armStoryTimelineAfterUnlock(nowMs);
     g_mp3.requestStorageRefresh();
-    startUnlockJingle(nowMs);
+    if (!playRandomTokenFx("WIN", "unlock_win", true)) {
+      Serial.println("[STORY] Aucun fichier contenant 'WIN': fallback jingle 8-bit I2S.");
+      playRtttlJingleBlocking(kWinFallbackJingleRtttl,
+                              config::kUnlockI2sJingleGain,
+                              "unlock_win_fallback");
+    }
     Serial.println("[MODE] MODULE U-SON Fonctionnel (LA detecte)");
     Serial.println("[SD] Detection SD activee.");
   }
@@ -2621,5 +2927,7 @@ void App::loop() {
                   tuningConfidence,
                   config::kScreenEnableMicScope && config::kUseI2SMicInput,
                   laHoldPercent,
+                  static_cast<uint8_t>(currentStartupStage()),
+                  static_cast<uint8_t>(currentAppStage()),
                   nowMs);
 }

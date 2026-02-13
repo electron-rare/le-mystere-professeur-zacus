@@ -6,6 +6,9 @@
 
 namespace {
 
+constexpr uint8_t kStormQueueThreshold = 8U;
+constexpr uint32_t kStormDuplicateWindowMs = 40U;
+
 void safeCopy(char* out, size_t outLen, const char* in) {
   if (out == nullptr || outLen == 0U) {
     return;
@@ -22,6 +25,10 @@ bool sameText(const char* lhs, const char* rhs) {
     return false;
   }
   return strcmp(lhs, rhs) == 0;
+}
+
+bool sameEventSignature(const StoryEvent& lhs, const StoryEvent& rhs) {
+  return lhs.type == rhs.type && lhs.value == rhs.value && sameText(lhs.name, rhs.name);
 }
 
 }  // namespace
@@ -210,6 +217,51 @@ void StoryControllerV2::printStatus(uint32_t nowMs, const char* source) const {
       engine_.lastError());
 }
 
+StoryControllerV2::StoryControllerV2Snapshot StoryControllerV2::snapshot(bool enabled,
+                                                                          uint32_t nowMs) const {
+  StoryControllerV2Snapshot out = {};
+  const StorySnapshot snap = engine_.snapshot();
+  out.enabled = enabled;
+  out.running = snap.running;
+  out.scenarioId = snap.scenarioId;
+  out.stepId = snap.stepId;
+  out.mp3GateOpen = snap.mp3GateOpen;
+  out.queueDepth = snap.queuedEvents;
+  out.appHostError = appHost_.lastError();
+  out.engineError = engine_.lastError();
+  out.etape2DueMs = etape2DueMs_;
+  out.testMode = testMode_;
+  (void)nowMs;
+  return out;
+}
+
+const char* StoryControllerV2::healthLabel(bool enabled, uint32_t nowMs) const {
+  const StoryControllerV2Snapshot snap = snapshot(enabled, nowMs);
+  if (!snap.enabled) {
+    return "OUT_OF_CONTEXT";
+  }
+  const bool hasEngineError =
+      snap.engineError != nullptr && snap.engineError[0] != '\0' && strcmp(snap.engineError, "OK") != 0;
+  const bool hasAppError =
+      snap.appHostError != nullptr && snap.appHostError[0] != '\0' && strcmp(snap.appHostError, "OK") != 0;
+  if (hasEngineError || hasAppError) {
+    return "ERROR";
+  }
+  if (snap.running && (snap.queueDepth > 0U || audio_.isBaseBusy())) {
+    return "BUSY";
+  }
+  return "OK";
+}
+
+void StoryControllerV2::setTraceEnabled(bool enabled) {
+  traceEnabled_ = enabled;
+  Serial.printf("[STORY_V2] trace=%u\n", traceEnabled_ ? 1U : 0U);
+}
+
+bool StoryControllerV2::traceEnabled() const {
+  return traceEnabled_;
+}
+
 void StoryControllerV2::printScenarioList(const char* source) const {
   Serial.printf("[STORY_V2] LIST via=%s count=%u\n",
                 source != nullptr ? source : "-",
@@ -286,6 +338,18 @@ bool StoryControllerV2::postEvent(StoryEventType type,
 bool StoryControllerV2::postEventInternal(const StoryEvent& event,
                                           const char* source,
                                           bool notifyApps) {
+  if (isDuplicateStormEvent(event)) {
+    ++droppedStormEvents_;
+    if (traceEnabled_) {
+      Serial.printf("[STORY_V2][TRACE] drop storm event type=%u name=%s queue=%u dropped=%lu\n",
+                    static_cast<unsigned int>(event.type),
+                    event.name,
+                    static_cast<unsigned int>(engine_.snapshot().queuedEvents),
+                    static_cast<unsigned long>(droppedStormEvents_));
+    }
+    return false;
+  }
+
   if (notifyApps) {
     appHost_.handleEvent(event, makeAppEventSink(source));
   }
@@ -296,6 +360,17 @@ bool StoryControllerV2::postEventInternal(const StoryEvent& event,
                   static_cast<unsigned int>(event.type),
                   event.name,
                   source != nullptr ? source : "-");
+  } else {
+    lastPostedEvent_ = event;
+    hasLastPostedEvent_ = true;
+    lastPostedEventAtMs_ = event.atMs;
+    if (traceEnabled_) {
+      Serial.printf("[STORY_V2][TRACE] post event type=%u name=%s via=%s queue=%u\n",
+                    static_cast<unsigned int>(event.type),
+                    event.name,
+                    source != nullptr ? source : "-",
+                    static_cast<unsigned int>(engine_.snapshot().queuedEvents));
+    }
   }
   return ok;
 }
@@ -338,6 +413,9 @@ void StoryControllerV2::resetRuntimeState() {
   etape2DueMs_ = 0U;
   etape2DuePosted_ = false;
   safeCopy(activeScreenSceneId_, sizeof(activeScreenSceneId_), nullptr);
+  hasLastPostedEvent_ = false;
+  lastPostedEventAtMs_ = 0U;
+  droppedStormEvents_ = 0U;
   appHost_.stopAll("reset");
 }
 
@@ -355,4 +433,17 @@ bool StoryControllerV2::postEventFromSink(const StoryEvent& event, void* user) {
     return false;
   }
   return self->postEventInternal(event, "app_sink", false);
+}
+
+bool StoryControllerV2::isDuplicateStormEvent(const StoryEvent& event) const {
+  if (!hasLastPostedEvent_) {
+    return false;
+  }
+  if (engine_.snapshot().queuedEvents < kStormQueueThreshold) {
+    return false;
+  }
+  if (!sameEventSignature(event, lastPostedEvent_)) {
+    return false;
+  }
+  return static_cast<uint32_t>(event.atMs - lastPostedEventAtMs_) <= kStormDuplicateWindowMs;
 }

@@ -37,7 +37,7 @@ void ScreenLink::begin() {
   serial_.begin(baud_, SERIAL_8N1, -1, txPin_);
 }
 
-void ScreenLink::update(const ScreenFrame& frame) {
+bool ScreenLink::update(const ScreenFrame& frame, bool forceKeyframe) {
   const bool changed = !hasState_ || frame.laDetected != lastLa_ || frame.mp3Playing != lastMp3_ ||
                        frame.sdReady != lastSd_ || frame.mp3Mode != lastMp3Mode_ || frame.key != lastKey_ ||
                        frame.track != lastTrack_ || frame.trackCount != lastTrackCount_ ||
@@ -59,11 +59,11 @@ void ScreenLink::update(const ScreenFrame& frame) {
                        frame.errorCode != lastErrorCode_;
   const uint32_t elapsedMs = frame.nowMs - lastTxMs_;
   const bool due = elapsedMs >= updatePeriodMs_;
-  if (!changed && !due) {
-    return;
+  if (!forceKeyframe && !changed && !due) {
+    return false;
   }
-  if (hasState_ && !due && elapsedMs < changeMinPeriodMs_) {
-    return;
+  if (!forceKeyframe && hasState_ && !due && elapsedMs < changeMinPeriodMs_) {
+    return false;
   }
 
   char payload[232] = {};
@@ -97,7 +97,7 @@ void ScreenLink::update(const ScreenFrame& frame) {
                                   frame.scanBusy ? 1U : 0U,
                                   static_cast<unsigned int>(frame.errorCode));
   if (payloadLen <= 0) {
-    return;
+    return false;
   }
 
   const size_t rawLen = strnlen(payload, sizeof(payload));
@@ -106,12 +106,13 @@ void ScreenLink::update(const ScreenFrame& frame) {
   char txFrame[256] = {};
   const int len = snprintf(txFrame, sizeof(txFrame), "%s,%02X\n", payload, static_cast<unsigned int>(crc));
   if (len <= 0) {
-    return;
+    return false;
   }
 
   const int available = serial_.availableForWrite();
   if (available >= 0 && available < len) {
-    return;
+    ++txDropCount_;
+    return false;
   }
   serial_.write(reinterpret_cast<const uint8_t*>(txFrame), static_cast<size_t>(len));
 
@@ -142,4 +143,18 @@ void ScreenLink::update(const ScreenFrame& frame) {
   lastErrorCode_ = frame.errorCode;
   lastSequence_ = frame.sequence;
   lastTxMs_ = frame.nowMs;
+  ++txFrameCount_;
+  return true;
+}
+
+uint32_t ScreenLink::txFrameCount() const {
+  return txFrameCount_;
+}
+
+uint32_t ScreenLink::txDropCount() const {
+  return txDropCount_;
+}
+
+uint32_t ScreenLink::lastTxMs() const {
+  return lastTxMs_;
 }

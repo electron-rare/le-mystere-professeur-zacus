@@ -21,6 +21,7 @@ class StoryEngineV2 {
 
   bool consumeStepChanged();
   const char* lastError() const;
+  uint32_t droppedEvents() const;
 
  private:
   bool transitionTo(uint8_t nextStepIndex, uint32_t nowMs, const char* reason);

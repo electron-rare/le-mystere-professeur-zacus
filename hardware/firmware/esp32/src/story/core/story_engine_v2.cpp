@@ -5,6 +5,8 @@
 
 namespace {
 
+constexpr uint8_t kEventProcessBudgetPerUpdate = 6U;
+
 bool sameText(const char* lhs, const char* rhs) {
   if (lhs == nullptr || rhs == nullptr) {
     return false;
@@ -107,7 +109,9 @@ void StoryEngineV2::update(uint32_t nowMs) {
   }
 
   StoryEvent event;
-  while (queue_.pop(&event)) {
+  uint8_t processed = 0U;
+  while (processed < kEventProcessBudgetPerUpdate && queue_.pop(&event)) {
+    ++processed;
     const int8_t transitionIndex = selectEventTransition(event);
     if (transitionIndex < 0) {
       continue;
@@ -121,6 +125,11 @@ void StoryEngineV2::update(uint32_t nowMs) {
       continue;
     }
     transitionTo(static_cast<uint8_t>(targetStepIndex), nowMs, transition.id);
+    return;
+  }
+
+  if (processed >= kEventProcessBudgetPerUpdate && queue_.size() > 0U) {
+    snprintf(lastError_, sizeof(lastError_), "%s", "EVENT_BUDGET");
     return;
   }
 
@@ -190,6 +199,10 @@ bool StoryEngineV2::consumeStepChanged() {
 
 const char* StoryEngineV2::lastError() const {
   return lastError_;
+}
+
+uint32_t StoryEngineV2::droppedEvents() const {
+  return queue_.droppedCount();
 }
 
 bool StoryEngineV2::transitionTo(uint8_t nextStepIndex, uint32_t nowMs, const char* reason) {

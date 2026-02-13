@@ -42,6 +42,20 @@ void setScanReason(Mp3ScanProgress* progress, const char* reason) {
   copyCStr(progress->reason, sizeof(progress->reason), reason);
 }
 
+void setBackendReason(Mp3BackendRuntimeStats* stats, const char* reason) {
+  if (stats == nullptr) {
+    return;
+  }
+  copyCStr(stats->lastFailureReason, sizeof(stats->lastFailureReason), reason);
+}
+
+void setFallbackPath(Mp3BackendRuntimeStats* stats, const char* path) {
+  if (stats == nullptr) {
+    return;
+  }
+  copyCStr(stats->lastFallbackPath, sizeof(stats->lastFallbackPath), path);
+}
+
 bool isJsonSafeChar(char c) {
   return c != '\\' && c != '"' && c != '\n' && c != '\r';
 }
@@ -117,6 +131,8 @@ void Mp3Player::begin() {
   scanProgress_.tickEntryBudget = kScanTickEntryBudget;
   setScanReason(&scanProgress_, "IDLE");
   backendStats_ = Mp3BackendRuntimeStats();
+  setBackendReason(&backendStats_, "OK");
+  setFallbackPath(&backendStats_, "NONE");
 }
 
 void Mp3Player::update(uint32_t nowMs, bool allowPlayback) {
@@ -916,12 +932,14 @@ bool Mp3Player::startLegacyTrack() {
   ++backendStats_.startAttempts;
   if (!sdReady_ || trackCount_ == 0U || currentTrack_ >= trackCount_) {
     ++backendStats_.startFailures;
+    setBackendReason(&backendStats_, "NO_TRACK");
     return false;
   }
 
   const TrackEntry* entry = catalog_.entry(currentTrack_);
   if (entry == nullptr || entry->path[0] == '\0') {
     ++backendStats_.startFailures;
+    setBackendReason(&backendStats_, "NO_ENTRY");
     return false;
   }
 
@@ -932,6 +950,7 @@ bool Mp3Player::startLegacyTrack() {
     nextRetryMs_ = millis() + 250U;
     ++backendStats_.retriesScheduled;
     ++backendStats_.startFailures;
+    setBackendReason(&backendStats_, "UNSUPPORTED_CODEC");
     return false;
   }
 
@@ -941,6 +960,7 @@ bool Mp3Player::startLegacyTrack() {
     nextRetryMs_ = millis() + 1000U;
     ++backendStats_.retriesScheduled;
     ++backendStats_.startFailures;
+    setBackendReason(&backendStats_, "MISSING_FILE");
     return false;
   }
 
@@ -954,6 +974,7 @@ bool Mp3Player::startLegacyTrack() {
     nextRetryMs_ = millis() + 1000U;
     ++backendStats_.retriesScheduled;
     ++backendStats_.startFailures;
+    setBackendReason(&backendStats_, "ALLOC_FAIL");
     return false;
   }
 
@@ -968,6 +989,7 @@ bool Mp3Player::startLegacyTrack() {
     nextRetryMs_ = millis() + 1000U;
     ++backendStats_.retriesScheduled;
     ++backendStats_.startFailures;
+    setBackendReason(&backendStats_, "DECODER_BEGIN_FAIL");
     return false;
   }
 
@@ -975,6 +997,7 @@ bool Mp3Player::startLegacyTrack() {
   copyCStr(backendError_, sizeof(backendError_), "OK");
   ++backendStats_.startSuccess;
   ++backendStats_.legacyStarts;
+  setBackendReason(&backendStats_, "OK");
   Serial.printf("[MP3] Playing %u/%u [%s|LEGACY]: %s\n",
                 static_cast<unsigned int>(currentTrack_ + 1U),
                 static_cast<unsigned int>(trackCount_),
@@ -987,22 +1010,26 @@ bool Mp3Player::startAudioToolsTrack() {
   ++backendStats_.startAttempts;
   if (!sdReady_ || trackCount_ == 0U || currentTrack_ >= trackCount_) {
     ++backendStats_.startFailures;
+    setBackendReason(&backendStats_, "NO_TRACK");
     return false;
   }
   const TrackEntry* entry = catalog_.entry(currentTrack_);
   if (entry == nullptr || entry->path[0] == '\0') {
     ++backendStats_.startFailures;
+    setBackendReason(&backendStats_, "NO_ENTRY");
     return false;
   }
   if (!audioTools_.canHandlePath(entry->path)) {
     copyCStr(backendError_, sizeof(backendError_), "UNSUPPORTED");
     ++backendStats_.startFailures;
+    setBackendReason(&backendStats_, "AT_UNSUPPORTED");
     return false;
   }
 
   if (!audioTools_.start(entry->path, gain_)) {
     copyCStr(backendError_, sizeof(backendError_), audioTools_.lastError());
     ++backendStats_.startFailures;
+    setBackendReason(&backendStats_, audioTools_.lastError());
     return false;
   }
 
@@ -1011,6 +1038,7 @@ bool Mp3Player::startAudioToolsTrack() {
   copyCStr(backendError_, sizeof(backendError_), "OK");
   ++backendStats_.startSuccess;
   ++backendStats_.audioToolsStarts;
+  setBackendReason(&backendStats_, "OK");
   Serial.printf("[MP3] Playing %u/%u [%s|AUDIO_TOOLS]: %s\n",
                 static_cast<unsigned int>(currentTrack_ + 1U),
                 static_cast<unsigned int>(trackCount_),
@@ -1027,6 +1055,7 @@ void Mp3Player::startCurrentTrack() {
   }
 
   fallbackUsed_ = false;
+  setFallbackPath(&backendStats_, "NONE");
   bool started = false;
 
   if (backendMode_ != PlayerBackendMode::kLegacyOnly) {
@@ -1034,7 +1063,11 @@ void Mp3Player::startCurrentTrack() {
     if (!started && backendMode_ == PlayerBackendMode::kAutoFallback) {
       fallbackUsed_ = true;
       ++backendStats_.fallbackCount;
+      setFallbackPath(&backendStats_, "AT->LEGACY");
       started = startLegacyTrack();
+      if (!started) {
+        setFallbackPath(&backendStats_, "AT->LEGACY_FAIL");
+      }
     }
   } else {
     started = startLegacyTrack();
@@ -1052,6 +1085,9 @@ void Mp3Player::startCurrentTrack() {
   if (!started) {
     nextRetryMs_ = millis() + 1000U;
     ++backendStats_.retriesScheduled;
+    if (backendError_[0] == '\0') {
+      copyCStr(backendError_, sizeof(backendError_), "START_FAIL");
+    }
     return;
   }
 

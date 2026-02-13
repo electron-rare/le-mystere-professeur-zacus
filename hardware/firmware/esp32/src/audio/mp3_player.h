@@ -53,6 +53,8 @@ struct Mp3BackendRuntimeStats {
   uint32_t fallbackCount = 0U;
   uint32_t legacyStarts = 0U;
   uint32_t audioToolsStarts = 0U;
+  char lastFailureReason[24] = "OK";
+  char lastFallbackPath[24] = "NONE";
 };
 
 class Mp3Player {

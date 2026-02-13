@@ -2,6 +2,10 @@
 
 #include <Arduino.h>
 
+#ifndef USON_STORY_V2_DEFAULT
+#define USON_STORY_V2_DEFAULT 1
+#endif
+
 namespace config {
 
 constexpr uint8_t kPinLedR = 16;
@@ -59,7 +63,7 @@ constexpr uint16_t kBootProtocolPromptPeriodMs = 3000;
 constexpr uint16_t kBootRadioScanChunkMs = 18;
 constexpr uint32_t kStoryEtape2DelayMs = 15UL * 60UL * 1000UL;
 constexpr uint32_t kStoryEtape2TestDelayMs = 5000U;
-constexpr bool kStoryV2EnabledDefault = true;
+constexpr bool kStoryV2EnabledDefault = (USON_STORY_V2_DEFAULT != 0);
 constexpr bool kEnableInternalLittleFs = true;
 constexpr bool kInternalLittleFsFormatOnFail = false;
 constexpr bool kPreferLittleFsBootFx = true;

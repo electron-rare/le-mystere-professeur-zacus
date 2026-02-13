@@ -49,11 +49,14 @@ void printUiStatus(Print& out, const Mp3SerialRuntimeContext& ctx, const char* s
     serialDispatchReply(out, "MP3_UI", SerialDispatchResult::kOutOfContext, "missing_context");
     return;
   }
-  out.printf("[MP3_UI] %s page=%s cursor=%u offset=%u tracks=%u\n",
+  out.printf("[MP3_UI] %s page=%s cursor=%u offset=%u browse=%u queue_off=%u set_idx=%u tracks=%u\n",
              source != nullptr ? source : "status",
              playerUiPageLabel(ctx.ui->page()),
              static_cast<unsigned int>(ctx.ui->cursor()),
              static_cast<unsigned int>(ctx.ui->offset()),
+             static_cast<unsigned int>(ctx.ui->browseCount()),
+             static_cast<unsigned int>(ctx.ui->queueOffset()),
+             static_cast<unsigned int>(ctx.ui->settingsIndex()),
              static_cast<unsigned int>(ctx.player->trackCount()));
 }
 

@@ -471,6 +471,18 @@ bool parseBackendModeToken(const char* token, PlayerBackendMode* outMode) {
   return false;
 }
 
+PlayerBackendMode cycleBackendMode(PlayerBackendMode mode) {
+  switch (mode) {
+    case PlayerBackendMode::kAutoFallback:
+      return PlayerBackendMode::kAudioToolsOnly;
+    case PlayerBackendMode::kAudioToolsOnly:
+      return PlayerBackendMode::kLegacyOnly;
+    case PlayerBackendMode::kLegacyOnly:
+    default:
+      return PlayerBackendMode::kAutoFallback;
+  }
+}
+
 uint8_t encodeBackendForScreen() {
   return static_cast<uint8_t>(g_mp3.activeBackend());
 }
@@ -615,7 +627,12 @@ void sendScreenFrameSnapshot(uint32_t nowMs, uint8_t keyForScreen) {
   }
   frame.unlockHoldPercent = holdPercent;
   frame.startupStage = g_bootAudioProtocol.active ? 1U : 0U;
+  const PlayerUiSnapshot uiSnapshot = g_playerUi.snapshot();
   frame.uiPage = static_cast<uint8_t>(currentPlayerUiPage());
+  frame.uiCursor = uiSnapshot.cursor;
+  frame.uiOffset = uiSnapshot.offset;
+  frame.uiCount = g_mp3.trackCount();
+  frame.queueCount = (g_mp3.trackCount() > 5U) ? 5U : g_mp3.trackCount();
   frame.repeatMode = static_cast<uint8_t>(g_mp3.repeatMode());
   frame.fxActive = g_mp3.isFxActive();
   frame.backendMode = encodeBackendForScreen();
@@ -635,6 +652,12 @@ void sendScreenFrameSnapshot(uint32_t nowMs, uint8_t keyForScreen) {
     frame.appStage = uLockListening ? 1U : 0U;
   } else {
     frame.appStage = 2U;
+  }
+  if (!frame.mp3Mode) {
+    frame.uiCursor = 0U;
+    frame.uiOffset = 0U;
+    frame.uiCount = 0U;
+    frame.queueCount = 0U;
   }
   if (!frame.mp3Mode && storyScene != nullptr) {
     frame.uiPage = storyScene->uiPage;
@@ -3002,8 +3025,21 @@ void handleKeyPress(uint8_t key) {
                           static_cast<unsigned int>(g_playerUi.cursor()));
           }
         } else if (page == PlayerUiPage::kSettings) {
-          g_mp3.cycleRepeatMode();
-          Serial.printf("[KEY] K1 REPEAT %s\n", g_mp3.repeatModeLabel());
+          switch (g_playerUi.settingsIndex()) {
+            case 0:
+              g_mp3.cycleRepeatMode();
+              Serial.printf("[KEY] K1 SET repeat=%s\n", g_mp3.repeatModeLabel());
+              break;
+            case 1:
+              g_mp3.setBackendMode(cycleBackendMode(g_mp3.backendMode()));
+              Serial.printf("[KEY] K1 SET backend=%s\n", g_mp3.backendModeLabel());
+              break;
+            case 2:
+            default:
+              g_mp3.requestCatalogScan(true);
+              Serial.println("[KEY] K1 SET scan=rebuild");
+              break;
+          }
         } else {
           g_mp3.togglePause();
           Serial.printf("[KEY] K1 MP3 %s\n", g_mp3.isPaused() ? "PAUSE" : "PLAY");
@@ -3019,8 +3055,11 @@ void handleKeyPress(uint8_t key) {
           UiAction action;
           action.source = UiActionSource::kKeyShort;
           action.key = 2U;
-          g_playerUi.applyAction(action);
-          Serial.printf("[KEY] K2 CURSOR %u\n", static_cast<unsigned int>(g_playerUi.cursor()));
+          mp3Controller().applyUiAction(action);
+          Serial.printf("[KEY] K2 UI page=%s cursor=%u offset=%u\n",
+                        playerUiPageLabel(g_playerUi.page()),
+                        static_cast<unsigned int>(g_playerUi.cursor()),
+                        static_cast<unsigned int>(g_playerUi.offset()));
         }
         break;
       case 3:
@@ -3033,8 +3072,11 @@ void handleKeyPress(uint8_t key) {
           UiAction action;
           action.source = UiActionSource::kKeyShort;
           action.key = 3U;
-          g_playerUi.applyAction(action);
-          Serial.printf("[KEY] K3 CURSOR %u\n", static_cast<unsigned int>(g_playerUi.cursor()));
+          mp3Controller().applyUiAction(action);
+          Serial.printf("[KEY] K3 UI page=%s cursor=%u offset=%u\n",
+                        playerUiPageLabel(g_playerUi.page()),
+                        static_cast<unsigned int>(g_playerUi.cursor()),
+                        static_cast<unsigned int>(g_playerUi.offset()));
         }
         break;
       case 4:
@@ -3050,7 +3092,7 @@ void handleKeyPress(uint8_t key) {
           UiAction action;
           action.source = UiActionSource::kKeyShort;
           action.key = 6U;
-          g_playerUi.applyAction(action);
+          mp3Controller().applyUiAction(action);
           Serial.printf("[KEY] K6 PAGE %s\n", playerUiPageLabel(g_playerUi.page()));
         }
         break;

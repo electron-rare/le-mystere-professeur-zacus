@@ -20,7 +20,8 @@ namespace {
 
 constexpr const char* kIndexPath = "/.uson_index_v1.csv";
 constexpr const char* kStatePath = "/.uson_player_state_v1.json";
-constexpr uint8_t kMetadataTimeoutMs = 40U;
+constexpr uint32_t kScanTickBudgetMs = 4U;
+constexpr uint8_t kScanMaxDepth = TrackCatalog::kDefaultMaxDepth;
 
 void copyCStr(char* out, size_t outLen, const char* value) {
   if (out == nullptr || outLen == 0U) {
@@ -59,6 +60,25 @@ String jsonEscape(const String& in) {
   return out;
 }
 
+const char* scanStateToLabel(CatalogScanService::State state) {
+  switch (state) {
+    case CatalogScanService::State::kIdle:
+      return "IDLE";
+    case CatalogScanService::State::kRequested:
+      return "REQUESTED";
+    case CatalogScanService::State::kRunning:
+      return "RUNNING";
+    case CatalogScanService::State::kDone:
+      return "DONE";
+    case CatalogScanService::State::kFailed:
+      return "FAILED";
+    case CatalogScanService::State::kCanceled:
+      return "CANCELED";
+    default:
+      return "UNKNOWN";
+  }
+}
+
 }  // namespace
 
 Mp3Player::Mp3Player(uint8_t i2sBclk,
@@ -82,6 +102,8 @@ void Mp3Player::begin() {
     pinMode(paEnablePin_, OUTPUT);
     digitalWrite(paEnablePin_, HIGH);
   }
+  scanService_.reset();
+  clearScanContext();
 }
 
 void Mp3Player::update(uint32_t nowMs, bool allowPlayback) {
@@ -191,10 +213,31 @@ void Mp3Player::cycleRepeatMode() {
   markStateDirty();
 }
 
-void Mp3Player::requestStorageRefresh() {
-  forceRescan_ = true;
+void Mp3Player::requestStorageRefresh(bool forceRebuild) {
+  forceRescan_ = forceRescan_ || forceRebuild;
   nextMountAttemptMs_ = 0;
   nextRescanMs_ = 0;
+  requestCatalogScan(forceRebuild);
+}
+
+void Mp3Player::requestCatalogScan(bool forceRebuild) {
+  if (!sdReady_) {
+    forceRescan_ = forceRescan_ || forceRebuild;
+    return;
+  }
+  scanService_.request(forceRebuild);
+}
+
+bool Mp3Player::cancelCatalogScan() {
+  const bool wasBusy = scanService_.isBusy();
+  scanService_.cancel();
+  clearScanContext();
+  scanBusy_ = false;
+  return wasBusy;
+}
+
+const char* Mp3Player::scanStateLabel() const {
+  return scanStateToLabel(scanService_.state());
 }
 
 void Mp3Player::setGain(float gain) {
@@ -414,7 +457,7 @@ CatalogStats Mp3Player::catalogStats() const {
 }
 
 bool Mp3Player::isScanBusy() const {
-  return scanBusy_;
+  return scanBusy_ || scanService_.isBusy();
 }
 
 const TrackEntry* Mp3Player::trackEntryByNumber(uint16_t oneBasedNumber) const {
@@ -526,7 +569,7 @@ bool Mp3Player::mountStorage(uint32_t nowMs) {
   nextRescanMs_ = nowMs;
   loadPlayerState();
   Serial.println("[MP3] SD_MMC mounted.");
-  scanTracks();
+  requestCatalogScan(forceRescan_);
   return true;
 }
 
@@ -543,6 +586,9 @@ void Mp3Player::unmountStorage(uint32_t nowMs) {
   nextRescanMs_ = 0U;
   nextRetryMs_ = 0U;
   catalog_.clear();
+  scanService_.reset();
+  clearScanContext();
+  scanBusy_ = false;
 
   Serial.println("[MP3] SD removed/unmounted.");
 }
@@ -563,42 +609,136 @@ void Mp3Player::refreshStorage(uint32_t nowMs) {
     }
   }
 
-  if (trackCount_ == 0U && nowMs >= nextRescanMs_) {
-    scanTracks();
-    forceRescan_ = false;
-    nextRescanMs_ = nowMs + 3000U;
-    return;
-  }
-
   if (forceRescan_) {
-    scanTracks();
+    requestCatalogScan(true);
     forceRescan_ = false;
-    nextRescanMs_ = nowMs + 3000U;
-    return;
   }
 
-  if (currentTrack_ >= trackCount_) {
-    currentTrack_ = 0U;
+  if (trackCount_ == 0U && nowMs >= nextRescanMs_ && !scanService_.isBusy()) {
+    requestCatalogScan(false);
+    nextRescanMs_ = nowMs + 3000U;
+  }
+
+  beginScanIfRequested(nowMs);
+  updateScan(nowMs);
+
+  if (trackCount_ > 0U && currentTrack_ >= trackCount_) {
+    currentTrack_ = static_cast<uint16_t>(trackCount_ - 1U);
   }
 }
 
-void Mp3Player::scanTracks() {
-  scanBusy_ = true;
-  catalog_.clear();
-  catalogStats_ = CatalogStats();
+void Mp3Player::beginScanIfRequested(uint32_t nowMs) {
+  if (!scanService_.hasPendingRequest()) {
+    return;
+  }
 
+  // Do not rebuild while an active stream is currently using the catalog.
+  if (activeBackend_ != PlayerBackendId::kNone && trackCount_ > 0U) {
+    return;
+  }
+
+  scanBusy_ = true;
+  catalogStats_ = CatalogStats();
+  clearScanContext();
+  scanService_.start(nowMs);
+
+  const bool forceRebuild = scanService_.forceRebuildRequested();
   bool loadedFromIndex = false;
-  if (!forceRescan_) {
+  if (!forceRebuild) {
     loadedFromIndex = catalog_.loadIndex(SD_MMC, kIndexPath, &catalogStats_);
   }
 
-  if (!loadedFromIndex) {
-    catalog_.scan(SD_MMC,
-                  "/",
-                  TrackCatalog::kDefaultMaxDepth,
-                  kMetadataTimeoutMs,
-                  &catalogStats_);
-    catalog_.saveIndex(SD_MMC, kIndexPath);
+  if (loadedFromIndex) {
+    finalizeScan(nowMs, true, true);
+    return;
+  }
+
+  catalog_.clear();
+  trackCount_ = 0U;
+  currentTrack_ = 0U;
+
+  scanCtx_.active = true;
+  if (!pushScanDir("/", 0U)) {
+    finalizeScan(nowMs, false, false);
+  }
+}
+
+void Mp3Player::updateScan(uint32_t nowMs) {
+  if (scanService_.state() != CatalogScanService::State::kRunning || !scanCtx_.active) {
+    return;
+  }
+
+  const uint32_t budgetStartMs = millis();
+  while (static_cast<uint32_t>(millis() - budgetStartMs) < kScanTickBudgetMs) {
+    if (!scanCtx_.currentDir) {
+      String dirPath;
+      uint8_t depth = 0U;
+      if (!popScanDir(&dirPath, &depth)) {
+        finalizeScan(nowMs, true, false);
+        return;
+      }
+      scanCtx_.currentDir = SD_MMC.open(dirPath.c_str());
+      if (!scanCtx_.currentDir || !scanCtx_.currentDir.isDirectory()) {
+        if (scanCtx_.currentDir) {
+          scanCtx_.currentDir.close();
+        }
+        continue;
+      }
+      scanCtx_.currentDepth = depth;
+      ++catalogStats_.folders;
+    }
+
+    fs::File entry = scanCtx_.currentDir.openNextFile();
+    if (!entry) {
+      scanCtx_.currentDir.close();
+      continue;
+    }
+
+    String path = String(entry.name());
+    const bool isDir = entry.isDirectory();
+    const uint32_t fileSize = static_cast<uint32_t>(entry.size());
+    entry.close();
+
+    if (!path.startsWith("/")) {
+      path = "/" + path;
+    }
+
+    if (isDir) {
+      if (scanCtx_.currentDepth < kScanMaxDepth) {
+        if (!pushScanDir(path.c_str(), static_cast<uint8_t>(scanCtx_.currentDepth + 1U))) {
+          Serial.printf("[MP3] Catalog scan queue overflow at '%s' (max=%u).\n",
+                        path.c_str(),
+                        static_cast<unsigned int>(kScanDirStackMax));
+          finalizeScan(nowMs, false, false);
+          return;
+        }
+      }
+      continue;
+    }
+
+    if (catalogCodecFromPath(path.c_str()) == CatalogCodec::kUnknown) {
+      continue;
+    }
+
+    if (!catalog_.appendFallbackPath(path.c_str(), fileSize)) {
+      scanCtx_.limitReached = true;
+      finalizeScan(nowMs, true, false);
+      return;
+    }
+  }
+}
+
+void Mp3Player::finalizeScan(uint32_t nowMs, bool success, bool loadedFromIndex) {
+  const bool wasTruncated = scanCtx_.limitReached;
+  const uint32_t startedAt = scanService_.startedAtMs();
+  catalogStats_.scanMs = (startedAt == 0U || nowMs < startedAt) ? 0U : (nowMs - startedAt);
+
+  if (!success) {
+    scanBusy_ = false;
+    scanService_.finish(CatalogScanService::State::kFailed, nowMs);
+    clearScanContext();
+    Serial.println("[MP3] Catalog scan failed.");
+    return;
   }
 
   if (catalog_.size() == 0U && isSupportedAudioFile(String(mp3Path_)) && SD_MMC.exists(mp3Path_)) {
@@ -611,10 +751,20 @@ void Mp3Player::scanTracks() {
     catalog_.appendFallbackPath(mp3Path_, fallbackSize);
   }
 
+  catalog_.sort();
   trackCount_ = catalog_.size();
+  catalogStats_.tracks = trackCount_;
+  catalogStats_.indexed = true;
+  catalogStats_.metadataBestEffort = loadedFromIndex;
+  if (!loadedFromIndex) {
+    catalog_.saveIndex(SD_MMC, kIndexPath);
+  }
+
   if (trackCount_ == 0U) {
-    Serial.println("[MP3] No supported audio file found on SD.");
     scanBusy_ = false;
+    scanService_.finish(CatalogScanService::State::kDone, nowMs);
+    clearScanContext();
+    Serial.println("[MP3] No supported audio file found on SD.");
     return;
   }
 
@@ -624,9 +774,47 @@ void Mp3Player::scanTracks() {
   restoreTrackFromStatePath();
 
   scanBusy_ = false;
-  Serial.printf("[MP3] %u track(s) loaded. index=%s\n",
+  scanService_.finish(CatalogScanService::State::kDone, nowMs);
+  clearScanContext();
+  Serial.printf("[MP3] %u track(s) loaded. index=%s%s\n",
                 static_cast<unsigned int>(trackCount_),
-                loadedFromIndex ? "HIT" : "REBUILD");
+                loadedFromIndex ? "HIT" : "REBUILD",
+                wasTruncated ? " (TRUNCATED)" : "");
+}
+
+bool Mp3Player::pushScanDir(const char* path, uint8_t depth) {
+  if (path == nullptr || path[0] == '\0' || scanCtx_.stackSize >= kScanDirStackMax) {
+    return false;
+  }
+  const uint8_t idx = scanCtx_.stackSize;
+  if (path[0] == '/') {
+    snprintf(scanCtx_.stackPath[idx], sizeof(scanCtx_.stackPath[idx]), "%s", path);
+  } else {
+    snprintf(scanCtx_.stackPath[idx], sizeof(scanCtx_.stackPath[idx]), "/%s", path);
+  }
+  scanCtx_.stackDepth[idx] = depth;
+  ++scanCtx_.stackSize;
+  return true;
+}
+
+bool Mp3Player::popScanDir(String* outPath, uint8_t* outDepth) {
+  if (scanCtx_.stackSize == 0U || outPath == nullptr || outDepth == nullptr) {
+    return false;
+  }
+  --scanCtx_.stackSize;
+  *outDepth = scanCtx_.stackDepth[scanCtx_.stackSize];
+  *outPath = scanCtx_.stackPath[scanCtx_.stackSize];
+  return true;
+}
+
+void Mp3Player::clearScanContext() {
+  if (scanCtx_.currentDir) {
+    scanCtx_.currentDir.close();
+  }
+  scanCtx_.active = false;
+  scanCtx_.limitReached = false;
+  scanCtx_.stackSize = 0U;
+  scanCtx_.currentDepth = 0U;
 }
 
 void Mp3Player::updateDeferredStateSave(uint32_t nowMs) {
@@ -659,7 +847,7 @@ bool Mp3Player::startLegacyTrack() {
 
   if (!SD_MMC.exists(trackPath.c_str())) {
     Serial.printf("[MP3] Missing track: %s\n", trackPath.c_str());
-    scanTracks();
+    requestCatalogScan(true);
     nextRetryMs_ = millis() + 1000U;
     return false;
   }

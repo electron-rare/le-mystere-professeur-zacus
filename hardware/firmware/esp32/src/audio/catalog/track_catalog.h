@@ -49,6 +49,7 @@ class TrackCatalog {
   bool saveIndex(fs::FS& storage, const char* path) const;
 
   bool appendFallbackPath(const char* path, uint32_t sizeBytes);
+  void sort();
 
   uint16_t size() const;
   const TrackEntry* entry(uint16_t index) const;

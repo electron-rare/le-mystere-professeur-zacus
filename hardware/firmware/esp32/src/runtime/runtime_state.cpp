@@ -32,6 +32,7 @@ RuntimeMode g_mode = RuntimeMode::kSignal;
 bool g_laDetectionEnabled = true;
 bool g_uSonFunctional = false;
 bool g_uLockListening = false;
+bool g_storyV2Enabled = config::kStoryV2EnabledDefault;
 uint32_t g_laHoldAccumMs = 0;
 uint32_t g_lastLoopMs = 0;
 bool g_paEnableActiveHigh = config::kPinAudioPaEnableActiveHigh;

@@ -2,9 +2,9 @@
 
 #include <Arduino.h>
 
-#include "../audio/effects/audio_effect_id.h"
-#include "../services/audio/audio_service.h"
-#include "../story/story_engine.h"
+#include "../../audio/effects/audio_effect_id.h"
+#include "../../services/audio/audio_service.h"
+#include "../../story/story_engine.h"
 
 class StoryController {
  public:

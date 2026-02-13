@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <cstring>
+#include <cstdio>
 
 SerialRouter::SerialRouter(HardwareSerial& serial) : serial_(serial) {}
 
@@ -10,7 +11,7 @@ void SerialRouter::setDispatcher(DispatchFn dispatcher, void* ctx) {
   dispatcherCtx_ = ctx;
 }
 
-void SerialRouter::normalize(char* line) {
+void SerialRouter::trim(char* line) {
   if (line == nullptr) {
     return;
   }
@@ -27,9 +28,42 @@ void SerialRouter::normalize(char* line) {
 
   size_t dst = 0U;
   for (size_t i = start; i < end; ++i) {
-    line[dst++] = static_cast<char>(toupper(static_cast<unsigned char>(line[i])));
+    line[dst++] = line[i];
   }
   line[dst] = '\0';
+}
+
+void SerialRouter::extractToken(const char* line,
+                                char* outToken,
+                                size_t outTokenLen,
+                                const char** outArgs) {
+  if (outToken == nullptr || outTokenLen == 0U) {
+    return;
+  }
+  outToken[0] = '\0';
+  if (outArgs != nullptr) {
+    *outArgs = "";
+  }
+  if (line == nullptr || line[0] == '\0') {
+    return;
+  }
+
+  size_t src = 0U;
+  size_t dst = 0U;
+  while (line[src] != '\0' && isspace(static_cast<unsigned char>(line[src])) == 0) {
+    if (dst < (outTokenLen - 1U)) {
+      outToken[dst++] = static_cast<char>(toupper(static_cast<unsigned char>(line[src])));
+    }
+    ++src;
+  }
+  outToken[dst] = '\0';
+
+  while (line[src] != '\0' && isspace(static_cast<unsigned char>(line[src])) != 0) {
+    ++src;
+  }
+  if (outArgs != nullptr) {
+    *outArgs = &line[src];
+  }
 }
 
 void SerialRouter::update(uint32_t nowMs) {
@@ -41,9 +75,15 @@ void SerialRouter::update(uint32_t nowMs) {
 
     if (c == '\n') {
       buffer_[len_] = '\0';
-      normalize(buffer_);
+      trim(buffer_);
       if (buffer_[0] != '\0' && dispatcher_ != nullptr) {
-        dispatcher_(buffer_, nowMs, dispatcherCtx_);
+        const char* args = "";
+        extractToken(buffer_, token_, sizeof(token_), &args);
+        SerialCommand cmd;
+        cmd.line = buffer_;
+        cmd.token = token_;
+        cmd.args = args;
+        dispatcher_(cmd, nowMs, dispatcherCtx_);
       }
       len_ = 0U;
       continue;

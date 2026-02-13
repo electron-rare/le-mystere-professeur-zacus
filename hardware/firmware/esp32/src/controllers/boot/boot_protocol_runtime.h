@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 
-class BootProtocolController {
+class BootProtocolRuntime {
  public:
   struct Hooks {
     void (*start)(uint32_t nowMs) = nullptr;
@@ -11,7 +11,7 @@ class BootProtocolController {
     bool (*isActive)() = nullptr;
   };
 
-  explicit BootProtocolController(const Hooks& hooks);
+  explicit BootProtocolRuntime(const Hooks& hooks);
 
   void start(uint32_t nowMs);
   void update(uint32_t nowMs);

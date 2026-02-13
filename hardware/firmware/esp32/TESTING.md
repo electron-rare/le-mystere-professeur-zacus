@@ -94,7 +94,7 @@ Cette checklist couvre le comportement attendu du couple ESP32 + ESP8266 OLED.
    - pictogramme de validation
    - puis ecran `U-SON FONCTIONNEL`
 
-## 2b) Scenario STORY (test direct sans attente)
+## 2b) Scenario STORY legacy (flag V2 OFF, default)
 
 Objectif: valider la logique STORY sans attendre 15 minutes.
 
@@ -126,6 +126,37 @@ Procedure rapide:
    - `stage=ETAPE2_DONE`
    - `etape2=1`
 9. Envoyer `STORY_TEST_OFF` pour revenir aux delais de prod.
+
+## 2c) Scenario STORY V2 (flag V2 ON)
+
+Objectif: valider le moteur data-driven et les commandes V2.
+
+Prerequis:
+
+- `kStoryV2EnabledDefault=true` recompile/reflash ESP32.
+- Etre en `MODULE U-SON Fonctionnel`.
+- Moniteur serie ESP32 ouvert.
+- Scenario YAML genere a jour:
+  - `make story-validate`
+  - `make story-gen`
+
+Procedure rapide:
+
+1. Envoyer `STORY_V2_STATUS` et verifier `enabled=1`.
+   - sinon envoyer `STORY_V2_ENABLE ON`
+2. Envoyer `STORY_V2_LIST` puis verifier le scenario `DEFAULT`.
+3. Envoyer `STORY_V2_VALIDATE` et verifier `OK valid`.
+4. Envoyer `STORY_TEST_ON`.
+5. Envoyer `STORY_TEST_DELAY 5000`.
+6. Envoyer `STORY_ARM`.
+7. Verifier `STORY_STATUS` ou `STORY_V2_STATUS`:
+   - progression `STEP_WAIT_UNLOCK -> STEP_WIN -> STEP_WAIT_ETAPE2`
+8. Forcer un event timer si besoin:
+   - `STORY_V2_EVENT ETAPE2_DUE`
+   - ou `STORY_FORCE_ETAPE2`
+9. Verifier transition vers `STEP_ETAPE2` puis `STEP_DONE`.
+10. Verifier que le gate MP3 est ouvert en fin de flux.
+11. Envoyer `STORY_TEST_OFF`.
 
 ## 3) SD et lecteur audio
 
@@ -210,3 +241,17 @@ Procedure rapide:
 3. Verifier les logs ESP32:
    - `[MP3] SD removed/unmounted.`
 4. Verifier retour mode signal/U_LOCK selon l'etat LA.
+
+## 7) Scan MP3 non bloquant (serie)
+
+1. Envoyer `MP3_SCAN STATUS` et verifier `state=IDLE|DONE`.
+2. Envoyer `MP3_SCAN START` puis, pendant le scan:
+   - appuyer sur les touches (logs toujours reactifs)
+   - verifier l'ecran (pas de freeze)
+   - verifier la serie (`MP3_SCAN STATUS` retourne `REQUESTED` ou `RUNNING`)
+3. Envoyer `MP3_SCAN CANCEL` et verifier la reponse:
+   - `OK canceled` si un scan etait actif
+   - `OUT_OF_CONTEXT idle` sinon
+4. Envoyer `MP3_SCAN REBUILD` et verifier la fin:
+   - `state=DONE`
+   - `tracks>0` si des fichiers supportes sont presents

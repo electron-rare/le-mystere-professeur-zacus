@@ -36,6 +36,25 @@ bool endsWithIgnoreCase(const char* value, const char* suffix) {
   return true;
 }
 
+AudioCodec codecFromPath(const char* path) {
+  if (endsWithIgnoreCase(path, ".mp3")) {
+    return AudioCodec::kMp3;
+  }
+  if (endsWithIgnoreCase(path, ".wav")) {
+    return AudioCodec::kWav;
+  }
+  if (endsWithIgnoreCase(path, ".aac") || endsWithIgnoreCase(path, ".m4a")) {
+    return AudioCodec::kAac;
+  }
+  if (endsWithIgnoreCase(path, ".flac")) {
+    return AudioCodec::kFlac;
+  }
+  if (endsWithIgnoreCase(path, ".opus") || endsWithIgnoreCase(path, ".ogg")) {
+    return AudioCodec::kOpus;
+  }
+  return AudioCodec::kUnknown;
+}
+
 }  // namespace
 
 AudioToolsBackend::AudioToolsBackend(uint8_t i2sBclk,
@@ -52,11 +71,12 @@ bool AudioToolsBackend::start(const char* path, float gain) {
   setGain(gain);
 
   if (path == nullptr || path[0] == '\0') {
-    setLastError("BAD_PATH");
+    setLastError(PlayerBackendError::kBadPath);
     return false;
   }
-  if (!canHandlePath(path)) {
-    setLastError("UNSUPPORTED");
+  const AudioCodec codec = codecForPath(path);
+  if (!supportsCodec(codec)) {
+    setLastError(PlayerBackendError::kUnsupportedCodec);
     return false;
   }
   if (!setupI2s()) {
@@ -67,12 +87,12 @@ bool AudioToolsBackend::start(const char* path, float gain) {
   *file = SD_MMC.open(path, FILE_READ);
   if (!(*file) || file->isDirectory()) {
     delete file;
-    setLastError("OPEN_FAIL");
+    setLastError(PlayerBackendError::kOpenFail);
     return false;
   }
 
   file_ = file;
-  if (!setupDecoderForPath(path)) {
+  if (!setupDecoderForCodec(codec)) {
     stop();
     return false;
   }
@@ -85,7 +105,8 @@ bool AudioToolsBackend::start(const char* path, float gain) {
   active_ = true;
   eof_ = false;
   idleLoops_ = 0U;
-  setLastError("OK");
+  activeCodec_ = codec;
+  setLastError(PlayerBackendError::kOk);
   return true;
 }
 
@@ -97,7 +118,7 @@ void AudioToolsBackend::update() {
   auto* copy = static_cast<StreamCopy*>(copier_);
   auto* file = static_cast<fs::File*>(file_);
   if (copy == nullptr || file == nullptr || !(*file)) {
-    setLastError("RUNTIME");
+    setLastError(PlayerBackendError::kRuntimeError);
     stop();
     return;
   }
@@ -122,6 +143,7 @@ void AudioToolsBackend::update() {
 void AudioToolsBackend::stop() {
   active_ = false;
   idleLoops_ = 0U;
+  activeCodec_ = AudioCodec::kUnknown;
 
   auto* copy = static_cast<StreamCopy*>(copier_);
   if (copy != nullptr) {
@@ -163,7 +185,40 @@ bool AudioToolsBackend::isActive() const {
 }
 
 bool AudioToolsBackend::canHandlePath(const char* path) const {
-  return endsWithIgnoreCase(path, ".wav");
+  return supportsCodec(codecForPath(path));
+}
+
+AudioCodec AudioToolsBackend::codecForPath(const char* path) const {
+  return codecFromPath(path);
+}
+
+bool AudioToolsBackend::supportsCodec(AudioCodec codec) const {
+  switch (codec) {
+    case AudioCodec::kWav:
+      return true;
+    case AudioCodec::kMp3:
+    case AudioCodec::kAac:
+    case AudioCodec::kFlac:
+    case AudioCodec::kOpus:
+    case AudioCodec::kUnknown:
+    default:
+      return false;
+  }
+}
+
+PlayerBackendCapabilities AudioToolsBackend::capabilities() const {
+  PlayerBackendCapabilities caps;
+  caps.mp3 = false;
+  caps.wav = true;
+  caps.aac = false;
+  caps.flac = false;
+  caps.opus = false;
+  caps.supportsOverlayFx = false;
+  return caps;
+}
+
+PlayerBackendError AudioToolsBackend::lastErrorCode() const {
+  return lastErrorCode_;
 }
 
 const char* AudioToolsBackend::lastError() const {
@@ -200,23 +255,30 @@ bool AudioToolsBackend::setupI2s() {
   cfg.bits_per_sample = 16;
 
   if (!i2s->begin(cfg)) {
-    setLastError("I2S_FAIL");
+    setLastError(PlayerBackendError::kI2sFail);
     return false;
   }
   return true;
 }
 
-bool AudioToolsBackend::setupDecoderForPath(const char* path) {
+bool AudioToolsBackend::setupDecoderForCodec(AudioCodec codec) {
   AudioDecoder* decoder = nullptr;
-  if (endsWithIgnoreCase(path, ".wav")) {
-    decoder = new WAVDecoder();
-  } else {
-    setLastError("UNSUPPORTED");
-    return false;
+  switch (codec) {
+    case AudioCodec::kWav:
+      decoder = new WAVDecoder();
+      break;
+    case AudioCodec::kMp3:
+    case AudioCodec::kAac:
+    case AudioCodec::kFlac:
+    case AudioCodec::kOpus:
+    case AudioCodec::kUnknown:
+    default:
+      setLastError(PlayerBackendError::kUnsupportedCodec);
+      return false;
   }
 
   if (decoder == nullptr) {
-    setLastError("OOM");
+    setLastError(PlayerBackendError::kDecoderAllocFail);
     return false;
   }
 
@@ -224,13 +286,13 @@ bool AudioToolsBackend::setupDecoderForPath(const char* path) {
   auto* encoded = new EncodedAudioStream(i2s, decoder);
   if (encoded == nullptr) {
     delete decoder;
-    setLastError("OOM");
+    setLastError(PlayerBackendError::kOutOfMemory);
     return false;
   }
   if (!encoded->begin()) {
     delete encoded;
     delete decoder;
-    setLastError("DEC_FAIL");
+    setLastError(PlayerBackendError::kDecoderInitFail);
     return false;
   }
 
@@ -239,10 +301,7 @@ bool AudioToolsBackend::setupDecoderForPath(const char* path) {
   return true;
 }
 
-void AudioToolsBackend::setLastError(const char* code) {
-  if (code == nullptr || code[0] == '\0') {
-    snprintf(lastError_, sizeof(lastError_), "%s", "UNKNOWN");
-    return;
-  }
-  snprintf(lastError_, sizeof(lastError_), "%s", code);
+void AudioToolsBackend::setLastError(PlayerBackendError code) {
+  lastErrorCode_ = code;
+  snprintf(lastError_, sizeof(lastError_), "%s", playerBackendErrorLabel(code));
 }

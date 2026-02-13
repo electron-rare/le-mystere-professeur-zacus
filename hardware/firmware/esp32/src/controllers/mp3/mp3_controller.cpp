@@ -1,6 +1,29 @@
 #include "mp3_controller.h"
 
 #include <cstring>
+#include <cstdio>
+
+namespace {
+
+const char* boolToFlag(bool value) {
+  return value ? "1" : "0";
+}
+
+void formatCaps(const PlayerBackendCapabilities& caps, char* out, size_t outLen) {
+  if (out == nullptr || outLen == 0U) {
+    return;
+  }
+  snprintf(out,
+           outLen,
+           "MP3:%s,WAV:%s,AAC:%s,FLAC:%s,OPUS:%s",
+           boolToFlag(caps.mp3),
+           boolToFlag(caps.wav),
+           boolToFlag(caps.aac),
+           boolToFlag(caps.flac),
+           boolToFlag(caps.opus));
+}
+
+}  // namespace
 
 Mp3Controller::Mp3Controller(Mp3Player& player, PlayerUiModel& ui) : player_(player), ui_(ui) {}
 
@@ -95,18 +118,27 @@ void Mp3Controller::printBackendStatus(Print& out, const char* source) const {
   const char* safeSource = (source != nullptr && source[0] != '\0') ? source : "status";
   const Mp3BackendRuntimeStats stats = player_.backendStats();
   out.printf(
-      "[MP3_BACKEND_STATUS] %s mode=%s active=%s err=%s attempts=%lu success=%lu fail=%lu retries=%lu fallback=%lu legacy=%lu tools=%lu\n",
+      "[MP3_BACKEND_STATUS] %s mode=%s active=%s err=%s last_fallback_reason=%s attempts=%lu success=%lu fail=%lu retries=%lu fallback=%lu legacy=%lu tools=%lu tools_attempt=%lu tools_ok=%lu tools_fail=%lu tools_retry=%lu legacy_attempt=%lu legacy_ok=%lu legacy_fail=%lu legacy_retry=%lu\n",
       safeSource,
       player_.backendModeLabel(),
       player_.activeBackendLabel(),
       player_.lastBackendError(),
+      player_.lastFallbackReason(),
       static_cast<unsigned long>(stats.startAttempts),
       static_cast<unsigned long>(stats.startSuccess),
       static_cast<unsigned long>(stats.startFailures),
       static_cast<unsigned long>(stats.retriesScheduled),
       static_cast<unsigned long>(stats.fallbackCount),
       static_cast<unsigned long>(stats.legacyStarts),
-      static_cast<unsigned long>(stats.audioToolsStarts));
+      static_cast<unsigned long>(stats.audioToolsStarts),
+      static_cast<unsigned long>(stats.audioToolsAttempts),
+      static_cast<unsigned long>(stats.audioToolsSuccess),
+      static_cast<unsigned long>(stats.audioToolsFailures),
+      static_cast<unsigned long>(stats.audioToolsRetries),
+      static_cast<unsigned long>(stats.legacyAttempts),
+      static_cast<unsigned long>(stats.legacySuccess),
+      static_cast<unsigned long>(stats.legacyFailures),
+      static_cast<unsigned long>(stats.legacyRetries));
 }
 
 void Mp3Controller::printBrowseList(Print& out,
@@ -172,9 +204,15 @@ void Mp3Controller::printQueuePreview(Print& out, uint8_t count, const char* sou
 
 void Mp3Controller::printCapabilities(Print& out, const char* source) const {
   const char* safeSource = (source != nullptr && source[0] != '\0') ? source : "status";
+  char toolsCaps[72] = {};
+  char legacyCaps[72] = {};
+  formatCaps(player_.audioToolsCapabilities(), toolsCaps, sizeof(toolsCaps));
+  formatCaps(player_.legacyCapabilities(), legacyCaps, sizeof(legacyCaps));
   out.printf(
-      "[MP3_CAPS] %s codecs=MP3,WAV,AAC,FLAC,OPUS tools=WAV legacy=MP3,WAV,AAC,FLAC,OPUS mode=%s active=%s\n",
+      "[MP3_CAPS] %s codecs=MP3,WAV,AAC,FLAC,OPUS tools=%s legacy=%s mode=%s active=%s\n",
       safeSource,
+      toolsCaps,
+      legacyCaps,
       player_.backendModeLabel(),
       player_.activeBackendLabel());
 }

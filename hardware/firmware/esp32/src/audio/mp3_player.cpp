@@ -42,6 +42,13 @@ void setScanReason(Mp3ScanProgress* progress, const char* reason) {
   copyCStr(progress->reason, sizeof(progress->reason), reason);
 }
 
+void setFallbackReason(Mp3BackendRuntimeStats* stats, const char* reason) {
+  if (stats == nullptr) {
+    return;
+  }
+  copyCStr(stats->lastFallbackReason, sizeof(stats->lastFallbackReason), reason);
+}
+
 bool isJsonSafeChar(char c) {
   return c != '\\' && c != '"' && c != '\n' && c != '\r';
 }
@@ -117,6 +124,7 @@ void Mp3Player::begin() {
   scanProgress_.tickEntryBudget = kScanTickEntryBudget;
   setScanReason(&scanProgress_, "IDLE");
   backendStats_ = Mp3BackendRuntimeStats();
+  setFallbackReason(&backendStats_, "NONE");
 }
 
 void Mp3Player::update(uint32_t nowMs, bool allowPlayback) {
@@ -449,6 +457,35 @@ const char* Mp3Player::activeBackendLabel() const {
 
 const char* Mp3Player::lastBackendError() const {
   return backendError_;
+}
+
+const char* Mp3Player::lastFallbackReason() const {
+  return backendStats_.lastFallbackReason;
+}
+
+PlayerBackendCapabilities Mp3Player::audioToolsCapabilities() const {
+  return audioTools_.capabilities();
+}
+
+PlayerBackendCapabilities Mp3Player::legacyCapabilities() const {
+  PlayerBackendCapabilities caps;
+  caps.mp3 = true;
+  caps.wav = true;
+  caps.aac = true;
+  caps.flac = true;
+  caps.opus = true;
+  caps.supportsOverlayFx = true;
+  return caps;
+}
+
+bool Mp3Player::backendSupportsCodec(PlayerBackendId backend, AudioCodec codec) const {
+  if (backend == PlayerBackendId::kAudioTools) {
+    return playerBackendSupportsCodec(audioTools_.capabilities(), codec);
+  }
+  if (backend == PlayerBackendId::kLegacy) {
+    return playerBackendSupportsCodec(legacyCapabilities(), codec);
+  }
+  return false;
 }
 
 bool Mp3Player::selectTrackByIndex(uint16_t index, bool restart) {
@@ -914,14 +951,19 @@ void Mp3Player::updateDeferredStateSave(uint32_t nowMs) {
 
 bool Mp3Player::startLegacyTrack() {
   ++backendStats_.startAttempts;
+  ++backendStats_.legacyAttempts;
   if (!sdReady_ || trackCount_ == 0U || currentTrack_ >= trackCount_) {
     ++backendStats_.startFailures;
+    ++backendStats_.legacyFailures;
+    copyCStr(backendError_, sizeof(backendError_), "OUT_OF_CONTEXT");
     return false;
   }
 
   const TrackEntry* entry = catalog_.entry(currentTrack_);
   if (entry == nullptr || entry->path[0] == '\0') {
     ++backendStats_.startFailures;
+    ++backendStats_.legacyFailures;
+    copyCStr(backendError_, sizeof(backendError_), "BAD_PATH");
     return false;
   }
 
@@ -931,7 +973,10 @@ bool Mp3Player::startLegacyTrack() {
     Serial.printf("[MP3] Unsupported file type: %s\n", trackPath.c_str());
     nextRetryMs_ = millis() + 250U;
     ++backendStats_.retriesScheduled;
+    ++backendStats_.legacyRetries;
     ++backendStats_.startFailures;
+    ++backendStats_.legacyFailures;
+    copyCStr(backendError_, sizeof(backendError_), "UNSUPPORTED_CODEC");
     return false;
   }
 
@@ -940,7 +985,10 @@ bool Mp3Player::startLegacyTrack() {
     requestCatalogScan(true);
     nextRetryMs_ = millis() + 1000U;
     ++backendStats_.retriesScheduled;
+    ++backendStats_.legacyRetries;
     ++backendStats_.startFailures;
+    ++backendStats_.legacyFailures;
+    copyCStr(backendError_, sizeof(backendError_), "OPEN_FAIL");
     return false;
   }
 
@@ -953,7 +1001,10 @@ bool Mp3Player::startLegacyTrack() {
     stopLegacyTrack();
     nextRetryMs_ = millis() + 1000U;
     ++backendStats_.retriesScheduled;
+    ++backendStats_.legacyRetries;
     ++backendStats_.startFailures;
+    ++backendStats_.legacyFailures;
+    copyCStr(backendError_, sizeof(backendError_), "OOM");
     return false;
   }
 
@@ -967,7 +1018,10 @@ bool Mp3Player::startLegacyTrack() {
     stopLegacyTrack();
     nextRetryMs_ = millis() + 1000U;
     ++backendStats_.retriesScheduled;
+    ++backendStats_.legacyRetries;
     ++backendStats_.startFailures;
+    ++backendStats_.legacyFailures;
+    copyCStr(backendError_, sizeof(backendError_), "DECODER_INIT_FAIL");
     return false;
   }
 
@@ -975,6 +1029,7 @@ bool Mp3Player::startLegacyTrack() {
   copyCStr(backendError_, sizeof(backendError_), "OK");
   ++backendStats_.startSuccess;
   ++backendStats_.legacyStarts;
+  ++backendStats_.legacySuccess;
   Serial.printf("[MP3] Playing %u/%u [%s|LEGACY]: %s\n",
                 static_cast<unsigned int>(currentTrack_ + 1U),
                 static_cast<unsigned int>(trackCount_),
@@ -985,32 +1040,41 @@ bool Mp3Player::startLegacyTrack() {
 
 bool Mp3Player::startAudioToolsTrack() {
   ++backendStats_.startAttempts;
+  ++backendStats_.audioToolsAttempts;
   if (!sdReady_ || trackCount_ == 0U || currentTrack_ >= trackCount_) {
     ++backendStats_.startFailures;
+    ++backendStats_.audioToolsFailures;
+    copyCStr(backendError_, sizeof(backendError_), "OUT_OF_CONTEXT");
     return false;
   }
   const TrackEntry* entry = catalog_.entry(currentTrack_);
   if (entry == nullptr || entry->path[0] == '\0') {
     ++backendStats_.startFailures;
+    ++backendStats_.audioToolsFailures;
+    copyCStr(backendError_, sizeof(backendError_), "BAD_PATH");
     return false;
   }
-  if (!audioTools_.canHandlePath(entry->path)) {
-    copyCStr(backendError_, sizeof(backendError_), "UNSUPPORTED");
+  const AudioCodec trackCodec = codecForPath(String(entry->path));
+  if (!audioTools_.supportsCodec(trackCodec)) {
+    copyCStr(backendError_, sizeof(backendError_), "UNSUPPORTED_CODEC");
     ++backendStats_.startFailures;
+    ++backendStats_.audioToolsFailures;
     return false;
   }
 
   if (!audioTools_.start(entry->path, gain_)) {
     copyCStr(backendError_, sizeof(backendError_), audioTools_.lastError());
     ++backendStats_.startFailures;
+    ++backendStats_.audioToolsFailures;
     return false;
   }
 
   activeBackend_ = PlayerBackendId::kAudioTools;
-  activeCodec_ = codecForPath(String(entry->path));
+  activeCodec_ = trackCodec;
   copyCStr(backendError_, sizeof(backendError_), "OK");
   ++backendStats_.startSuccess;
   ++backendStats_.audioToolsStarts;
+  ++backendStats_.audioToolsSuccess;
   Serial.printf("[MP3] Playing %u/%u [%s|AUDIO_TOOLS]: %s\n",
                 static_cast<unsigned int>(currentTrack_ + 1U),
                 static_cast<unsigned int>(trackCount_),
@@ -1027,22 +1091,32 @@ void Mp3Player::startCurrentTrack() {
   }
 
   fallbackUsed_ = false;
+  setFallbackReason(&backendStats_, "NONE");
   bool started = false;
+  bool attemptedLegacy = false;
+  bool attemptedTools = false;
 
   if (backendMode_ != PlayerBackendMode::kLegacyOnly) {
+    attemptedTools = true;
     started = startAudioToolsTrack();
     if (!started && backendMode_ == PlayerBackendMode::kAutoFallback) {
       fallbackUsed_ = true;
       ++backendStats_.fallbackCount;
+      setFallbackReason(&backendStats_, backendError_);
+      attemptedLegacy = true;
       started = startLegacyTrack();
     }
   } else {
+    attemptedLegacy = true;
     started = startLegacyTrack();
   }
 
   if (!started && backendMode_ == PlayerBackendMode::kAudioToolsOnly) {
     nextRetryMs_ = millis() + 1000U;
     ++backendStats_.retriesScheduled;
+    if (attemptedTools) {
+      ++backendStats_.audioToolsRetries;
+    }
     Serial.printf("[MP3] AudioTools start failed (mode=%s err=%s).\n",
                   backendModeLabel(),
                   backendError_);
@@ -1052,6 +1126,11 @@ void Mp3Player::startCurrentTrack() {
   if (!started) {
     nextRetryMs_ = millis() + 1000U;
     ++backendStats_.retriesScheduled;
+    if (attemptedLegacy) {
+      ++backendStats_.legacyRetries;
+    } else if (attemptedTools) {
+      ++backendStats_.audioToolsRetries;
+    }
     return;
   }
 

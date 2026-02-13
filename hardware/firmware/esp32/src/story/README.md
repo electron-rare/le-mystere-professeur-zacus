@@ -99,9 +99,9 @@ Diagnostic:
 
 Compat legacy conservee pendant PR1 via feature flag:
 
-- default compile-time: `config::kStoryV2EnabledDefault = false`
+- default compile-time: `config::kStoryV2EnabledDefault = true`
 - rollback runtime: `STORY_V2_ENABLE OFF`
-- rollback release: garder `kStoryV2EnabledDefault=false` puis recompiler/reflasher
+- rollback release: remettre `kStoryV2EnabledDefault=false` puis recompiler/reflasher
 
 ## Creation d'un nouveau scenario
 
@@ -113,3 +113,17 @@ Compat legacy conservee pendant PR1 via feature flag:
 6. `pio run -e esp32dev`
 
 Aucune modification du moteur V2 n'est requise pour un nouveau flux tant que le scenario reste dans le contrat StorySpec V1.
+
+## QA sprint (S5/S6)
+
+- smoke debut sprint:
+  - `make qa-story-v2-smoke ESP32_PORT=<PORT_ESP32> SCREEN_PORT=<PORT_ESP8266>`
+  - ou `make qa-story-v2-smoke-fast ESP32_PORT=<PORT_ESP32>`
+- runbook live complet fin sprint:
+  - `tools/qa/live_story_v2_runbook.md`
+- runbook release candidate:
+  - `tools/qa/live_story_v2_rc_runbook.md`
+- checklist review PR:
+  - `tools/qa/story_v2_review_checklist.md`
+- CI firmware:
+  - `.github/workflows/firmware-story-v2.yml`

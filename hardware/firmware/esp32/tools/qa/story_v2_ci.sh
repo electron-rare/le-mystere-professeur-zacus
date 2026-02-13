@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
+SKIP_BUILDS="${QA_STORY_V2_SKIP_BUILDS:-0}"
+REQUIRE_CLEAN_GEN="${QA_STORY_V2_REQUIRE_CLEAN_GEN:-1}"
 
 echo "[qa-story-v2] validate(strict)"
 python3 tools/story_gen/story_gen.py validate --strict --spec-dir story_specs/scenarios
@@ -11,7 +13,13 @@ echo "[qa-story-v2] generate(strict) pass#1"
 python3 tools/story_gen/story_gen.py generate --strict --spec-dir story_specs/scenarios --out-dir src/story/generated
 
 if ! git diff --quiet -- src/story/generated; then
-  echo "[qa-story-v2] generated files changed after pass#1"
+  if [ "$REQUIRE_CLEAN_GEN" = "1" ]; then
+    echo "[qa-story-v2] ERROR: generated files changed after pass#1"
+    echo "[qa-story-v2] run 'make story-gen' and commit generated files"
+    git --no-pager diff -- src/story/generated
+    exit 1
+  fi
+  echo "[qa-story-v2] WARN: generated files changed after pass#1"
 fi
 
 SNAPSHOT_DIR="$(mktemp -d)"
@@ -30,13 +38,17 @@ if ! diff -ru "$SNAPSHOT_DIR" src/story/generated >/tmp/story_v2_idempotence.dif
   exit 1
 fi
 
-echo "[qa-story-v2] build esp32dev"
-pio run -e esp32dev
+if [ "$SKIP_BUILDS" != "1" ]; then
+  echo "[qa-story-v2] build esp32dev"
+  pio run -e esp32dev
 
-echo "[qa-story-v2] build esp8266_oled"
-pio run -e esp8266_oled
+  echo "[qa-story-v2] build esp8266_oled"
+  pio run -e esp8266_oled
 
-echo "[qa-story-v2] build screen nodemcuv2"
-( cd screen_esp8266_hw630 && pio run -e nodemcuv2 )
+  echo "[qa-story-v2] build screen nodemcuv2"
+  ( cd screen_esp8266_hw630 && pio run -e nodemcuv2 )
+else
+  echo "[qa-story-v2] builds skipped (QA_STORY_V2_SKIP_BUILDS=1)"
+fi
 
 echo "[qa-story-v2] OK"

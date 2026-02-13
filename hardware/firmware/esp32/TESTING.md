@@ -28,6 +28,8 @@ Cette checklist couvre le comportement attendu du couple ESP32 + ESP8266 OLED.
 Runbook live semi-automatique disponible:
 
 - `tools/qa/live_story_v2_runbook.md`
+- `tools/qa/live_story_v2_smoke.sh` (smoke debut sprint)
+- `tools/qa/live_story_v2_rc_runbook.md` (release candidate)
 
 ## 0) Tooling STORY V2 (hors carte)
 
@@ -40,6 +42,16 @@ Runbook live semi-automatique disponible:
 4. Attendu:
    - aucun diff apres generation repetee
    - hash spec visible dans `src/story/generated/*.h` et `src/story/generated/*.cpp`
+
+## 0b) Smoke debut sprint (optionnel mais recommande)
+
+Commande standard:
+
+- `make qa-story-v2-smoke ESP32_PORT=<PORT_ESP32> SCREEN_PORT=<PORT_ESP8266>`
+
+Sans reflash (controle rapide runtime):
+
+- `make qa-story-v2-smoke-fast ESP32_PORT=<PORT_ESP32>`
 
 ## 1) Boot sans SD
 
@@ -110,7 +122,7 @@ Runbook live semi-automatique disponible:
    - pictogramme de validation
    - puis ecran `U-SON FONCTIONNEL`
 
-## 2b) Scenario STORY legacy (flag V2 OFF, default)
+## 2b) Scenario STORY legacy (forcer V2 OFF)
 
 Objectif: valider la logique STORY sans attendre 15 minutes.
 
@@ -118,6 +130,7 @@ Prerequis:
 
 - Etre en `MODULE U-SON Fonctionnel` (unlock fait).
 - Moniteur serie ESP32 ouvert.
+- Envoyer `STORY_V2_ENABLE OFF` avant le test legacy.
 
 Procedure rapide:
 
@@ -149,7 +162,7 @@ Objectif: valider le moteur data-driven et les commandes V2.
 
 Prerequis:
 
-- `kStoryV2EnabledDefault=true` recompile/reflash ESP32.
+- `kStoryV2EnabledDefault=true` au compile-time (defaut actuel) ou activation runtime `STORY_V2_ENABLE ON`.
 - Etre en `MODULE U-SON Fonctionnel`.
 - Moniteur serie ESP32 ouvert.
 - Scenario YAML genere a jour:
@@ -300,3 +313,15 @@ Rollback (si anomalie en live):
    - verifier remise a zero des compteurs
 4. Envoyer `SYS_LOOP_BUDGET RESET` puis `SYS_LOOP_BUDGET STATUS`:
    - verifier remise a zero des compteurs loop budget
+
+## 9) Release candidate (S6)
+
+1. Lancer la matrice RC:
+   - `make qa-story-v2-rc ESP32_PORT=<PORT_ESP32> SOAK_MINUTES=20 POLL_SECONDS=15 TRACE_LEVEL=INFO`
+2. Verifier le rapport:
+   - fichier `reports/story_v2_rc_matrix_*.log`
+3. Executer ensuite les resets croises manuels:
+   - reset ESP8266 seul
+   - reset ESP32 seul
+   - coupure/reprise liaison UART ecran
+4. Consigner la decision flag default ON/OFF dans `RELEASE_STORY_V2.md`.

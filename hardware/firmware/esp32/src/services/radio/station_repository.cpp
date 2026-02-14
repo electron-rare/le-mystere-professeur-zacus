@@ -89,14 +89,6 @@ const StationRepository::Station* StationRepository::at(uint16_t index) const {
   return &stations_[index];
 }
 
-const StationRepository::Station* StationRepository::findById(uint16_t id) const {
-  const int16_t idx = indexById(id);
-  if (idx < 0) {
-    return nullptr;
-  }
-  return &stations_[static_cast<uint16_t>(idx)];
-}
-
 int16_t StationRepository::indexById(uint16_t id) const {
   for (uint16_t i = 0U; i < count_; ++i) {
     if (stations_[i].id == id) {

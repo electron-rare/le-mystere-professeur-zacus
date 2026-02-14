@@ -18,10 +18,8 @@ class StationRepository {
 
   bool loadFromFs(fs::FS& fs, const char* path);
   void loadDefaults();
-
   uint16_t count() const;
   const Station* at(uint16_t index) const;
-  const Station* findById(uint16_t id) const;
   int16_t indexById(uint16_t id) const;
 
  private:

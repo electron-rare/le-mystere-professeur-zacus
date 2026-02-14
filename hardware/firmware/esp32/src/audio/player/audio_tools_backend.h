@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+#include "player_backend.h"
+
 class AudioToolsBackend {
  public:
   AudioToolsBackend(uint8_t i2sBclk, uint8_t i2sLrc, uint8_t i2sDout, uint8_t i2sPort);
@@ -12,6 +14,10 @@ class AudioToolsBackend {
 
   bool isActive() const;
   bool canHandlePath(const char* path) const;
+  AudioCodec codecForPath(const char* path) const;
+  bool supportsCodec(AudioCodec codec) const;
+  PlayerBackendCapabilities capabilities() const;
+  PlayerBackendError lastErrorCode() const;
   const char* lastError() const;
 
   void setGain(float gain);
@@ -19,8 +25,8 @@ class AudioToolsBackend {
 
  private:
   bool setupI2s();
-  bool setupDecoderForPath(const char* path);
-  void setLastError(const char* code);
+  bool setupDecoderForCodec(AudioCodec codec);
+  void setLastError(PlayerBackendError code);
 
   uint8_t i2sBclk_;
   uint8_t i2sLrc_;
@@ -31,6 +37,8 @@ class AudioToolsBackend {
   bool active_ = false;
   bool eof_ = false;
   uint8_t idleLoops_ = 0U;
+  AudioCodec activeCodec_ = AudioCodec::kUnknown;
+  PlayerBackendError lastErrorCode_ = PlayerBackendError::kOk;
   char lastError_[24] = "OK";
 
   void* i2s_ = nullptr;

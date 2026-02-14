@@ -32,6 +32,9 @@ Runbook live semi-automatique disponible:
 - `tools/qa/live_story_v2_rc_runbook.md` (release candidate)
 - `tools/qa/mp3_rc_smoke.sh` (smoke RC MP3)
 - `tools/qa/mp3_rc_runbook.md` (runbook RC MP3)
+- `tools/qa/mp3_client_demo_smoke.sh` (smoke presentation client MP3)
+- `tools/qa/mp3_client_live_checklist.md` (checklist operateur live client MP3)
+- `docs/client/mp3/` (kit complet presentation client)
 
 ## 0) Tooling STORY V2 (hors carte)
 
@@ -347,3 +350,16 @@ Rollback (si anomalie en live):
    - reset ESP32 seul
    - coupure/reprise liaison UART ecran
 4. Consigner la decision flag default ON/OFF dans `RELEASE_STORY_V2.md`.
+
+## 10) Kit presentation client MP3 (ordre recommande)
+
+1. Smoke statique client:
+   - `make qa-mp3-client-demo`
+2. Lire le script de demonstration:
+   - `docs/client/mp3/03_demo_live_script.md`
+3. Lancer la demo live en suivant:
+   - `tools/qa/mp3_client_live_checklist.md`
+4. En cas de fallback:
+   - `docs/client/mp3/04_evidence_qa.md`
+   - `docs/client/mp3/05_risques_et_mitigations.md`
+   - `docs/client/mp3/06_qna_client.md`

@@ -1,4 +1,8 @@
-# Firmware ecran ESP8266 (HW-630)
+# Firmware écran ESP8266 (HW-630)
+## Centralisation
+
+La documentation des protocoles, templates et specs partagés est désormais centralisée dans `../../docs/protocols/`.
+
 
 Ce firmware transforme une carte ESP8266 (HW-630) en ecran de statut pour l'ESP32.
 

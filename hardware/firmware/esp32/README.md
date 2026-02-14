@@ -1,23 +1,43 @@
-# Firmware ESP32 (Audio Kit A252)
+
+# Firmware ESP32
+
+## Sommaire
+- [Présentation](#présentation)
+- [Installation](#installation)
+- [Build & Flash](#build--flash)
+- [Structure](#structure)
+- [Protocole UI](#protocole-ui)
+- [Dépannage](#dépannage)
+- [Mise à jour](#mise-à-jour)
+
+# Présentation
 
 Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
 
-## Licence firmware
+Ce firmware gère la logique principale, l’audio, la radio et la communication avec l’UI (RP2040).
 
-- Code firmware: `GPL-3.0-or-later`
-- Dependances open source: voir `OPEN_SOURCE.md`
-- Politique de licence du depot: `../../../LICENSE.md`
 
-## Gouvernance branches (double flux)
+## Installation
+- Prérequis : PlatformIO, Python 3.14
+- Cloner le repo, puis :
+   ```
+   cd esp32
+   pio run
+   ```
 
-- Flux actifs: `main` et `codex/esp32-audio-mozzi-20260213`
-- Regle de sync hebdomadaire:
-  1. PR `sync/main-into-codex-<date>`
-  2. validation build matrix firmware
-  3. PR `sync/codex-into-main-<date>`
-- Toute PR sprint doit indiquer explicitement sa base (`main` ou `codex/*`) et le plan de resynchronisation.
 
-## Profil cible
+## Build & Flash
+- Build : `pio run`
+- Flash : `pio run -t upload`
+
+
+## Structure
+- `src/` : code source C++
+- `data/` : fichiers de config, stations radio
+- `docs/` : documentation
+- `story_specs/` : prompts, scénarios, templates (voir centralisation dans `../docs/protocols/`)
+  
+**Les protocoles, templates, schémas et exemples STORY sont désormais centralisés dans `docs/protocols/`.**
 
 - Carte: ESP32 Audio Kit V2.2 A252
 - Flash interne: partition `no_ota.csv` + filesystem `LittleFS`
@@ -35,7 +55,9 @@ Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
 - Touches: clavier analogique sur une seule entree ADC
 - Ecran distant: ESP8266 NodeMCU OLED via UART
 
-## Fichiers principaux
+
+## Protocole UI
+Voir `../docs/protocols/PROTOCOL.md` et `../docs/protocols/UI_SPEC.md`
 
 - Entree minimale Arduino: `src/main.cpp`
 - Entree App minimale: `src/app.h`, `src/app.cpp`
@@ -73,7 +95,16 @@ Ce dossier contient le firmware principal pour **ESP32 Audio Kit V2.2 A252**.
 - Assets LittleFS (sons internes): `data/`
 - Archives non actives: `old/` (ex: sources audio de travail)
 
-## GPIO utilises (A252)
+
+## Dépannage
+- Voir TESTING.md
+- Logs série : 115200 bauds
+## Mise à jour
+- Merci de garder ce README à jour lors de toute évolution majeure.
+
+---
+
+*Pour la documentation détaillée, voir les sections ci-dessous et le dossier [docs/protocols](../docs/protocols/).*
 
 - I2S codec:
   - `BCLK GPIO27`
@@ -270,7 +301,7 @@ Depuis la racine de ce dossier (`hardware/firmware/esp32`):
    - `pio run -e esp8266_oled`
    - `pio run -e esp8266_oled -t upload --upload-port /dev/ttyUSB1`
    - `pio device monitor -e esp8266_oled --port /dev/ttyUSB1`
-   - (sous-projet ecran) `cd screen_esp8266_hw630 && pio run -e nodemcuv2`
+   - (sous-projet ecran) `cd ../ui/esp8266_oled && pio run -e nodemcuv2`
 
 Sans variable `PORT`, PlatformIO choisit automatiquement le port serie.
 

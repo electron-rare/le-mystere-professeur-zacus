@@ -18,7 +18,7 @@ Ce document formalise la release candidate Story V2 (S6) et les options de rollb
 2. Build matrix:
    - `pio run -e esp32dev`
    - `pio run -e esp8266_oled`
-   - `cd screen_esp8266_hw630 && pio run -e nodemcuv2`
+   - `cd ../ui/esp8266_oled && pio run -e nodemcuv2`
 3. Live RC:
    - `tools/qa/live_story_v2_rc_runbook.md`
    - soak >= 20 min

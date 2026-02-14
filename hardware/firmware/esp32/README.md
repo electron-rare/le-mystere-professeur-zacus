@@ -194,13 +194,13 @@ Selection serie:
 
 - `STORY_V2_SCENARIO SPECTRE_RADIO_LAB`
 
-### Mode U_LOCK (au boot, detection SD bloquee)
+### Mode U_LOCK (au boot, SD active)
 
 - Ecran initial: module casse avec effet glitch (sans texte)
 - Apres appui touche: detection LA active + affichage accordage/volume/scope
 - Le LA doit cumuler 3 secondes de detection (continue ou repetee) pour deverrouiller
 - Les touches SIGNAL restent bloquees tant que le LA n'est pas detecte
-- La detection SD/MP3 reste desactivee tant que `MODULE U-SON Fonctionnel` n'est pas atteint
+- Le service SD (mount/scan) reste actif, mais le playback MP3 reste gate tant que `MODULE U-SON Fonctionnel` n'est pas atteint
 
 ### Module U-SON fonctionnel (apres detection du LA)
 
@@ -225,7 +225,7 @@ Selection serie:
 Le firmware bascule automatiquement selon la SD:
 - SD presente + pistes audio supportees: `MODE LECTEUR U-SON`
 - SD absente: `MODE U_LOCK`, puis passage automatique en `MODULE U-SON Fonctionnel` apres detection du LA.
-- Note: en `U_LOCK`, la SD n'est volontairement pas scannee ni montee.
+- Note: en `U_LOCK`, la SD peut etre montee/scannee pour garder un etat pret.
 
 ## Calibration micro (serial)
 
@@ -331,6 +331,31 @@ Commandes MP3 utiles:
 - `MP3_UI_STATUS` : etat UI courant (`page/cursor/offset/browse/queue_off/set_idx`)
 - `MP3_QUEUE_PREVIEW [n]` : projection des prochaines pistes
 - `MP3_CAPS` : capacites codec/backend exposees au runtime
+
+Commandes SD utiles:
+
+- `SD_STATUS` : etat stockage (mount + scan)
+- `SD_MOUNT` : demande de montage SD
+- `SD_UNMOUNT` : demande de demontage SD
+- `SD_RESCAN [FORCE]` : relance scan catalogue
+- `SD_SCAN_PROGRESS` : progression scan (alias orientee stockage)
+
+Commandes Radio/WiFi/Web utiles:
+
+- `RADIO_STATUS`, `RADIO_LIST [offset limit]`, `RADIO_PLAY <id|url>`, `RADIO_STOP`, `RADIO_NEXT`, `RADIO_PREV`, `RADIO_META`
+- `WIFI_STATUS`, `WIFI_SCAN`, `WIFI_CONNECT <ssid> <pass>`, `WIFI_AP_ON [ssid pass]`, `WIFI_AP_OFF`
+- `WEB_STATUS`
+
+## WebUI smartphone
+
+La WebUI est exposee sur l'ESP32 (port configure dans `data/net/config.json`, defaut `80`).
+
+- URL: `http://<ip_esp32>/`
+- Vue mobile responsive: pilotage lecteur + radio + wifi + statut live
+- Auth optionnelle:
+  - `data/net/config.json > web.auth` (`true|false`)
+  - `data/net/config.json > web.user`
+  - `data/net/config.json > web.pass`
 
 Sons internes:
 

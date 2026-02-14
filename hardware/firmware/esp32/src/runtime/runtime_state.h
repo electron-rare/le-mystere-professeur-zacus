@@ -9,8 +9,12 @@
 #include "../la_detector.h"
 #include "../ui/led_controller.h"
 #include "../audio/mp3_player.h"
+#include "../services/network/wifi_service.h"
+#include "../services/radio/radio_service.h"
+#include "../services/web/web_ui_service.h"
 #include "../screen/screen_link.h"
 #include "../audio/sine_dac.h"
+#include "radio_runtime.h"
 #include "runtime_mode.h"
 
 extern LedController g_led;
@@ -19,6 +23,10 @@ extern SineDac g_sine;
 extern KeypadAnalog g_keypad;
 extern ScreenLink g_screen;
 extern Mp3Player g_mp3;
+extern WifiService g_wifi;
+extern RadioService g_radio;
+extern WebUiService g_webUi;
+extern RadioRuntime g_radioRuntime;
 extern I2sJinglePlayer g_unlockJinglePlayer;
 extern AsyncAudioService g_asyncAudio;
 

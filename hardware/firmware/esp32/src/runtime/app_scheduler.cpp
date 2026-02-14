@@ -17,9 +17,8 @@ AppBrickSchedule schedulerBuildBricks(const AppSchedulerInputs& input) {
   schedule.runBootProtocol = input.bootProtocolActive;
   schedule.runSerialConsole = !input.bootProtocolActive;
   schedule.runUnlockJingle = (input.currentMode == RuntimeMode::kSignal);
-  schedule.runMp3Service =
-      (input.currentMode == RuntimeMode::kMp3) ||
-      (input.uSonFunctional && !input.unlockJingleActive);
+  // Keep storage/catalog services alive in every mode. Playback remains gated separately.
+  schedule.runMp3Service = true;
   schedule.allowMp3Playback = (input.currentMode == RuntimeMode::kMp3);
   schedule.runSineDac = (input.currentMode == RuntimeMode::kSignal) && input.sineEnabled;
   schedule.runLaDetector =

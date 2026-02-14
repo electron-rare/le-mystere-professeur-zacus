@@ -32,6 +32,11 @@ Runbook live semi-automatique disponible:
 - `tools/qa/live_story_v2_rc_runbook.md` (release candidate)
 - `tools/qa/mp3_rc_smoke.sh` (smoke RC MP3)
 - `tools/qa/mp3_rc_runbook.md` (runbook RC MP3)
+- `tools/qa/manual_keypad_validation.md` (validation boutons hors smoke)
+
+Note:
+- les smoke tests RC ne couvrent plus les appuis `K1..K6`
+- la validation boutons est desormais executee separément via `tools/qa/manual_keypad_validation.md`
 
 ## 0) Tooling STORY V2 (hors carte)
 

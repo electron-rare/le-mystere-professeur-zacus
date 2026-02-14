@@ -76,8 +76,14 @@ Le script affiche un résumé final : `Build status` (OK ou SKIPPED) et `Smoke 
    - `Ports watch (venv)` to list serial ports every 15s (fails clearly before `.venv` exists).
    - `Git watch` to keep `git status -sb` + `git diff --stat=25` refreshed.
    - `Build firmware (one-shot)` for a single `./build_all.sh` run (exports `PLATFORMIO_CORE_DIR="$HOME/.platformio"` first).
-   - `Serial smoke (one-shot)` to run `tools/dev/serial_smoke.py --role auto --baud 19200 --wait-port 3 --allow-no-hardware` (set `ZACUS_REQUIRE_HW=1` and `--wait-port 180` manually if you need strict hardware detection).
+ - `Serial smoke (one-shot)` to run `tools/dev/serial_smoke.py --role auto --baud 19200 --wait-port 3 --allow-no-hardware` (set `ZACUS_REQUIRE_HW=1` and `--wait-port 180` manually if you need strict hardware detection).
 3. Thanks to the VS Code cockpit, `.pio`, `.platformio`, and `.venv` are hidden from explorer/search via workspace settings.
+
+## 4.7) Smoke sanity checks (doc-only)
+
+- **Tout déjà branché** (baseline non vide): smoke reuses the initial port list and prints `Using existing ports (already connected)`.
+- **Hotplug**: unplug a board, run the countdown, plug it back before timeout → new port triggers detection.
+- **Aucun hardware**: run smoke without devices; default behavior logs the skip, `ZACUS_REQUIRE_HW=1` forces failure, and `ZACUS_SKIP_PIO=1` still runs the skip-only sequence.
 
 ## 5) Hot-swap manuel
 

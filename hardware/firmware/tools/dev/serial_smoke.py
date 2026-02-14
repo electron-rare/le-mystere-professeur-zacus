@@ -197,16 +197,25 @@ def main() -> int:
             print("[error] failed to classify the explicit port", file=sys.stderr)
             return 1
     else:
-        before = {p.device for p in list(list_ports.comports())}
-        new_ports = wait_for_new_ports(before, args.wait_port)
-        if not new_ports:
+        baseline_ports = list(list_ports.comports())
+        baseline_devices = {p.device for p in baseline_ports}
+        new_ports = wait_for_new_ports(baseline_devices, args.wait_port)
+        if new_ports:
+            detection = detect_roles(new_ports, args.prefer_cu, ports_map)
+            if not detection:
+                return exit_no_hw(
+                    args.wait_port, allow_no_hardware, "failed to classify detected ports"
+                )
+        elif baseline_ports:
+            print("[info] Using existing ports (already connected)")
+            detection = detect_roles(baseline_ports, args.prefer_cu, ports_map)
+            if not detection:
+                return exit_no_hw(
+                    args.wait_port, allow_no_hardware, "failed to classify baseline ports"
+                )
+        else:
             return exit_no_hw(
                 args.wait_port, allow_no_hardware, "no new serial port detected"
-            )
-        detection = detect_roles(new_ports, args.prefer_cu, ports_map)
-        if not detection:
-            return exit_no_hw(
-                args.wait_port, allow_no_hardware, "failed to classify detected ports"
             )
 
     if args.role == "auto":

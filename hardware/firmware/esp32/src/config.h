@@ -61,6 +61,9 @@ constexpr uint32_t kBootAudioValidationTimeoutMs = 0;  // 0 => pas de timeout au
 constexpr uint8_t kBootAudioValidationMaxReplays = 6;
 constexpr uint16_t kBootProtocolPromptPeriodMs = 3000;
 constexpr uint16_t kBootRadioScanChunkMs = 18;
+constexpr uint32_t kLoopBudgetBootThresholdMs = 40U;
+constexpr uint32_t kLoopBudgetRuntimeThresholdMs = 25U;
+constexpr uint32_t kLoopBudgetWarnThrottleMs = 2500U;
 constexpr uint32_t kStoryEtape2DelayMs = 15UL * 60UL * 1000UL;
 constexpr uint32_t kStoryEtape2TestDelayMs = 5000U;
 constexpr bool kStoryV2EnabledDefault = (USON_STORY_V2_DEFAULT != 0);

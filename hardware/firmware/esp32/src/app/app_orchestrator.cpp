@@ -16,6 +16,7 @@
 #include "../controllers/story/story_controller.h"
 #include "../controllers/story/story_controller_v2.h"
 #include "../runtime/app_scheduler.h"
+#include "../runtime/loop_budget_manager.h"
 #include "../runtime/runtime_state.h"
 #include "../services/audio/audio_service.h"
 #include "../services/input/input_service.h"
@@ -78,19 +79,15 @@ struct StoryAudioCaptureGuardState {
 };
 StoryAudioCaptureGuardState g_storyAudioCaptureGuard;
 PlayerUiModel g_playerUi;
-struct LoopBudgetState {
-  uint32_t lastWarnMs = 0U;
-  uint32_t maxLoopMs = 0U;
-  uint32_t warnCount = 0U;
-  uint32_t sampleCount = 0U;
-  uint32_t totalLoopMs = 0U;
-  uint32_t overBootThresholdCount = 0U;
-  uint32_t overRuntimeThresholdCount = 0U;
-  uint32_t bootThresholdMs = 40U;
-  uint32_t runtimeThresholdMs = 25U;
-  uint32_t warnThrottleMs = 2500U;
-};
-LoopBudgetState g_loopBudget;
+
+LoopBudgetConfig makeLoopBudgetConfig() {
+  LoopBudgetConfig config;
+  config.bootThresholdMs = config::kLoopBudgetBootThresholdMs;
+  config.runtimeThresholdMs = config::kLoopBudgetRuntimeThresholdMs;
+  config.warnThrottleMs = config::kLoopBudgetWarnThrottleMs;
+  return config;
+}
+LoopBudgetManager g_loopBudget(makeLoopBudgetConfig());
 
 void setBootAudioPaEnabled(bool enabled, const char* source);
 void printBootAudioOutputInfo(const char* source);
@@ -2322,32 +2319,26 @@ void updateMp3FormatTest(uint32_t nowMs) {
 }
 
 void printLoopBudgetStatus(const char* source, uint32_t nowMs) {
-  const uint32_t avgLoopMs =
-      (g_loopBudget.sampleCount > 0U) ? (g_loopBudget.totalLoopMs / g_loopBudget.sampleCount) : 0U;
+  const LoopBudgetSnapshot snap = g_loopBudget.snapshot();
+  const uint32_t avgLoopMs = (snap.sampleCount > 0U) ? (snap.totalLoopMs / snap.sampleCount) : 0U;
   Serial.printf(
       "[SYS_LOOP_BUDGET] %s mode=%s max=%lu avg=%lu samples=%lu warn=%lu over_boot=%lu over_runtime=%lu thr_boot=%lu thr_runtime=%lu throttle=%lu\n",
       source,
       runtimeModeLabel(),
-      static_cast<unsigned long>(g_loopBudget.maxLoopMs),
+      static_cast<unsigned long>(snap.maxLoopMs),
       static_cast<unsigned long>(avgLoopMs),
-      static_cast<unsigned long>(g_loopBudget.sampleCount),
-      static_cast<unsigned long>(g_loopBudget.warnCount),
-      static_cast<unsigned long>(g_loopBudget.overBootThresholdCount),
-      static_cast<unsigned long>(g_loopBudget.overRuntimeThresholdCount),
-      static_cast<unsigned long>(g_loopBudget.bootThresholdMs),
-      static_cast<unsigned long>(g_loopBudget.runtimeThresholdMs),
-      static_cast<unsigned long>(g_loopBudget.warnThrottleMs));
+      static_cast<unsigned long>(snap.sampleCount),
+      static_cast<unsigned long>(snap.warnCount),
+      static_cast<unsigned long>(snap.overBootThresholdCount),
+      static_cast<unsigned long>(snap.overRuntimeThresholdCount),
+      static_cast<unsigned long>(snap.bootThresholdMs),
+      static_cast<unsigned long>(snap.runtimeThresholdMs),
+      static_cast<unsigned long>(snap.warnThrottleMs));
   (void)nowMs;
 }
 
 void resetLoopBudgetStats(uint32_t nowMs, const char* source) {
-  g_loopBudget.lastWarnMs = nowMs;
-  g_loopBudget.maxLoopMs = 0U;
-  g_loopBudget.warnCount = 0U;
-  g_loopBudget.sampleCount = 0U;
-  g_loopBudget.totalLoopMs = 0U;
-  g_loopBudget.overBootThresholdCount = 0U;
-  g_loopBudget.overRuntimeThresholdCount = 0U;
+  g_loopBudget.reset(nowMs);
   Serial.printf("[SYS_LOOP_BUDGET] reset via=%s\n", source);
 }
 
@@ -3354,28 +3345,10 @@ void app_orchestrator::loop() {
   sendScreenFrameSnapshot(nowMs, screenKey);
 
   const uint32_t loopElapsedMs = static_cast<uint32_t>(millis() - loopStartMs);
-  ++g_loopBudget.sampleCount;
-  g_loopBudget.totalLoopMs += loopElapsedMs;
-  if (loopElapsedMs > g_loopBudget.maxLoopMs) {
-    g_loopBudget.maxLoopMs = loopElapsedMs;
-  }
-
-  const bool bootActive = g_bootAudioProtocol.active;
-  const uint32_t thresholdMs = bootActive ? g_loopBudget.bootThresholdMs : g_loopBudget.runtimeThresholdMs;
-  if (loopElapsedMs > g_loopBudget.bootThresholdMs) {
-    ++g_loopBudget.overBootThresholdCount;
-  }
-  if (loopElapsedMs > g_loopBudget.runtimeThresholdMs) {
-    ++g_loopBudget.overRuntimeThresholdCount;
-  }
-  if (loopElapsedMs > thresholdMs && static_cast<int32_t>(nowMs - g_loopBudget.lastWarnMs) >= 0) {
-    ++g_loopBudget.warnCount;
-    Serial.printf("[LOOP_BUDGET] warn loop=%lums max=%lums mode=%u boot=%u mp3=%u\n",
-                  static_cast<unsigned long>(loopElapsedMs),
-                  static_cast<unsigned long>(g_loopBudget.maxLoopMs),
-                  static_cast<unsigned int>(g_mode),
-                  g_bootAudioProtocol.active ? 1U : 0U,
-                  (g_mode == RuntimeMode::kMp3) ? 1U : 0U);
-    g_loopBudget.lastWarnMs = nowMs + g_loopBudget.warnThrottleMs;
-  }
+  g_loopBudget.record(nowMs,
+                      loopElapsedMs,
+                      g_bootAudioProtocol.active,
+                      Serial,
+                      static_cast<uint8_t>(g_mode),
+                      (g_mode == RuntimeMode::kMp3));
 }

@@ -1,29 +1,20 @@
-# Centralisation des protocoles, specs et templates
+# Index des protocoles et specs
 
-Ce dossier contient tous les fichiers partagés entre les firmwares (esp32, ui/rp2040, etc.) :
-
-- PROTOCOL.md : protocole UART UI <-> ESP32
-- UI_SPEC.md : spécification UI tactile
-- story_spec_v1.yaml : schéma YAML des scénarios STORY V2
-- scenario.template.yaml : template YAML de scénario
-- spectre_radio_lab.prompt.md : exemple de prompt STORY V2
-- spectre_radio_lab.yaml : exemple de scénario STORY V2
-- GENERER_UN_SCENARIO_STORY_V2.md : guide de génération de scénario
-- story_README.md : documentation d’utilisation des specs/scénarios
+Ce dossier est la référence unique des interfaces partagées firmware.
 
 ## Index
 
-| Fichier | Description |
-|---------|------------|
-| PROTOCOL.md | Protocole UART JSONL UI <-> ESP32 |
-| UI_SPEC.md | Spécification UI tactile RP2040 |
-| story_spec_v1.yaml | Schéma YAML de scénario STORY V2 |
-| scenario.template.yaml | Template YAML de scénario STORY V2 |
-| spectre_radio_lab.prompt.md | Exemple de prompt STORY V2 |
-| spectre_radio_lab.yaml | Exemple de scénario STORY V2 |
-| GENERER_UN_SCENARIO_STORY_V2.md | Guide de génération de scénario STORY V2 |
-| story_README.md | Documentation d’utilisation des specs/scénarios |
+| Fichier | Statut | Description |
+|---|---|---|
+| `PROTOCOL.md` | Source of truth | Contrat UART JSONL UI<->ESP32 + commandes série canoniques |
+| `UI_SPEC.md` | Source of truth | Spécification UI tactile RP2040 (pages, gestes, mode dégradé) |
+| `story_spec_v1.yaml` | Source of truth | Schéma YAML des scénarios STORY |
+| `scenario.template.yaml` | Modèle | Template de scénario STORY |
+| `spectre_radio_lab.prompt.md` | Exemple | Prompt de génération STORY |
+| `spectre_radio_lab.yaml` | Exemple | Scénario STORY d'exemple |
+| `GENERER_UN_SCENARIO_STORY_V2.md` | Guide | Process auteur STORY |
+| `story_README.md` | Guide | Usage général specs/scénarios STORY |
+| `README.md` | Guide | Règles d'évolution et validation |
 
----
-
-*Merci de référencer ce dossier dans tous les README des firmwares et de maintenir cet index à jour.*
+## Règle
+- Toute divergence entre code et docs doit être corrigée dans ce dossier au même cycle de livraison.

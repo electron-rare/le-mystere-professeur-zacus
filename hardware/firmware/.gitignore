@@ -1,0 +1,40 @@
+# .gitignore global pour hardware/firmware
+# Exclut tous les fichiers/dossiers de build, caches, et fichiers temporaires
+
+# PlatformIO
+.pio/
+.pio-home/
+
+# VSCode
+.vscode/
+
+# macOS
+.DS_Store
+
+# Fichiers temporaires courants
+*.swp
+*.swo
+*.tmp
+*.bak
+
+# Build/firmware
+*.elf
+*.bin
+*.hex
+*.map
+*.uf2
+
+# Logs
+*.log
+
+# Exclure les fichiers générés automatiquement
+libdeps/
+
+# Node/npm (si jamais utilisé pour outils)
+node_modules/
+
+# Python (si jamais utilisé pour outils)
+__pycache__/
+*.pyc
+
+# Autres à adapter selon besoins

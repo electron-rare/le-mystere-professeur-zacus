@@ -22,7 +22,7 @@ const char* sourceLabel(const screen_core::TelemetryState* state) {
   if (state == nullptr) {
     return "SD";
   }
-  return (state->uiSource == 1U) ? "RADIO" : "SD";
+  return state->mp3Mode ? "SD" : "RADIO";
 }
 
 }  // namespace

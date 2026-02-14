@@ -3,21 +3,17 @@
 set -e
 cd "$(dirname "$0")"
 
-# Build ESP32
-if [ -d "esp32" ]; then
-  echo "[BUILD] ESP32..."
-  cd esp32 && pio run && cd ..
-fi
+envs=(
+  "esp32dev"
+  "esp32_release"
+  "ui_rp2040_ili9488"
+  "ui_rp2040_ili9486"
+  "esp8266_oled"
+)
 
-# Build UI RP2040
-if [ -d "ui/rp2040" ]; then
-  echo "[BUILD] UI RP2040..."
-  cd ui/rp2040 && pio run && cd ../..
-fi
-# Build écran ESP8266 (optionnel)
-if [ -d "ui/esp8266_oled" ]; then
-  echo "[BUILD] ESP8266 OLED..."
-  cd ui/esp8266_oled && pio run && cd ../..
-fi
+for env in "${envs[@]}"; do
+  echo "[BUILD] ${env}..."
+  pio run -e "${env}"
+done
 
 echo "[OK] Build global terminé."

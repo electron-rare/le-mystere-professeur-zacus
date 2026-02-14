@@ -20,6 +20,24 @@ Pour builder tous les firmwares :
 ./build_all.sh
 ```
 
+Ou directement avec PlatformIO depuis cette racine:
+```sh
+pio run
+```
+
+## Build ciblé
+
+Depuis `hardware/firmware/`:
+```sh
+pio run -e esp32dev
+pio run -e esp32_release
+pio run -e ui_rp2040_ili9488
+pio run -e ui_rp2040_ili9486
+pio run -e esp8266_oled
+```
+
+Voir `README_PLATFORMIO.txt` pour les détails.
+
 ## Convention
 - Un README harmonisé dans chaque firmware
 - Style C++ imposé par `.clang-format`

@@ -42,11 +42,26 @@ void setScanReason(Mp3ScanProgress* progress, const char* reason) {
   copyCStr(progress->reason, sizeof(progress->reason), reason);
 }
 
+<<<<<<< HEAD
 void setFallbackReason(Mp3BackendRuntimeStats* stats, const char* reason) {
   if (stats == nullptr) {
     return;
   }
   copyCStr(stats->lastFallbackReason, sizeof(stats->lastFallbackReason), reason);
+=======
+void setBackendReason(Mp3BackendRuntimeStats* stats, const char* reason) {
+  if (stats == nullptr) {
+    return;
+  }
+  copyCStr(stats->lastFailureReason, sizeof(stats->lastFailureReason), reason);
+}
+
+void setFallbackPath(Mp3BackendRuntimeStats* stats, const char* path) {
+  if (stats == nullptr) {
+    return;
+  }
+  copyCStr(stats->lastFallbackPath, sizeof(stats->lastFallbackPath), path);
+>>>>>>> feature/MPRC-RC1-mp3-audio
 }
 
 bool isJsonSafeChar(char c) {
@@ -124,7 +139,12 @@ void Mp3Player::begin() {
   scanProgress_.tickEntryBudget = kScanTickEntryBudget;
   setScanReason(&scanProgress_, "IDLE");
   backendStats_ = Mp3BackendRuntimeStats();
+<<<<<<< HEAD
   setFallbackReason(&backendStats_, "NONE");
+=======
+  setBackendReason(&backendStats_, "OK");
+  setFallbackPath(&backendStats_, "NONE");
+>>>>>>> feature/MPRC-RC1-mp3-audio
 }
 
 void Mp3Player::update(uint32_t nowMs, bool allowPlayback) {
@@ -954,16 +974,24 @@ bool Mp3Player::startLegacyTrack() {
   ++backendStats_.legacyAttempts;
   if (!sdReady_ || trackCount_ == 0U || currentTrack_ >= trackCount_) {
     ++backendStats_.startFailures;
+<<<<<<< HEAD
     ++backendStats_.legacyFailures;
     copyCStr(backendError_, sizeof(backendError_), "OUT_OF_CONTEXT");
+=======
+    setBackendReason(&backendStats_, "NO_TRACK");
+>>>>>>> feature/MPRC-RC1-mp3-audio
     return false;
   }
 
   const TrackEntry* entry = catalog_.entry(currentTrack_);
   if (entry == nullptr || entry->path[0] == '\0') {
     ++backendStats_.startFailures;
+<<<<<<< HEAD
     ++backendStats_.legacyFailures;
     copyCStr(backendError_, sizeof(backendError_), "BAD_PATH");
+=======
+    setBackendReason(&backendStats_, "NO_ENTRY");
+>>>>>>> feature/MPRC-RC1-mp3-audio
     return false;
   }
 
@@ -975,8 +1003,12 @@ bool Mp3Player::startLegacyTrack() {
     ++backendStats_.retriesScheduled;
     ++backendStats_.legacyRetries;
     ++backendStats_.startFailures;
+<<<<<<< HEAD
     ++backendStats_.legacyFailures;
     copyCStr(backendError_, sizeof(backendError_), "UNSUPPORTED_CODEC");
+=======
+    setBackendReason(&backendStats_, "UNSUPPORTED_CODEC");
+>>>>>>> feature/MPRC-RC1-mp3-audio
     return false;
   }
 
@@ -987,8 +1019,12 @@ bool Mp3Player::startLegacyTrack() {
     ++backendStats_.retriesScheduled;
     ++backendStats_.legacyRetries;
     ++backendStats_.startFailures;
+<<<<<<< HEAD
     ++backendStats_.legacyFailures;
     copyCStr(backendError_, sizeof(backendError_), "OPEN_FAIL");
+=======
+    setBackendReason(&backendStats_, "MISSING_FILE");
+>>>>>>> feature/MPRC-RC1-mp3-audio
     return false;
   }
 
@@ -1003,8 +1039,12 @@ bool Mp3Player::startLegacyTrack() {
     ++backendStats_.retriesScheduled;
     ++backendStats_.legacyRetries;
     ++backendStats_.startFailures;
+<<<<<<< HEAD
     ++backendStats_.legacyFailures;
     copyCStr(backendError_, sizeof(backendError_), "OOM");
+=======
+    setBackendReason(&backendStats_, "ALLOC_FAIL");
+>>>>>>> feature/MPRC-RC1-mp3-audio
     return false;
   }
 
@@ -1020,8 +1060,12 @@ bool Mp3Player::startLegacyTrack() {
     ++backendStats_.retriesScheduled;
     ++backendStats_.legacyRetries;
     ++backendStats_.startFailures;
+<<<<<<< HEAD
     ++backendStats_.legacyFailures;
     copyCStr(backendError_, sizeof(backendError_), "DECODER_INIT_FAIL");
+=======
+    setBackendReason(&backendStats_, "DECODER_BEGIN_FAIL");
+>>>>>>> feature/MPRC-RC1-mp3-audio
     return false;
   }
 
@@ -1029,7 +1073,11 @@ bool Mp3Player::startLegacyTrack() {
   copyCStr(backendError_, sizeof(backendError_), "OK");
   ++backendStats_.startSuccess;
   ++backendStats_.legacyStarts;
+<<<<<<< HEAD
   ++backendStats_.legacySuccess;
+=======
+  setBackendReason(&backendStats_, "OK");
+>>>>>>> feature/MPRC-RC1-mp3-audio
   Serial.printf("[MP3] Playing %u/%u [%s|LEGACY]: %s\n",
                 static_cast<unsigned int>(currentTrack_ + 1U),
                 static_cast<unsigned int>(trackCount_),
@@ -1043,29 +1091,45 @@ bool Mp3Player::startAudioToolsTrack() {
   ++backendStats_.audioToolsAttempts;
   if (!sdReady_ || trackCount_ == 0U || currentTrack_ >= trackCount_) {
     ++backendStats_.startFailures;
+<<<<<<< HEAD
     ++backendStats_.audioToolsFailures;
     copyCStr(backendError_, sizeof(backendError_), "OUT_OF_CONTEXT");
+=======
+    setBackendReason(&backendStats_, "NO_TRACK");
+>>>>>>> feature/MPRC-RC1-mp3-audio
     return false;
   }
   const TrackEntry* entry = catalog_.entry(currentTrack_);
   if (entry == nullptr || entry->path[0] == '\0') {
     ++backendStats_.startFailures;
+<<<<<<< HEAD
     ++backendStats_.audioToolsFailures;
     copyCStr(backendError_, sizeof(backendError_), "BAD_PATH");
+=======
+    setBackendReason(&backendStats_, "NO_ENTRY");
+>>>>>>> feature/MPRC-RC1-mp3-audio
     return false;
   }
   const AudioCodec trackCodec = codecForPath(String(entry->path));
   if (!audioTools_.supportsCodec(trackCodec)) {
     copyCStr(backendError_, sizeof(backendError_), "UNSUPPORTED_CODEC");
     ++backendStats_.startFailures;
+<<<<<<< HEAD
     ++backendStats_.audioToolsFailures;
+=======
+    setBackendReason(&backendStats_, "AT_UNSUPPORTED");
+>>>>>>> feature/MPRC-RC1-mp3-audio
     return false;
   }
 
   if (!audioTools_.start(entry->path, gain_)) {
     copyCStr(backendError_, sizeof(backendError_), audioTools_.lastError());
     ++backendStats_.startFailures;
+<<<<<<< HEAD
     ++backendStats_.audioToolsFailures;
+=======
+    setBackendReason(&backendStats_, audioTools_.lastError());
+>>>>>>> feature/MPRC-RC1-mp3-audio
     return false;
   }
 
@@ -1074,7 +1138,11 @@ bool Mp3Player::startAudioToolsTrack() {
   copyCStr(backendError_, sizeof(backendError_), "OK");
   ++backendStats_.startSuccess;
   ++backendStats_.audioToolsStarts;
+<<<<<<< HEAD
   ++backendStats_.audioToolsSuccess;
+=======
+  setBackendReason(&backendStats_, "OK");
+>>>>>>> feature/MPRC-RC1-mp3-audio
   Serial.printf("[MP3] Playing %u/%u [%s|AUDIO_TOOLS]: %s\n",
                 static_cast<unsigned int>(currentTrack_ + 1U),
                 static_cast<unsigned int>(trackCount_),
@@ -1091,7 +1159,11 @@ void Mp3Player::startCurrentTrack() {
   }
 
   fallbackUsed_ = false;
+<<<<<<< HEAD
   setFallbackReason(&backendStats_, "NONE");
+=======
+  setFallbackPath(&backendStats_, "NONE");
+>>>>>>> feature/MPRC-RC1-mp3-audio
   bool started = false;
   bool attemptedLegacy = false;
   bool attemptedTools = false;
@@ -1102,9 +1174,16 @@ void Mp3Player::startCurrentTrack() {
     if (!started && backendMode_ == PlayerBackendMode::kAutoFallback) {
       fallbackUsed_ = true;
       ++backendStats_.fallbackCount;
+<<<<<<< HEAD
       setFallbackReason(&backendStats_, backendError_);
       attemptedLegacy = true;
+=======
+      setFallbackPath(&backendStats_, "AT->LEGACY");
+>>>>>>> feature/MPRC-RC1-mp3-audio
       started = startLegacyTrack();
+      if (!started) {
+        setFallbackPath(&backendStats_, "AT->LEGACY_FAIL");
+      }
     }
   } else {
     attemptedLegacy = true;
@@ -1126,10 +1205,15 @@ void Mp3Player::startCurrentTrack() {
   if (!started) {
     nextRetryMs_ = millis() + 1000U;
     ++backendStats_.retriesScheduled;
+<<<<<<< HEAD
     if (attemptedLegacy) {
       ++backendStats_.legacyRetries;
     } else if (attemptedTools) {
       ++backendStats_.audioToolsRetries;
+=======
+    if (backendError_[0] == '\0') {
+      copyCStr(backendError_, sizeof(backendError_), "START_FAIL");
+>>>>>>> feature/MPRC-RC1-mp3-audio
     }
     return;
   }

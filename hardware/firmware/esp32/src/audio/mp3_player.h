@@ -44,6 +44,7 @@ struct Mp3BackendRuntimeStats {
   uint32_t fallbackCount = 0U;
   uint32_t legacyStarts = 0U;
   uint32_t audioToolsStarts = 0U;
+<<<<<<< HEAD
   uint32_t legacyAttempts = 0U;
   uint32_t legacySuccess = 0U;
   uint32_t legacyFailures = 0U;
@@ -53,6 +54,10 @@ struct Mp3BackendRuntimeStats {
   uint32_t audioToolsFailures = 0U;
   uint32_t audioToolsRetries = 0U;
   char lastFallbackReason[32] = "NONE";
+=======
+  char lastFailureReason[24] = "OK";
+  char lastFallbackPath[24] = "NONE";
+>>>>>>> feature/MPRC-RC1-mp3-audio
 };
 
 class Mp3Player {

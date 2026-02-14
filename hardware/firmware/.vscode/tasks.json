@@ -1,0 +1,54 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Zacus: Ports watch (15s, venv strict)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -e; ROOT='${workspaceFolder}'; if [ -f \"$ROOT/platformio.ini\" ]; then FW=\"$ROOT\"; else FW=\"$ROOT/hardware/firmware\"; fi; cd \"$FW\"; test -f .venv/bin/activate || { echo 'Missing venv: run tools/dev/bootstrap_local.sh'; exit 1; }; source .venv/bin/activate; while true; do echo \"\\n=== PORTS $(date) ===\"; python3 -m serial.tools.list_ports -v; sleep 15; done"
+      ],
+      "presentation": { "panel": "dedicated", "reveal": "always", "clear": true, "group": "zacus" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Zacus: Git watch (15s)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -e; ROOT='${workspaceFolder}'; if [ -d \"$ROOT/.git\" ]; then cd \"$ROOT\"; else cd \"$ROOT/..\"; fi; while true; do echo \"\\n=== GIT $(date) ===\"; git status -sb; echo; git diff --stat | head -n 25; sleep 15; done"
+      ],
+      "presentation": { "panel": "dedicated", "reveal": "always", "clear": true, "group": "zacus" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Zacus: Build matrix (one-shot)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -e; ROOT='${workspaceFolder}'; if [ -f \"$ROOT/platformio.ini\" ]; then FW=\"$ROOT\"; else FW=\"$ROOT/hardware/firmware\"; fi; cd \"$FW\"; test -f .venv/bin/activate && source .venv/bin/activate || true; export PLATFORMIO_CORE_DIR=\"$HOME/.platformio\"; ./build_all.sh"
+      ],
+      "presentation": { "panel": "dedicated", "reveal": "always", "clear": true, "group": "zacus" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Zacus: Serial smoke (one-shot, auto/skip)",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -e; ROOT='${workspaceFolder}'; if [ -f \"$ROOT/platformio.ini\" ]; then FW=\"$ROOT\"; else FW=\"$ROOT/hardware/firmware\"; fi; cd \"$FW\"; test -f .venv/bin/activate || { echo 'Missing venv: run tools/dev/bootstrap_local.sh'; exit 1; }; source .venv/bin/activate; python3 tools/dev/serial_smoke.py --role auto --baud 19200 --wait-port 3 --allow-no-hardware"
+      ],
+      "presentation": { "panel": "dedicated", "reveal": "always", "clear": true, "group": "zacus" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Zacus: Cockpit (watch only)",
+      "dependsOn": ["Zacus: Ports watch (15s, venv strict)", "Zacus: Git watch (15s)"],
+      "problemMatcher": []
+    }
+  ]
+}

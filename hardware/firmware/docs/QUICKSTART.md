@@ -62,6 +62,20 @@ Variantes d'environnement :
 - `ZACUS_USB_COUNTDOWN=60 ./tools/dev/run_matrix_and_smoke.sh` — prolonge la remise USB.
 - `ZACUS_NO_COUNTDOWN=1 ./tools/dev/run_matrix_and_smoke.sh` — saute le compte à rebours et la cloche.
 
+## 4.6) Local dev cockpit
+
+1. Bootstrap the workspace once:
+   ```sh
+   ./tools/dev/bootstrap_local.sh
+   ```
+   This creates `.venv`, installs `pyserial`, and reminds you to manually warm PlatformIO caches (`PLATFORMIO_CORE_DIR="$HOME/.platformio"` + `pio platform install espressif32`) when network access is available.
+2. Open VS Code from the repo root and use **Run Task**:
+   - `Ports watch (venv)` to list serial ports every 15s (fails clearly before `.venv` exists).
+   - `Git watch` to keep `git status -sb` + `git diff --stat=25` refreshed.
+   - `Build firmware (one-shot)` for a single `./build_all.sh` run (exports `PLATFORMIO_CORE_DIR="$HOME/.platformio"` first).
+   - `Serial smoke (one-shot)` to run `tools/dev/serial_smoke.py --role auto --baud 19200 --wait-port 3 --allow-no-hardware` (set `ZACUS_REQUIRE_HW=1` and `--wait-port 180` manually if you need strict hardware detection).
+3. Thanks to the VS Code cockpit, `.pio`, `.platformio`, and `.venv` are hidden from explorer/search via workspace settings.
+
 ## 5) Hot-swap manuel
 
 1. Demarrer ESP32 + OLED, verifier affichage.

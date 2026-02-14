@@ -7,7 +7,6 @@
 .pio-home/
 
 # VSCode
-.vscode/
 
 # macOS
 .DS_Store

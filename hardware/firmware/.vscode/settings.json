@@ -1,0 +1,17 @@
+{
+  "files.exclude": {
+    "**/.pio": true,
+    "**/.platformio": true,
+    "**/.venv": true
+  },
+  "search.exclude": {
+    "**/.pio": true,
+    "**/.platformio": true,
+    "**/.venv": true
+  },
+  "files.watcherExclude": {
+    "**/.pio/**": true,
+    "**/.platformio/**": true,
+    "**/.venv/**": true
+  }
+}

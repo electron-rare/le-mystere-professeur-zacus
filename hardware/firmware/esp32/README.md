@@ -346,7 +346,6 @@ Kit presentation client MP3:
 - `docs/client/mp3/07_decisions_next_steps.md`
 - `tools/qa/mp3_client_demo_smoke.sh`
 - `tools/qa/mp3_client_live_checklist.md`
-
 Commandes SD utiles:
 
 - `SD_STATUS` : etat stockage (mount + scan)

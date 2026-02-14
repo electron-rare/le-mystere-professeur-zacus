@@ -45,6 +45,12 @@ python3 tools/dev/serial_smoke.py --role auto --wait-port 180
 
 MacOS CP2102 duplicates share VID/PID=10C4:EA60/0001; the LOCATION (20-6.1.1=ESP32, 20-6.1.2=ESP8266) drives the detector. Adjust `tools/dev/ports_map.json` if your rig changes and `/dev/cu.SLAB_*` should be preferred over `usbserial-*`.
 
+## Serial smoke commands
+
+- baseline smoke (auto handles already connected boards): `python3 tools/dev/serial_smoke.py --role auto --baud 19200 --wait-port 30 --allow-no-hardware`
+- force hardware detection: `ZACUS_REQUIRE_HW=1 python3 tools/dev/serial_smoke.py --role auto --baud 19200 --wait-port 180`
+- skip PlatformIO builds and just run smoke (useful when downloads are impossible): `ZACUS_SKIP_PIO=1 ./tools/dev/run_matrix_and_smoke.sh`
+
 ## Build + smoke combo
 
 ```sh

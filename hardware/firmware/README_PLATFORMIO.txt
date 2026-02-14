@@ -1,22 +1,23 @@
-Configuration PlatformIO centralisée (racine firmware)
-=====================================================
+Configuration PlatformIO centralisee (hardware/firmware)
+=========================================================
 
-Ce dépôt utilise un seul fichier `platformio.ini` à la racine `hardware/firmware/`.
+Ce depot utilise un seul `platformio.ini` a la racine.
 
-Environnements disponibles:
+Environnements:
 - esp32dev
 - esp32_release
+- esp8266_oled
 - ui_rp2040_ili9488
 - ui_rp2040_ili9486
-- esp8266_oled
 
-Commandes:
+Commandes utiles:
 - Build complet: `pio run`
-- Build ciblé: `pio run -e <env>`
-- Build script: `./build_all.sh`
-- Upload ciblé: `pio run -e <env> -t upload --upload-port <PORT>`
-- Monitor ciblé: `pio device monitor -e <env> --port <PORT>`
+- Build cible: `pio run -e <env>`
+- Upload: `pio run -e <env> -t upload --upload-port <PORT>`
+- Monitor: `pio device monitor -e <env> --port <PORT>`
+- Matrix locale: `./build_all.sh`
 
-Règle de structure:
-- Les sources sont sélectionnées par `build_src_filter` par environnement.
-- Ne pas remettre de `platformio.ini` local dans `esp32/` ou `ui/*`.
+Rappels:
+- `src_dir = esp32_audio/src` (sources ESP32 par defaut)
+- Chaque env isole ses sources via `build_src_filter`
+- Header protocole partage: `protocol/ui_link_v2.h` via `-Iprotocol`

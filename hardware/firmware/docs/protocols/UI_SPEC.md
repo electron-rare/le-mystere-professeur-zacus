@@ -2,6 +2,9 @@
 
 Ce document est la source de vérité de l'interface UI tactile.
 
+Transport UART actif:
+- `../../protocol/ui_link_v2.md` (trames `TYPE,k=v*CC\n`, CRC8 poly `0x07`)
+
 ## Pages
 
 ### 1. `LECTURE`
@@ -36,18 +39,17 @@ Ce document est la source de vérité de l'interface UI tactile.
 ## Contrat de données UI
 
 ### Entrée (ESP32 -> UI)
-- `state`: état complet (source, lecture, metadata, volume, RSSI, buffer).
-- `tick`: mise à jour rapide (position, buffer, VU).
-- `hb`: heartbeat lien.
-- `list`: liste de navigation (source, offset, total, cursor, items).
+- `ACK`: confirmation de session après `HELLO`.
+- `KEYFRAME`: snapshot complet (resync immédiat, puis périodique).
+- `STAT`: télémétrie compacte périodique (delta-friendly).
+- `PING`: heartbeat (UI répond `PONG`).
 
 ### Sortie (UI -> ESP32)
-- `t=cmd`, action `a`, valeur optionnelle `v`.
-- Actions canoniques:
-  - `play_pause`, `next`, `prev`
-  - `vol_delta`, `vol_set`
-  - `source_set`, `seek`, `station_delta`
-  - `request_state`
+- `HELLO` au boot/reconnect (`proto=2`, `ui_type`, `ui_id`, `fw`, `caps`).
+- `PONG` en réponse au `PING`.
+- `BTN` logique (`id=NEXT|PREV|OK|BACK|VOL_UP|VOL_DOWN|MODE`, `action=...`).
+- `TOUCH` optionnel (coordonnées brutes, action `down|move|up`).
+- `CMD` optionnel (ex: `op=request_keyframe`).
 
 ## Performance et rendu
 - Rendu partiel par zones (pas de full refresh continu).
@@ -57,7 +59,7 @@ Ce document est la source de vérité de l'interface UI tactile.
 - La boucle UI doit rester non bloquante sur réception UART.
 
 ## Modes dégradés
-- Pas de `hb` > 3s: état offline.
+- Pas de trame valide > 1500 ms: état offline.
 - En mode offline:
   - affichage explicite du statut lien.
-  - émission périodique `request_state` (1s) jusqu'au retour du lien.
+  - réémission périodique `HELLO` (1s) jusqu'au retour du lien.

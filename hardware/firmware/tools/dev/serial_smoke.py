@@ -33,6 +33,19 @@ DEFAULT_PORTS_MAP = {
 ROLE_PRIORITY = ["esp32", "esp8266", "rp2040"]
 
 
+def exit_no_hw(wait_port, allow, reason=None):
+    if not allow:
+        if reason:
+            print(f"[error] {reason}", file=sys.stderr)
+        print(
+            f"[error] no suitable hardware detected after waiting {wait_port}s",
+            file=sys.stderr,
+        )
+        return 2
+    print("SKIP: no hardware detected")
+    return 0
+
+
 def load_ports_map():
     if not os.path.exists(PORTS_MAP_PATH):
         os.makedirs(os.path.dirname(PORTS_MAP_PATH), exist_ok=True)
@@ -54,15 +67,17 @@ def parse_location(hwid: str):
 def canonical_device(group, prefer_cu):
     def score(port):
         name = port.device
-        if prefer_cu and name.startswith("/dev/cu.SLAB"):
+        if name.startswith("/dev/cu.SLAB"):
             return 0
-        if prefer_cu and name.startswith("/dev/cu.usbserial"):
+        if name.startswith("/dev/cu.usbserial"):
             return 1
-        if prefer_cu and name.startswith("/dev/cu."):
+        if name.startswith("/dev/cu.usbmodem"):
             return 2
-        if name.startswith("/dev/cu."):
+        if prefer_cu and name.startswith("/dev/cu."):
             return 3
-        return 4
+        if name.startswith("/dev/cu."):
+            return 4
+        return 5
 
     return min(group, key=score)
 
@@ -160,8 +175,14 @@ def main() -> int:
     parser.add_argument("--all", action="store_true", help="Run smoke on all detected roles (when not auto)")
     parser.add_argument("--baud", type=int, default=19200, help="Serial baud (default 19200)")
     parser.add_argument("--timeout", type=float, default=2.0, help="Per-command timeout (seconds)")
+    parser.add_argument(
+        "--allow-no-hardware",
+        action="store_true",
+        help="Exit cleanly when no hardware is detected instead of failing.",
+    )
     parser.add_argument("--prefer-cu", action="store_true", default=platform.system() == "Darwin", help="Prefer /dev/cu.* on macOS")
     args = parser.parse_args()
+    allow_no_hardware = args.allow_no_hardware or os.environ.get("ZACUS_ALLOW_NO_HW") == "1"
 
     ports_map = load_ports_map()
     detection = {}
@@ -179,12 +200,14 @@ def main() -> int:
         before = {p.device for p in list(list_ports.comports())}
         new_ports = wait_for_new_ports(before, args.wait_port)
         if not new_ports:
-            print("[error] no new serial port detected", file=sys.stderr)
-            return 1
+            return exit_no_hw(
+                args.wait_port, allow_no_hardware, "no new serial port detected"
+            )
         detection = detect_roles(new_ports, args.prefer_cu, ports_map)
         if not detection:
-            print("[error] failed to classify detected ports", file=sys.stderr)
-            return 1
+            return exit_no_hw(
+                args.wait_port, allow_no_hardware, "failed to classify detected ports"
+            )
 
     if args.role == "auto":
         run_roles = [role for role in ROLE_PRIORITY if role in detection]

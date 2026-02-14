@@ -15,11 +15,12 @@
 #include "core/render_scheduler.h"
 #include "core/stat_parser.h"
 #include "core/telemetry_state.h"
+#include "ui_link_v2.h"
 
 namespace {
 
 constexpr uint8_t kLinkRx = D6;    // ESP8266 RX <- ESP32 TX (GPIO22)
-constexpr uint8_t kLinkTx = D5;    // Non utilise dans le profil actuel
+constexpr uint8_t kLinkTx = D5;    // ESP8266 TX -> ESP32 RX (GPIO19)
 constexpr uint32_t kLinkBaud = 19200;
 constexpr int kLinkRxBufferBytes = 256;
 constexpr int kLinkIsrBufferBytes = 2048;
@@ -29,11 +30,12 @@ constexpr uint8_t kScreenHeight = 64;
 constexpr int8_t kOledReset = -1;
 
 constexpr uint16_t kRenderPeriodMs = 250;
-constexpr uint16_t kLinkTimeoutMs = 15000;
-constexpr uint16_t kLinkDownConfirmMs = 2500;
+constexpr uint16_t kLinkTimeoutMs = 1500;
+constexpr uint16_t kLinkDownConfirmMs = 450;
 constexpr uint32_t kLinkRecoverGraceMs = 30000;
 constexpr uint32_t kPeerRebootGraceMs = 8000;
 constexpr uint32_t kPeerUptimeRollbackSlackMs = 2000;
+constexpr uint16_t kHelloRetryMs = 1000;
 constexpr uint16_t kDiagPeriodMs = 5000;
 constexpr uint16_t kBootVisualTestMs = 400;
 constexpr uint16_t kBootSplashMinMs = 3600;
@@ -91,6 +93,8 @@ uint8_t g_scopeHead = 0;
 bool g_scopeFilled = false;
 uint32_t g_unlockSequenceStartMs = 0;
 uint32_t g_bootSplashUntilMs = 0;
+uint32_t g_lastHelloMs = 0;
+bool g_linkAcked = false;
 
 uint32_t latestLinkTickMs() {
   return screen_core::latestLinkTickMs(g_state, g_linkState);
@@ -986,8 +990,41 @@ bool initDisplayOnPins(uint8_t sda, uint8_t scl) {
   return false;
 }
 
-bool parseFrame(const char* frame, screen_core::TelemetryState* out) {
-  return screen_core::parseStatFrame(frame, out, millis(), &g_crcErrorCount);
+bool sendLinkFrame(const char* type, const UiLinkField* fields, uint8_t fieldCount) {
+  if (!g_linkState.linkEnabled) {
+    return false;
+  }
+  char line[UILINK_V2_MAX_LINE + 1U] = {};
+  const size_t lineLen = uiLinkBuildLine(line, sizeof(line), type, fields, fieldCount);
+  if (lineLen == 0U) {
+    return false;
+  }
+  g_link.write(reinterpret_cast<const uint8_t*>(line), lineLen);
+  return true;
+}
+
+void sendHelloFrame() {
+  UiLinkField fields[5] = {};
+  snprintf(fields[0].key, sizeof(fields[0].key), "proto");
+  snprintf(fields[0].value, sizeof(fields[0].value), "%u", static_cast<unsigned int>(UILINK_V2_PROTO));
+  snprintf(fields[1].key, sizeof(fields[1].key), "ui_type");
+  snprintf(fields[1].value, sizeof(fields[1].value), "OLED");
+  snprintf(fields[2].key, sizeof(fields[2].key), "ui_id");
+  snprintf(fields[2].value, sizeof(fields[2].value), "esp8266-oled");
+  snprintf(fields[3].key, sizeof(fields[3].key), "fw");
+  snprintf(fields[3].value, sizeof(fields[3].value), "v2");
+  snprintf(fields[4].key, sizeof(fields[4].key), "caps");
+  snprintf(fields[4].value, sizeof(fields[4].value), "btn:0;touch:0;display:oled");
+  if (sendLinkFrame("HELLO", fields, 5U)) {
+    g_lastHelloMs = millis();
+  }
+}
+
+void sendPongFrame(uint32_t nowMs) {
+  UiLinkField fields[1] = {};
+  snprintf(fields[0].key, sizeof(fields[0].key), "ms");
+  snprintf(fields[0].value, sizeof(fields[0].value), "%lu", static_cast<unsigned long>(nowMs));
+  sendLinkFrame("PONG", fields, 1U);
 }
 
 void handleIncoming() {
@@ -1000,35 +1037,50 @@ void handleIncoming() {
 
     if (c == '\n') {
       g_lineBuffer[g_lineLen] = '\0';
-      screen_core::TelemetryState parsed = g_state;
-      if (parseFrame(g_lineBuffer, &parsed)) {
-        if (g_hasValidState &&
-            (parsed.uptimeMs + kPeerUptimeRollbackSlackMs) < g_state.uptimeMs) {
-          g_linkState.peerRebootUntilMs = millis() + kPeerRebootGraceMs;
-          Serial.printf("[SCREEN] Peer reboot detecte: uptime %lu -> %lu\n",
-                        static_cast<unsigned long>(g_state.uptimeMs),
-                        static_cast<unsigned long>(parsed.uptimeMs));
-        }
-        if (g_state.appStage != screen_core::kAppStageUSonFunctional &&
-            parsed.appStage == screen_core::kAppStageUSonFunctional) {
-          g_unlockSequenceStartMs = millis();
-        } else if (g_state.appStage == screen_core::kAppStageUSonFunctional &&
-                   parsed.appStage != screen_core::kAppStageUSonFunctional) {
-          g_unlockSequenceStartMs = 0;
-        }
-        if (g_hasValidState) {
-          if (parsed.frameSeq < g_state.frameSeq) {
-            ++g_seqRollbackCount;
-          } else if (parsed.frameSeq > (g_state.frameSeq + 1U)) {
-            g_seqGapCount += (parsed.frameSeq - g_state.frameSeq - 1U);
+      UiLinkFrame frame = {};
+      if (uiLinkParseLine(g_lineBuffer, &frame)) {
+        const uint32_t nowMs = millis();
+        if (frame.type == UILINK_MSG_PING) {
+          sendPongFrame(nowMs);
+        } else if (frame.type == UILINK_MSG_ACK) {
+          g_linkAcked = true;
+          g_stateDirty = true;
+        } else {
+          screen_core::TelemetryState parsed = g_state;
+          if (screen_core::parseStatFrame(frame, &parsed, nowMs)) {
+            if (g_hasValidState &&
+                (parsed.uptimeMs + kPeerUptimeRollbackSlackMs) < g_state.uptimeMs) {
+              g_linkState.peerRebootUntilMs = millis() + kPeerRebootGraceMs;
+              Serial.printf("[SCREEN] Peer reboot detecte: uptime %lu -> %lu\n",
+                            static_cast<unsigned long>(g_state.uptimeMs),
+                            static_cast<unsigned long>(parsed.uptimeMs));
+            }
+            if (g_state.appStage != screen_core::kAppStageUSonFunctional &&
+                parsed.appStage == screen_core::kAppStageUSonFunctional) {
+              g_unlockSequenceStartMs = millis();
+            } else if (g_state.appStage == screen_core::kAppStageUSonFunctional &&
+                       parsed.appStage != screen_core::kAppStageUSonFunctional) {
+              g_unlockSequenceStartMs = 0;
+            }
+            if (g_hasValidState) {
+              if (parsed.frameSeq < g_state.frameSeq) {
+                ++g_seqRollbackCount;
+              } else if (parsed.frameSeq > (g_state.frameSeq + 1U)) {
+                g_seqGapCount += (parsed.frameSeq - g_state.frameSeq - 1U);
+              }
+            }
+            pushScopeSample(parsed.micLevelPercent);
+            g_state = parsed;
+            g_hasValidState = true;
+            g_stateDirty = true;
           }
         }
-        pushScopeSample(parsed.micLevelPercent);
-        g_state = parsed;
-        g_hasValidState = true;
-        g_stateDirty = true;
-      } else if (g_lineLen > 0) {
-        ++g_parseErrorCount;
+      } else if (g_lineLen > 0U) {
+        if (strchr(g_lineBuffer, '*') != nullptr) {
+          ++g_crcErrorCount;
+        } else {
+          ++g_parseErrorCount;
+        }
       }
       g_lineLen = 0;
       continue;
@@ -1113,6 +1165,7 @@ void setup() {
                  kLinkIsrBufferBytes);
     g_link.enableRxGPIOPullUp(true);
     g_link.enableIntTx(false);
+    sendHelloFrame();
   }
   Serial.println("[SCREEN] Ready.");
 }
@@ -1120,6 +1173,9 @@ void setup() {
 void loop() {
   const uint32_t nowMs = millis();
   if (g_linkState.linkEnabled) {
+    if (!g_linkAcked && static_cast<int32_t>(nowMs - g_lastHelloMs) >= static_cast<int32_t>(kHelloRetryMs)) {
+      sendHelloFrame();
+    }
     handleIncoming();
   }
   const bool physicalAlive = isPhysicalLinkAlive(nowMs);
@@ -1127,6 +1183,7 @@ void loop() {
 
   if (!linkAlive && g_linkWasAlive) {
     ++g_linkLossCount;
+    g_linkAcked = false;
     g_stateDirty = true;
   }
   if (linkAlive) {
@@ -1152,9 +1209,10 @@ void loop() {
   if ((nowMs - g_lastDiagMs) >= kDiagPeriodMs) {
     const uint32_t lastTickMs = latestLinkTickMs();
     const uint32_t ageMs = safeAgeMs(nowMs, lastTickMs);
-    Serial.printf("[SCREEN] oled=%s link=%s phys=%s valid=%u age_ms=%lu losses=%lu parse_err=%lu crc_err=%lu rx_ovf=%lu seq_gap=%lu seq_rb=%lu sda=%u scl=%u addr=0x%02X\n",
+    Serial.printf("[SCREEN] oled=%s link=%s ack=%u phys=%s valid=%u age_ms=%lu losses=%lu parse_err=%lu crc_err=%lu rx_ovf=%lu seq_gap=%lu seq_rb=%lu sda=%u scl=%u addr=0x%02X\n",
                   g_displayReady ? "OK" : "KO",
                   g_linkState.linkEnabled ? (linkAlive ? "OK" : "DOWN") : "OFF",
+                  g_linkAcked ? 1U : 0U,
                   g_linkState.linkEnabled ? (physicalAlive ? "OK" : "DOWN") : "OFF",
                   g_hasValidState ? 1U : 0U,
                   static_cast<unsigned long>(ageMs),

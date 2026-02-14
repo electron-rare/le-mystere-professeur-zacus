@@ -46,6 +46,20 @@ python3 tools/dev/serial_smoke.py --role auto --wait-port 180
 
 Sur macOS les deux CP2102 partagent VID/PID=10C4:EA60/0001; utilisez `LOCATION=20-6.1.1` pour l’ESP32 et `20-6.1.2` pour l’ESP8266. Mettez à jour `tools/dev/ports_map.json` si votre configuration USB change et `/dev/cu.SLAB_*` sera privilégié automatiquement.
 
+## 4.5) Build + smoke runner
+
+```sh
+./tools/dev/run_matrix_and_smoke.sh
+```
+
+Le script force `PLATFORMIO_CORE_DIR=$HOME/.platformio` pour que les caches PlatformIO restent en dehors du repo.
+
+Variantes d'environnement :
+
+- `ZACUS_REQUIRE_HW=1 ./tools/dev/run_matrix_and_smoke.sh` — échoue si aucun hardware détecté.
+- `ZACUS_USB_COUNTDOWN=60 ./tools/dev/run_matrix_and_smoke.sh` — prolonge la remise USB.
+- `ZACUS_NO_COUNTDOWN=1 ./tools/dev/run_matrix_and_smoke.sh` — saute le compte à rebours et la cloche.
+
 ## 5) Hot-swap manuel
 
 1. Demarrer ESP32 + OLED, verifier affichage.

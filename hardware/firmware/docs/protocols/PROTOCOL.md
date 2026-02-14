@@ -1,15 +1,23 @@
-# Protocole UART JSONL (UI <-> ESP32)
+# Commandes série ESP32 (debug/ops)
 
-Ce document est la source de vérité du protocole UART entre UI et ESP32.
+Source de vérité des commandes console ESP32 (`PREFIX_ACTION`) et de leur traçabilité code.
 
-## Transport
+Le protocole UART UI actif (OLED/TFT <-> ESP32) est `UI Link v2`:
+- `../../protocol/ui_link_v2.md` (spec)
+- `../../protocol/ui_link_v2.h` (helpers C/C++)
+
+Les sections JSONL ci-dessous sont conservées en historique legacy.
+
+## Legacy JSONL (déprécié)
+
+### Transport
 - UART texte UTF-8, une ligne JSON par message (`\n`).
 - Débit recommandé: `115200`.
 - Longueur maximale de ligne: `512` octets.
 - Les clés inconnues sont ignorées.
 - Les champs absents sont tolérés (compatibilité additive).
 
-## UI -> ESP32 (`t=cmd`)
+### UI -> ESP32 (`t=cmd`)
 
 Format canonique:
 ```json
@@ -29,7 +37,7 @@ Actions supportées:
 {"t":"cmd","a":"request_state"}
 ```
 
-## ESP32 -> UI
+### ESP32 -> UI
 
 ### `state`
 ```json
@@ -54,11 +62,11 @@ Extension additive pour navigation catalogue:
 {"t":"list","source":"sd","offset":12,"total":75,"cursor":14,"items":["Track A","Track B","Track C","Track D"]}
 ```
 
-## Politique de reconnexion UI
+### Politique de reconnexion UI
 1. Si aucun `hb` reçu pendant `3s`, l'UI passe en état offline.
 2. Tant que le lien est offline, l'UI envoie `request_state` toutes les `1s`.
 
-## Commandes série canonique (debug/ops)
+## Commandes série canoniques (debug/ops)
 
 Le moniteur série ESP32 utilise des tokens texte (`PREFIX_ACTION`) routés vers des handlers dédiés.
 
@@ -66,13 +74,13 @@ Le moniteur série ESP32 utilise des tokens texte (`PREFIX_ACTION`) routés vers
 
 | Domaine | Préfixe | Handler principal |
 |---|---|---|
-| Boot/audio boot | `BOOT_*` | `esp32/src/app/app_orchestrator.cpp` |
-| Codec audio | `CODEC_*` | `esp32/src/app/app_orchestrator.cpp` |
-| Clavier analogique | `KEY_*` | `esp32/src/app/app_orchestrator.cpp` |
-| Story legacy + V2 | `STORY_*` | `esp32/src/services/serial/serial_commands_story.cpp` |
-| MP3/UI player | `MP3_*` | `esp32/src/services/serial/serial_commands_mp3.cpp` |
-| Radio/Wi-Fi/Web | `RADIO_*`, `WIFI_*`, `WEB_*` | `esp32/src/services/serial/serial_commands_radio.cpp` |
-| Système runtime | `SYS_*`, `SCREEN_LINK_*` | `esp32/src/app/app_orchestrator.cpp` |
+| Boot/audio boot | `BOOT_*` | `esp32_audio/src/app/app_orchestrator.cpp` |
+| Codec audio | `CODEC_*` | `esp32_audio/src/app/app_orchestrator.cpp` |
+| Clavier analogique | `KEY_*` | `esp32_audio/src/app/app_orchestrator.cpp` |
+| Story legacy + V2 | `STORY_*` | `esp32_audio/src/services/serial/serial_commands_story.cpp` |
+| MP3/UI player | `MP3_*` | `esp32_audio/src/services/serial/serial_commands_mp3.cpp` |
+| Radio/Wi-Fi/Web | `RADIO_*`, `WIFI_*`, `WEB_*` | `esp32_audio/src/services/serial/serial_commands_radio.cpp` |
+| Système runtime | `SYS_*`, `UI_LINK_*`, `SCREEN_LINK_*` | `esp32_audio/src/app/app_orchestrator.cpp` |
 
 ### Tokens canoniques exposés
 
@@ -82,13 +90,14 @@ Le moniteur série ESP32 utilise des tokens texte (`PREFIX_ACTION`) routés vers
 - `KEY_*`: `KEY_HELP`, `KEY_STATUS`, `KEY_RAW_ON`, `KEY_RAW_OFF`, `KEY_RESET`, `KEY_SET`, `KEY_SET_ALL`, `KEY_TEST_START`, `KEY_TEST_STATUS`, `KEY_TEST_RESET`, `KEY_TEST_STOP`
 - `CODEC_*`: `CODEC_HELP`, `CODEC_STATUS`, `CODEC_DUMP`, `CODEC_RD`, `CODEC_WR`, `CODEC_VOL`, `CODEC_VOL_RAW`
 - `SYS_*`: `SYS_LOOP_BUDGET`
-- `SCREEN_LINK_*`: `SCREEN_LINK_STATUS`, `SCREEN_LINK_RESET_STATS`
+- `UI_LINK_*`: `UI_LINK_STATUS`, `UI_LINK_RESET_STATS`
+- `SCREEN_LINK_*`: alias legacy (`SCREEN_LINK_STATUS`, `SCREEN_LINK_RESET_STATS`)
 - `RADIO/WIFI/WEB`: `RADIO_HELP`, `RADIO_STATUS`, `RADIO_LIST`, `RADIO_PLAY`, `RADIO_STOP`, `RADIO_NEXT`, `RADIO_PREV`, `RADIO_META`, `WIFI_STATUS`, `WIFI_SCAN`, `WIFI_CONNECT`, `WIFI_AP_ON`, `WIFI_AP_OFF`, `WEB_STATUS`
 
 ## Compatibilité et versioning
 
 - Politique par défaut: compatibilité additive.
-- Interdit: suppression brutale d'un champ JSON sans dépréciation.
+- Interdit: suppression brutale d'un token/champ public sans dépréciation.
 - Dépréciation:
   - documenter le changement dans ce fichier,
   - conserver l'ancien champ/token pendant au moins un cycle release.

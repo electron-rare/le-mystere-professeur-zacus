@@ -3,6 +3,7 @@
 
 # PlatformIO
 .pio/
+.platformio/
 .pio-home/
 
 # VSCode

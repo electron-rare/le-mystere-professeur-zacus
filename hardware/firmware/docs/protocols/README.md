@@ -3,8 +3,9 @@
 Ce dossier centralise les contrats partagés entre firmwares (ESP32, RP2040, ESP8266).
 
 ## Source of truth
-- `PROTOCOL.md`: protocole UART JSONL UI <-> ESP32 + commandes série canoniques.
-- `UI_SPEC.md`: comportement UI et contrat des messages.
+- `../../protocol/ui_link_v2.md`: protocole UART UI Link v2 (ESP32 <-> OLED/TFT).
+- `PROTOCOL.md`: commandes série canoniques ESP32 (debug/ops).
+- `UI_SPEC.md`: comportement UI et contrat fonctionnel.
 - `story_spec_v1.yaml` + templates/scénarios: contrat auteur STORY.
 
 ## Règles d’évolution

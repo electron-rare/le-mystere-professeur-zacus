@@ -1,13 +1,17 @@
-# Hardware (optionnel)
+# Hardware
 
-Accessoires simples pour le jeu (ex : LED, buzzer, “scanner”, déclencheur d’indice).
+Contenu principal:
+- BOM: `bom/bom.md`
+- Cablage: `wiring/wiring.md`
+- Firmware: `firmware/` (ESP32 audio + UI OLED + UI TFT)
+- Boitier: `enclosure/`
 
-Contenu :
-- BOM : `bom/bom.md`
-- Câblage : `wiring/wiring.md`
-- Firmware : `firmware/arduino/` et `firmware/esp32/`
-- Boîtier : `enclosure/`
+Firmware structure:
+- `firmware/esp32_audio/`
+- `firmware/ui/esp8266_oled/`
+- `firmware/ui/rp2040_tft/`
+- `firmware/protocol/ui_link_v2.md`
 
-Licence :
-- code = GPL-3.0-or-later
-- docs hardware = CC BY-SA 4.0
+Licence:
+- code: GPL-3.0-or-later
+- docs hardware: CC BY-SA 4.0

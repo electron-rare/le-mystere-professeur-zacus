@@ -23,10 +23,8 @@ Objectif : un kit cohérent, fluide à animer, facile à imprimer (noir & blanc)
 5. PR avec explication + previews PNG si possible
 
 ## Licence des contributions
-- Contenu créatif : CC BY-NC 4.0
-- Code : MIT
-- Contenu creatif : CC BY-SA 4.0
-- Code : GPL-3.0-or-later
+- Contenu créatif (docs, printables, assets) : CC BY-NC 4.0 (`LICENSES/CC-BY-NC-4.0.txt`)
+- Code & scripts (outils, firmware, helpers) : MIT (`LICENSES/MIT.txt`)
 
 ## Checklist PR (recommandée)
 - [ ] Cohérence narrative validée (indices/cartes/solution).

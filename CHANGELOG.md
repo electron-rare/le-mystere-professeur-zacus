@@ -1,17 +1,11 @@
 # Changelog
 
 ## [Unreleased]
-- Printables : déplacement et classement des PNG dans `printables/export/png/{general,fiche-enquete,personnages,zones}`.
-- Documentation : ajout d'une illustration SVG de structure du dépôt dans le README (`docs/assets/repo-map.svg`).
-- Documentation : revue de cohérence étendue sur les Markdown/README et mise à jour de `docs/repo-audit.md`.
-- Structure : ajout du dossier `kit-maitre-du-jeu/export/pdf/` pour aligner la documentation avec l'arborescence.
-- Printables : clarification de l'état actuel et du niveau de préparation des dossiers `src/` et `export/{pdf,png}/`.
-- Documentation : ajout d'un plan de maintenance du dépôt (hors firmware).
-- Contribution : ajout d'une checklist PR doc-only dans `CONTRIBUTING.md`.
-- Documentation : ajout d'une illustration SVG de structure du dépôt dans le README (`docs/assets/repo-map.svg`).
-- Documentation : revue de cohérence étendue sur les Markdown/README et mise à jour de `docs/repo-audit.md`.
-- Structure : ajout du dossier `kit-maitre-du-jeu/export/pdf/` pour aligner la documentation avec l'arborescence.
-- Printables : clarification de l'état actuel et du niveau de préparation des dossiers `src/` et `export/{pdf,png}/`.
+- Workflow : nouvelle exportation `tools/scenario/export_md.py` et briefs Markdown (kit + `docs/_generated/SCENARIO_BRIEF.md`) alignés sur `game/scenarios/zacus_v1.yaml`.
+- Printables : manifeste `printables/manifests/zacus_v1_printables.yaml`, prompts dédiés pour chaque asset et `tools/printables/validate_manifest.py` pour éviter les trous entre IDs et fichiers.
+- Documentation : AGENTS, WORKFLOWS, GLOSSARY, Quickstart, index et le Makefile rappellent que le YAML est la single source of truth et listent les commandes standard de validation/export.
+- Tooling : `tools/scenario/validate_scenario.py`, `tools/audio/validate_manifest.py`, `tools/scenario/export_md.py` et `tools/printables/validate_manifest.py` accompagnés par `Makefile` facilitent la maintenance.
+- Automation : workflow GitHub `.github/workflows/validate.yml` installe PyYAML puis lance les validations de scénario, audio et printables.
 
 ## [0.2.0] - 2026-02-12
 

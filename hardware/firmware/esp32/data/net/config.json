@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "hostname": "u-son-radio",
+  "sta": {
+    "ssid": "",
+    "pass": ""
+  },
+  "ap": {
+    "enabled": true,
+    "ssid": "U-SON-RADIO",
+    "pass": "usonradio"
+  },
+  "web": {
+    "port": 80,
+    "auth": false
+  }
+}

@@ -1,6 +1,10 @@
 PYTHON ?= python3
 
+<<<<<<< Updated upstream
 .PHONY: scenario-validate audio-validate printables-validate export all-validate
+=======
+.PHONY: scenario-validate audio-validate printables-validate export all-validate images
+>>>>>>> Stashed changes
 
 scenario-validate:
 	$(PYTHON) tools/scenario/validate_scenario.py game/scenarios/zacus_v1.yaml
@@ -16,3 +20,9 @@ export:
 
 all-validate: scenario-validate audio-validate printables-validate
 	@echo "All validations passed."
+<<<<<<< Updated upstream
+=======
+
+images:
+	$(PYTHON) tools/images/generate_printables.py --manifest printables/manifests/zacus_v1_printables.yaml
+>>>>>>> Stashed changes

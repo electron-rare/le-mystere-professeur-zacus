@@ -294,6 +294,9 @@ Astuce detection ports:
 - Runbook release candidate: `tools/qa/live_story_v2_rc_runbook.md`
 - Smoke RC MP3: `tools/qa/mp3_rc_smoke.sh`
 - Runbook RC MP3: `tools/qa/mp3_rc_runbook.md`
+- Smoke client MP3: `tools/qa/mp3_client_demo_smoke.sh`
+- Checklist live client MP3: `tools/qa/mp3_client_live_checklist.md`
+- Kit presentation client MP3: `docs/client/mp3/`
 - Handbook release/rollback: `RELEASE_STORY_V2.md`
 
 ### CI / Review policy
@@ -331,6 +334,18 @@ Commandes MP3 utiles:
 - `MP3_UI_STATUS` : etat UI courant (`page/cursor/offset/browse/queue_off/set_idx`)
 - `MP3_QUEUE_PREVIEW [n]` : projection des prochaines pistes
 - `MP3_CAPS` : capacites codec/backend exposees au runtime
+
+Kit presentation client MP3:
+
+- `docs/client/mp3/01_pitch_executif.md`
+- `docs/client/mp3/02_architecture_stack.md`
+- `docs/client/mp3/03_demo_live_script.md`
+- `docs/client/mp3/04_evidence_qa.md`
+- `docs/client/mp3/05_risques_et_mitigations.md`
+- `docs/client/mp3/06_qna_client.md`
+- `docs/client/mp3/07_decisions_next_steps.md`
+- `tools/qa/mp3_client_demo_smoke.sh`
+- `tools/qa/mp3_client_live_checklist.md`
 
 Sons internes:
 

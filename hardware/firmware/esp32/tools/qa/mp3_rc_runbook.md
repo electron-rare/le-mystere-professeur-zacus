@@ -33,6 +33,8 @@ Expected:
 - responses use canonical status (`OK/BAD_ARGS/OUT_OF_CONTEXT/NOT_FOUND/BUSY/UNKNOWN`)
 - no freeze while scan is active
 - page state (`NOW/BROWSE/QUEUE/SET`) visible in `MP3_UI_STATUS`
+- backend status exposes `last_fallback_reason` and per-backend counters
+- caps output reflects runtime capabilities per backend (no hardcoded promise)
 
 ## 4) Keyboard parity
 
@@ -54,3 +56,8 @@ Expected:
 
 - PASS if all steps are green
 - Otherwise list anomalies as `Critique`, `Majeure`, `Mineure`
+
+Presentation support:
+
+- `tools/qa/mp3_client_live_checklist.md`
+- `docs/client/mp3/03_demo_live_script.md`

@@ -1,0 +1,25 @@
+name: Validate Zacus content
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip pyyaml
+      - name: Validate scenario
+        run: python tools/scenario/validate_scenario.py game/scenarios/zacus_v1.yaml
+      - name: Validate audio manifest
+        run: python tools/audio/validate_manifest.py audio/manifests/zacus_v1_audio.yaml
+      - name: Validate printables manifest
+        run: python tools/printables/validate_manifest.py printables/manifests/zacus_v1_printables.yaml

@@ -1,68 +1,24 @@
-# Générer un scénario (méthode simple)
+# Générer un scénario
 
-Ce guide te donne une méthode rapide pour construire un scénario jouable et cohérent pour **Le Mystère du Professeur Zacus**.
+Ce kit est livré avec un scénario canon (`game/scenarios/zacus_v1.yaml`). Pour créer une variante ou un nouveau mystère, suivez ces étapes :
 
-## 1) Poser la solution avant les indices
+1. **Copiez le canevas**
+   - Dupliquez `game/scenarios/zacus_v1.yaml` et choisissez un nouvel `id` (ex. `zacus_v2`).
+   - Ajustez les champs `title`, `canon.timeline`, `stations`, `puzzles` et `solution` pour correspondre à la nouvelle intrigue.
 
-Commence par remplir `solution-complete.md` avec une solution unique :
-- **Coupable** (qui ?)
-- **Mobile** (pourquoi ?)
-- **Méthode** (comment ?)
-- **Chronologie** (dans quel ordre ?)
+2. **Respectez la structure canonique**
+   - `players` doit refléter la plage 6–14.
+   - `duration_minutes` doit indiquer une fourchette 60–90.
+   - `solution_unique` doit être `true` et les preuves dans `solution.proof` doivent justifier l’accusation principale.
 
-Règle d’or : chaque indice doit confirmer la même vérité finale, sans contradiction.
+3. **Validez le fichier**
+   - Utilisez `python tools/scenario/validate_scenario.py game/scenarios/zacus_v2.yaml` pour confirmer que le fichier contient tous les champs obligatoires (id, title, solution, preuve, stations, puzzles).
+   - Le script vérifie aussi que la solution pointe vers un seul coupable et qu’il existe au moins trois preuves inscrites.
 
-## 2) Transformer la solution en parcours de jeu
+4. **Reliez les prompts**
+   - Si votre scénario utilise des éléments audio ou imprimables spécifiques, créez des fichiers dans `game/prompts/audio/` et `printables/src/prompts/`. Ajoutez-les ensuite à `audio/manifests/zacus_v1_audio.yaml` ou créez un manifeste dédié.
 
-Utilise `script-minute-par-minute.md` pour découper la partie en 5 blocs :
-1. Accueil + mise en ambiance
-2. Découverte du mystère
-3. Enquête en équipes
-4. Mise en commun des hypothèses
-5. Révélation finale
+5. **Documentez la variante**
+   - Ajoutez une entrée dans `CHANGELOG.md` et, si le scénario est stable, mentionnez-le dans `docs/QUICKSTART.md` ou `docs/STYLEGUIDE.md` comme référence.
 
-Pour des enfants de 9–11 ans, vise des séquences courtes et rythmées.
-
-## 3) Répartir les informations par rôle et par station
-
-- Dans `distribution-des-roles.md`, donne à chaque équipe un angle d’enquête différent.
-- Dans `plan-stations-et-mise-en-place.md`, associe chaque station à 1 information clé.
-
-Bon équilibre :
-- des indices faciles (confiance)
-- des indices moyens (déduction)
-- 1 ou 2 indices-pivot (twist)
-
-## 4) Vérifier la logique avec un test « à rebours »
-
-Teste ton scénario à rebours :
-- En partant de la révélation, peut-on justifier chaque affirmation par un indice concret ?
-- Un indice peut-il être interprété dans deux sens contradictoires ?
-- Sans un indice donné, l’enquête reste-t-elle possible ?
-
-Si blocage : simplifie la chronologie et retire les faux fils trop complexes.
-
-## 5) Préparer la version animateur
-
-Avant de jouer :
-- checklist dans `checklist-materiel.md`
-- rythme et transitions dans `guide-anti-chaos.md`
-- variantes avec/sans stations bonus (`stations/`)
-
-Objectif : un scénario robuste même si le timing dérive de 10–15 minutes.
-
-## Trame prête à copier
-
-Tu peux partir de ce squelette :
-
-- **Mystère de départ** : disparition / sabotage / message codé.
-- **Coupable** : personnage avec motivation compréhensible.
-- **Mobile** : jalousie / peur / malentendu / secret à protéger.
-- **Méthode** : action réalisable avec les éléments du décor.
-- **Twist final** : indice réinterprété au moment de la révélation.
-
-Puis décline en 6 à 10 indices, répartis entre équipes et stations.
-## Et côté firmware ESP32 ?
-
-Si tu veux synchroniser ce scénario avec la logique embarquée, utilise le guide firmware: `hardware/firmware/esp32/GENERER_UN_SCENARIO_STORY_V2.md`.
-
+> Conseils : gardez une chronologie simple (3 à 5 temps forts), des preuves tangibles et un mobile clair. Les enfants de 6 à 14 ans ont besoin d’une progression visuelle simple et d’un seul point de friction majeur.

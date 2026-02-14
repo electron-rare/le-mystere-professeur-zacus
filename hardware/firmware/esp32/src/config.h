@@ -6,6 +6,22 @@
 #define USON_STORY_V2_DEFAULT 1
 #endif
 
+#ifndef UI_SERIAL_ENABLED
+#define UI_SERIAL_ENABLED 0
+#endif
+
+#ifndef UI_SERIAL_BAUD
+#define UI_SERIAL_BAUD 115200
+#endif
+
+#ifndef UI_SERIAL_RX_PIN
+#define UI_SERIAL_RX_PIN 18
+#endif
+
+#ifndef UI_SERIAL_TX_PIN
+#define UI_SERIAL_TX_PIN 19
+#endif
+
 namespace config {
 
 constexpr uint8_t kPinLedR = 16;
@@ -76,6 +92,12 @@ constexpr uint8_t kPinScreenTx = 22;
 constexpr uint32_t kScreenBaud = 19200;
 constexpr uint16_t kScreenUpdatePeriodMs = 250;
 constexpr uint16_t kScreenChangeMinPeriodMs = 90;
+
+// UART UI tactile externe (RP2040), module optionnel.
+constexpr bool kUiSerialEnabled = (UI_SERIAL_ENABLED != 0);
+constexpr uint32_t kUiSerialBaud = static_cast<uint32_t>(UI_SERIAL_BAUD);
+constexpr int8_t kPinUiSerialRx = static_cast<int8_t>(UI_SERIAL_RX_PIN);
+constexpr int8_t kPinUiSerialTx = static_cast<int8_t>(UI_SERIAL_TX_PIN);
 
 // Clavier analogique (6 touches sur 1 entree ADC)
 constexpr uint8_t kPinKeysAdc = 36;

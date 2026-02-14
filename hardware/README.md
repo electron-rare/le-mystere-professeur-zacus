@@ -6,6 +6,7 @@ Contenu :
 - BOM : `bom/bom.md`
 - Câblage : `wiring/wiring.md`
 - Firmware : `firmware/arduino/` et `firmware/esp32/`
+- UI tactile optionnelle: `firmware/ui/rp2040_tft35_xpt2046/`
 - Boîtier : `enclosure/`
 
 Licence :

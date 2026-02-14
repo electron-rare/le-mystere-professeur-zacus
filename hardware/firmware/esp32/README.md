@@ -420,3 +420,13 @@ Reglage live (sans reflash):
 Contraintes:
 
 - ordre strict obligatoire: `K1 < K2 < K3 < K4 < K5 < K6 < REL`
+
+## Option UI tactile RP2040 (additive)
+
+- Firmware UI optionnel: `../ui/rp2040_tft35_xpt2046/`
+- Module serie UI cote ESP32 (off par defaut): `src/services/ui_serial/`
+- Flags build:
+  - `UI_SERIAL_ENABLED=1`
+  - `UI_SERIAL_BAUD=115200`
+  - `UI_SERIAL_RX_PIN=18`
+  - `UI_SERIAL_TX_PIN=19`

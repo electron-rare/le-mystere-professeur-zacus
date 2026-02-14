@@ -32,6 +32,7 @@ Dossier : `hardware/`
 - BOM (liste de matériel)
 - câblage
 - firmware Arduino / ESP32
+- option UI tactile RP2040 + écran 3.5": `hardware/firmware/ui/rp2040_tft35_xpt2046/`
 
 ## État du projet
 - **Kit MJ** : documentation d'animation complète, exports PDF possibles via `kit-maitre-du-jeu/export/pdf/`.

@@ -34,6 +34,7 @@
 #include "../services/network/wifi_service.h"
 #include "../services/radio/radio_service.h"
 #include "../services/web/web_ui_service.h"
+#include "../services/ui_serial/ui_serial.h"
 #include "../services/screen/screen_sync_service.h"
 #include "../story/resources/screen_scene_registry.h"
 #include "../story/story_engine.h"
@@ -113,6 +114,32 @@ struct NetRuntimeConfig {
 };
 
 NetRuntimeConfig g_netConfig;
+
+struct UiSerialStateCache {
+  bool playing = false;
+  char source[8] = "sd";
+  char title[96] = {};
+  char artist[64] = {};
+  char station[64] = {};
+  int32_t pos = 0;
+  int32_t dur = 0;
+  int32_t vol = 0;
+  int32_t rssi = -127;
+  int32_t buffer = -1;
+  char error[64] = {};
+};
+
+struct UiSerialRuntimeState {
+  bool initialized = false;
+  bool forceState = true;
+  uint32_t nextTickMs = 0U;
+  uint32_t nextHbMs = 0U;
+  uint32_t nextStateMs = 0U;
+  uint32_t nextListMs = 0U;
+  UiSerialStateCache lastState = {};
+};
+
+UiSerialRuntimeState g_uiSerialRuntime;
 
 void setBootAudioPaEnabled(bool enabled, const char* source);
 void printBootAudioOutputInfo(const char* source);
@@ -196,6 +223,9 @@ bool commandMatches(const char* cmd, const char* token);
 void printRadioDebugHelp();
 bool loadNetRuntimeConfigFromLittleFs(NetRuntimeConfig* outCfg);
 void setupRadioWifiWebRuntime();
+void setupUiSerialRuntime();
+void updateUiSerialRuntime(uint32_t nowMs);
+bool onUiSerialCommand(const UiSerialCommand& command, void* ctx);
 
 InputService& inputService() {
   static InputService service(g_keypad);
@@ -557,6 +587,333 @@ uint8_t encodeMp3ErrorForScreen() {
     return 6U;
   }
   return 99U;
+}
+
+void copyUiSerialText(char* out, size_t outLen, const char* in) {
+  if (out == nullptr || outLen == 0U) {
+    return;
+  }
+  out[0] = '\0';
+  if (in == nullptr) {
+    return;
+  }
+  snprintf(out, outLen, "%s", in);
+}
+
+bool uiSerialCacheEquals(const UiSerialStateCache& lhs, const UiSerialStateCache& rhs) {
+  return lhs.playing == rhs.playing &&
+         lhs.pos == rhs.pos &&
+         lhs.dur == rhs.dur &&
+         lhs.vol == rhs.vol &&
+         lhs.rssi == rhs.rssi &&
+         lhs.buffer == rhs.buffer &&
+         strcmp(lhs.source, rhs.source) == 0 &&
+         strcmp(lhs.title, rhs.title) == 0 &&
+         strcmp(lhs.artist, rhs.artist) == 0 &&
+         strcmp(lhs.station, rhs.station) == 0 &&
+         strcmp(lhs.error, rhs.error) == 0;
+}
+
+void buildUiSerialStateCache(UiSerialStateCache* out) {
+  if (out == nullptr) {
+    return;
+  }
+  *out = UiSerialStateCache();
+
+  const RadioService::Snapshot radioSnap = g_radio.snapshot();
+  const WifiService::Snapshot wifiSnap = g_wifi.snapshot();
+  const bool radioSource =
+      (g_playerUi.source() == PlayerUiSource::kRadio) || radioSnap.active;
+
+  out->playing = radioSource ? radioSnap.active : g_mp3.isPlaying();
+  copyUiSerialText(out->source, sizeof(out->source), radioSource ? "radio" : "sd");
+  out->vol = static_cast<int32_t>(g_mp3.volumePercent());
+  out->rssi = static_cast<int32_t>(wifiSnap.rssi);
+  out->buffer = radioSource ? static_cast<int32_t>(radioSnap.bufferPercent) : -1;
+
+  if (radioSource) {
+    copyUiSerialText(out->title, sizeof(out->title), radioSnap.title);
+    copyUiSerialText(out->artist, sizeof(out->artist), "");
+    copyUiSerialText(out->station, sizeof(out->station), radioSnap.activeStationName);
+    out->pos = 0;
+    out->dur = 0;
+    if (radioSnap.lastError[0] != '\0' && strcmp(radioSnap.lastError, "OK") != 0) {
+      copyUiSerialText(out->error, sizeof(out->error), radioSnap.lastError);
+    } else {
+      copyUiSerialText(out->error, sizeof(out->error), "");
+    }
+    return;
+  }
+
+  const uint16_t trackNum = g_mp3.currentTrackNumber();
+  const TrackEntry* entry = g_mp3.trackEntryByNumber(trackNum);
+  copyUiSerialText(out->title, sizeof(out->title), g_mp3.currentTrackName().c_str());
+  copyUiSerialText(out->artist, sizeof(out->artist), (entry != nullptr) ? entry->artist : "");
+  copyUiSerialText(out->station, sizeof(out->station), "");
+  out->pos = 0;
+  out->dur = (entry != nullptr) ? static_cast<int32_t>(entry->durationMs / 1000U) : 0;
+  const char* mp3Error = g_mp3.lastBackendError();
+  if (mp3Error != nullptr && strcmp(mp3Error, "OK") != 0) {
+    copyUiSerialText(out->error, sizeof(out->error), mp3Error);
+  }
+}
+
+void publishUiSerialStateCache(const UiSerialStateCache& cache) {
+  UiSerialState out;
+  out.playing = cache.playing;
+  out.source = cache.source;
+  out.title = cache.title;
+  out.artist = cache.artist;
+  out.station = cache.station;
+  out.pos = cache.pos;
+  out.dur = cache.dur;
+  out.vol = cache.vol;
+  out.rssi = cache.rssi;
+  out.buffer = cache.buffer;
+  out.error = cache.error;
+  uiSerialPublishState(out);
+}
+
+void publishUiSerialList() {
+  UiSerialList out;
+  static char items[8][48];
+  memset(items, 0, sizeof(items));
+  const PlayerUiSnapshot uiSnap = g_playerUi.snapshot();
+  const bool radioSource = (uiSnap.source == PlayerUiSource::kRadio);
+  out.source = radioSource ? "radio" : "sd";
+
+  if (radioSource) {
+    const uint16_t total = g_radio.stationCount();
+    out.total = total;
+    uint16_t cursor = uiSnap.cursor;
+    if (cursor >= total && total > 0U) {
+      cursor = total - 1U;
+    }
+    out.cursor = cursor;
+    out.offset = (cursor > 1U) ? static_cast<uint16_t>(cursor - 1U) : 0U;
+    const uint16_t maxCount = 4U;
+    uint8_t idx = 0U;
+    for (uint16_t i = out.offset; i < total && idx < maxCount; ++i, ++idx) {
+      const StationRepository::Station* station = g_radio.stationAt(i);
+      if (station == nullptr) {
+        continue;
+      }
+      snprintf(items[idx], sizeof(items[idx]), "%s", station->name);
+      out.items[idx] = items[idx];
+    }
+    out.count = idx;
+    uiSerialPublishList(out);
+    return;
+  }
+
+  const uint16_t total = g_mp3.trackCount();
+  out.total = total;
+  uint16_t cursor = g_mp3.currentTrackNumber();
+  if (cursor > 0U) {
+    cursor = static_cast<uint16_t>(cursor - 1U);
+  }
+  if (cursor >= total && total > 0U) {
+    cursor = total - 1U;
+  }
+  out.cursor = cursor;
+  out.offset = (cursor > 1U) ? static_cast<uint16_t>(cursor - 1U) : 0U;
+  const uint16_t maxCount = 4U;
+  uint8_t idx = 0U;
+  for (uint16_t i = out.offset; i < total && idx < maxCount; ++i, ++idx) {
+    const TrackEntry* entry = g_mp3.trackEntryByNumber(static_cast<uint16_t>(i + 1U));
+    if (entry == nullptr) {
+      continue;
+    }
+    if (entry->title[0] != '\0') {
+      snprintf(items[idx], sizeof(items[idx]), "%s", entry->title);
+    } else {
+      snprintf(items[idx], sizeof(items[idx]), "%s", entry->path);
+    }
+    out.items[idx] = items[idx];
+  }
+  out.count = idx;
+  uiSerialPublishList(out);
+}
+
+bool onUiSerialCommand(const UiSerialCommand& command, void* ctx) {
+  (void)ctx;
+  const PlayerUiSource currentSource = g_playerUi.source();
+  const bool useRadio = (currentSource == PlayerUiSource::kRadio) || g_radio.snapshot().active;
+  switch (command.action) {
+    case UiSerialAction::kPlayPause:
+      if (useRadio) {
+        const RadioService::Snapshot snap = g_radio.snapshot();
+        if (snap.active) {
+          g_radio.stop("ui_serial_play_pause");
+        } else {
+          const uint16_t cursor = g_playerUi.cursor();
+          const StationRepository::Station* station = g_radio.stationAt(cursor);
+          if (station != nullptr) {
+            g_radio.playById(station->id, "ui_serial_play_pause");
+          }
+        }
+      } else {
+        g_mp3.togglePause();
+      }
+      g_uiSerialRuntime.forceState = true;
+      return true;
+
+    case UiSerialAction::kNext:
+      if (useRadio) {
+        g_radio.next("ui_serial_next");
+      } else {
+        g_mp3.nextTrack();
+      }
+      g_uiSerialRuntime.forceState = true;
+      return true;
+
+    case UiSerialAction::kPrev:
+      if (useRadio) {
+        g_radio.prev("ui_serial_prev");
+      } else {
+        g_mp3.previousTrack();
+      }
+      g_uiSerialRuntime.forceState = true;
+      return true;
+
+    case UiSerialAction::kVolDelta: {
+      int32_t delta = command.hasIntValue ? command.intValue : 0;
+      delta = delta * 2;
+      const int32_t current = static_cast<int32_t>(g_mp3.volumePercent());
+      const int32_t target = constrain(current + delta, 0, 100);
+      g_mp3.setGain(static_cast<float>(target) / 100.0f);
+      g_uiSerialRuntime.forceState = true;
+      return true;
+    }
+
+    case UiSerialAction::kVolSet: {
+      if (!command.hasIntValue) {
+        return false;
+      }
+      const int32_t target = constrain(command.intValue, 0, 100);
+      g_mp3.setGain(static_cast<float>(target) / 100.0f);
+      g_uiSerialRuntime.forceState = true;
+      return true;
+    }
+
+    case UiSerialAction::kSourceSet:
+      if (!command.hasTextValue) {
+        return false;
+      }
+      if (strcmp(command.textValue, "radio") == 0) {
+        setPlayerUiSource(PlayerUiSource::kRadio);
+      } else if (strcmp(command.textValue, "sd") == 0) {
+        setPlayerUiSource(PlayerUiSource::kSd);
+        if (g_radio.snapshot().active) {
+          g_radio.stop("ui_serial_source_sd");
+        }
+      } else {
+        return false;
+      }
+      g_uiSerialRuntime.forceState = true;
+      return true;
+
+    case UiSerialAction::kSeek:
+      // Seek fine n'est pas expose par le player actuel: fallback restart.
+      if (command.hasIntValue && command.intValue <= 1) {
+        g_mp3.restartTrack();
+      }
+      g_uiSerialRuntime.forceState = true;
+      return true;
+
+    case UiSerialAction::kStationDelta: {
+      int32_t delta = command.hasIntValue ? command.intValue : 0;
+      if (delta == 0) {
+        return false;
+      }
+      delta = constrain(delta, -12, 12);
+      if (useRadio) {
+        while (delta < 0) {
+          g_radio.prev("ui_serial_station_delta");
+          ++delta;
+        }
+        while (delta > 0) {
+          g_radio.next("ui_serial_station_delta");
+          --delta;
+        }
+      } else {
+        while (delta < 0) {
+          g_mp3.previousTrack();
+          ++delta;
+        }
+        while (delta > 0) {
+          g_mp3.nextTrack();
+          --delta;
+        }
+      }
+      g_uiSerialRuntime.forceState = true;
+      return true;
+    }
+
+    case UiSerialAction::kRequestState:
+      g_uiSerialRuntime.forceState = true;
+      return true;
+
+    case UiSerialAction::kUnknown:
+    default:
+      return false;
+  }
+}
+
+void setupUiSerialRuntime() {
+  if (!config::kUiSerialEnabled) {
+    return;
+  }
+  uiSerialInit(Serial1, config::kUiSerialBaud, config::kPinUiSerialRx, config::kPinUiSerialTx);
+  uiSerialSetCommandHandler(onUiSerialCommand, nullptr);
+  const uint32_t nowMs = millis();
+  g_uiSerialRuntime.initialized = true;
+  g_uiSerialRuntime.forceState = true;
+  g_uiSerialRuntime.nextTickMs = nowMs + 200U;
+  g_uiSerialRuntime.nextHbMs = nowMs + 1000U;
+  g_uiSerialRuntime.nextStateMs = nowMs + 1000U;
+  g_uiSerialRuntime.nextListMs = nowMs + 900U;
+  Serial.printf("[UI_SERIAL] enabled baud=%lu rx=%d tx=%d\n",
+                static_cast<unsigned long>(config::kUiSerialBaud),
+                static_cast<int>(config::kPinUiSerialRx),
+                static_cast<int>(config::kPinUiSerialTx));
+}
+
+void updateUiSerialRuntime(uint32_t nowMs) {
+  if (!config::kUiSerialEnabled || !g_uiSerialRuntime.initialized) {
+    return;
+  }
+  uiSerialPoll(nowMs);
+
+  if (static_cast<int32_t>(nowMs - g_uiSerialRuntime.nextTickMs) >= 0) {
+    UiSerialTick tick;
+    tick.pos = 0;
+    tick.buffer = g_radio.snapshot().active ? static_cast<int32_t>(g_radio.snapshot().bufferPercent) : -1;
+    tick.vu = 0.0f;
+    uiSerialPublishTick(tick);
+    g_uiSerialRuntime.nextTickMs = nowMs + 200U;
+  }
+
+  if (static_cast<int32_t>(nowMs - g_uiSerialRuntime.nextHbMs) >= 0) {
+    uiSerialPublishHeartbeat(nowMs);
+    g_uiSerialRuntime.nextHbMs = nowMs + 1000U;
+  }
+
+  UiSerialStateCache current;
+  buildUiSerialStateCache(&current);
+  const bool changed = !uiSerialCacheEquals(current, g_uiSerialRuntime.lastState);
+  if (g_uiSerialRuntime.forceState || changed ||
+      static_cast<int32_t>(nowMs - g_uiSerialRuntime.nextStateMs) >= 0) {
+    publishUiSerialStateCache(current);
+    g_uiSerialRuntime.lastState = current;
+    g_uiSerialRuntime.forceState = false;
+    g_uiSerialRuntime.nextStateMs = nowMs + 1200U;
+  }
+
+  if (static_cast<int32_t>(nowMs - g_uiSerialRuntime.nextListMs) >= 0) {
+    publishUiSerialList();
+    g_uiSerialRuntime.nextListMs = nowMs + 1200U;
+  }
 }
 
 void printMp3ScanStatus(const char* source) {
@@ -3253,6 +3610,7 @@ void app_orchestrator::setup() {
   g_mp3.setFxDuckingGain(config::kMp3FxDuckingGainDefault);
   g_mp3.setFxOverlayGain(config::kMp3FxOverlayGainDefault);
   setupRadioWifiWebRuntime();
+  setupUiSerialRuntime();
   g_playerUi.reset();
   mp3Controller().setBrowsePath("/");
   g_screen.begin();
@@ -3328,6 +3686,8 @@ void app_orchestrator::setup() {
 void app_orchestrator::loop() {
   const uint32_t loopStartMs = millis();
   uint32_t nowMs = millis();
+  updateUiSerialRuntime(nowMs);
+  nowMs = millis();
   updateAsyncAudioService(nowMs);
   serviceStoryAudioCaptureGuard(nowMs);
   nowMs = millis();

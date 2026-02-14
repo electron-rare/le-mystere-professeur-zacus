@@ -16,6 +16,4 @@ else
 fi
 
 echo
-read -r -p "[2/2] Plug USB now, then press Enter to start serial smoke… " _
-
-python3 tools/dev/serial_smoke.py --wait-port 180 --role auto --baud 19200
+python3 tools/dev/serial_smoke.py --role auto --wait-port 180 --baud 19200

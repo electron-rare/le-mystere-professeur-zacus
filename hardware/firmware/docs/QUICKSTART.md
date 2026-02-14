@@ -1,0 +1,54 @@
+# QUICKSTART Firmware
+
+## 1) Flasher ESP32 audio
+
+```sh
+pio run -e esp32dev -t upload --upload-port <PORT_ESP32>
+pio device monitor -e esp32dev --port <PORT_ESP32>
+```
+
+## 2) Choisir une UI
+
+### UI ESP8266 OLED
+
+```sh
+pio run -e esp8266_oled -t upload --upload-port <PORT_ESP8266>
+pio device monitor -e esp8266_oled --port <PORT_ESP8266>
+```
+
+### UI RP2040 TFT
+
+```sh
+pio run -e ui_rp2040_ili9488 -t upload --upload-port <PORT_RP2040>
+pio device monitor -e ui_rp2040_ili9488 --port <PORT_RP2040>
+```
+
+## 3) Verifier le lien v2
+
+Sur le moniteur ESP32:
+
+```text
+UI_LINK_STATUS
+```
+
+Attendu:
+- `connected=1`
+- compteur `pong` qui augmente
+
+## 4) Boucle dev rapide (credit-friendly)
+
+```sh
+make fast-esp32 ESP32_PORT=<PORT_ESP32>
+make fast-ui-oled UI_OLED_PORT=<PORT_ESP8266>
+make fast-ui-tft UI_TFT_PORT=<PORT_RP2040>
+python3 tools/dev/serial_smoke.py --role auto --wait-port 180
+```
+
+Sur macOS les deux CP2102 partagent VID/PID=10C4:EA60/0001; utilisez `LOCATION=20-6.1.1` pour l’ESP32 et `20-6.1.2` pour l’ESP8266. Mettez à jour `tools/dev/ports_map.json` si votre configuration USB change et `/dev/cu.SLAB_*` sera privilégié automatiquement.
+
+## 5) Hot-swap manuel
+
+1. Demarrer ESP32 + OLED, verifier affichage.
+2. Debrancher OLED.
+3. Brancher TFT sans reboot ESP32.
+4. Verifier resync UI (< 2s) et commandes BTN.

@@ -61,6 +61,9 @@ Variantes d'environnement :
 - `ZACUS_REQUIRE_HW=1 ./tools/dev/run_matrix_and_smoke.sh` — échoue si aucun hardware détecté.
 - `ZACUS_USB_COUNTDOWN=60 ./tools/dev/run_matrix_and_smoke.sh` — prolonge la remise USB.
 - `ZACUS_NO_COUNTDOWN=1 ./tools/dev/run_matrix_and_smoke.sh` — saute le compte à rebours et la cloche.
+- `ZACUS_SKIP_PIO=1 ./tools/dev/run_matrix_and_smoke.sh` — saute l’étape PlatformIO et ne lance que la smoke (utile quand les downloads sont impossibles).
+
+Le script affiche un résumé final : `Build status` (OK ou SKIPPED) et `Smoke status` (OK/SKIP) avec la commande exacte.
 
 ## 4.6) Local dev cockpit
 

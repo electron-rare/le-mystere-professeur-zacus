@@ -120,15 +120,21 @@ prepare_pip_cache
 echo "[0/3] Ensuring Python deps..."
 python3 -m pip install --no-cache-dir -U pip pyserial
 
-echo "[1/3] Build matrix…"
-if [[ -x "./build_all.sh" ]]; then
-  run_build_all
+BUILD_STATUS="SKIPPED (ZACUS_SKIP_PIO=1)"
+if [[ "${ZACUS_SKIP_PIO:-0}" == "1" ]]; then
+  echo "[1/3] Build matrix… (skipped via ZACUS_SKIP_PIO=1)"
 else
-  run_pio_env esp32dev
-  run_pio_env esp32_release
-  run_pio_env esp8266_oled
-  run_pio_env ui_rp2040_ili9488
-  run_pio_env ui_rp2040_ili9486
+  echo "[1/3] Build matrix…"
+  if [[ -x "./build_all.sh" ]]; then
+    run_build_all
+  else
+    run_pio_env esp32dev
+    run_pio_env esp32_release
+    run_pio_env esp8266_oled
+    run_pio_env ui_rp2040_ili9488
+    run_pio_env ui_rp2040_ili9486
+  fi
+  BUILD_STATUS="OK"
 fi
 
 echo
@@ -142,4 +148,26 @@ if [[ "${ZACUS_REQUIRE_HW:-0}" == "1" ]]; then
 else
   SMOKE_CMD+=(--wait-port 3 --allow-no-hardware)
 fi
-"${SMOKE_CMD[@]}"
+SMOKE_COMMAND_STRING="$(printf '%q ' "${SMOKE_CMD[@]}")"
+SMOKE_LOG="$(mktemp)"
+set +e
+if "${SMOKE_CMD[@]}" 2>&1 | tee "$SMOKE_LOG"; then
+  if grep -q "SKIP: no hardware detected" "$SMOKE_LOG"; then
+    SMOKE_STATUS="SKIP"
+  else
+    SMOKE_STATUS="OK"
+  fi
+else
+  SMOKE_STATUS="FAILED"
+  rm -f "$SMOKE_LOG"
+  echo
+  echo "Smoke step failed; rerun the command above once the hardware is ready."
+  exit 1
+fi
+set -e
+rm -f "$SMOKE_LOG"
+
+echo
+echo "=== Run summary ==="
+echo "Build status: $BUILD_STATUS"
+echo "Smoke status: $SMOKE_STATUS (command: $SMOKE_COMMAND_STRING)"

@@ -124,16 +124,44 @@ BUILD_STATUS="SKIPPED (ZACUS_SKIP_PIO=1)"
 if [[ "${ZACUS_SKIP_PIO:-0}" == "1" ]]; then
   echo "[1/3] Build matrix… (skipped via ZACUS_SKIP_PIO=1)"
 else
+ENVS=(esp32dev esp32_release esp8266_oled ui_rp2040_ili9488 ui_rp2040_ili9486)
+
+all_builds_present() {
+  for env in "${ENVS[@]}"; do
+    if [[ ! -f ".pio/build/$env/firmware.bin" && ! -f ".pio/build/$env/firmware.elf" ]]; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+BUILD_STATUS="SKIPPED (ZACUS_SKIP_PIO=1)"
+if [[ "${ZACUS_SKIP_PIO:-0}" == "1" ]]; then
+  echo "[1/3] Build matrix… (skipped via ZACUS_SKIP_PIO=1)"
+elif [[ "${ZACUS_FORCE_BUILD:-0}" == "1" ]]; then
+  echo "[1/3] Build matrix… (forced rebuild)"
+  if [[ -x "./build_all.sh" ]]; then
+    run_build_all
+  else
+    for env in "${ENVS[@]}"; do
+      run_pio_env "$env"
+    done
+  fi
+  BUILD_STATUS="OK"
+elif all_builds_present; then
+  echo "[1/3] Build matrix… (already built)"
+  BUILD_STATUS="SKIPPED (already built)"
+else
   echo "[1/3] Build matrix…"
   if [[ -x "./build_all.sh" ]]; then
     run_build_all
   else
-    run_pio_env esp32dev
-    run_pio_env esp32_release
-    run_pio_env esp8266_oled
-    run_pio_env ui_rp2040_ili9488
-    run_pio_env ui_rp2040_ili9486
+    for env in "${ENVS[@]}"; do
+      run_pio_env "$env"
+    done
   fi
+  BUILD_STATUS="OK"
+fi
   BUILD_STATUS="OK"
 fi
 

@@ -7,6 +7,7 @@
 #include <FS.h>
 #include <LittleFS.h>
 #include <SD_MMC.h>
+#include <ArduinoJson.h>
 
 #include "app_orchestrator.h"
 #include "../audio/effects/audio_effect_id.h"
@@ -16,6 +17,7 @@
 #include "../controllers/story/story_controller.h"
 #include "../controllers/story/story_controller_v2.h"
 #include "../runtime/app_scheduler.h"
+#include "../runtime/radio_runtime.h"
 #include "../runtime/runtime_state.h"
 #include "../services/audio/audio_service.h"
 #include "../services/input/input_service.h"
@@ -25,9 +27,13 @@
 #include "../services/serial/serial_commands_codec.h"
 #include "../services/serial/serial_commands_key.h"
 #include "../services/serial/serial_commands_mp3.h"
+#include "../services/serial/serial_commands_radio.h"
 #include "../services/serial/serial_commands_story.h"
 #include "../services/serial/serial_commands_system.h"
 #include "../services/serial/serial_router.h"
+#include "../services/network/wifi_service.h"
+#include "../services/radio/radio_service.h"
+#include "../services/web/web_ui_service.h"
 #include "../services/screen/screen_sync_service.h"
 #include "../story/resources/screen_scene_registry.h"
 #include "../story/story_engine.h"
@@ -91,6 +97,22 @@ struct LoopBudgetState {
   uint32_t warnThrottleMs = 2500U;
 };
 LoopBudgetState g_loopBudget;
+
+struct NetRuntimeConfig {
+  char hostname[33] = "u-son-radio";
+  bool staEnabled = false;
+  char staSsid[33] = {};
+  char staPass[65] = {};
+  bool apEnabled = true;
+  char apSsid[33] = "U-SON-RADIO";
+  char apPass[65] = "usonradio";
+  uint16_t webPort = 80U;
+  bool webAuth = false;
+  char webUser[33] = "admin";
+  char webPass[65] = "usonradio";
+};
+
+NetRuntimeConfig g_netConfig;
 
 void setBootAudioPaEnabled(bool enabled, const char* source);
 void printBootAudioOutputInfo(const char* source);
@@ -165,8 +187,12 @@ void serviceULockSearchSonarCue(uint32_t nowMs);
 void onSerialCommand(const SerialCommand& cmd, uint32_t nowMs, void* ctx);
 StorySerialRuntimeContext makeStorySerialRuntimeContext();
 Mp3SerialRuntimeContext makeMp3SerialRuntimeContext();
+RadioSerialRuntimeContext makeRadioSerialRuntimeContext();
 bool isCanonicalSerialCommand(const char* token);
 bool commandMatches(const char* cmd, const char* token);
+void printRadioDebugHelp();
+bool loadNetRuntimeConfigFromLittleFs(NetRuntimeConfig* outCfg);
+void setupRadioWifiWebRuntime();
 
 InputService& inputService() {
   static InputService service(g_keypad);
@@ -912,6 +938,107 @@ void setupInternalLittleFs() {
   } else {
     Serial.printf("[FS] Boot FX ready: %s\n", bootFxPath.c_str());
   }
+}
+
+bool loadNetRuntimeConfigFromLittleFs(NetRuntimeConfig* outCfg) {
+  if (outCfg == nullptr) {
+    return false;
+  }
+  *outCfg = NetRuntimeConfig();
+  if (!g_littleFsReady) {
+    return false;
+  }
+
+  fs::File file = LittleFS.open("/net/config.json", FILE_READ);
+  if (!file || file.isDirectory()) {
+    if (file) {
+      file.close();
+    }
+    file = LittleFS.open("/config.json", FILE_READ);
+  }
+  if (!file || file.isDirectory()) {
+    if (file) {
+      file.close();
+    }
+    return false;
+  }
+
+  StaticJsonDocument<1024> doc;
+  const DeserializationError err = deserializeJson(doc, file);
+  file.close();
+  if (err) {
+    Serial.printf("[NET] config parse failed: %s\n", err.c_str());
+    return false;
+  }
+
+  const char* hostname = doc["hostname"] | outCfg->hostname;
+  snprintf(outCfg->hostname, sizeof(outCfg->hostname), "%s", hostname);
+
+  JsonObject sta = doc["sta"].as<JsonObject>();
+  if (!sta.isNull()) {
+    const char* ssid = sta["ssid"] | "";
+    const char* pass = sta["pass"] | "";
+    snprintf(outCfg->staSsid, sizeof(outCfg->staSsid), "%s", ssid);
+    snprintf(outCfg->staPass, sizeof(outCfg->staPass), "%s", pass);
+    outCfg->staEnabled = outCfg->staSsid[0] != '\0';
+  }
+
+  JsonObject ap = doc["ap"].as<JsonObject>();
+  if (!ap.isNull()) {
+    outCfg->apEnabled = ap["enabled"] | outCfg->apEnabled;
+    const char* ssid = ap["ssid"] | outCfg->apSsid;
+    const char* pass = ap["pass"] | outCfg->apPass;
+    snprintf(outCfg->apSsid, sizeof(outCfg->apSsid), "%s", ssid);
+    snprintf(outCfg->apPass, sizeof(outCfg->apPass), "%s", pass);
+  }
+
+  JsonObject web = doc["web"].as<JsonObject>();
+  if (!web.isNull()) {
+    outCfg->webPort = static_cast<uint16_t>(web["port"] | outCfg->webPort);
+    outCfg->webAuth = web["auth"] | outCfg->webAuth;
+    const char* user = web["user"] | outCfg->webUser;
+    const char* pass = web["pass"] | outCfg->webPass;
+    snprintf(outCfg->webUser, sizeof(outCfg->webUser), "%s", user);
+    snprintf(outCfg->webPass, sizeof(outCfg->webPass), "%s", pass);
+  }
+
+  return true;
+}
+
+void setupRadioWifiWebRuntime() {
+  NetRuntimeConfig cfg;
+  const bool loaded = loadNetRuntimeConfigFromLittleFs(&cfg);
+  g_netConfig = cfg;
+
+  g_wifi.begin(g_netConfig.hostname);
+  if (g_netConfig.staEnabled) {
+    g_wifi.connectSta(g_netConfig.staSsid, g_netConfig.staPass, "boot_sta");
+  }
+  if (g_netConfig.apEnabled) {
+    g_wifi.enableAp(g_netConfig.apSsid, g_netConfig.apPass, "boot_ap");
+  } else {
+    g_wifi.disableAp("boot_ap_off");
+  }
+
+  fs::FS* radioFs = g_littleFsReady ? static_cast<fs::FS*>(&LittleFS) : nullptr;
+  g_radio.begin(radioFs, "/radio/stations.json", &g_wifi);
+
+  WebUiService::Config webCfg;
+  webCfg.authEnabled = g_netConfig.webAuth;
+  snprintf(webCfg.user, sizeof(webCfg.user), "%s", g_netConfig.webUser);
+  snprintf(webCfg.pass, sizeof(webCfg.pass), "%s", g_netConfig.webPass);
+  g_webUi.begin(&g_wifi, &g_radio, &g_mp3, g_netConfig.webPort, &webCfg);
+
+  // Keep cooperative runtime for RC V3.1 stability.
+  g_radioRuntime.begin(false, &g_wifi, &g_radio, &g_webUi);
+
+  Serial.printf("[NET] cfg=%s host=%s sta=%u ap=%u web=%u auth=%u\n",
+                loaded ? "FS" : "DEFAULT",
+                g_netConfig.hostname,
+                g_netConfig.staEnabled ? 1U : 0U,
+                g_netConfig.apEnabled ? 1U : 0U,
+                static_cast<unsigned int>(g_netConfig.webPort),
+                g_netConfig.webAuth ? 1U : 0U);
 }
 
 void printLittleFsInfo(const char* source) {
@@ -2129,6 +2256,7 @@ void printMp3DebugHelp() {
   Serial.println("[MP3_DBG] Cmd: MP3_FX FM|SONAR|MORSE|WIN [ms] | MP3_FX_STOP");
   Serial.println("[MP3_DBG] Cmd: MP3_BACKEND STATUS|SET AUTO|AUDIO_TOOLS|LEGACY | MP3_BACKEND_STATUS");
   Serial.println("[MP3_DBG] Cmd: MP3_SCAN START|STATUS|CANCEL|REBUILD | MP3_SCAN_PROGRESS");
+  Serial.println("[MP3_DBG] Cmd: SD_STATUS | SD_MOUNT | SD_UNMOUNT | SD_RESCAN [FORCE] | SD_SCAN_PROGRESS");
   Serial.println("[MP3_DBG] Cmd: MP3_BROWSE LS [path] | MP3_BROWSE CD <path> | MP3_PLAY_PATH <path>");
   Serial.println(
       "[MP3_DBG] Cmd: MP3_UI STATUS|PAGE NOW|BROWSE|QUEUE|SET | MP3_UI_STATUS | MP3_QUEUE_PREVIEW [n]");
@@ -2149,6 +2277,9 @@ void stopMp3FormatTest(const char* reason) {
 }
 
 void forceUsonFunctionalForMp3Debug(const char* source) {
+  if (g_bootAudioProtocol.active) {
+    finishBootAudioValidationProtocol("mp3_unlock_force", false);
+  }
   if (g_uSonFunctional) {
     return;
   }
@@ -2166,7 +2297,7 @@ void printMp3Status(const char* source) {
   const Mp3BackendRuntimeStats backendStats = g_mp3.backendStats();
   const PlayerUiPage page = currentPlayerUiPage();
   Serial.printf(
-      "[MP3_DBG] %s mode=%s u_son=%u sd=%u tracks=%u cur=%u play=%u pause=%u repeat=%s vol=%u%% fx_mode=%s fx=%u(%s,%lums) duck=%u%% mix=%u%% backend=%s/%s err=%s b_attempt=%lu b_fail=%lu b_retry=%lu b_fallback=%lu scan_busy=%u scan_ms=%lu ui=%s browse=%s file=%s\n",
+      "[MP3_DBG] %s mode=%s u_son=%u sd=%u tracks=%u cur=%u play=%u pause=%u repeat=%s vol=%u%% fx_mode=%s fx=%u(%s,%lums) duck=%u%% mix=%u%% backend=%s/%s err=%s b_attempt=%lu b_fail=%lu b_retry=%lu b_fallback=%lu b_reason=%s tools_unsupported=%lu auto_heal=%lu scan_busy=%u scan_ms=%lu ui=%s browse=%s file=%s\n",
       source,
       runtimeModeLabel(),
       g_uSonFunctional ? 1U : 0U,
@@ -2190,6 +2321,9 @@ void printMp3Status(const char* source) {
       static_cast<unsigned long>(backendStats.startFailures),
       static_cast<unsigned long>(backendStats.retriesScheduled),
       static_cast<unsigned long>(backendStats.fallbackCount),
+      backendStats.lastFallbackReason,
+      static_cast<unsigned long>(backendStats.audioToolsUnsupported),
+      static_cast<unsigned long>(backendStats.autoHealToFallback),
       g_mp3.isScanBusy() ? 1U : 0U,
       static_cast<unsigned long>(stats.scanMs),
       playerUiPageLabel(page),
@@ -2424,6 +2558,14 @@ void printStoryDebugHelp() {
   Serial.println("[STORY] Cmd: STORY_V2_EVENT <name> | STORY_V2_STEP <id> | STORY_V2_SCENARIO <id>");
 }
 
+void printRadioDebugHelp() {
+  Serial.println("[RADIO] Cmd: RADIO_STATUS | RADIO_LIST [offset limit] | RADIO_PLAY <id|url>");
+  Serial.println("[RADIO] Cmd: RADIO_STOP | RADIO_NEXT | RADIO_PREV | RADIO_META");
+  Serial.println("[WIFI] Cmd: WIFI_STATUS | WIFI_SCAN | WIFI_CONNECT <ssid> <pass>");
+  Serial.println("[WIFI] Cmd: WIFI_AP_ON [ssid pass] | WIFI_AP_OFF");
+  Serial.println("[WEB] Cmd: WEB_STATUS");
+}
+
 StorySerialRuntimeContext makeStorySerialRuntimeContext() {
   StorySerialRuntimeContext context = {};
   context.storyV2Enabled = &g_storyV2Enabled;
@@ -2465,6 +2607,15 @@ Mp3SerialRuntimeContext makeMp3SerialRuntimeContext() {
   return context;
 }
 
+RadioSerialRuntimeContext makeRadioSerialRuntimeContext() {
+  RadioSerialRuntimeContext context = {};
+  context.wifi = &g_wifi;
+  context.radio = &g_radio;
+  context.web = &g_webUi;
+  context.printHelp = printRadioDebugHelp;
+  return context;
+}
+
 void printKeyTuneHelp() {
   Serial.println("[KEY_TUNE] Cmd: KEY_STATUS | KEY_RAW_ON | KEY_RAW_OFF | KEY_RESET");
   Serial.println("[KEY_TUNE] Cmd: KEY_SET K4 1500 | KEY_SET K6 2200 | KEY_SET REL 3920");
@@ -2479,6 +2630,9 @@ void printKeyTuneHelp() {
   Serial.println("[KEY_TUNE] Cmd: STORY_V2_STATUS | STORY_V2_LIST | STORY_V2_VALIDATE | STORY_V2_HEALTH");
   Serial.println("[KEY_TUNE] Cmd: STORY_V2_METRICS | STORY_V2_METRICS_RESET");
   Serial.println("[KEY_TUNE] Cmd: STORY_V2_EVENT <name> | STORY_V2_STEP <id> | STORY_V2_SCENARIO <id>");
+  Serial.println("[KEY_TUNE] Cmd: SD_STATUS | SD_MOUNT | SD_UNMOUNT | SD_RESCAN [FORCE] | SD_SCAN_PROGRESS");
+  Serial.println("[KEY_TUNE] Cmd: RADIO_STATUS|LIST|PLAY|STOP|NEXT|PREV|META");
+  Serial.println("[KEY_TUNE] Cmd: WIFI_STATUS|SCAN|CONNECT|AP_ON|AP_OFF | WEB_STATUS");
   Serial.println("[KEY_TUNE] Cmd: CODEC_STATUS | CODEC_DUMP | CODEC_RD/WR | CODEC_VOL");
   Serial.println("[KEY_TUNE] Cmd: MP3_STATUS | MP3_UNLOCK | MP3_REFRESH | MP3_LIST | MP3_TEST_START | MP3_FX");
   Serial.println("[KEY_TUNE] Cmd: MP3_SCAN_PROGRESS | MP3_BACKEND_STATUS | MP3_UI_STATUS | MP3_QUEUE_PREVIEW | MP3_CAPS");
@@ -2658,6 +2812,13 @@ bool isCanonicalSerialCommand(const char* token) {
       "MP3_BROWSE",                 "MP3_PLAY_PATH",
       "MP3_UI",                     "MP3_UI_STATUS",   "MP3_QUEUE_PREVIEW",
       "MP3_CAPS",                   "MP3_STATE",
+      "SD_STATUS",                  "SD_MOUNT",        "SD_UNMOUNT",
+      "SD_RESCAN",                  "SD_SCAN_PROGRESS",
+      "RADIO_HELP",                 "RADIO_STATUS",    "RADIO_LIST",
+      "RADIO_PLAY",                 "RADIO_STOP",      "RADIO_NEXT",
+      "RADIO_PREV",                 "RADIO_META",
+      "WIFI_STATUS",                "WIFI_SCAN",       "WIFI_CONNECT",
+      "WIFI_AP_ON",                 "WIFI_AP_OFF",     "WEB_STATUS",
       "KEY_HELP",                   "KEY_STATUS",      "KEY_RAW_ON",  "KEY_RAW_OFF",
       "KEY_RESET",                  "KEY_SET",         "KEY_SET_ALL", "KEY_TEST_START",
       "KEY_TEST_STATUS",            "KEY_TEST_RESET",  "KEY_TEST_STOP", "CODEC_HELP",
@@ -2706,6 +2867,13 @@ void onSerialCommand(const SerialCommand& cmd, uint32_t nowMs, void* ctx) {
     const Mp3SerialRuntimeContext context = makeMp3SerialRuntimeContext();
     if (!serialProcessMp3Command(cmd, nowMs, context, Serial)) {
       serialDispatchReply(Serial, "MP3", SerialDispatchResult::kUnknown, cmd.line);
+    }
+    return;
+  }
+  if (serialIsRadioCommand(cmd.token)) {
+    const RadioSerialRuntimeContext context = makeRadioSerialRuntimeContext();
+    if (!serialProcessRadioCommand(cmd, nowMs, context, Serial)) {
+      serialDispatchReply(Serial, "RADIO", SerialDispatchResult::kUnknown, cmd.line);
     }
     return;
   }
@@ -3116,6 +3284,7 @@ void app_orchestrator::setup() {
   g_mp3.setFxMode(config::kMp3FxOverlayModeDefault ? Mp3FxMode::kOverlay : Mp3FxMode::kDucking);
   g_mp3.setFxDuckingGain(config::kMp3FxDuckingGainDefault);
   g_mp3.setFxOverlayGain(config::kMp3FxOverlayGainDefault);
+  setupRadioWifiWebRuntime();
   g_playerUi.reset();
   mp3Controller().setBrowsePath("/");
   g_screen.begin();
@@ -3152,7 +3321,7 @@ void app_orchestrator::setup() {
   Serial.printf("[STORY_V2] feature flag=%u (default=%u)\n",
                 isStoryV2Enabled() ? 1U : 0U,
                 config::kStoryV2EnabledDefault ? 1U : 0U);
-  Serial.println("[BOOT] En U_LOCK: detection SD desactivee jusqu'au mode U-SON Fonctionnel.");
+  Serial.println("[BOOT] En U_LOCK: service SD actif (mount/scan), playback MP3 reste gate par story.");
   if (config::kEnableBootAudioValidationProtocol) {
     Serial.println("[KEYMAP][BOOT_PROTO] K1..K6=NEXT | Serial: BOOT_NEXT, BOOT_REPLAY, BOOT_REOPEN");
     Serial.println("[KEYMAP][BOOT_PROTO] FX: BOOT_FX_FM | BOOT_FX_SONAR | BOOT_FX_MORSE | BOOT_FX_WIN");
@@ -3174,6 +3343,8 @@ void app_orchestrator::setup() {
       "[MP3_DBG] Serial: MP3_BROWSE LS [path] | MP3_BROWSE CD <path> | MP3_PLAY_PATH <path> | MP3_UI STATUS|PAGE ... | MP3_UI_STATUS");
   Serial.println("[MP3_DBG] Serial: MP3_QUEUE_PREVIEW [n] | MP3_CAPS | MP3_STATE SAVE|LOAD|RESET");
   Serial.println("[SYS] Serial: SYS_LOOP_BUDGET STATUS|RESET | SCREEN_LINK_STATUS | SCREEN_LINK_RESET_STATS");
+  Serial.println("[RADIO] Serial: RADIO_STATUS|LIST|PLAY|STOP|NEXT|PREV|META");
+  Serial.println("[WIFI] Serial: WIFI_STATUS|SCAN|CONNECT|AP_ON|AP_OFF | WEB_STATUS");
   Serial.println("[FS] Serial: BOOT_FS_INFO | BOOT_FS_LIST | BOOT_FS_TEST");
   Serial.printf("[FS] Boot FX path: %s (%s)\n",
                 config::kBootFxLittleFsPath,
@@ -3191,6 +3362,8 @@ void app_orchestrator::loop() {
   uint32_t nowMs = millis();
   updateAsyncAudioService(nowMs);
   serviceStoryAudioCaptureGuard(nowMs);
+  nowMs = millis();
+  g_radioRuntime.updateCooperative(nowMs);
   nowMs = millis();
   laRuntimeService().setEnvironment(g_laDetectionEnabled, g_uLockListening, g_uSonFunctional);
   updateStoryTimeline(nowMs);

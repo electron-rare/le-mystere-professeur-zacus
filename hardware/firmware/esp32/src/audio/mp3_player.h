@@ -53,6 +53,9 @@ struct Mp3BackendRuntimeStats {
   uint32_t fallbackCount = 0U;
   uint32_t legacyStarts = 0U;
   uint32_t audioToolsStarts = 0U;
+  uint32_t audioToolsUnsupported = 0U;
+  uint32_t autoHealToFallback = 0U;
+  char lastFallbackReason[24] = "-";
 };
 
 class Mp3Player {
@@ -72,6 +75,7 @@ class Mp3Player {
   void previousTrack();
   void cycleRepeatMode();
   void requestStorageRefresh(bool forceRebuild = false);
+  void requestStorageUnmount();
   void requestCatalogScan(bool forceRebuild);
   bool cancelCatalogScan();
   const char* scanStateLabel() const;
@@ -128,7 +132,8 @@ class Mp3Player {
 
  private:
   static constexpr uint16_t kStateSaveDebounceMs = 1200;
-  static constexpr uint8_t kScanDirStackMax = 24;
+  static constexpr uint8_t kScanDirStackMax = 16;
+  static constexpr uint8_t kAudioToolsUnsupportedAutoHealThreshold = 3;
 
   bool mountStorage(uint32_t nowMs);
   void unmountStorage(uint32_t nowMs);
@@ -177,6 +182,7 @@ class Mp3Player {
   String selectedPathFromState_;
   RepeatMode repeatMode_ = RepeatMode::kAll;
   bool forceRescan_ = false;
+  bool forceUnmountRequested_ = false;
   bool scanBusy_ = false;
   Mp3ScanProgress scanProgress_;
   CatalogStats catalogStats_;
@@ -199,6 +205,7 @@ class Mp3Player {
   PlayerBackendMode backendMode_ = PlayerBackendMode::kAutoFallback;
   PlayerBackendId activeBackend_ = PlayerBackendId::kNone;
   bool fallbackUsed_ = false;
+  uint8_t audioToolsUnsupportedStreak_ = 0U;
   char backendError_[24] = "OK";
   Mp3BackendRuntimeStats backendStats_;
   AudioToolsBackend audioTools_;

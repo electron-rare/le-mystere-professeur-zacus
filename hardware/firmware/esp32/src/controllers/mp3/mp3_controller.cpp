@@ -95,18 +95,21 @@ void Mp3Controller::printBackendStatus(Print& out, const char* source) const {
   const char* safeSource = (source != nullptr && source[0] != '\0') ? source : "status";
   const Mp3BackendRuntimeStats stats = player_.backendStats();
   out.printf(
-      "[MP3_BACKEND_STATUS] %s mode=%s active=%s err=%s attempts=%lu success=%lu fail=%lu retries=%lu fallback=%lu legacy=%lu tools=%lu\n",
+      "[MP3_BACKEND_STATUS] %s mode=%s active=%s err=%s fallback_reason=%s attempts=%lu success=%lu fail=%lu retries=%lu fallback=%lu legacy=%lu tools=%lu tools_unsupported=%lu auto_heal=%lu\n",
       safeSource,
       player_.backendModeLabel(),
       player_.activeBackendLabel(),
       player_.lastBackendError(),
+      stats.lastFallbackReason,
       static_cast<unsigned long>(stats.startAttempts),
       static_cast<unsigned long>(stats.startSuccess),
       static_cast<unsigned long>(stats.startFailures),
       static_cast<unsigned long>(stats.retriesScheduled),
       static_cast<unsigned long>(stats.fallbackCount),
       static_cast<unsigned long>(stats.legacyStarts),
-      static_cast<unsigned long>(stats.audioToolsStarts));
+      static_cast<unsigned long>(stats.audioToolsStarts),
+      static_cast<unsigned long>(stats.audioToolsUnsupported),
+      static_cast<unsigned long>(stats.autoHealToFallback));
 }
 
 void Mp3Controller::printBrowseList(Print& out,
@@ -173,7 +176,7 @@ void Mp3Controller::printQueuePreview(Print& out, uint8_t count, const char* sou
 void Mp3Controller::printCapabilities(Print& out, const char* source) const {
   const char* safeSource = (source != nullptr && source[0] != '\0') ? source : "status";
   out.printf(
-      "[MP3_CAPS] %s codecs=MP3,WAV,AAC,FLAC,OPUS tools=WAV legacy=MP3,WAV,AAC,FLAC,OPUS mode=%s active=%s\n",
+      "[MP3_CAPS] %s codecs=MP3,WAV,AAC,FLAC,OPUS tools=wav_only legacy=mp3,wav,aac,flac,opus mode=%s active=%s\n",
       safeSource,
       player_.backendModeLabel(),
       player_.activeBackendLabel());

@@ -18,6 +18,10 @@ Mp3Player g_mp3(config::kPinI2SBclk,
                 config::kPinI2SDout,
                 config::kMp3Path,
                 config::kPinAudioPaEnable);
+WifiService g_wifi;
+RadioService g_radio;
+WebUiService g_webUi;
+RadioRuntime g_radioRuntime;
 I2sJinglePlayer g_unlockJinglePlayer(config::kPinI2SBclk,
                                      config::kPinI2SLrc,
                                      config::kPinI2SDout,

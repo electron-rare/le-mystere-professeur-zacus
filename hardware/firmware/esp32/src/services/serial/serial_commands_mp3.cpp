@@ -63,7 +63,10 @@ void printUiStatus(Print& out, const Mp3SerialRuntimeContext& ctx, const char* s
 }  // namespace
 
 bool serialIsMp3Command(const char* token) {
-  return token != nullptr && strncmp(token, "MP3_", 4U) == 0;
+  if (token == nullptr) {
+    return false;
+  }
+  return strncmp(token, "MP3_", 4U) == 0 || strncmp(token, "SD_", 3U) == 0;
 }
 
 bool serialProcessMp3Command(const SerialCommand& cmd,
@@ -91,6 +94,51 @@ bool serialProcessMp3Command(const SerialCommand& cmd,
       ctx.printStatus("status");
     }
     serialDispatchReply(out, "MP3", SerialDispatchResult::kOk, "status");
+    return true;
+  }
+
+  if (serialTokenEquals(cmd, "SD_STATUS")) {
+    const CatalogStats stats = player.catalogStats();
+    const Mp3ScanProgress progress = player.scanProgress();
+    out.printf("[SD_STATUS] mounted=%u tracks=%u scan=%s busy=%u reason=%s elapsed=%lums\n",
+               player.isSdReady() ? 1U : 0U,
+               static_cast<unsigned int>(player.trackCount()),
+               player.scanStateLabel(),
+               player.isScanBusy() ? 1U : 0U,
+               progress.reason,
+               static_cast<unsigned long>(stats.scanMs));
+    serialDispatchReply(out, "SD", SerialDispatchResult::kOk, "status");
+    return true;
+  }
+
+  if (serialTokenEquals(cmd, "SD_MOUNT")) {
+    player.requestStorageRefresh(false);
+    serialDispatchReply(out, "SD", SerialDispatchResult::kOk, "mount_req");
+    return true;
+  }
+
+  if (serialTokenEquals(cmd, "SD_UNMOUNT")) {
+    player.requestStorageUnmount();
+    serialDispatchReply(out, "SD", SerialDispatchResult::kOk, "unmount_req");
+    return true;
+  }
+
+  if (serialTokenEquals(cmd, "SD_RESCAN")) {
+    const bool force = (args[0] != '\0') && textEqualsIgnoreCase(args, "FORCE");
+    if (args[0] != '\0' && !force) {
+      serialDispatchReply(out, "SD", SerialDispatchResult::kBadArgs, "[FORCE]");
+      return true;
+    }
+    player.requestCatalogScan(force);
+    serialDispatchReply(out, "SD", SerialDispatchResult::kOk, force ? "rescan_force" : "rescan");
+    return true;
+  }
+
+  if (serialTokenEquals(cmd, "SD_SCAN_PROGRESS")) {
+    if (ctx.printScanProgress != nullptr) {
+      ctx.printScanProgress("sd_progress");
+    }
+    serialDispatchReply(out, "SD", SerialDispatchResult::kOk, "scan_progress");
     return true;
   }
 

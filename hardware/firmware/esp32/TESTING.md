@@ -35,6 +35,11 @@ Runbook live semi-automatique disponible:
 - `tools/qa/mp3_client_demo_smoke.sh` (smoke presentation client MP3)
 - `tools/qa/mp3_client_live_checklist.md` (checklist operateur live client MP3)
 - `docs/client/mp3/` (kit complet presentation client)
+- `tools/qa/manual_keypad_validation.md` (validation boutons hors smoke)
+
+Note:
+- les smoke tests RC ne couvrent plus les appuis `K1..K6`
+- la validation boutons est desormais executee separement via `tools/qa/manual_keypad_validation.md`
 
 ## 0) Tooling STORY V2 (hors carte)
 

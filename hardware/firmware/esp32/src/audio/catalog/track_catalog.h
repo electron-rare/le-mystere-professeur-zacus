@@ -3,6 +3,10 @@
 #include <Arduino.h>
 #include <FS.h>
 
+#ifndef USON_TRACK_MAX
+#define USON_TRACK_MAX 180
+#endif
+
 enum class CatalogCodec : uint8_t {
   kUnknown = 0,
   kMp3,
@@ -35,7 +39,7 @@ struct CatalogStats {
 
 class TrackCatalog {
  public:
-  static constexpr uint16_t kMaxTracks = 250;
+  static constexpr uint16_t kMaxTracks = static_cast<uint16_t>(USON_TRACK_MAX);
   static constexpr uint8_t kDefaultMaxDepth = 4;
 
   void clear();

@@ -59,6 +59,8 @@ Environment overrides:
 - `ZACUS_USB_COUNTDOWN=60 ./tools/dev/run_matrix_and_smoke.sh` (longer countdown).
 - `ZACUS_NO_COUNTDOWN=1 ./tools/dev/run_matrix_and_smoke.sh` (skip countdown/bell).
 
+By default the smoke step exits 0 when no serial hardware is present; use `ZACUS_REQUIRE_HW=1` to enforce detection.
+
 ## Docs
 
 - Cablage ESP32/UI: `esp32_audio/WIRING.md`

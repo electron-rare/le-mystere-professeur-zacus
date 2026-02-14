@@ -54,6 +54,8 @@ Sur macOS les deux CP2102 partagent VID/PID=10C4:EA60/0001; utilisez `LOCATION=2
 
 Le script force `PLATFORMIO_CORE_DIR=$HOME/.platformio` pour que les caches PlatformIO restent en dehors du repo.
 
+Par défaut, la séquence smoke tolère l’absence de matériel et termine avec un code 0 quand rien n’est détecté.
+
 Variantes d'environnement :
 
 - `ZACUS_REQUIRE_HW=1 ./tools/dev/run_matrix_and_smoke.sh` — échoue si aucun hardware détecté.

@@ -1,5 +1,8 @@
 # Le Mystère du Professeur Zacus — kit d’enquête (printables + guide MJ + audio)
 
+**Working rules:** see `CODEX_RULES.md` and `docs/BRANCHES.md`.
+
+
 Kit d’enquête pour anniversaire (6–14 enfants, 60–90 minutes), ambiance laboratoire / campus scientifique.
 
 ## Aperçu visuel

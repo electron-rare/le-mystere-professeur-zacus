@@ -12,6 +12,15 @@
 class AudioFileSourceFS;
 class AudioGenerator;
 
+enum class AudioCodec : uint8_t {
+  kUnknown = 0,
+  kMp3,
+  kWav,
+  kAac,
+  kFlac,
+  kOpus,
+};
+
 enum class RepeatMode : uint8_t {
   kAll = 0,
   kOne = 1,
@@ -44,20 +53,8 @@ struct Mp3BackendRuntimeStats {
   uint32_t fallbackCount = 0U;
   uint32_t legacyStarts = 0U;
   uint32_t audioToolsStarts = 0U;
-<<<<<<< HEAD
-  uint32_t legacyAttempts = 0U;
-  uint32_t legacySuccess = 0U;
-  uint32_t legacyFailures = 0U;
-  uint32_t legacyRetries = 0U;
-  uint32_t audioToolsAttempts = 0U;
-  uint32_t audioToolsSuccess = 0U;
-  uint32_t audioToolsFailures = 0U;
-  uint32_t audioToolsRetries = 0U;
-  char lastFallbackReason[32] = "NONE";
-=======
   char lastFailureReason[24] = "OK";
   char lastFallbackPath[24] = "NONE";
->>>>>>> feature/MPRC-RC1-mp3-audio
 };
 
 class Mp3Player {
@@ -111,10 +108,6 @@ class Mp3Player {
   const char* backendModeLabel() const;
   const char* activeBackendLabel() const;
   const char* lastBackendError() const;
-  const char* lastFallbackReason() const;
-  PlayerBackendCapabilities audioToolsCapabilities() const;
-  PlayerBackendCapabilities legacyCapabilities() const;
-  bool backendSupportsCodec(PlayerBackendId backend, AudioCodec codec) const;
 
   bool selectTrackByIndex(uint16_t index, bool restart = true);
   bool selectTrackByPath(const char* path, bool restart = true);

@@ -67,22 +67,14 @@ void LaDetectorApp::update(uint32_t nowMs, const StoryEventSink& sink) {
     snapshot_.status = "SEARCHING";
   }
 
-  // Keep unlock pending until Story accepts the event. This avoids losing
-  // UNLOCK when the event queue is temporarily busy.
-  if (!runtime.unlockPending) {
+  if (!context_.laRuntime->consumeUnlock()) {
     return;
   }
 
-  const bool emitted = sink.emit(StoryEventType::kUnlock, unlockEventName_, 1, nowMs);
-  if (!emitted) {
-    snapshot_.status = "UNLOCK_RETRY";
-    return;
-  }
-
-  (void)context_.laRuntime->consumeUnlock();
   if (context_.onUnlockRuntimeApplied != nullptr) {
     context_.onUnlockRuntimeApplied(nowMs, "story_app_la_unlock");
   }
+  sink.emit(StoryEventType::kUnlock, unlockEventName_, 1, nowMs);
   unlockPosted_ = true;
   snapshot_.status = "UNLOCK_SENT";
 }

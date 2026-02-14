@@ -70,11 +70,3 @@ Sinon, depuis ce dossier:
 1. `pio run`
 2. `pio run -t upload`
 3. `pio device monitor`
-
-## Validation demo client MP3
-
-Pour une demonstration client orientee MP3:
-
-- smoke statique: `bash ../tools/qa/mp3_client_demo_smoke.sh`
-- checklist operateur live: `../tools/qa/mp3_client_live_checklist.md`
-- script de narration: `../docs/client/mp3/03_demo_live_script.md`

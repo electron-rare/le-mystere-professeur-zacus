@@ -93,6 +93,29 @@ def determine_role(port, location, ports_map):
     return None
 
 
+def port_preference(port):
+    name = port.device or ""
+    if name.startswith("/dev/cu.SLAB"):
+        return 0
+    if name.startswith("/dev/cu.usbserial"):
+        return 1
+    if name.startswith("/dev/cu."):
+        return 2
+    return 3
+
+
+def filter_detectable_ports(ports):
+    by_location = {}
+    for port in ports:
+        if port.vid is None or port.pid is None:
+            continue
+        location = parse_location(port.hwid) or port.device
+        existing = by_location.get(location)
+        if existing is None or port_preference(port) < port_preference(existing):
+            by_location[location] = port
+    return list(by_location.values())
+
+
 def detect_roles(ports, prefer_cu, ports_map):
     groups = {}
     for port in ports:
@@ -201,14 +224,16 @@ def main() -> int:
         baseline_devices = {p.device for p in baseline_ports}
         new_ports = wait_for_new_ports(baseline_devices, args.wait_port)
         if new_ports:
-            detection = detect_roles(new_ports, args.prefer_cu, ports_map)
+            detection = detect_roles(filter_detectable_ports(new_ports), args.prefer_cu, ports_map)
             if not detection:
                 return exit_no_hw(
                     args.wait_port, allow_no_hardware, "failed to classify detected ports"
                 )
         elif baseline_ports:
-            print("[info] Using existing ports (already connected)")
-            detection = detect_roles(baseline_ports, args.prefer_cu, ports_map)
+            print("Using existing ports (already connected).")
+            detection = detect_roles(
+                filter_detectable_ports(baseline_ports), args.prefer_cu, ports_map
+            )
             if not detection:
                 return exit_no_hw(
                     args.wait_port, allow_no_hardware, "failed to classify baseline ports"

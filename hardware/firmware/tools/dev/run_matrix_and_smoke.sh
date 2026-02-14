@@ -142,11 +142,12 @@ print_usb_alert
 run_countdown
 
 echo "[2/3] Running serial smoke…"
+DEFAULT_WAIT_PORT="${ZACUS_WAIT_PORT:-30}"
 SMOKE_CMD=(python3 tools/dev/serial_smoke.py --role auto --baud 19200)
 if [[ "${ZACUS_REQUIRE_HW:-0}" == "1" ]]; then
   SMOKE_CMD+=(--wait-port 180)
 else
-  SMOKE_CMD+=(--wait-port 3 --allow-no-hardware)
+  SMOKE_CMD+=(--wait-port "$DEFAULT_WAIT_PORT" --allow-no-hardware)
 fi
 SMOKE_COMMAND_STRING="$(printf '%q ' "${SMOKE_CMD[@]}")"
 SMOKE_LOG="$(mktemp)"

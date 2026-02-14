@@ -221,15 +221,7 @@ def main() -> int:
             return 1
     else:
         baseline_ports = list(list_ports.comports())
-        baseline_devices = {p.device for p in baseline_ports}
-        new_ports = wait_for_new_ports(baseline_devices, args.wait_port)
-        if new_ports:
-            detection = detect_roles(filter_detectable_ports(new_ports), args.prefer_cu, ports_map)
-            if not detection:
-                return exit_no_hw(
-                    args.wait_port, allow_no_hardware, "failed to classify detected ports"
-                )
-        elif baseline_ports:
+        if baseline_ports:
             print("Using existing ports (already connected).")
             detection = detect_roles(
                 filter_detectable_ports(baseline_ports), args.prefer_cu, ports_map
@@ -239,9 +231,17 @@ def main() -> int:
                     args.wait_port, allow_no_hardware, "failed to classify baseline ports"
                 )
         else:
-            return exit_no_hw(
-                args.wait_port, allow_no_hardware, "no new serial port detected"
-            )
+            baseline_devices = {p.device for p in baseline_ports}
+            new_ports = wait_for_new_ports(baseline_devices, args.wait_port)
+            if not new_ports:
+                return exit_no_hw(
+                    args.wait_port, allow_no_hardware, "no new serial port detected"
+                )
+            detection = detect_roles(filter_detectable_ports(new_ports), args.prefer_cu, ports_map)
+            if not detection:
+                return exit_no_hw(
+                    args.wait_port, allow_no_hardware, "failed to classify detected ports"
+                )
 
     if args.role == "auto":
         run_roles = [role for role in ROLE_PRIORITY if role in detection]

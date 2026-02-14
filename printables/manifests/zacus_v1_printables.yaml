@@ -1,0 +1,16 @@
+items:
+  - id: INVITATION
+    type: invitation
+    description: "Invitation labo"
+    prompt: src/prompts/invitation.txt
+    version: 1
+  - id: BADGE_ENQUETE
+    type: badge
+    description: "Badge détective en noir et blanc"
+    prompt: src/prompts/badge-detective.txt
+    version: 1
+  - id: REGLES_EXPRESS
+    type: rulesheet
+    description: "Règles express en une page"
+    prompt: src/prompts/regles-express.txt
+    version: 1

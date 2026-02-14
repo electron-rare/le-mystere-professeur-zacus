@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "stations": [
+    {
+      "id": 1,
+      "name": "NOVA Radio",
+      "url": "http://novazz.ice.infomaniak.ch/novazz-128.mp3",
+      "codec": "MP3",
+      "favorite": true,
+      "enabled": true
+    },
+    {
+      "id": 2,
+      "name": "FG Chic",
+      "url": "http://radiofg.impek.com/fg",
+      "codec": "MP3",
+      "favorite": false,
+      "enabled": true
+    },
+    {
+      "id": 3,
+      "name": "SomaFM Groove",
+      "url": "http://ice1.somafm.com/groovesalad-128-mp3",
+      "codec": "MP3",
+      "favorite": false,
+      "enabled": true
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+packs:
+  - id: PACK_SONAR_HINT
+    title: "Indice sonar"
+    files:
+      - audio/pack-sonar-hint.mp3
+    duration_ms: 42000
+  - id: PACK_MORSE_HINT
+    title: "Indice morse"
+    files:
+      - audio/pack-morse-hint.mp3
+    duration_ms: 38000
+  - id: PACK_WIN
+    title: "Récompense victoire"
+    files:
+      - audio/pack-win.mp3
+    duration_ms: 54000

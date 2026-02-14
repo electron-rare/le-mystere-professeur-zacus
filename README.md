@@ -38,17 +38,10 @@ Dossier : `hardware/`
 - **Printables** : structure `src/` + `export/{pdf,png}/` en place, prête à recevoir les livrables.
 - **Hardware/firmware** : flux `U_LOCK`/`U-SON`/MP3 opérationnel et documenté (`hardware/firmware/esp32/`).
 
-## Licence (non-commercial pour le contenu)
-- Contenus créatifs (documents, PDFs, PNG, SVG, textes de jeu) : **CC BY-NC 4.0**
-- Code (firmware, scripts) : **MIT**
-- **Kit MJ** : structure documentaire en place (`kit-maitre-du-jeu/`).
-- **Printables** : conventions définies, arborescence `src/export` à compléter selon les livrables.
-- **Hardware/firmware** : flux `U_LOCK`/`U-SON`/MP3 opérationnel et documenté (`hardware/firmware/esp32/`).
-
-## Licence (open source)
-- Contenus créatifs (documents, PDFs, PNG, SVG, textes de jeu) : **CC BY-SA 4.0**
-- Code (firmware, scripts) : **GPL-3.0-or-later**
-Voir `LICENSE.md` et `LICENSES/`.
+## Licence
+- **Contenus créatifs (docs, PDFs, PNG, SVG, textes de jeu)** : CC BY-SA 4.0 (`LICENSES/CC-BY-SA-4.0.txt`).
+- **Code (firmware et scripts)** : GPL-3.0-or-later (`LICENSES/GPL-3.0-or-later.txt`).
+Consultez `LICENSE.md` pour les obligations générales et `LICENSES/` pour les textes complets.
 
 ## Disclaimer
 Projet indépendant, non affilié à aucune marque ou éditeur.

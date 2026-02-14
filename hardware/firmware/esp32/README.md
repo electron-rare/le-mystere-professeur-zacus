@@ -214,13 +214,14 @@ Selection serie:
 
 ### Mode lecteur (SD detectee)
 
-- `K1` : play/pause
-- `K2` : piste precedente (page NOW) / navigation (pages BROWSE|QUEUE|SET)
-- `K3` : piste suivante (page NOW) / navigation (pages BROWSE|QUEUE|SET)
-- `K4` : volume -
-- `K5` : volume +
-- `K6` : changer de page UI (`NOW -> BROWSE -> QUEUE -> SET`)
-- En page `SET`, `K1` applique l'action selectionnee (`REPEAT`, `BACKEND`, `SCAN`)
+- UI V3.1 (OLED 128x64): pages `LECTURE`, `LISTE`, `REGLAGES`
+- `K1` : action contextuelle (`OK` / play-pause / selection / appliquer reglage)
+- `K2` : `UP` (navigation liste/reglages)
+- `K3` : `DOWN` (navigation liste/reglages)
+- `K4` : `LEFT` (piste/station precedente, ou ajustement reglage)
+- `K5` : `RIGHT` (piste/station suivante, ou ajustement reglage)
+- `K6` : `MODE/BACK` (page suivante, appui long: page precedente, en `LECTURE`: bascule source SD<->RADIO)
+- Les commandes serie `MP3_UI NAV ...` et `MP3_UI SOURCE ...` restent equivalentes aux touches.
 
 Le firmware bascule automatiquement selon la SD:
 - SD presente + pistes audio supportees: `MODE LECTEUR U-SON`

@@ -62,45 +62,83 @@ bool parseStatFrame(const char* frame,
   unsigned int uiOffset = 0;
   unsigned int uiCount = 0;
   unsigned int queueCount = 0;
+  unsigned int uiSource = 0;
   unsigned int frameCrc = 0;
 
-  const int parsed = sscanf(frame,
-                            "STAT,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u,%u,%u,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%x",
-                            &la,
-                            &mp3,
-                            &sd,
-                            &up,
-                            &key,
-                            &mode,
-                            &track,
-                            &trackCount,
-                            &volumePercent,
-                            &uLockMode,
-                            &uSonFunctional,
-                            &tuningOffset,
-                            &tuningConfidence,
-                            &uLockListening,
-                            &micLevelPercent,
-                            &micScopeEnabled,
-                            &unlockHoldPercent,
-                            &startupStage,
-                            &appStage,
-                            &frameSeq,
-                            &uiPage,
-                            &repeatMode,
-                            &fxActive,
-                            &backendMode,
-                            &scanBusy,
-                            &errorCode,
-                            &uiCursor,
-                            &uiOffset,
-                            &uiCount,
-                            &queueCount,
-                            &frameCrc);
+  int parsed = sscanf(frame,
+                      "STAT,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u,%u,%u,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%x",
+                      &la,
+                      &mp3,
+                      &sd,
+                      &up,
+                      &key,
+                      &mode,
+                      &track,
+                      &trackCount,
+                      &volumePercent,
+                      &uLockMode,
+                      &uSonFunctional,
+                      &tuningOffset,
+                      &tuningConfidence,
+                      &uLockListening,
+                      &micLevelPercent,
+                      &micScopeEnabled,
+                      &unlockHoldPercent,
+                      &startupStage,
+                      &appStage,
+                      &frameSeq,
+                      &uiPage,
+                      &repeatMode,
+                      &fxActive,
+                      &backendMode,
+                      &scanBusy,
+                      &errorCode,
+                      &uiCursor,
+                      &uiOffset,
+                      &uiCount,
+                      &queueCount,
+                      &uiSource,
+                      &frameCrc);
+  if (parsed < 32) {
+    // Legacy STAT format without uiSource.
+    parsed = sscanf(frame,
+                    "STAT,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u,%u,%u,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%x",
+                    &la,
+                    &mp3,
+                    &sd,
+                    &up,
+                    &key,
+                    &mode,
+                    &track,
+                    &trackCount,
+                    &volumePercent,
+                    &uLockMode,
+                    &uSonFunctional,
+                    &tuningOffset,
+                    &tuningConfidence,
+                    &uLockListening,
+                    &micLevelPercent,
+                    &micScopeEnabled,
+                    &unlockHoldPercent,
+                    &startupStage,
+                    &appStage,
+                    &frameSeq,
+                    &uiPage,
+                    &repeatMode,
+                    &fxActive,
+                    &backendMode,
+                    &scanBusy,
+                    &errorCode,
+                    &uiCursor,
+                    &uiOffset,
+                    &uiCount,
+                    &queueCount,
+                    &frameCrc);
+  }
   if (parsed < 19) {
     return false;
   }
-  if (parsed >= 27) {
+  if (parsed >= 31) {
     const char* lastComma = strrchr(frame, ',');
     if (lastComma == nullptr) {
       return false;
@@ -203,6 +241,7 @@ bool parseStatFrame(const char* frame,
   out->uiOffset = (parsed >= 28) ? static_cast<uint16_t>(uiOffset) : 0U;
   out->uiCount = (parsed >= 29) ? static_cast<uint16_t>(uiCount) : 0U;
   out->queueCount = (parsed >= 30) ? static_cast<uint16_t>(queueCount) : 0U;
+  out->uiSource = (parsed >= 32) ? static_cast<uint8_t>(uiSource) : 0U;
 
   out->lastRxMs = nowMs;
   return true;

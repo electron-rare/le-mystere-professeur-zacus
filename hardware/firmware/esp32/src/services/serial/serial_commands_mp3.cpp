@@ -49,14 +49,16 @@ void printUiStatus(Print& out, const Mp3SerialRuntimeContext& ctx, const char* s
     serialDispatchReply(out, "MP3_UI", SerialDispatchResult::kOutOfContext, "missing_context");
     return;
   }
-  out.printf("[MP3_UI] %s page=%s cursor=%u offset=%u browse=%u queue_off=%u set_idx=%u tracks=%u\n",
+  const PlayerUiSnapshot snap = ctx.ui->snapshot();
+  out.printf("[MP3_UI] %s page=%s page_v2=%s source=%s cursor=%u offset=%u count=%u setting_key=%s tracks=%u\n",
              source != nullptr ? source : "status",
-             playerUiPageLabel(ctx.ui->page()),
-             static_cast<unsigned int>(ctx.ui->cursor()),
-             static_cast<unsigned int>(ctx.ui->offset()),
-             static_cast<unsigned int>(ctx.ui->browseCount()),
-             static_cast<unsigned int>(ctx.ui->queueOffset()),
-             static_cast<unsigned int>(ctx.ui->settingsIndex()),
+             playerUiPageLabel(snap.page),
+             playerUiPageLabel(snap.page),
+             playerUiSourceLabel(snap.source),
+             static_cast<unsigned int>(snap.cursor),
+             static_cast<unsigned int>(snap.offset),
+             static_cast<unsigned int>(snap.listCount),
+             uiSettingLabel(snap.settingsKey),
              static_cast<unsigned int>(ctx.player->trackCount()));
 }
 
@@ -253,7 +255,7 @@ bool serialProcessMp3Command(const SerialCommand& cmd,
         ctx.setBrowsePath(normalized.c_str());
       }
       if (ctx.setUiPage != nullptr) {
-        ctx.setUiPage(PlayerUiPage::kBrowser);
+        ctx.setUiPage(PlayerUiPage::kListe);
       }
       out.printf("[MP3_BROWSE] CD path=%s count=%u\n", normalized.c_str(), static_cast<unsigned int>(count));
       serialDispatchReply(out, "MP3_BROWSE", SerialDispatchResult::kOk, "cd");
@@ -285,6 +287,28 @@ bool serialProcessMp3Command(const SerialCommand& cmd,
     return true;
   }
 
+  if (serialTokenEquals(cmd, "MP3_UI_SELECT")) {
+    if (ctx.navigateUi != nullptr) {
+      ctx.navigateUi(UiNavAction::kOk, nowMs);
+      printUiStatus(out, ctx, "select");
+      serialDispatchReply(out, "MP3_UI", SerialDispatchResult::kOk, "select");
+    } else {
+      serialDispatchReply(out, "MP3_UI", SerialDispatchResult::kOutOfContext, "missing_nav");
+    }
+    return true;
+  }
+
+  if (serialTokenEquals(cmd, "MP3_UI_BACK")) {
+    if (ctx.navigateUi != nullptr) {
+      ctx.navigateUi(UiNavAction::kBack, nowMs);
+      printUiStatus(out, ctx, "back");
+      serialDispatchReply(out, "MP3_UI", SerialDispatchResult::kOk, "back");
+    } else {
+      serialDispatchReply(out, "MP3_UI", SerialDispatchResult::kOutOfContext, "missing_nav");
+    }
+    return true;
+  }
+
   if (serialTokenEquals(cmd, "MP3_UI")) {
     if (args[0] == '\0' || textEqualsIgnoreCase(args, "STATUS")) {
       printUiStatus(out, ctx, "status");
@@ -294,9 +318,9 @@ bool serialProcessMp3Command(const SerialCommand& cmd,
 
     char pageToken[16] = {};
     if (sscanf(args, "PAGE %15s", pageToken) == 1) {
-      PlayerUiPage page = PlayerUiPage::kNowPlaying;
+      PlayerUiPage page = PlayerUiPage::kLecture;
       if (ctx.parsePlayerUiPageToken == nullptr || !ctx.parsePlayerUiPageToken(pageToken, &page)) {
-        serialDispatchReply(out, "MP3_UI", SerialDispatchResult::kBadArgs, "NOW|BROWSE|QUEUE|SET");
+        serialDispatchReply(out, "MP3_UI", SerialDispatchResult::kBadArgs, "LECTURE|LISTE|REGLAGES");
         return true;
       }
       if (ctx.setUiPage != nullptr) {
@@ -309,7 +333,63 @@ bool serialProcessMp3Command(const SerialCommand& cmd,
       return true;
     }
 
-    serialDispatchReply(out, "MP3_UI", SerialDispatchResult::kBadArgs, "STATUS|PAGE <NOW|BROWSE|QUEUE|SET>");
+    char navToken[16] = {};
+    if (sscanf(args, "NAV %15s", navToken) == 1) {
+      UiNavAction action = UiNavAction::kNone;
+      if (textEqualsIgnoreCase(navToken, "UP")) {
+        action = UiNavAction::kUp;
+      } else if (textEqualsIgnoreCase(navToken, "DOWN")) {
+        action = UiNavAction::kDown;
+      } else if (textEqualsIgnoreCase(navToken, "LEFT")) {
+        action = UiNavAction::kLeft;
+      } else if (textEqualsIgnoreCase(navToken, "RIGHT")) {
+        action = UiNavAction::kRight;
+      } else if (textEqualsIgnoreCase(navToken, "OK") || textEqualsIgnoreCase(navToken, "ENTER")) {
+        action = UiNavAction::kOk;
+      } else if (textEqualsIgnoreCase(navToken, "BACK")) {
+        action = UiNavAction::kBack;
+      } else if (textEqualsIgnoreCase(navToken, "MODE")) {
+        action = UiNavAction::kModeToggle;
+      }
+      if (action == UiNavAction::kNone) {
+        serialDispatchReply(out, "MP3_UI", SerialDispatchResult::kBadArgs, "NAV <UP|DOWN|LEFT|RIGHT|OK|BACK|MODE>");
+        return true;
+      }
+      if (ctx.navigateUi != nullptr) {
+        ctx.navigateUi(action, nowMs);
+      } else if (ui != nullptr) {
+        UiAction uiAction;
+        uiAction.source = UiActionSource::kSerial;
+        uiAction.nav = action;
+        ui->applyAction(uiAction);
+      }
+      printUiStatus(out, ctx, "nav");
+      serialDispatchReply(out, "MP3_UI", SerialDispatchResult::kOk, "nav");
+      return true;
+    }
+
+    char sourceToken[16] = {};
+    if (sscanf(args, "SOURCE %15s", sourceToken) == 1) {
+      PlayerUiSource source = PlayerUiSource::kSd;
+      if (ctx.parsePlayerUiSourceToken == nullptr ||
+          !ctx.parsePlayerUiSourceToken(sourceToken, &source)) {
+        serialDispatchReply(out, "MP3_UI", SerialDispatchResult::kBadArgs, "SOURCE <SD|RADIO>");
+        return true;
+      }
+      if (ctx.setUiSource != nullptr) {
+        ctx.setUiSource(source);
+      } else if (ui != nullptr) {
+        ui->setSource(source);
+      }
+      printUiStatus(out, ctx, "source");
+      serialDispatchReply(out, "MP3_UI", SerialDispatchResult::kOk, "source");
+      return true;
+    }
+
+    serialDispatchReply(out,
+                        "MP3_UI",
+                        SerialDispatchResult::kBadArgs,
+                        "STATUS|PAGE <LECTURE|LISTE|REGLAGES>|NAV <UP|DOWN|LEFT|RIGHT|OK|BACK|MODE>|SOURCE <SD|RADIO>");
     return true;
   }
 

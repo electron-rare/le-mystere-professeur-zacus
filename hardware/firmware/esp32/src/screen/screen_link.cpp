@@ -20,6 +20,9 @@ uint8_t crc8(const uint8_t* data, size_t len) {
   return crc;
 }
 
+constexpr uint32_t kTxtMinPeriodMs = 80U;
+constexpr uint32_t kTxtKeyframePeriodMs = 3000U;
+
 }  // namespace
 
 ScreenLink::ScreenLink(HardwareSerial& serial,
@@ -52,6 +55,7 @@ bool ScreenLink::update(const ScreenFrame& frame, bool forceKeyframe) {
                        frame.startupStage != lastStartupStage_ ||
                        frame.appStage != lastAppStage_ ||
                        frame.uiPage != lastUiPage_ ||
+                       frame.uiSource != lastUiSource_ ||
                        frame.uiCursor != lastUiCursor_ ||
                        frame.uiOffset != lastUiOffset_ ||
                        frame.uiCount != lastUiCount_ ||
@@ -73,7 +77,7 @@ bool ScreenLink::update(const ScreenFrame& frame, bool forceKeyframe) {
   char payload[280] = {};
   const int payloadLen = snprintf(payload,
                                   sizeof(payload),
-                                  "STAT,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u,%u,%u,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u",
+                                  "STAT,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%d,%u,%u,%u,%u,%u,%u,%u,%lu,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u",
                                   frame.laDetected ? 1U : 0U,
                                   frame.mp3Playing ? 1U : 0U,
                                   frame.sdReady ? 1U : 0U,
@@ -103,7 +107,8 @@ bool ScreenLink::update(const ScreenFrame& frame, bool forceKeyframe) {
                                   static_cast<unsigned int>(frame.uiCursor),
                                   static_cast<unsigned int>(frame.uiOffset),
                                   static_cast<unsigned int>(frame.uiCount),
-                                  static_cast<unsigned int>(frame.queueCount));
+                                  static_cast<unsigned int>(frame.queueCount),
+                                  static_cast<unsigned int>(frame.uiSource));
   if (payloadLen <= 0) {
     return false;
   }
@@ -144,6 +149,7 @@ bool ScreenLink::update(const ScreenFrame& frame, bool forceKeyframe) {
   lastStartupStage_ = frame.startupStage;
   lastAppStage_ = frame.appStage;
   lastUiPage_ = frame.uiPage;
+  lastUiSource_ = frame.uiSource;
   lastUiCursor_ = frame.uiCursor;
   lastUiOffset_ = frame.uiOffset;
   lastUiCount_ = frame.uiCount;
@@ -156,6 +162,53 @@ bool ScreenLink::update(const ScreenFrame& frame, bool forceKeyframe) {
   lastSequence_ = frame.sequence;
   lastTxMs_ = frame.nowMs;
   ++txFrameCount_;
+
+  if (static_cast<uint32_t>(frame.nowMs - lastTxtTxMs_) < kTxtMinPeriodMs) {
+    return true;
+  }
+
+  bool keyframeTxt = false;
+  if (lastTxtKeyframeMs_ == 0U ||
+      static_cast<uint32_t>(frame.nowMs - lastTxtKeyframeMs_) >= kTxtKeyframePeriodMs) {
+    keyframeTxt = true;
+  }
+
+  ScreenTextSlot candidate = ScreenTextSlot::kNowTitle1;
+  bool hasCandidate = false;
+  for (uint8_t i = 0U; i < static_cast<uint8_t>(ScreenTextSlot::kCount); ++i) {
+    const uint8_t slotIndex = keyframeTxt
+                                  ? static_cast<uint8_t>((txtKeyframeCursor_ + i) %
+                                                         static_cast<uint8_t>(ScreenTextSlot::kCount))
+                                  : i;
+    const ScreenTextSlot slot = static_cast<ScreenTextSlot>(slotIndex);
+    const char* newText = frame.txtSlots[slotIndex];
+    if (newText == nullptr) {
+      continue;
+    }
+    if (keyframeTxt || strncmp(lastTxt_[slotIndex], newText, ScreenFrame::kTextSlotLen) != 0) {
+      candidate = slot;
+      hasCandidate = true;
+      break;
+    }
+  }
+
+  if (hasCandidate) {
+    const uint8_t idx = static_cast<uint8_t>(candidate);
+    if (sendTxtSlot(candidate, frame.txtSlots[idx], frame.sequence)) {
+      snprintf(lastTxt_[idx], sizeof(lastTxt_[idx]), "%s", frame.txtSlots[idx]);
+      lastTxtTxMs_ = frame.nowMs;
+      if (keyframeTxt) {
+        txtKeyframeCursor_ =
+            static_cast<uint8_t>((idx + 1U) % static_cast<uint8_t>(ScreenTextSlot::kCount));
+        if (txtKeyframeCursor_ == 0U) {
+          lastTxtKeyframeMs_ = frame.nowMs;
+        }
+      }
+    }
+  } else if (keyframeTxt) {
+    lastTxtKeyframeMs_ = frame.nowMs;
+  }
+
   return true;
 }
 
@@ -163,6 +216,12 @@ void ScreenLink::resetStats() {
   txFrameCount_ = 0U;
   txDropCount_ = 0U;
   lastTxMs_ = 0U;
+  lastTxtTxMs_ = 0U;
+  lastTxtKeyframeMs_ = 0U;
+  txtKeyframeCursor_ = 0U;
+  for (uint8_t i = 0U; i < static_cast<uint8_t>(ScreenTextSlot::kCount); ++i) {
+    lastTxt_[i][0] = '\0';
+  }
 }
 
 uint32_t ScreenLink::txFrameCount() const {
@@ -175,4 +234,37 @@ uint32_t ScreenLink::txDropCount() const {
 
 uint32_t ScreenLink::lastTxMs() const {
   return lastTxMs_;
+}
+
+bool ScreenLink::sendTxtSlot(ScreenTextSlot slot, const char* text, uint32_t seq) {
+  char sanitized[ScreenFrame::kTextSlotLen] = {};
+  snprintf(sanitized, sizeof(sanitized), "%s", (text != nullptr) ? text : "");
+  sanitizeScreenText(sanitized, sizeof(sanitized));
+
+  char payload[140] = {};
+  const int payloadLen = snprintf(payload,
+                                  sizeof(payload),
+                                  "TXT,%lu,%s,%s",
+                                  static_cast<unsigned long>(seq),
+                                  screenTextSlotToken(slot),
+                                  sanitized);
+  if (payloadLen <= 0) {
+    return false;
+  }
+  const size_t rawLen = strnlen(payload, sizeof(payload));
+  const uint8_t crc = crc8(reinterpret_cast<const uint8_t*>(payload), rawLen);
+
+  char frame[156] = {};
+  const int len = snprintf(frame, sizeof(frame), "%s,%02X\n", payload, static_cast<unsigned int>(crc));
+  if (len <= 0) {
+    return false;
+  }
+
+  const int available = serial_.availableForWrite();
+  if (available >= 0 && available < len) {
+    ++txDropCount_;
+    return false;
+  }
+  serial_.write(reinterpret_cast<const uint8_t*>(frame), static_cast<size_t>(len));
+  return true;
 }

@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include "screen_frame.h"
+#include "screen_text_slots.h"
 
 class ScreenLink {
  public:
@@ -46,6 +47,7 @@ class ScreenLink {
   uint8_t lastStartupStage_ = 0;
   uint8_t lastAppStage_ = 0;
   uint8_t lastUiPage_ = 0;
+  uint8_t lastUiSource_ = 0;
   uint16_t lastUiCursor_ = 0;
   uint16_t lastUiOffset_ = 0;
   uint16_t lastUiCount_ = 0;
@@ -59,4 +61,11 @@ class ScreenLink {
   uint32_t lastTxMs_ = 0;
   uint32_t txFrameCount_ = 0U;
   uint32_t txDropCount_ = 0U;
+
+  uint32_t lastTxtTxMs_ = 0U;
+  uint32_t lastTxtKeyframeMs_ = 0U;
+  uint8_t txtKeyframeCursor_ = 0U;
+  char lastTxt_[static_cast<uint8_t>(ScreenTextSlot::kCount)][ScreenFrame::kTextSlotLen] = {};
+
+  bool sendTxtSlot(ScreenTextSlot slot, const char* text, uint32_t seq);
 };

@@ -154,6 +154,9 @@ void updateMp3FormatTest(uint32_t nowMs);
 PlayerUiPage currentPlayerUiPage();
 bool setPlayerUiPage(PlayerUiPage page);
 bool parsePlayerUiPageToken(const char* token, PlayerUiPage* outPage);
+bool parsePlayerUiSourceToken(const char* token, PlayerUiSource* outSource);
+bool setPlayerUiSource(PlayerUiSource source);
+bool navigatePlayerUi(UiNavAction action, uint32_t nowMs);
 uint8_t encodeBackendForScreen();
 uint8_t encodeMp3ErrorForScreen();
 void printMp3ScanStatus(const char* source);
@@ -205,7 +208,7 @@ AudioService& audioService() {
 }
 
 Mp3Controller& mp3Controller() {
-  static Mp3Controller controller(g_mp3, g_playerUi);
+  static Mp3Controller controller(g_mp3, g_playerUi, &g_radio);
   return controller;
 }
 
@@ -452,23 +455,43 @@ bool parsePlayerUiPageToken(const char* token, PlayerUiPage* outPage) {
   if (token == nullptr || outPage == nullptr) {
     return false;
   }
-  if (strcmp(token, "NOW") == 0) {
-    *outPage = PlayerUiPage::kNowPlaying;
+  if (strcmp(token, "LECTURE") == 0 || strcmp(token, "NOW") == 0) {
+    *outPage = PlayerUiPage::kLecture;
     return true;
   }
-  if (strcmp(token, "BROWSE") == 0) {
-    *outPage = PlayerUiPage::kBrowser;
+  if (strcmp(token, "LISTE") == 0 || strcmp(token, "BROWSE") == 0 || strcmp(token, "QUEUE") == 0) {
+    *outPage = PlayerUiPage::kListe;
     return true;
   }
-  if (strcmp(token, "QUEUE") == 0) {
-    *outPage = PlayerUiPage::kQueue;
-    return true;
-  }
-  if (strcmp(token, "SET") == 0) {
-    *outPage = PlayerUiPage::kSettings;
+  if (strcmp(token, "REGLAGES") == 0 || strcmp(token, "SET") == 0) {
+    *outPage = PlayerUiPage::kReglages;
     return true;
   }
   return false;
+}
+
+bool parsePlayerUiSourceToken(const char* token, PlayerUiSource* outSource) {
+  if (token == nullptr || outSource == nullptr) {
+    return false;
+  }
+  if (strcmp(token, "SD") == 0) {
+    *outSource = PlayerUiSource::kSd;
+    return true;
+  }
+  if (strcmp(token, "RADIO") == 0) {
+    *outSource = PlayerUiSource::kRadio;
+    return true;
+  }
+  return false;
+}
+
+bool setPlayerUiSource(PlayerUiSource source) {
+  g_playerUi.setSource(source);
+  return true;
+}
+
+bool navigatePlayerUi(UiNavAction action, uint32_t nowMs) {
+  return mp3Controller().uiNavigate(action, nowMs);
 }
 
 const char* currentBrowsePath() {
@@ -558,12 +581,13 @@ void sendScreenFrameSnapshot(uint32_t nowMs, uint8_t keyForScreen) {
   const bool uLockMode = (g_mode == RuntimeMode::kSignal) && !g_uSonFunctional;
   const bool uLockListening = uLockMode && g_uLockListening;
   const bool uSonFunctional = (g_mode == RuntimeMode::kSignal) && g_uSonFunctional;
+  const bool radioActive = g_radio.snapshot().active;
   const float micRms = g_laDetector.micRms();
   const uint8_t micLevelPercent = micLevelPercentFromRms(micRms);
 
   ScreenFrame frame;
   frame.laDetected = laDetected;
-  frame.mp3Playing = g_mp3.isPlaying();
+  frame.mp3Playing = g_mp3.isPlaying() || radioActive;
   frame.sdReady = g_mp3.isSdReady();
   frame.mp3Mode = (g_mode == RuntimeMode::kMp3);
   frame.uLockMode = uLockMode;
@@ -588,10 +612,11 @@ void sendScreenFrameSnapshot(uint32_t nowMs, uint8_t keyForScreen) {
   frame.startupStage = g_bootAudioProtocol.active ? 1U : 0U;
   const PlayerUiSnapshot uiSnapshot = g_playerUi.snapshot();
   frame.uiPage = static_cast<uint8_t>(currentPlayerUiPage());
+  frame.uiSource = static_cast<uint8_t>(uiSnapshot.source == PlayerUiSource::kRadio ? 1U : 0U);
   frame.uiCursor = uiSnapshot.cursor;
   frame.uiOffset = uiSnapshot.offset;
-  frame.uiCount = g_mp3.trackCount();
-  frame.queueCount = (g_mp3.trackCount() > 5U) ? 5U : g_mp3.trackCount();
+  frame.uiCount = uiSnapshot.listCount;
+  frame.queueCount = (uiSnapshot.listCount > 5U) ? 5U : uiSnapshot.listCount;
   frame.repeatMode = static_cast<uint8_t>(g_mp3.repeatMode());
   frame.fxActive = g_mp3.isFxActive();
   frame.backendMode = encodeBackendForScreen();
@@ -613,6 +638,7 @@ void sendScreenFrameSnapshot(uint32_t nowMs, uint8_t keyForScreen) {
     frame.appStage = 2U;
   }
   if (!frame.mp3Mode) {
+    frame.uiSource = 0U;
     frame.uiCursor = 0U;
     frame.uiOffset = 0U;
     frame.uiCount = 0U;
@@ -621,6 +647,19 @@ void sendScreenFrameSnapshot(uint32_t nowMs, uint8_t keyForScreen) {
   if (!frame.mp3Mode && storyScene != nullptr) {
     frame.uiPage = storyScene->uiPage;
   }
+
+  Mp3UiTextSlots slots = {};
+  if (frame.mp3Mode) {
+    mp3Controller().buildTextSlots(&slots, nowMs);
+  }
+  snprintf(frame.txtSlots[0], sizeof(frame.txtSlots[0]), "%s", slots.npTitle1);
+  snprintf(frame.txtSlots[1], sizeof(frame.txtSlots[1]), "%s", slots.npTitle2);
+  snprintf(frame.txtSlots[2], sizeof(frame.txtSlots[2]), "%s", slots.npSub);
+  snprintf(frame.txtSlots[3], sizeof(frame.txtSlots[3]), "%s", slots.listPath);
+  snprintf(frame.txtSlots[4], sizeof(frame.txtSlots[4]), "%s", slots.listRow0);
+  snprintf(frame.txtSlots[5], sizeof(frame.txtSlots[5]), "%s", slots.listRow1);
+  snprintf(frame.txtSlots[6], sizeof(frame.txtSlots[6]), "%s", slots.listRow2);
+  snprintf(frame.txtSlots[7], sizeof(frame.txtSlots[7]), "%s", slots.setHint);
 
   screenSyncService().update(&frame, nowMs);
 }
@@ -2259,7 +2298,7 @@ void printMp3DebugHelp() {
   Serial.println("[MP3_DBG] Cmd: SD_STATUS | SD_MOUNT | SD_UNMOUNT | SD_RESCAN [FORCE] | SD_SCAN_PROGRESS");
   Serial.println("[MP3_DBG] Cmd: MP3_BROWSE LS [path] | MP3_BROWSE CD <path> | MP3_PLAY_PATH <path>");
   Serial.println(
-      "[MP3_DBG] Cmd: MP3_UI STATUS|PAGE NOW|BROWSE|QUEUE|SET | MP3_UI_STATUS | MP3_QUEUE_PREVIEW [n]");
+      "[MP3_DBG] Cmd: MP3_UI STATUS|PAGE LECTURE|LISTE|REGLAGES|NAV <UP|DOWN|LEFT|RIGHT|OK|BACK|MODE>|SOURCE <SD|RADIO>");
   Serial.println("[MP3_DBG] Cmd: MP3_CAPS | MP3_STATE SAVE|LOAD|RESET");
 }
 
@@ -2585,7 +2624,10 @@ Mp3SerialRuntimeContext makeMp3SerialRuntimeContext() {
   context.ui = &g_playerUi;
   context.allowPlaybackNow = allowMp3PlaybackNowHook;
   context.setUiPage = setPlayerUiPage;
+  context.setUiSource = setPlayerUiSource;
   context.parsePlayerUiPageToken = parsePlayerUiPageToken;
+  context.parsePlayerUiSourceToken = parsePlayerUiSourceToken;
+  context.navigateUi = navigatePlayerUi;
   context.parseBackendModeToken = parseBackendModeToken;
   context.parseMp3FxEffectToken = parseMp3FxEffectToken;
   context.triggerMp3Fx = triggerMp3Fx;
@@ -2810,7 +2852,8 @@ bool isCanonicalSerialCommand(const char* token) {
       "MP3_FX",                     "MP3_FX_STOP",     "MP3_TEST_START", "MP3_TEST_STOP",
       "MP3_BACKEND",                "MP3_BACKEND_STATUS", "MP3_SCAN", "MP3_SCAN_PROGRESS",
       "MP3_BROWSE",                 "MP3_PLAY_PATH",
-      "MP3_UI",                     "MP3_UI_STATUS",   "MP3_QUEUE_PREVIEW",
+      "MP3_UI",                     "MP3_UI_STATUS",   "MP3_UI_SELECT",
+      "MP3_UI_BACK",                "MP3_QUEUE_PREVIEW",
       "MP3_CAPS",                   "MP3_STATE",
       "SD_STATUS",                  "SD_MOUNT",        "SD_UNMOUNT",
       "SD_RESCAN",                  "SD_SCAN_PROGRESS",
@@ -3112,94 +3155,19 @@ void applyRuntimeMode(RuntimeMode newMode, bool force = false) {
 
 void handleKeyPress(uint8_t key) {
   if (g_mode == RuntimeMode::kMp3) {
-    g_playerUi.setBrowserBounds(g_mp3.trackCount());
-    const PlayerUiPage page = currentPlayerUiPage();
-
-    switch (key) {
-      case 1:
-        if (page == PlayerUiPage::kBrowser) {
-          if (g_mp3.selectTrackByIndex(g_playerUi.cursor(), true)) {
-            Serial.printf("[KEY] K1 SELECT %u/%u\n",
-                          static_cast<unsigned int>(g_mp3.currentTrackNumber()),
-                          static_cast<unsigned int>(g_mp3.trackCount()));
-          } else {
-            Serial.printf("[KEY] K1 SELECT refuse idx=%u\n",
-                          static_cast<unsigned int>(g_playerUi.cursor()));
-          }
-        } else if (page == PlayerUiPage::kSettings) {
-          switch (g_playerUi.settingsIndex()) {
-            case 0:
-              g_mp3.cycleRepeatMode();
-              Serial.printf("[KEY] K1 SET repeat=%s\n", g_mp3.repeatModeLabel());
-              break;
-            case 1:
-              g_mp3.setBackendMode(cycleBackendMode(g_mp3.backendMode()));
-              Serial.printf("[KEY] K1 SET backend=%s\n", g_mp3.backendModeLabel());
-              break;
-            case 2:
-            default:
-              g_mp3.requestCatalogScan(true);
-              Serial.println("[KEY] K1 SET scan=rebuild");
-              break;
-          }
-        } else {
-          g_mp3.togglePause();
-          Serial.printf("[KEY] K1 MP3 %s\n", g_mp3.isPaused() ? "PAUSE" : "PLAY");
-        }
-        break;
-      case 2:
-        if (page == PlayerUiPage::kNowPlaying) {
-          g_mp3.previousTrack();
-          Serial.printf("[KEY] K2 PREV %u/%u\n",
-                        static_cast<unsigned int>(g_mp3.currentTrackNumber()),
-                        static_cast<unsigned int>(g_mp3.trackCount()));
-        } else {
-          UiAction action;
-          action.source = UiActionSource::kKeyShort;
-          action.key = 2U;
-          mp3Controller().applyUiAction(action);
-          Serial.printf("[KEY] K2 UI page=%s cursor=%u offset=%u\n",
-                        playerUiPageLabel(g_playerUi.page()),
-                        static_cast<unsigned int>(g_playerUi.cursor()),
-                        static_cast<unsigned int>(g_playerUi.offset()));
-        }
-        break;
-      case 3:
-        if (page == PlayerUiPage::kNowPlaying) {
-          g_mp3.nextTrack();
-          Serial.printf("[KEY] K3 NEXT %u/%u\n",
-                        static_cast<unsigned int>(g_mp3.currentTrackNumber()),
-                        static_cast<unsigned int>(g_mp3.trackCount()));
-        } else {
-          UiAction action;
-          action.source = UiActionSource::kKeyShort;
-          action.key = 3U;
-          mp3Controller().applyUiAction(action);
-          Serial.printf("[KEY] K3 UI page=%s cursor=%u offset=%u\n",
-                        playerUiPageLabel(g_playerUi.page()),
-                        static_cast<unsigned int>(g_playerUi.cursor()),
-                        static_cast<unsigned int>(g_playerUi.offset()));
-        }
-        break;
-      case 4:
-        g_mp3.setGain(g_mp3.gain() - 0.05f);
-        Serial.printf("[KEY] K4 VOL- %u%%\n", static_cast<unsigned int>(g_mp3.volumePercent()));
-        break;
-      case 5:
-        g_mp3.setGain(g_mp3.gain() + 0.05f);
-        Serial.printf("[KEY] K5 VOL+ %u%%\n", static_cast<unsigned int>(g_mp3.volumePercent()));
-        break;
-      case 6:
-        {
-          UiAction action;
-          action.source = UiActionSource::kKeyShort;
-          action.key = 6U;
-          mp3Controller().applyUiAction(action);
-          Serial.printf("[KEY] K6 PAGE %s\n", playerUiPageLabel(g_playerUi.page()));
-        }
-        break;
-      default:
-        break;
+    if (key >= 1U && key <= 6U) {
+      UiAction action;
+      action.source = UiActionSource::kKeyShort;
+      action.key = key;
+      mp3Controller().applyUiAction(action);
+      const PlayerUiSnapshot snap = g_playerUi.snapshot();
+      Serial.printf("[KEY][MP3_UI] K%u page=%s source=%s cursor=%u offset=%u count=%u\n",
+                    static_cast<unsigned int>(key),
+                    playerUiPageLabel(snap.page),
+                    playerUiSourceLabel(snap.source),
+                    static_cast<unsigned int>(snap.cursor),
+                    static_cast<unsigned int>(snap.offset),
+                    static_cast<unsigned int>(snap.listCount));
     }
     return;
   }
@@ -3312,7 +3280,7 @@ void app_orchestrator::setup() {
   }
   Serial.printf("[MIC] Source: %s\n",
                 config::kUseI2SMicInput ? "I2S codec onboard (DIN GPIO35)" : "ADC externe GPIO34");
-  Serial.println("[KEYMAP][MP3] K1 play/pause, K2 prev, K3 next, K4 vol-, K5 vol+, K6 repeat");
+  Serial.println("[KEYMAP][MP3] K1 OK, K2 UP, K3 DOWN, K4 LEFT(prev), K5 RIGHT(next), K6 MODE(back/source)");
   Serial.println("[BOOT] Boucle attente: random '*boot*' puis scan radio I2S 10..40s.");
   Serial.println("[BOOT] Appui touche pendant attente: lancement U_LOCK ecoute (detection LA).");
   Serial.println("[BOOT] Puis MODULE U-SON Fonctionnel apres detection LA.");
@@ -3340,7 +3308,7 @@ void app_orchestrator::setup() {
   Serial.println(
       "[MP3_DBG] Serial: MP3_BACKEND STATUS|SET AUTO|AUDIO_TOOLS|LEGACY | MP3_BACKEND_STATUS | MP3_SCAN START|STATUS|CANCEL|REBUILD | MP3_SCAN_PROGRESS");
   Serial.println(
-      "[MP3_DBG] Serial: MP3_BROWSE LS [path] | MP3_BROWSE CD <path> | MP3_PLAY_PATH <path> | MP3_UI STATUS|PAGE ... | MP3_UI_STATUS");
+      "[MP3_DBG] Serial: MP3_BROWSE LS [path] | MP3_BROWSE CD <path> | MP3_PLAY_PATH <path> | MP3_UI STATUS|PAGE|NAV|SOURCE | MP3_UI_STATUS");
   Serial.println("[MP3_DBG] Serial: MP3_QUEUE_PREVIEW [n] | MP3_CAPS | MP3_STATE SAVE|LOAD|RESET");
   Serial.println("[SYS] Serial: SYS_LOOP_BUDGET STATUS|RESET | SCREEN_LINK_STATUS | SCREEN_LINK_RESET_STATS");
   Serial.println("[RADIO] Serial: RADIO_STATUS|LIST|PLAY|STOP|NEXT|PREV|META");

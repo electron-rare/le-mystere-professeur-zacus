@@ -1,8 +1,6 @@
 #include <Arduino.h>
 #include <SoftwareSerial.h>
 #include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -15,6 +13,11 @@
 #include "core/render_scheduler.h"
 #include "core/stat_parser.h"
 #include "core/telemetry_state.h"
+#include "core/text_parser.h"
+#include "core/text_slots.h"
+#include "gfx/layout_metrics.h"
+#include "gfx/scenes/scene_renderer.h"
+#include "gfx/u8g2_display_backend.h"
 
 namespace {
 
@@ -26,7 +29,6 @@ constexpr int kLinkIsrBufferBytes = 2048;
 
 constexpr uint8_t kScreenWidth = 128;
 constexpr uint8_t kScreenHeight = 64;
-constexpr int8_t kOledReset = -1;
 
 constexpr uint16_t kRenderPeriodMs = 250;
 constexpr uint16_t kLinkTimeoutMs = 15000;
@@ -51,7 +53,7 @@ constexpr uint8_t kSpritePhone[8] = {0x60, 0x70, 0x38, 0x1C, 0x0E, 0x87, 0xC3, 0
 constexpr uint8_t kSpriteSkull[8] = {0x3C, 0x7E, 0xA5, 0x81, 0xA5, 0xDB, 0x24, 0x18};
 
 SoftwareSerial g_link(kLinkRx, kLinkTx);  // RX, TX
-Adafruit_SSD1306 g_display(kScreenWidth, kScreenHeight, &Wire, kOledReset);
+U8g2DisplayBackend g_display;
 
 struct I2cCandidate {
   uint8_t sda;
@@ -68,6 +70,7 @@ constexpr I2cCandidate kI2cCandidates[] = {
 };
 
 screen_core::TelemetryState g_state;
+screen_core::TextSlots g_textSlots;
 bool g_displayReady = false;
 screen_core::LinkMonitorState g_linkState;
 bool g_stateDirty = true;
@@ -258,26 +261,6 @@ void drawUnlockProgressBar(uint8_t unlockHoldPercent, int16_t y) {
     unlockHoldPercent = 100U;
   }
   drawHorizontalGauge(8, y, 112, 8, unlockHoldPercent);
-}
-
-void drawMiniEqualizer(uint32_t nowMs, uint8_t levelPercent, int16_t x, int16_t y) {
-  if (levelPercent > 100U) {
-    levelPercent = 100U;
-  }
-
-  constexpr uint8_t kBars = 10;
-  constexpr int16_t kBarW = 3;
-  constexpr int16_t kBarGap = 1;
-  constexpr int16_t kMaxH = 9;
-
-  for (uint8_t i = 0; i < kBars; ++i) {
-    const uint8_t phase = static_cast<uint8_t>((nowMs / 90U) + (i * 17U));
-    const uint8_t wave = static_cast<uint8_t>((phase % 20U) * 5U);
-    const uint8_t mixed = static_cast<uint8_t>((levelPercent + wave) / 2U);
-    const int16_t barH = 1 + ((static_cast<int16_t>(mixed) * kMaxH) / 100);
-    const int16_t bx = x + (i * (kBarW + kBarGap));
-    g_display.fillRect(bx, y + (kMaxH - barH), kBarW, barH, SSD1306_WHITE);
-  }
 }
 
 void drawBrokenIcon(int16_t cx, int16_t cy);
@@ -567,140 +550,13 @@ void drawMissionGrid(uint32_t nowMs, int16_t x, int16_t y, int16_t w, int16_t h)
   g_display.drawRect(cursor - 1, pathY - 1, 3, 3, SSD1306_WHITE);
 }
 
-const char* uiPageShortLabel(uint8_t page) {
-  switch (page) {
-    case 1:
-      return "BRW";
-    case 2:
-      return "QUE";
-    case 3:
-      return "SET";
-    case 0:
-    default:
-      return "NOW";
-  }
-}
-
-const char* repeatShortLabel(uint8_t repeatMode) {
-  return (repeatMode == 1U) ? "ONE" : "ALL";
-}
-
-const char* backendShortLabel(uint8_t backendMode) {
-  switch (backendMode) {
-    case 1:
-      return "AT";
-    case 2:
-      return "LEG";
-    case 0:
-    default:
-      return "AUTO";
-  }
-}
-
-const char* settingsShortLabel(uint16_t idx) {
-  switch (idx) {
-    case 0:
-      return "REPEAT";
-    case 1:
-      return "BACKEND";
-    case 2:
-      return "SCAN";
-    default:
-      return "-";
-  }
-}
-
 void renderMp3Screen() {
-  drawTitleBar("LECTEUR U-SON");
-
-  drawCenteredText(g_state.mp3Playing ? "PLAY" : "PAUSE", 14, 2);
-  drawMiniEqualizer(g_state.uptimeMs,
-                    g_state.mp3Playing ? g_state.volumePercent : static_cast<uint8_t>(g_state.volumePercent / 3U),
-                    84,
-                    15);
-
-  char trackLine[20];
-  if (g_state.uiPage == 1U) {
-    const uint16_t cursor = (g_state.uiCursor < g_state.uiCount) ? g_state.uiCursor : 0U;
-    snprintf(trackLine,
-             sizeof(trackLine),
-             "BRW %u/%u",
-             static_cast<unsigned int>((g_state.uiCount == 0U) ? 0U : (cursor + 1U)),
-             static_cast<unsigned int>(g_state.uiCount));
-  } else if (g_state.uiPage == 2U) {
-    snprintf(trackLine,
-             sizeof(trackLine),
-             "QUE +%u/%u",
-             static_cast<unsigned int>(g_state.uiOffset),
-             static_cast<unsigned int>(g_state.queueCount));
-  } else if (g_state.uiPage == 3U) {
-    snprintf(trackLine,
-             sizeof(trackLine),
-             "SET %s",
-             settingsShortLabel(g_state.uiCursor));
-  } else if (g_state.trackCount == 0U) {
-    snprintf(trackLine, sizeof(trackLine), "-- / --");
-  } else {
-    snprintf(trackLine,
-             sizeof(trackLine),
-             "PISTE %u/%u",
-             static_cast<unsigned int>(g_state.track),
-             static_cast<unsigned int>(g_state.trackCount));
-  }
-  drawCenteredText(trackLine, 33, 1);
-
-  char infoLine[32];
-  if (g_state.uiPage == 1U) {
-    snprintf(infoLine,
-             sizeof(infoLine),
-             "CUR %u OFF %u",
-             static_cast<unsigned int>((g_state.uiCount == 0U) ? 0U : (g_state.uiCursor + 1U)),
-             static_cast<unsigned int>(g_state.uiOffset));
-  } else if (g_state.uiPage == 2U) {
-    snprintf(infoLine,
-             sizeof(infoLine),
-             "QUEUE +%u  N%u",
-             static_cast<unsigned int>(g_state.uiOffset),
-             static_cast<unsigned int>(g_state.queueCount));
-  } else if (g_state.uiPage == 3U) {
-    snprintf(infoLine,
-             sizeof(infoLine),
-             "K1 %s",
-             settingsShortLabel(g_state.uiCursor));
-  } else if (g_state.key == 0) {
-    snprintf(infoLine,
-             sizeof(infoLine),
-             "VOL %u%%  SD %s",
-             static_cast<unsigned int>(g_state.volumePercent),
-             g_state.sdReady ? "OK" : "ERR");
-  } else {
-    snprintf(infoLine,
-             sizeof(infoLine),
-             "VOL %u%%  K%u",
-             static_cast<unsigned int>(g_state.volumePercent),
-             static_cast<unsigned int>(g_state.key));
-  }
-  drawCenteredText(infoLine, 43, 1);
-
-  char modeLine[32];
-  snprintf(modeLine,
-           sizeof(modeLine),
-           "%s %s %s%s%s",
-           uiPageShortLabel(g_state.uiPage),
-           repeatShortLabel(g_state.repeatMode),
-           backendShortLabel(g_state.backendMode),
-           g_state.fxActive ? " FX" : "",
-           g_state.scanBusy ? " SC" : "");
-  drawCenteredText(modeLine, 52, 1);
-  drawHorizontalGauge(12, 58, 104, 5, g_state.volumePercent);
-
-  if (g_state.errorCode != 0U) {
-    char errLine[10];
-    snprintf(errLine, sizeof(errLine), "E%u", static_cast<unsigned int>(g_state.errorCode));
-    g_display.setCursor(103, 0);
-    g_display.setTextSize(1);
-    g_display.print(errLine);
-  }
+  screen_gfx::SceneRenderContext ctx;
+  ctx.display = &g_display;
+  ctx.state = &g_state;
+  ctx.text = &g_textSlots;
+  ctx.nowMs = g_state.uptimeMs;
+  screen_gfx::renderMp3SceneV3(ctx);
 }
 
 void renderULockWaitingScreen(uint32_t nowMs) {
@@ -972,13 +828,13 @@ bool initDisplayOnPins(uint8_t sda, uint8_t scl) {
   delay(5);
 
   if (hasI2cDevice(0x3C)) {
-    if (g_display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    if (g_display.begin(0x3C)) {
       g_oledAddress = 0x3C;
       return true;
     }
   }
   if (hasI2cDevice(0x3D)) {
-    if (g_display.begin(SSD1306_SWITCHCAPVCC, 0x3D)) {
+    if (g_display.begin(0x3D)) {
       g_oledAddress = 0x3D;
       return true;
     }
@@ -1026,6 +882,8 @@ void handleIncoming() {
         pushScopeSample(parsed.micLevelPercent);
         g_state = parsed;
         g_hasValidState = true;
+        g_stateDirty = true;
+      } else if (screen_core::parseTxtFrame(g_lineBuffer, &g_textSlots, &g_crcErrorCount, &g_parseErrorCount)) {
         g_stateDirty = true;
       } else if (g_lineLen > 0) {
         ++g_parseErrorCount;
@@ -1102,6 +960,7 @@ void initDisplay() {
 
 void setup() {
   Serial.begin(115200);
+  screen_core::clearTextSlots(&g_textSlots);
   initDisplay();
   if (g_linkState.linkEnabled) {
     g_link.begin(kLinkBaud,
@@ -1152,7 +1011,7 @@ void loop() {
   if ((nowMs - g_lastDiagMs) >= kDiagPeriodMs) {
     const uint32_t lastTickMs = latestLinkTickMs();
     const uint32_t ageMs = safeAgeMs(nowMs, lastTickMs);
-    Serial.printf("[SCREEN] oled=%s link=%s phys=%s valid=%u age_ms=%lu losses=%lu parse_err=%lu crc_err=%lu rx_ovf=%lu seq_gap=%lu seq_rb=%lu sda=%u scl=%u addr=0x%02X\n",
+    Serial.printf("[SCREEN] oled=%s link=%s phys=%s valid=%u age_ms=%lu losses=%lu parse_err=%lu crc_err=%lu rx_ovf=%lu seq_gap=%lu seq_rb=%lu txt_seq=%lu sda=%u scl=%u addr=0x%02X\n",
                   g_displayReady ? "OK" : "KO",
                   g_linkState.linkEnabled ? (linkAlive ? "OK" : "DOWN") : "OFF",
                   g_linkState.linkEnabled ? (physicalAlive ? "OK" : "DOWN") : "OFF",
@@ -1164,6 +1023,7 @@ void loop() {
                   static_cast<unsigned long>(g_rxOverflowCount),
                   static_cast<unsigned long>(g_seqGapCount),
                   static_cast<unsigned long>(g_seqRollbackCount),
+                  static_cast<unsigned long>(g_textSlots.seq),
                   static_cast<unsigned int>(g_oledSdaPin),
                   static_cast<unsigned int>(g_oledSclPin),
                   static_cast<unsigned int>(g_oledAddress));

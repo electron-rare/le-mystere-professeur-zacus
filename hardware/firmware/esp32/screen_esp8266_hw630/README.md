@@ -10,9 +10,12 @@ Le code ecran est decoupe en modules pour faciliter l'evolution par app:
 - `src/core/stat_parser.*`: parser `STAT` + validation CRC
 - `src/core/link_monitor.*`: etat lien serie + watchdog/recovery
 - `src/core/render_scheduler.*`: selection non bloquante de l'app ecran
+- `src/core/text_parser.*` + `src/core/text_slots.*`: parsing/cache des trames `TXT`
 - `src/apps/screen_app.h`: contrat `matches()/render()`
 - `src/apps/boot_app.*`, `src/apps/link_app.*`, `src/apps/mp3_app.*`, `src/apps/ulock_app.*`
-- `src/main.cpp`: orchestration setup/loop + rendu concret
+- `src/gfx/u8g2_display_backend.*`: HAL d'affichage U8g2
+- `src/gfx/scenes/scene_renderer.*` + `src/gfx/widgets/*`: rendu modulaire
+- `src/main.cpp`: orchestration setup/loop + selection app
 
 Ce decoupage garde la compatibilite protocole tout en permettant d'ajouter de nouvelles apps ecran sans reouvrir un monolithe unique.
 
@@ -22,7 +25,7 @@ Ce decoupage garde la compatibilite protocole tout en permettant d'ajouter de no
 - `MODE U_LOCK` detection: volume micro + accordage + scope optionnel
 - Pictogramme de validation lors du passage en module fonctionnel
 - `MODULE U-SON FONCTIONNEL` (apres detection du LA)
-- `MODE LECTEUR U-SON` (SD presente): vue lecteur MP3 enrichie (play/pause, piste, volume)
+- `MODE LECTEUR U-SON` (SD ou RADIO): UI V3.1 `LECTURE/LISTE/REGLAGES`
 - Ecran explicite `LINK DOWN` si la telemetrie serie est perdue (avec anti-flicker)
 - Uptime + derniere touche (`KEY`)
 
@@ -30,11 +33,17 @@ Ce decoupage garde la compatibilite protocole tout en permettant d'ajouter de no
 
 Trame texte envoyee par l'ESP32 (format etendu v2):
 
-`STAT,<la>,<mp3>,<sd>,<uptime_ms>,<key>,<mode_mp3>,<track>,<track_count>,<volume_pct>,<u_lock>,<u_son_functional>,<tuning_offset>,<tuning_confidence>,<u_lock_listening>,<mic_level_pct>,<mic_scope>,<unlock_hold_pct>,<startup_stage>,<app_stage>,<seq>,<ui_page>,<repeat_mode>,<fx_active>,<backend_mode>,<scan_busy>,<error_code>,<ui_cursor>,<ui_offset>,<ui_count>,<queue_count>,<crc8_hex>\n`
+`STAT,<la>,<mp3>,<sd>,<uptime_ms>,<key>,<mode_mp3>,<track>,<track_count>,<volume_pct>,<u_lock>,<u_son_functional>,<tuning_offset>,<tuning_confidence>,<u_lock_listening>,<mic_level_pct>,<mic_scope>,<unlock_hold_pct>,<startup_stage>,<app_stage>,<seq>,<ui_page>,<repeat_mode>,<fx_active>,<backend_mode>,<scan_busy>,<error_code>,<ui_cursor>,<ui_offset>,<ui_count>,<queue_count>,<ui_source>,<crc8_hex>\n`
 
 Exemple:
 
-`STAT,1,0,0,12345,2,0,0,0,0,1,0,-2,68,1,42,1,57,1,0,77,1,0,0,1,0,0,2,1,34,5,5A`
+`STAT,1,0,0,12345,2,0,0,0,0,1,0,-2,68,1,42,1,57,1,0,77,1,0,0,1,0,0,2,1,34,5,0,5A`
+
+Trame texte additive (delta + CRC):
+
+`TXT,<seq>,<slot>,<text_sanitized>,<crc8_hex>\n`
+
+Slots actuels: `NP_TITLE1`, `NP_TITLE2`, `NP_SUB`, `LIST_PATH`, `LIST_ROW0`, `LIST_ROW1`, `LIST_ROW2`, `SET_HINT`.
 
 Compatibilite:
 - le parser ecran accepte encore les trames `STAT` sans CRC (format legacy).

@@ -8,11 +8,15 @@ Ce runbook est volontairement separé des smoke tests automatiques.
 
 ## Test MP3 UI
 1. Passer en mode MP3.
-2. Vérifier:
-- `K1`: play/pause (ou action setting)
-- `K2/K3`: navigation prev/next ou curseur selon page
-- `K4/K5`: volume -/+
-- `K6`: changement de page
+2. Vérifier UI V3.1:
+- `K1`: `OK` (play/pause, select, apply setting)
+- `K2`: `UP`
+- `K3`: `DOWN`
+- `K4`: `LEFT` (prev / decrement setting)
+- `K5`: `RIGHT` (next / increment setting)
+- `K6` court: page suivante
+- `K6` long: page precedente
+- `K6` en `LECTURE`: bascule source `SD <-> RADIO`
 
 ## Test Story/U_LOCK
 1. Revenir en mode signal/U_LOCK.

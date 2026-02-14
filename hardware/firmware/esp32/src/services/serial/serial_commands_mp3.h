@@ -12,7 +12,10 @@ struct Mp3SerialRuntimeContext {
   PlayerUiModel* ui = nullptr;
   bool (*allowPlaybackNow)() = nullptr;
   bool (*setUiPage)(PlayerUiPage page) = nullptr;
+  bool (*setUiSource)(PlayerUiSource source) = nullptr;
   bool (*parsePlayerUiPageToken)(const char* token, PlayerUiPage* outPage) = nullptr;
+  bool (*parsePlayerUiSourceToken)(const char* token, PlayerUiSource* outSource) = nullptr;
+  bool (*navigateUi)(UiNavAction action, uint32_t nowMs) = nullptr;
   bool (*parseBackendModeToken)(const char* token, PlayerBackendMode* outMode) = nullptr;
   bool (*parseMp3FxEffectToken)(const char* token, Mp3FxEffect* outEffect) = nullptr;
   bool (*triggerMp3Fx)(Mp3FxEffect effect, uint32_t durationMs, const char* source) = nullptr;

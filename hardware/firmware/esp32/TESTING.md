@@ -318,20 +318,26 @@ Rollback (si anomalie en live):
 6. Envoyer `MP3_BACKEND_STATUS`:
    - verifier compteurs `attempts/fail/retries/fallback`
 
-## 7b) UI MP3 NOW/BROWSE/QUEUE/SET
+## 7b) UI MP3 V3.1 LECTURE/LISTE/REGLAGES
 
 1. Envoyer `MP3_UI_STATUS`:
-   - verifier `page`, `cursor`, `offset`, `browse`, `queue_off`, `set_idx`
+   - verifier `page_v2`, `source`, `cursor`, `offset`, `count`, `setting`
 2. Envoyer successivement:
-   - `MP3_UI PAGE NOW`
-   - `MP3_UI PAGE BROWSE`
-   - `MP3_UI PAGE QUEUE`
-   - `MP3_UI PAGE SET`
-3. Envoyer `MP3_QUEUE_PREVIEW 5` et verifier la cohérence avec `queue_off`.
-4. En mode MP3, verifier les touches:
-   - `K6` change de page
-   - `K2/K3` naviguent en BROWSE/QUEUE/SET
-   - `K1` applique l'action settings en page `SET` (`REPEAT`, `BACKEND`, `SCAN`)
+   - `MP3_UI PAGE LECTURE`
+   - `MP3_UI PAGE LISTE`
+   - `MP3_UI PAGE REGLAGES`
+3. Verifier navigation serie:
+   - `MP3_UI NAV UP`
+   - `MP3_UI NAV DOWN`
+   - `MP3_UI NAV LEFT`
+   - `MP3_UI NAV RIGHT`
+   - `MP3_UI NAV OK`
+   - `MP3_UI NAV MODE`
+4. Verifier bascule source:
+   - `MP3_UI SOURCE SD`
+   - `MP3_UI SOURCE RADIO`
+5. Validation boutons physique hors smoke:
+   - executer `tools/qa/manual_keypad_validation.md`
 
 ## 8) Diagnostics runtime/screen (serie)
 

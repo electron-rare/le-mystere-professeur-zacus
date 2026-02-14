@@ -3,6 +3,9 @@
 #include <Arduino.h>
 
 struct ScreenFrame {
+  static constexpr uint8_t kTextSlotCount = 8U;
+  static constexpr uint8_t kTextSlotLen = 48U;
+
   bool laDetected = false;
   bool mp3Playing = false;
   bool sdReady = false;
@@ -22,6 +25,7 @@ struct ScreenFrame {
   uint8_t startupStage = 0;
   uint8_t appStage = 0;
   uint8_t uiPage = 0;
+  uint8_t uiSource = 0;
   uint16_t uiCursor = 0;
   uint16_t uiOffset = 0;
   uint16_t uiCount = 0;
@@ -33,4 +37,5 @@ struct ScreenFrame {
   uint8_t errorCode = 0;
   uint32_t sequence = 0;
   uint32_t nowMs = 0;
+  char txtSlots[kTextSlotCount][kTextSlotLen] = {};
 };

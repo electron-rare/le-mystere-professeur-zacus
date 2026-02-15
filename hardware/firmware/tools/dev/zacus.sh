@@ -205,61 +205,82 @@ HELP
 mkdir -p "$ARTIFACT_ROOT"
 
 
-# Menu interactif si aucun argument fourni
+
+
+# Menu principal Zacus : boucle infinie, retour auto après chaque action
+
+# Menu principal Zacus : boucle infinie, retour auto après chaque action
+show_menu() {
+  source "$(dirname "$0")/agent_utils.sh"
+  local options=(
+    "$(menu_str opt_bootstrap)"
+    "$(menu_str opt_build)"
+    "$(menu_str opt_flash)"
+    "$(menu_str opt_logs)"
+    "$(menu_str opt_help)"
+    "$(menu_str opt_quit)"
+  )
+  while true; do
+    local idx=$(menu_select "$(menu_str menu_title)" "${options[@]}")
+    case "$idx" in
+      1) cmd_bootstrap; _zacus_pause ;;
+      2) cmd_build; _zacus_pause ;;
+      3) cmd_flash; _zacus_pause ;;
+      4) cmd_rc; _zacus_pause ;;
+      5) cmd_rc_autofix; _zacus_pause ;;
+      6) cmd_ports; _zacus_pause ;;
+      7) cmd_latest; _zacus_pause ;;
+      0) echo -e "\n\033[1;32m$(menu_str bye)\033[0m"; exit 0 ;;
+      8) ./tools/dev/cockpit.sh ;;
+    esac
+  done
+}
+
+# Pause après chaque action
+
+# Pause après chaque action
+_zacus_pause() {
+  echo -e "\n\033[1;36m$(menu_str pause)\033[0m"
+  read -n 1 -s -r
+}
+
+
 command=${1:-}
 if [[ -z "$command" ]]; then
-  if [[ -n "$TUI_CMD" ]]; then
-    choice=$( \
-      $TUI_CMD --clear --title "Zacus CLI" \
-        --menu "Sélectionnez une commande :" 20 70 10 \
-        bootstrap "bootstrap tooling" \
-        build "run build_all.sh" \
-        flash "upload esp32 + esp8266 via resolved ports" \
-        rc "strict RC live (ZACUS_REQUIRE_HW=1)" \
-        rc-autofix "RC + codex autofix loop" \
-        ports "ports watch (15s)" \
-        latest "show latest RC artifact path" \
-        exit "exit" \
-        3>&1 1>&2 2>&3
-    )
-    if [[ -z "$choice" || "$choice" == "exit" ]]; then
-      exit 0
-    fi
-    command="$choice"
-  else
-    echo "Usage: zacus.sh <command>"
-    echo "Commandes disponibles : bootstrap, build, flash, rc, rc-autofix, ports, latest"
-    read -rp "Commande : " command
-    if [[ -z "$command" || "$command" == "exit" ]]; then
-      exit 0
-    fi
-  fi
+  show_menu
+  exit 0
 fi
+
 
 case "$command" in
   bootstrap)
-    cmd_bootstrap
-    ;;
+    cmd_bootstrap; exit $? ;;
   build)
-    cmd_build
-    ;;
+    cmd_build; exit $? ;;
   flash)
-    cmd_flash
-    ;;
+    cmd_flash; exit $? ;;
   rc)
-    cmd_rc
-    ;;
+    cmd_rc; exit $? ;;
   rc-autofix)
-    cmd_rc_autofix
-    ;;
+    cmd_rc_autofix; exit $? ;;
   ports)
-    cmd_ports
-    ;;
+    cmd_ports; exit $? ;;
   latest)
-    cmd_latest
-    ;;
+    cmd_latest; exit $? ;;
+  afficher_aide)
+    afficher_aide; exit 0 ;;
   *)
     usage
     exit 1
     ;;
 esac
+
+afficher_aide() {
+  echo -e "\n\033[1;36mAide Zacus\033[0m"
+  echo "- Utilisez les flèches ou le numéro pour naviguer."
+  echo "- Installez fzf/dialog/whiptail pour une meilleure expérience."
+  echo "- [Entrée] pour valider, [Échap] ou [Entrée] vide pour annuler."
+  echo "- Logs : 15 dernières lignes de chaque fichier dans logs/"
+  echo "- Pour toute question, voir README.md."
+  read -n 1 -s -r -p "Appuyez sur une touche pour revenir au menu..."
+}

@@ -1,0 +1,56 @@
+name: Firmware CI
+
+on:
+  push:
+    branches: [ main, hardware/firmware ]
+  pull_request:
+    branches: [ main, hardware/firmware ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install platformio
+
+      - name: Install shell dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make fzf dialog whiptail
+
+      - name: Bootstrap local tools
+        run: |
+          cd hardware/firmware
+          ./tools/dev/bootstrap_local.sh
+
+      - name: Build all firmwares (PlatformIO)
+        run: |
+          cd hardware/firmware
+          ./build_all.sh
+
+      - name: Run smoke tests (simulation)
+        run: |
+          cd hardware/firmware
+          ZACUS_SKIP_PIO=1 ZACUS_SKIP_SMOKE=1 ./tools/dev/run_matrix_and_smoke.sh
+
+      - name: Archive build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-artifacts
+          path: hardware/firmware/artifacts/
+
+      - name: Archive logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-logs
+          path: hardware/firmware/logs/

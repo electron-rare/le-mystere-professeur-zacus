@@ -10,14 +10,9 @@ PROMPT_DIR="$FW_ROOT/tools/dev/codex_prompts"
 ARTIFACTS_DIR="$FW_ROOT/artifacts/rc_live"
 LAST_MESSAGE_FILE="$ARTIFACTS_DIR/_codex_last_message.md"
 
-# Détection TUI (dialog/whiptail)
-if command -v dialog >/dev/null 2>&1; then
-  TUI_CMD="dialog"
-elif command -v whiptail >/dev/null 2>&1; then
-  TUI_CMD="whiptail"
-else
-  TUI_CMD=""
-fi
+
+# Centralise la logique TUI via agent_utils.sh
+source "$(dirname "$0")/agent_utils.sh"
 
 collect_prompts() {
   local glob
@@ -29,7 +24,8 @@ collect_prompts() {
 }
 
 
-# Menu interactif pour choisir un prompt (TUI si possible)
+# Menu interactif harmonisé pour choisir un prompt (fzf/dialog/texte)
+
 main_menu() {
   collect_prompts
   if [[ ${#prompt_files[@]} -eq 0 ]]; then
@@ -37,43 +33,31 @@ main_menu() {
     exit 1
   fi
   while true; do
-    local choice
-    if [[ -n "$TUI_CMD" ]]; then
-      local menu_args=()
-      for idx in "${!prompt_files[@]}"; do
-        menu_args+=("$idx" "$(basename "${prompt_files[idx]}")")
-      done
-      choice=$( \
-        $TUI_CMD --clear --title "Codex Prompt Menu" \
-          --menu "Sélectionnez un prompt :" 20 70 12 \
-          "${menu_args[@]}" \
-          3>&1 1>&2 2>&3
-      )
-      if [[ -z "$choice" ]]; then
-        exit 0
-      fi
-      run_prompt "${prompt_files[choice]}"
-    else
-      echo
-      echo "Available prompts:"
-      for idx in "${!prompt_files[@]}"; do
-        printf "%2d) %s\n" $((idx + 1)) "$(basename "${prompt_files[idx]}")"
-      done
-      read -rp "Choice (q to quit): " choice
-      if [[ "$choice" =~ ^[Qq]$ ]]; then
-        exit 0
-      fi
-      if ! [[ "$choice" =~ ^[0-9]+$ ]]; then
-        echo "Please enter a number or 'q'."
-        continue
-      fi
-      choice=$((choice - 1))
-      if (( choice < 0 || choice >= ${#prompt_files[@]} )); then
-        echo "Selection out of range."
-        continue
-      fi
-      run_prompt "${prompt_files[choice]}"
-    fi
+    local options=(
+      "Prompt 1"
+      "Prompt 2"
+      "Prompt 3"
+      "Aide"
+      "Quitter"
+    )
+    local idx=$(menu_select "Menu Codex" "${options[@]}")
+    case "$idx" in
+      1) run_prompt 1 ;;
+      2) run_prompt 2 ;;
+      3) run_prompt 3 ;;
+      4) afficher_aide ;;
+      5|0) break ;;
+    esac
+  done
+
+  afficher_aide() {
+    echo -e "\n\033[1;36mAide Codex\033[0m"
+    echo "- Utilisez les flèches ou le numéro pour naviguer."
+    echo "- Installez fzf/dialog/whiptail pour une meilleure expérience."
+    echo "- [Entrée] pour valider, [Échap] ou [Entrée] vide pour annuler."
+    echo "- Pour toute question, voir README.md."
+    read -n 1 -s -r -p "Appuyez sur une touche pour revenir au menu..."
+  }
   done
 }
 

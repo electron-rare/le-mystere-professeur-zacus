@@ -1,6 +1,7 @@
+
 #!/usr/bin/env bash
 set -euo pipefail
-
+source "$(dirname "$0")/agent_utils.sh"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 REPO_ROOT="$(cd "$ROOT/../.." && pwd)"
 cd "$ROOT"
@@ -780,14 +781,17 @@ else
   fi
 fi
 
-echo | tee -a "$RUN_LOG"
-action_log "=== Run summary ==="
-action_log "Build status : $BUILD_STATUS"
-action_log "Port status  : $PORT_STATUS"
-action_log "Smoke status : $SMOKE_STATUS"
-action_log "UI link      : $UI_LINK_STATUS"
+
+log "=== Run summary ==="
+log "Build status : $BUILD_STATUS"
+log "Port status  : $PORT_STATUS"
+log "Smoke status : $SMOKE_STATUS"
+log "UI link      : $UI_LINK_STATUS"
 if [[ -n "$SMOKE_COMMAND_STRING" ]]; then
-  action_log "Smoke cmd    : $SMOKE_COMMAND_STRING"
+  log "Smoke cmd    : $SMOKE_COMMAND_STRING"
 fi
+
+artefact_gate "$ARTIFACT_DIR" "artifacts/rc_live/$(date +%Y%m%d-%H%M%S)_agent"
+logs_gate "$LOG_DIR" "artifacts/rc_live/$(date +%Y%m%d-%H%M%S)_logs"
 
 exit "$EXIT_CODE"

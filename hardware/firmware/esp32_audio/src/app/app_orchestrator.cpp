@@ -2384,6 +2384,8 @@ void printScreenLinkStatus(const char* source, uint32_t nowMs) {
                                      : 0U;
   const uint32_t sinceRxMs =
       (g_screen.lastRxMs() > 0U && nowMs >= g_screen.lastRxMs()) ? (nowMs - g_screen.lastRxMs()) : 0U;
+  const uint32_t lastPingMs = g_screen.lastPingMs();
+  const uint32_t pingAge = (lastPingMs > 0U && nowMs >= lastPingMs) ? (nowMs - lastPingMs) : 0U;
   Serial.printf(
       "[UI_LINK_STATUS] %s seq=%lu tx_ok=%lu tx_drop=%lu keyframes=%lu resync=%lu last_ok_age=%lu link_tx=%lu link_drop=%lu link_last_age=%lu rx=%lu parse_err=%lu crc_err=%lu ping=%lu pong=%lu connected=%u rx_age=%lu\n",
       source,
@@ -2403,6 +2405,23 @@ void printScreenLinkStatus(const char* source, uint32_t nowMs) {
       static_cast<unsigned long>(g_screen.pongRxCount()),
       g_screen.connected() ? 1U : 0U,
       static_cast<unsigned long>(sinceRxMs));
+  Serial.printf("[UI_LINK_STATS] tx=%lu drop=%lu rx=%lu parse=%lu crc=%lu ping=%lu pong=%lu session=%lu ack_pending=%u\n",
+                static_cast<unsigned long>(g_screen.txFrameCount()),
+                static_cast<unsigned long>(g_screen.txDropCount()),
+                static_cast<unsigned long>(g_screen.rxFrameCount()),
+                static_cast<unsigned long>(g_screen.parseErrorCount()),
+                static_cast<unsigned long>(g_screen.crcErrorCount()),
+                static_cast<unsigned long>(g_screen.pingTxCount()),
+                static_cast<unsigned long>(g_screen.pongRxCount()),
+                static_cast<unsigned long>(g_screen.sessionCounter()),
+                g_screen.ackPending() ? 1U : 0U);
+  Serial.printf("[UI_LINK_CONFIG] baud=%lu rx_pin=%u tx_pin=%u heartbeat=%u timeout=%u ping_age=%lu\n",
+                static_cast<unsigned long>(config::kUiUartBaud),
+                static_cast<unsigned int>(config::kUiUartRxPin),
+                static_cast<unsigned int>(config::kUiUartTxPin),
+                static_cast<unsigned int>(config::kUiHeartbeatMs),
+                static_cast<unsigned int>(config::kUiTimeoutMs),
+                static_cast<unsigned long>(pingAge));
 }
 
 void resetScreenLinkStats(const char* source) {

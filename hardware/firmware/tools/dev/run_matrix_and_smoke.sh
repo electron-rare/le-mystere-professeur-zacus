@@ -456,8 +456,8 @@ run_ui_link_check() {
   UI_LINK_COMMAND="$PYTHON_BIN - <PORT_ESP32> UI_LINK_STATUS"
   printf '[step] ui-link check on %s\n' "$PORT_ESP32" | tee -a "$RUN_LOG" "$ui_log"
 
-  set +e
-  "$PYTHON_BIN" - "$PORT_ESP32" >"$ui_log" 2>&1 <<'PY'
+set +e
+"$PYTHON_BIN" - "$PORT_ESP32" >"$ui_log" 2>&1 <<'PY'
 import re
 import sys
 import time
@@ -467,29 +467,36 @@ import serial
 port = sys.argv[1]
 line_seen = ""
 connected = None
+command = b"UI_LINK_STATUS\n"
+deadline = time.time() + 14.0
 
 try:
-    ser = serial.Serial(port, 115200, timeout=0.25)
+    ser = serial.Serial(port, 115200, timeout=0.5)
 except Exception as exc:
     print(f"serial open failed: {exc}")
     raise SystemExit(4)
 
 try:
-    ser.reset_input_buffer()
-    ser.write(b"UI_LINK_STATUS\n")
-    deadline = time.time() + 3.0
     while time.time() < deadline:
-        line = ser.readline().decode("utf-8", errors="ignore").strip()
-        if not line:
-            continue
-        print(line)
-        if "UI_LINK_STATUS" not in line:
-            continue
-        line_seen = line
-        match = re.search(r"connected=(\d)", line)
-        if match:
-            connected = int(match.group(1))
-        break
+        ser.reset_input_buffer()
+        ser.write(command)
+        attempt_deadline = time.time() + 3.0
+        while time.time() < attempt_deadline:
+            line = ser.readline().decode("utf-8", errors="ignore").strip()
+            if not line:
+                continue
+            print(line)
+            if "UI_LINK_STATUS" not in line:
+                continue
+            line_seen = line
+            match = re.search(r"connected=(\d)", line)
+            if match:
+                connected = int(match.group(1))
+            if connected == 1:
+                break
+        if connected == 1:
+            break
+        time.sleep(0.5)
 finally:
     ser.close()
 
@@ -502,7 +509,7 @@ if connected != 1:
 raise SystemExit(0)
 PY
   local rc=$?
-  set -e
+set -e
 
   if [[ "$rc" == "0" ]]; then
     UI_LINK_STATUS="OK"

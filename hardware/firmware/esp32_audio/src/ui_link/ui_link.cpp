@@ -480,3 +480,15 @@ bool UiLink::connected() const {
 uint32_t UiLink::lastRxMs() const {
   return lastRxMs_;
 }
+
+bool UiLink::ackPending() const {
+  return ackPending_;
+}
+
+uint32_t UiLink::lastPingMs() const {
+  return lastPingMs_;
+}
+
+uint32_t UiLink::sessionCounter() const {
+  return sessionCounter_;
+}

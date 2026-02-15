@@ -48,6 +48,9 @@ class UiLink {
   uint32_t pongRxCount() const;
   bool connected() const;
   uint32_t lastRxMs() const;
+  bool ackPending() const;
+  uint32_t lastPingMs() const;
+  uint32_t sessionCounter() const;
 
  private:
   bool enqueueInput(const UiLinkInputEvent& event);

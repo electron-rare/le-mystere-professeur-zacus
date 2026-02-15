@@ -25,6 +25,12 @@ Allowed:
 Forbidden:
 - services wifi/web/mp3 stack, tools/**, game/**
 
+**Note**: For firmware development, use Git branches instead of separate directories:
+- `main:hardware/firmware/` → stable releases
+- `hardware/esp32-dev` → active development
+- `hardware/esp32-experimental` → R&D and experimental features
+See `hardware/firmware/README.md` for complete branch strategy.
+
 ### generation/story-ia
 Allowed:
 - game/**

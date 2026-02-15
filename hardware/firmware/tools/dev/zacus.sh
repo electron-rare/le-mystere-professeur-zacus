@@ -1,12 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+
+# --- Zacus.sh TUI ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ARTIFACT_ROOT="$REPO_ROOT/artifacts/rc_live"
 RESOLVER="$REPO_ROOT/tools/test/resolve_ports.py"
 RC_RUNNER="$REPO_ROOT/tools/dev/run_matrix_and_smoke.sh"
 PROMPT_DIR="$SCRIPT_DIR/codex_prompts"
+
+# Détection TUI (dialog/whiptail)
+if command -v dialog >/dev/null 2>&1; then
+  TUI_CMD="dialog"
+elif command -v whiptail >/dev/null 2>&1; then
+  TUI_CMD="whiptail"
+else
+  TUI_CMD=""
+fi
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -193,10 +204,36 @@ HELP
 
 mkdir -p "$ARTIFACT_ROOT"
 
+
+# Menu interactif si aucun argument fourni
 command=${1:-}
 if [[ -z "$command" ]]; then
-  usage
-  exit 1
+  if [[ -n "$TUI_CMD" ]]; then
+    choice=$( \
+      $TUI_CMD --clear --title "Zacus CLI" \
+        --menu "Sélectionnez une commande :" 20 70 10 \
+        bootstrap "bootstrap tooling" \
+        build "run build_all.sh" \
+        flash "upload esp32 + esp8266 via resolved ports" \
+        rc "strict RC live (ZACUS_REQUIRE_HW=1)" \
+        rc-autofix "RC + codex autofix loop" \
+        ports "ports watch (15s)" \
+        latest "show latest RC artifact path" \
+        exit "exit" \
+        3>&1 1>&2 2>&3
+    )
+    if [[ -z "$choice" || "$choice" == "exit" ]]; then
+      exit 0
+    fi
+    command="$choice"
+  else
+    echo "Usage: zacus.sh <command>"
+    echo "Commandes disponibles : bootstrap, build, flash, rc, rc-autofix, ports, latest"
+    read -rp "Commande : " command
+    if [[ -z "$command" || "$command" == "exit" ]]; then
+      exit 0
+    fi
+  fi
 fi
 
 case "$command" in

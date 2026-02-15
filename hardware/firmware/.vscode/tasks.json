@@ -5,10 +5,7 @@
       "label": "Zacus: RC Live",
       "type": "shell",
       "command": "bash",
-      "args": [
-        "-lc",
-        "set -euo pipefail; ROOT=$(git rev-parse --show-toplevel); \"$ROOT/tools/dev/zacus.sh\" rc"
-      ],
+      "args": ["-lc", "set -euo pipefail; ./tools/dev/zacus.sh rc"],
       "options": { "cwd": "${workspaceFolder}" },
       "presentation": { "panel": "dedicated", "reveal": "always" },
       "problemMatcher": []
@@ -19,7 +16,7 @@
       "command": "bash",
       "args": [
         "-lc",
-        "set -euo pipefail; ROOT=$(git rev-parse --show-toplevel); \"$ROOT/tools/dev/zacus.sh\" flash && \"$ROOT/tools/dev/zacus.sh\" rc"
+        "set -euo pipefail; ./tools/dev/zacus.sh flash && ./tools/dev/zacus.sh rc"
       ],
       "options": { "cwd": "${workspaceFolder}" },
       "presentation": { "panel": "dedicated", "reveal": "always" },
@@ -29,10 +26,7 @@
       "label": "Zacus: RC Live + AutoFix",
       "type": "shell",
       "command": "bash",
-      "args": [
-        "-lc",
-        "set -euo pipefail; ROOT=$(git rev-parse --show-toplevel); \"$ROOT/tools/dev/zacus.sh\" rc-autofix"
-      ],
+      "args": ["-lc", "set -euo pipefail; ./tools/dev/zacus.sh rc-autofix"],
       "options": { "cwd": "${workspaceFolder}" },
       "presentation": { "panel": "dedicated", "reveal": "always" },
       "problemMatcher": []
@@ -43,10 +37,14 @@
       "command": "bash",
       "args": [
         "-lc",
-        "set -euo pipefail; ROOT=$(git rev-parse --show-toplevel); \"$ROOT/tools/dev/zacus.sh\" ports"
+        "set -euo pipefail; while true; do ./tools/dev/zacus.sh ports; sleep 15; done"
       ],
       "options": { "cwd": "${workspaceFolder}" },
-      "presentation": { "panel": "dedicated", "reveal": "always", "showReuseMessage": false },
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always",
+        "showReuseMessage": false
+      },
       "problemMatcher": []
     }
   ]

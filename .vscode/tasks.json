@@ -5,7 +5,8 @@
       "label": "Zacus: Firmware · Bootstrap venv",
       "type": "shell",
       "command": "bash",
-      "args": ["-lc", "cd hardware/firmware && ./tools/dev/bootstrap_local.sh"],
+      "args": ["-lc", "./tools/dev/bootstrap_local.sh"],
+      "options": { "cwd": "${workspaceFolder}/hardware/firmware" },
       "problemMatcher": [],
       "presentation": { "panel": "dedicated", "group": "zacus", "reveal": "always" }
     },
@@ -15,8 +16,9 @@
       "command": "bash",
       "args": [
         "-lc",
-        "cd hardware/firmware && ./tools/dev/bootstrap_local.sh && export PLATFORMIO_CORE_DIR=\"$HOME/.platformio\" && ./build_all.sh"
+        "./tools/dev/bootstrap_local.sh && export PLATFORMIO_CORE_DIR=\"$HOME/.platformio\" && ./build_all.sh"
       ],
+      "options": { "cwd": "${workspaceFolder}/hardware/firmware" },
       "problemMatcher": [],
       "presentation": { "panel": "dedicated", "group": "zacus", "reveal": "always" }
     },
@@ -25,7 +27,7 @@
       "type": "shell",
       "command": "bash",
       "args": ["-lc", "./tools/dev/zacus.sh rc"],
-      "options": { "cwd": "${workspaceFolder}" },
+      "options": { "cwd": "${workspaceFolder}/hardware/firmware" },
       "problemMatcher": [],
       "presentation": { "panel": "dedicated", "group": "zacus", "reveal": "always" }
     },
@@ -37,18 +39,7 @@
         "-lc",
         "./tools/dev/zacus.sh codex --prompt tools/dev/codex_prompts/zacus_overhaul_one_shot.md"
       ],
-      "options": { "cwd": "${workspaceFolder}" },
-      "problemMatcher": [],
-      "presentation": { "panel": "dedicated", "group": "zacus", "reveal": "always" }
-    },
-    {
-      "label": "Zacus: Firmware · RC live FAST (--skip-build --skip-upload)",
-      "type": "shell",
-      "command": "bash",
-      "args": [
-        "-lc",
-        "cd hardware/firmware && ./tools/dev/bootstrap_local.sh && export PLATFORMIO_CORE_DIR=\"$HOME/.platformio\" && ZACUS_REQUIRE_HW=1 ./tools/dev/run_matrix_and_smoke.sh --skip-build --skip-upload"
-      ],
+      "options": { "cwd": "${workspaceFolder}/hardware/firmware" },
       "problemMatcher": [],
       "presentation": { "panel": "dedicated", "group": "zacus", "reveal": "always" }
     },
@@ -58,8 +49,9 @@
       "command": "bash",
       "args": [
         "-lc",
-        "cd hardware/firmware && ./tools/dev/bootstrap_local.sh && while true; do echo \"==== $(date) ====\"; ./.venv/bin/python -m serial.tools.list_ports -v || true; echo; sleep 15; done"
+        "while true; do printf '==== %s ====\\n' \"$(date)\"; ./tools/dev/zacus.sh ports; sleep 15; done"
       ],
+      "options": { "cwd": "${workspaceFolder}/hardware/firmware" },
       "problemMatcher": [],
       "presentation": { "panel": "dedicated", "group": "zacus-watch", "reveal": "always" }
     },
@@ -69,8 +61,9 @@
       "command": "bash",
       "args": [
         "-lc",
-        "cd hardware/firmware && while true; do d=$(ls -1dt artifacts/rc_live/* 2>/dev/null | head -n 1); if [ -n \"$d\" ]; then echo \"== $d ==\"; tail -n 60 \"$d/run_matrix_and_smoke.log\" 2>/dev/null || true; echo; fi; sleep 5; done"
+        "while true; do d=$(ls -1dt artifacts/rc_live/* 2>/dev/null | head -n 1); if [ -n \"$d\" ]; then echo \"== $d ==\"; tail -n 60 \"$d/run_matrix_and_smoke.log\" 2>/dev/null || true; echo; fi; sleep 5; done"
       ],
+      "options": { "cwd": "${workspaceFolder}/hardware/firmware" },
       "problemMatcher": [],
       "presentation": { "panel": "dedicated", "group": "zacus-watch", "reveal": "always" }
     },
@@ -80,8 +73,9 @@
       "command": "bash",
       "args": [
         "-lc",
-        "cd hardware/firmware && d=$(ls -1dt artifacts/rc_live/* 2>/dev/null | head -n 1); echo \"Last: ${d:-n/a}\"; [ -n \"$d\" ] && sed -n '1,220p' \"$d/summary.md\" || true"
+        "d=$(ls -1dt artifacts/rc_live/* 2>/dev/null | head -n 1); echo \"Last: ${d:-n/a}\"; [ -n \"$d\" ] && sed -n '1,220p' \"$d/summary.md\" || true"
       ],
+      "options": { "cwd": "${workspaceFolder}/hardware/firmware" },
       "problemMatcher": [],
       "presentation": { "panel": "dedicated", "group": "zacus", "reveal": "always" }
     },
@@ -90,8 +84,12 @@
       "type": "shell",
       "command": "bash",
       "args": ["-lc", "echo \"Cockpit started (stop tasks to close watchers).\""],
+      "options": { "cwd": "${workspaceFolder}/hardware/firmware" },
       "dependsOrder": "parallel",
-      "dependsOn": ["Zacus: Firmware · Ports watch (15s)", "Zacus: Firmware · Tail last RC log (5s)"],
+      "dependsOn": [
+        "Zacus: Firmware · Ports watch (15s)",
+        "Zacus: Firmware · Tail last RC log (5s)"
+      ],
       "problemMatcher": [],
       "presentation": { "panel": "dedicated", "group": "zacus", "reveal": "always" }
     }

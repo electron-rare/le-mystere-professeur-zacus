@@ -11,14 +11,17 @@ import re
 import sys
 import time
 from pathlib import Path
+import csv
 from typing import Dict, List, Optional, Tuple
 
+PY_SERIAL_ERROR = ""
 try:
     import serial
     from serial.tools import list_ports
-except ImportError:
-    print(json.dumps({"status": "fail", "notes": ["pyserial missing: pip install pyserial"]}))
-    raise SystemExit(2)
+except ImportError as exc:
+    serial = None
+    list_ports = None
+    PY_SERIAL_ERROR = str(exc)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -36,6 +39,40 @@ ESP32_SIGNATURE = re.compile(r"(BOOT_PROTO|U-SON|U_LOCK|STORY_V2|MP3_DBG)", re.I
 ESP8266_SIGNATURE = re.compile(r"(ets Jan|Exception \(|Stack smashing|\[SCREEN\])", re.IGNORECASE)
 FINGERPRINT_BAUDS = (115200, 19200)
 FINGERPRINT_TIMEOUT = 2.0
+
+DEFAULT_PORTS_FIXTURE = REPO_ROOT / "tools" / "test" / "fixtures" / "ports_list_macos.txt"
+
+
+class MockPort:
+    def __init__(
+        self,
+        device: str,
+        location: str = "",
+        description: str = "",
+        manufacturer: str = "",
+        product: str = "",
+        vid: int = 0,
+        pid: int = 0,
+    ) -> None:
+        self.device = device
+        self.location = location
+        self.description = description
+        self.manufacturer = manufacturer
+        self.product = product
+        self.vid = vid
+        self.pid = pid
+
+    @property
+    def hwid(self) -> str:
+        parts = []
+        if self.vid is not None and self.pid is not None:
+            parts.append(f"USB VID:PID={self.vid:04X}:{self.pid:04X}")
+        if self.location:
+            parts.append(f"LOCATION={self.location}")
+        return " ".join(parts)
+
+
+FIXTURE_PORTS: List["MockPort"] = []
 
 
 def is_bluetooth_port(device: str) -> bool:
@@ -63,6 +100,43 @@ def parse_location(port) -> str:
     if m:
         return m.group(1).lower()
     return ""
+
+
+def load_ports_fixture(fixture_path: Path) -> List[MockPort]:
+    if not fixture_path.exists():
+        return []
+    ports: List[MockPort] = []
+    with fixture_path.open(encoding="utf-8") as handle:
+        reader = csv.reader(handle)
+        for row in reader:
+            if not row or row[0].strip().startswith("#"):
+                continue
+            device = row[0].strip()
+            if not device:
+                continue
+            location = row[1].strip() if len(row) > 1 else ""
+            description = row[2].strip() if len(row) > 2 else "mock"
+            vidpid = row[3].strip() if len(row) > 3 else ""
+            vid = pid = 0
+            if vidpid and ":" in vidpid:
+                parts = vidpid.split(":", 1)
+                try:
+                    vid = int(parts[0], 16)
+                    pid = int(parts[1], 16)
+                except Exception:
+                    vid = pid = 0
+            ports.append(
+                MockPort(
+                    device=device,
+                    location=location,
+                    description=description,
+                    manufacturer="mock",
+                    product="mock",
+                    vid=vid,
+                    pid=pid,
+                )
+            )
+    return ports
 
 
 def load_map_file(path: Path) -> Dict[str, Dict[str, str]]:
@@ -266,6 +340,10 @@ def choose_interactive(candidates: List[dict], role: str) -> Optional[str]:
 
 def gather_ports(wait_port: int) -> List:
     deadline = time.monotonic() + max(1, wait_port)
+    if FIXTURE_PORTS:
+        return FIXTURE_PORTS
+    if list_ports is None:
+        return []
     while True:
         ports = list(list_ports.comports())
         if ports:
@@ -411,6 +489,8 @@ def main() -> int:
     parser.add_argument("--auto-ports", dest="auto_ports", action="store_true", default=True)
     parser.add_argument("--no-auto-ports", dest="auto_ports", action="store_false")
     parser.add_argument("--prefer-cu", action="store_true")
+    parser.add_argument("--mock", action="store_true")
+    parser.add_argument("--ports-fixture", default="")
     parser.add_argument("--interactive", action="store_true")
     parser.add_argument("--ports-resolve-json", default="")
     args = parser.parse_args()
@@ -429,6 +509,20 @@ def main() -> int:
     if env_esp8266 and not args.port_esp8266:
         args.port_esp8266 = env_esp8266
         env_override["esp8266"] = True
+
+    env_mock = os.environ.get("ZACUS_MOCK_PORTS", "0") == "1"
+    fixture_arg = args.ports_fixture or os.environ.get("ZACUS_PORTS_FIXTURE", "")
+    use_mock = args.mock or env_mock or bool(fixture_arg)
+    mock_notes: List[str] = []
+    if use_mock:
+        fixture_path = Path(fixture_arg) if fixture_arg else DEFAULT_PORTS_FIXTURE
+        if fixture_path.exists():
+            FIXTURE_PORTS.clear()
+            FIXTURE_PORTS.extend(load_ports_fixture(fixture_path))
+            if FIXTURE_PORTS:
+                mock_notes.append(f"mock fixture={fixture_path.name}")
+        else:
+            mock_notes.append(f"mock fixture missing: {fixture_path}")
 
     ports_map = load_ports_map()
 
@@ -458,6 +552,9 @@ def main() -> int:
         },
         "notes": [],
     }
+    result["notes"].extend(mock_notes)
+    if PY_SERIAL_ERROR and not use_mock:
+        result["notes"].append(f"pyserial missing: {PY_SERIAL_ERROR}")
 
     missing_roles = []
     if args.need_esp32 and not result["ports"]["esp32"]:

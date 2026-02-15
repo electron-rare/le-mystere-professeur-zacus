@@ -51,6 +51,10 @@ python3 tools/test/run_serial_suite.py --suite smoke_plus --allow-no-hardware
 python3 tools/test/zacus_menu.py --action smoke --allow-no-hardware
 ```
 
+Pour résoudre les ports sans matériel, la commande `./tools/dev/zacus.sh ports` écrit le JSON contractuel dans `artifacts/ports/<timestamp>/ports_resolve.json` et met à jour `artifacts/ports/latest_ports_resolve.json`. Pour mocker les CP2102 utilisez `ZACUS_MOCK_PORTS=1 ZACUS_PORTS_FIXTURE=tools/test/fixtures/ports_list_macos.txt ./tools/dev/zacus.sh ports`.
+
+Codex CLI intégré : `./tools/dev/zacus.sh codex --prompt tools/dev/codex_prompts/zacus_overhaul_one_shot.md`. Le script note aussi l’état des ports résolus et place les logs dans `artifacts/codex/<timestamp>/`.
+
 Dépendances optionnelles:
 - `pip install pyyaml` pour `run_content_checks.sh`
 - `pip install pyserial` pour suites USB, UI Link sim et console série

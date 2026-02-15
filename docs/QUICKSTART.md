@@ -22,6 +22,37 @@
 - Printables : `python tools/printables/validate_manifest.py printables/manifests/zacus_v1_printables.yaml`
 - Export Markdown : `python3 tools/scenario/export_md.py game/scenarios/zacus_v1.yaml`
 
+## Outils test firmware
+
+Entrée rapide:
+
+```bash
+python3 tools/test/zacus_menu.py
+```
+
+Checks contenu (sans hardware):
+
+```bash
+bash tools/test/run_content_checks.sh
+```
+
+Suites série disponibles:
+
+```bash
+python3 tools/test/run_serial_suite.py --list-suites
+```
+
+Mode laptop/CI (sans carte branchée):
+
+```bash
+python3 tools/test/run_serial_suite.py --suite smoke_plus --allow-no-hardware
+python3 tools/test/zacus_menu.py --action smoke --allow-no-hardware
+```
+
+Dépendances optionnelles:
+- `pip install pyyaml` pour `run_content_checks.sh`
+- `pip install pyserial` pour suites USB, UI Link sim et console série
+
 ## Pour aller plus loin
 - Crée une variante : duplique le YAML, modifie `canon` et `solution` et revalide avec le script.
 - Ajoute des cartes imprimables en t’inspirant des prompts dans `printables/src/prompts/`.

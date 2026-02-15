@@ -231,8 +231,6 @@ resolve_live_ports() {
   local wait_port="${ZACUS_WAIT_PORT:-3}"
   local resolve_log="$ARTIFACT_DIR/resolve_ports.log"
   local require_hw="${ZACUS_REQUIRE_HW:-0}"
-  local expected_loc_esp32="20-6.1.1"
-  local expected_loc_esp8266="20-6.1.2"
 
   if ! [[ "$wait_port" =~ ^[0-9]+$ ]]; then
     wait_port=3
@@ -302,13 +300,13 @@ print("RESOLVE_NOTES=" + shlex.quote(" | ".join(v.get("notes", []))))
     local location_guard=0
     local location_notes=()
     if [[ "$(uname -s)" == "Darwin" ]]; then
-      if [[ -z "${ZACUS_PORT_ESP32:-}" && "$RESOLVE_LOCATION_ESP32" != "$expected_loc_esp32" ]]; then
+      if [[ -z "${ZACUS_PORT_ESP32:-}" && "$RESOLVE_REASON_ESP32" != location-map:* ]]; then
         location_guard=1
-        location_notes+=("esp32 location=${RESOLVE_LOCATION_ESP32:-unknown} expected=$expected_loc_esp32")
+        location_notes+=("esp32 reason=${RESOLVE_REASON_ESP32:-unknown} (need location-map)")
       fi
-      if [[ -z "${ZACUS_PORT_ESP8266:-}" && "$RESOLVE_LOCATION_ESP8266" != "$expected_loc_esp8266" ]]; then
+      if [[ -z "${ZACUS_PORT_ESP8266:-}" && "$RESOLVE_REASON_ESP8266" != location-map:* ]]; then
         location_guard=1
-        location_notes+=("esp8266 location=${RESOLVE_LOCATION_ESP8266:-unknown} expected=$expected_loc_esp8266")
+        location_notes+=("esp8266 reason=${RESOLVE_REASON_ESP8266:-unknown} (need location-map)")
       fi
     fi
 

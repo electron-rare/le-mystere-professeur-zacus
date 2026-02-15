@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR/.." rev-parse --show-toplevel)"
-FW_ROOT="$REPO_ROOT"
+FW_ROOT="$REPO_ROOT/hardware/firmware"
 PROMPT_DIR="$FW_ROOT/tools/dev/codex_prompts"
 ARTIFACTS_DIR="$FW_ROOT/artifacts/rc_live"
 LAST_MESSAGE_FILE="$ARTIFACTS_DIR/_codex_last_message.md"

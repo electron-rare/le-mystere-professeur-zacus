@@ -27,6 +27,10 @@
 # Logs
 *.log
 
+# Generated artifacts/logs
+artifacts/
+logs/
+
 # Exclure les fichiers générés automatiquement
 libdeps/
 

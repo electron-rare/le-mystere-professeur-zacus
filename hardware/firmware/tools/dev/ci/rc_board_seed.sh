@@ -1,3 +1,4 @@
+source "$(dirname "$0")/../agent_utils.sh"
 #!/usr/bin/env bash
 set -euo pipefail
 

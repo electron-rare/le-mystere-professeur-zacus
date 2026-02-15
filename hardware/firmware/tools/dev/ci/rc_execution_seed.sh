@@ -67,17 +67,13 @@ Options:
   --yes                      Apply without confirmation prompt
   --verbose                  Print gh commands before running
   -h, --help                 Show this message
+die() {
+
 EOF
 }
 
-log() {
-  printf '%s\n' "$*"
-}
-
-die() {
-  printf '[error] %s\n' "$*" >&2
-  exit 1
-}
+# Centralise les helpers via agent_utils.sh
+source "$(dirname "$0")/../agent_utils.sh"
 
 run_cmd() {
   if (( VERBOSE )); then

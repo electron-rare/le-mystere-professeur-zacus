@@ -207,45 +207,12 @@ mkdir -p "$ARTIFACT_ROOT"
 
 
 
-# Menu principal Zacus : boucle infinie, retour auto après chaque action
-
-# Menu principal Zacus : boucle infinie, retour auto après chaque action
-show_menu() {
-  source "$(dirname "$0")/agent_utils.sh"
-  local options=(
-    "$(menu_str opt_bootstrap)"
-    "$(menu_str opt_build)"
-    "$(menu_str opt_flash)"
-    "$(menu_str opt_logs)"
-    "$(menu_str opt_help)"
-    "$(menu_str opt_quit)"
-  )
-  while true; do
-    local idx=$(menu_select "$(menu_str menu_title)" "${options[@]}")
-    case "$idx" in
-      1) cmd_bootstrap; _zacus_pause ;;
-      2) cmd_build; _zacus_pause ;;
-      3) cmd_flash; _zacus_pause ;;
-      4) cmd_rc; _zacus_pause ;;
-      5) cmd_rc_autofix; _zacus_pause ;;
-      6) cmd_ports; _zacus_pause ;;
-      7) cmd_latest; _zacus_pause ;;
-      0) echo -e "\n\033[1;32m$(menu_str bye)\033[0m"; exit 0 ;;
-      8) ./tools/dev/cockpit.sh ;;
-    esac
-  done
-}
-
-# Pause après chaque action
-
-# Pause après chaque action
-_zacus_pause() {
-  echo -e "\n\033[1;36m$(menu_str pause)\033[0m"
-  read -n 1 -s -r
-}
-
 
 command=${1:-}
+if [[ -z "$command" ]]; then
+  usage
+  exit 1
+fi
 if [[ -z "$command" ]]; then
   show_menu
   exit 0

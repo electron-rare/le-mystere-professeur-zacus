@@ -90,3 +90,8 @@ By default the smoke step exits 0 when no serial hardware is present; use `ZACUS
 - Quickstart flash: `docs/QUICKSTART.md`
 - RC board execution: `docs/RC_FINAL_BOARD.md`
 - Protocole: `protocol/ui_link_v2.md`
+
+## Codex prompts
+
+Prompt files live under `tools/dev/codex_prompts/*.prompt.md` and are designed to be consumed by the automation-friendly `codex exec` command.
+Run `./tools/dev/codex_prompt_menu.sh` to see a numbered menu, pick a prompt, and send it to `codex exec --sandbox workspace-write --output-last-message artifacts/rc_live/_codex_last_message.md`.

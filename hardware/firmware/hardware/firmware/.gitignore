@@ -1,0 +1,10 @@
+# Nested-workspace mirror ignore rules.
+
+.pio/
+.platformio/
+.venv/
+
+*.log
+smoke_*.log
+*_upload.log
+summary.json

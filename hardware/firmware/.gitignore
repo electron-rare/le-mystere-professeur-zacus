@@ -6,6 +6,9 @@
 .platformio/
 .pio-home/
 
+# Local Python venv
+.venv/
+
 # VSCode
 
 # macOS
@@ -26,6 +29,9 @@
 
 # Logs
 *.log
+smoke_*.log
+*_upload.log
+summary.json
 
 # Generated artifacts/logs
 artifacts/

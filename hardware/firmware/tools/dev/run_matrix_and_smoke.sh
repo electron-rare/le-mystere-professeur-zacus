@@ -154,39 +154,53 @@ macOS devices typically appear as:
   /dev/cu.usbserial-*
   /dev/cu.usbmodem*
 
-Keep the cables seated and adapters powered before the countdown ends.
+Confirm USB connection before smoke starts.
 EOF
 }
 
-run_countdown() {
+wait_for_usb_confirmation() {
+  local warning="⚠️ BRANCHE L’USB MAINTENANT ⚠️"
+  local probe_every_s=15
+
   if [[ "${ZACUS_NO_COUNTDOWN:-0}" == "1" ]]; then
-    log_info "USB countdown skipped (ZACUS_NO_COUNTDOWN=1)"
+    log_info "USB wait gate skipped (ZACUS_NO_COUNTDOWN=1)"
     return
   fi
-  local countdown="${ZACUS_USB_COUNTDOWN:-5}"
-  if ! [[ "$countdown" =~ ^[0-9]+$ ]]; then
-    countdown=5
-  fi
-  if (( countdown <= 0 )); then
-    countdown=1
-  fi
-  log_info "starting USB countdown (${countdown}s)"
-  for ((i = countdown; i > 0; i--)); do
-    printf '\a'
-    printf '  Plug USB now — %ds remaining...\n' "$i"
-    if (( i % 5 == 0 )); then
-      echo "⚠️ BRANCHE L’USB MAINTENANT ⚠️"
+
+  print_usb_alert
+  for _ in 1 2 3; do
+    printf '\a%s\n' "$warning"
+  done
+  list_ports_verbose
+
+  if [[ -t 0 ]]; then
+    log_info "press Enter once USB is connected (ports are listed every ${probe_every_s}s)"
+    while true; do
+      if read -r -t "$probe_every_s" -p "Press Enter to continue: " _; then
+        echo
+        break
+      fi
+      echo
+      printf '\a%s\n' "$warning"
+      list_ports_verbose
+    done
+  else
+    if read -r -t 1 _; then
+      log_info "USB confirmation received from stdin"
+    else
+      log_warn "stdin is non-interactive; waiting ${probe_every_s}s then continuing"
+      sleep "$probe_every_s"
       list_ports_verbose
     fi
-    sleep 1
-  done
-  log_info "USB countdown complete"
+  fi
+
+  log_info "USB confirmation complete"
 }
 
 run_smoke() {
   local default_wait_port="${ZACUS_WAIT_PORT:-3}"
   local smoke_role="${ZACUS_SMOKE_ROLE:-auto}"
-  local smoke_baud="${ZACUS_BAUD:-19200}"
+  local smoke_baud="${ZACUS_BAUD:-115200}"
   local smoke_timeout="${ZACUS_TIMEOUT:-1.0}"
 
   if ! [[ "$default_wait_port" =~ ^[0-9]+$ ]]; then
@@ -272,8 +286,7 @@ if [[ "${ZACUS_SKIP_SMOKE:-0}" == "1" ]]; then
   log_step "serial smoke skipped"
 else
   echo
-  print_usb_alert
-  run_countdown
+  wait_for_usb_confirmation
   log_step "serial smoke running"
   if run_smoke; then
     :

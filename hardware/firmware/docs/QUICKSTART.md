@@ -38,14 +38,19 @@ Attendu:
 ## 4) Boucle dev rapide (credit-friendly)
 
 ```sh
+./tools/dev/bootstrap_local.sh
+./tools/dev/run_matrix_and_smoke.sh
 make fast-esp32 ESP32_PORT=<PORT_ESP32>
 make fast-ui-oled UI_OLED_PORT=<PORT_ESP8266>
 make fast-ui-tft UI_TFT_PORT=<PORT_RP2040>
-python3 tools/dev/serial_smoke.py --role auto --wait-port 3 --allow-no-hardware
-python3 tools/dev/serial_smoke.py --role all --wait-port 3 --allow-no-hardware
+python3 tools/dev/serial_smoke.py --role auto --baud 115200 --wait-port 3 --allow-no-hardware
+python3 tools/dev/serial_smoke.py --role all --baud 115200 --wait-port 3 --allow-no-hardware
 ```
 
 Sur macOS les deux CP2102 partagent VID/PID=10C4:EA60/0001; utilisez `LOCATION=20-6.1.1` pour l’ESP32 et `20-6.1.2` pour l’ESP8266. `tools/dev/ports_map.json` suit le format `location -> role` + `vidpid -> role`.
+Baud separation a retenir:
+- console USB PlatformIO: `115200`
+- lien interne ESP8266 SoftwareSerial vers ESP32: `19200`
 
 ## 4.5) Build + smoke runner
 
@@ -54,6 +59,7 @@ Sur macOS les deux CP2102 partagent VID/PID=10C4:EA60/0001; utilisez `LOCATION=2
 ```
 
 Le script force `PLATFORMIO_CORE_DIR=$HOME/.platformio` pour que les caches PlatformIO restent en dehors du repo.
+Avant le smoke, il affiche `⚠️ BRANCHE L’USB MAINTENANT ⚠️` 3 fois, puis attend Enter en listant les ports toutes les 15s.
 
 Par défaut, la séquence smoke tolère l’absence de matériel et termine avec un code 0 quand rien n’est détecté.
 
@@ -61,8 +67,7 @@ Variantes d'environnement :
 
 - `ZACUS_REQUIRE_HW=1 ./tools/dev/run_matrix_and_smoke.sh` — échoue si aucun hardware détecté.
 - `ZACUS_WAIT_PORT=3 ./tools/dev/run_matrix_and_smoke.sh` — réduit/ajuste la fenêtre d’attente smoke.
-- `ZACUS_USB_COUNTDOWN=60 ./tools/dev/run_matrix_and_smoke.sh` — prolonge la remise USB.
-- `ZACUS_NO_COUNTDOWN=1 ./tools/dev/run_matrix_and_smoke.sh` — saute le compte à rebours et la cloche.
+- `ZACUS_NO_COUNTDOWN=1 ./tools/dev/run_matrix_and_smoke.sh` — saute la gate USB (alertes + attente Enter).
 - `ZACUS_SKIP_PIO=1 ./tools/dev/run_matrix_and_smoke.sh` — saute l’étape PlatformIO et ne lance que la smoke (utile quand les downloads sont impossibles).
 - `ZACUS_SKIP_SMOKE=1 ./tools/dev/run_matrix_and_smoke.sh` — ne lance que la build matrix.
 - `ZACUS_ENV="esp32dev esp8266_oled" ./tools/dev/run_matrix_and_smoke.sh` — cible un sous-ensemble d’environnements.
@@ -79,14 +84,14 @@ Le script affiche un résumé final : `Build status` (OK ou SKIPPED) et `Smoke 
    This creates `.venv`, installs `pyserial`, and reminds you to manually warm PlatformIO caches (`PLATFORMIO_CORE_DIR="$HOME/.platformio"` + `pio platform install espressif32`) when network access is available.
 2. Open VS Code from the repo root and use **Run Task**:
    - `List ports (15s, venv strict)` to list serial ports every 15s (fails clearly before `.venv` exists).
-   - `Serial smoke (auto/skip)` to run `tools/dev/serial_smoke.py --role auto --baud 19200 --wait-port 3 --allow-no-hardware`.
+   - `Serial smoke (auto/skip)` to run `tools/dev/serial_smoke.py --role auto --baud 115200 --wait-port 3 --allow-no-hardware`.
    - `Matrix + smoke (one-shot)` to run `./tools/dev/run_matrix_and_smoke.sh`.
 3. Thanks to the VS Code cockpit, `.pio`, `.platformio`, and `.venv` are hidden from explorer/search via workspace settings.
 
 ## 4.7) Smoke sanity checks (doc-only)
 
 - **Tout déjà branché** (baseline non vide): smoke reuses the initial port list and prints `Using existing ports (already connected)`.
-- **Hotplug**: unplug a board, run the countdown, plug it back before timeout → new port triggers detection.
+- **Hotplug**: unplug a board, run the USB wait gate, plug it back before confirmation → new port triggers detection.
 - **Aucun hardware**: run smoke without devices; default behavior logs the skip, `ZACUS_REQUIRE_HW=1` forces failure, and `ZACUS_SKIP_PIO=1` still runs the skip-only sequence.
 
 ## 4.8) RC sprint gates

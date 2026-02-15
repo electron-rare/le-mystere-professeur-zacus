@@ -49,7 +49,7 @@ make qa-story-v2
 - [ ] parser ESP8266 suit `seq_gap/seq_rb`
 - Preuve:
 ```bash
-rg -n "kScreenKeyframePeriodMs|kScreenWatchdogMs|tx_drop|seq_gap|seq_rb" src/services/screen src/screen screen_esp8266_hw630/src/main.cpp
+rg -n "kScreenKeyframePeriodMs|kScreenWatchdogMs|tx_drop|seq_gap|seq_rb" src/services/screen src/screen ../ui/esp8266_oled/src/main.cpp
 ```
 
 ## STV2-46 — Non bloquant runtime

@@ -20,7 +20,7 @@ Cette checklist couvre le comportement attendu du couple ESP32 + ESP8266 OLED.
 3. Brancher ensuite l'ESP8266 OLED.
 4. Uploader:
    - `pio run -e esp8266_oled -t upload --upload-port <PORT_ESP8266>`
-   - ou dans `screen_esp8266_hw630`: `pio run -e nodemcuv2 -t upload --upload-port <PORT_ESP8266>`
+   - ou depuis `../ui/esp8266_oled`: `pio run -e esp8266_oled -t upload --upload-port <PORT_ESP8266>`
 5. Verifier les 2 moniteurs:
    - `pio device monitor -e esp32dev --port <PORT_ESP32>`
    - `pio device monitor -e esp8266_oled --port <PORT_ESP8266>`

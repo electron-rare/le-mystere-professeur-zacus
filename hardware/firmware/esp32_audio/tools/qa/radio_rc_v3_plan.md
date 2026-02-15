@@ -25,7 +25,8 @@ Livrer une stack unifiée SD MP3 + Radio Web + WiFi + pilotage Web, sans régres
 - `pio run -e esp32dev`
 - `pio run -e esp32_release`
 - `pio run -e esp8266_oled`
-- `cd screen_esp8266_hw630 && pio run -e nodemcuv2`
+- `pio run -e ui_rp2040_ili9488`
+- `pio run -e ui_rp2040_ili9486`
 - `tools/qa/radio_rc_smoke.sh`
 
 ## KPIs release

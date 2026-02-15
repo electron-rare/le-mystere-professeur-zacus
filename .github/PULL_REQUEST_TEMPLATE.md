@@ -1,6 +1,6 @@
 ## Scope
 - [ ] Ticket(s) Jira / sprint references:
-- [ ] Base branch cible (`main` ou `codex/*`):
+- [ ] Base branch cible (`hardware/firmware`, `main` ou `codex/*`):
 - [ ] Type de changement: code / docs / tests / infra
 - [ ] Commandes publiques impactées (si oui, lister):
 
@@ -11,15 +11,18 @@
 - [ ] Si changement flag default: justification + plan rollback
 
 ## Validation statique obligatoire
+- [ ] `python3 -m compileall hardware/firmware/tools/dev`
 - [ ] `make story-validate`
 - [ ] `make story-gen`
 - [ ] `make qa-story-v2`
 - [ ] `pio run -e esp32dev`
+- [ ] `pio run -e esp32_release`
 - [ ] `pio run -e esp8266_oled`
-- [ ] `cd screen_esp8266_hw630 && pio run -e nodemcuv2`
+- [ ] `pio run -e ui_rp2040_ili9488`
+- [ ] `pio run -e ui_rp2040_ili9486`
 
 ## Validation runtime (si applicable)
-- [ ] smoke debut sprint: `make qa-story-v2-smoke` (ou `qa-story-v2-smoke-fast`)
+- [ ] smoke debut sprint: `ZACUS_SKIP_PIO=1 ./tools/dev/run_matrix_and_smoke.sh`
 - [ ] runbook complet fin sprint: `tools/qa/live_story_v2_runbook.md`
 - [ ] Séquence Story V2 testée (`STEP_DONE` + `gate=1`)
 - [ ] Recovery reset croisé ESP32/ESP8266 validé

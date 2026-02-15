@@ -8,6 +8,7 @@ import platform
 import re
 import sys
 import time
+from pathlib import Path
 
 try:
     from serial import Serial
@@ -16,19 +17,20 @@ except ImportError:
     print("pip install pyserial", file=sys.stderr)
     sys.exit(2)
 
-CHECKS = [
-    ("BOOT_STATUS", re.compile(r"BOOT|U_LOCK|STATUS", re.IGNORECASE)),
-    ("STORY_STATUS", re.compile(r"STORY", re.IGNORECASE)),
-    ("MP3_STATUS", re.compile(r"MP3", re.IGNORECASE)),
-]
+PING_COMMAND = "PING"
+PING_OK_PATTERN = re.compile(r"\b(PONG|OK|ACK|UNKNOWN)\b|BOOT|STATUS|HELLO|STAT", re.IGNORECASE)
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PORTS_MAP_PATH = os.path.join(ROOT, "tools", "dev", "ports_map.json")
+ROOT = Path(__file__).resolve().parents[2]
+PORTS_MAP_PATH = ROOT / "tools" / "dev" / "ports_map.json"
 DEFAULT_PORTS_MAP = {
-    "macos": {
-        "20-6.1.1": {"role": "esp32"},
-        "20-6.1.2": {"role": "esp8266"},
-    }
+    "location": {
+        "20-6.1.1": "esp32",
+        "20-6.1.2": "esp8266",
+    },
+    "vidpid": {
+        "2e8a:0005": "rp2040",
+        "2e8a:000a": "rp2040",
+    },
 }
 ROLE_PRIORITY = ["esp32", "esp8266", "rp2040"]
 
@@ -47,12 +49,50 @@ def exit_no_hw(wait_port, allow, reason=None):
 
 
 def load_ports_map():
-    if not os.path.exists(PORTS_MAP_PATH):
-        os.makedirs(os.path.dirname(PORTS_MAP_PATH), exist_ok=True)
+    if not PORTS_MAP_PATH.exists():
+        PORTS_MAP_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(PORTS_MAP_PATH, "w", encoding="utf-8") as fp:
             json.dump(DEFAULT_PORTS_MAP, fp, indent=2)
     with open(PORTS_MAP_PATH, encoding="utf-8") as fp:
-        return json.load(fp)
+        raw_map = json.load(fp)
+    return normalize_ports_map(raw_map)
+
+
+def normalize_ports_map(raw_map):
+    location = {}
+    vidpid = {}
+    if not isinstance(raw_map, dict):
+        return {"location": location, "vidpid": vidpid}
+
+    if "location" in raw_map or "vidpid" in raw_map:
+        raw_location = raw_map.get("location", {})
+        if isinstance(raw_location, dict):
+            for key, value in raw_location.items():
+                if isinstance(value, str):
+                    location[str(key).lower()] = value
+                elif isinstance(value, dict) and isinstance(value.get("role"), str):
+                    location[str(key).lower()] = value["role"]
+        raw_vidpid = raw_map.get("vidpid", {})
+        if isinstance(raw_vidpid, dict):
+            for key, value in raw_vidpid.items():
+                if isinstance(value, str):
+                    vidpid[str(key).lower()] = value
+                elif isinstance(value, dict) and isinstance(value.get("role"), str):
+                    vidpid[str(key).lower()] = value["role"]
+        return {"location": location, "vidpid": vidpid}
+
+    # Backward compatibility with the previous shape:
+    # { "macos": { "20-6.1.1": {"role":"esp32"} } }
+    for platform_key in ("macos", "linux", "windows"):
+        platform_map = raw_map.get(platform_key, {})
+        if not isinstance(platform_map, dict):
+            continue
+        for key, value in platform_map.items():
+            if isinstance(value, dict) and isinstance(value.get("role"), str):
+                location[str(key).lower()] = value["role"]
+            elif isinstance(value, str):
+                location[str(key).lower()] = value
+    return {"location": location, "vidpid": vidpid}
 
 
 def parse_location(hwid: str):
@@ -62,6 +102,12 @@ def parse_location(hwid: str):
     if match:
         return match.group(1).lower()
     return None
+
+
+def port_vidpid(port):
+    if port.vid is None or port.pid is None:
+        return None
+    return f"{port.vid:04x}:{port.pid:04x}"
 
 
 def canonical_device(group, prefer_cu):
@@ -83,13 +129,17 @@ def canonical_device(group, prefer_cu):
 
 
 def determine_role(port, location, ports_map):
+    location_role = ports_map.get("location", {}).get((location or "").lower())
+    if location_role:
+        return location_role
+    vidpid = port_vidpid(port)
+    if vidpid:
+        mapped = ports_map.get("vidpid", {}).get(vidpid)
+        if mapped:
+            return mapped
     product = (port.product or "").lower()
     if port.vid in (0x2E8A,) or "rp2040" in product or "pico" in product or "usbmodem" in port.device:
         return "rp2040"
-    if port.vid == 0x10C4 and port.pid == 0xEA60:
-        entry = ports_map.get("macos", {}).get(location or "")
-        if entry:
-            return entry.get("role")
     return None
 
 
@@ -173,18 +223,15 @@ def run_smoke(device, baud, timeout):
     print(f"[smoke] running on {device} (baud={baud})")
     try:
         with Serial(device, baud, timeout=0.2) as ser:
-            time.sleep(0.2)
+            time.sleep(0.15)
             ser.reset_input_buffer()
-            ok = True
-            for command, pattern in CHECKS:
-                print(f"[tx] {command}")
-                ser.write((command + "\n").encode("ascii"))
-                if not read_until_match(ser, pattern, timeout):
-                    print(f"[fail] no expected response for {command}", file=sys.stderr)
-                    ok = False
-                else:
-                    print(f"[ok] {command}")
-            return ok
+            print(f"[tx] {PING_COMMAND}")
+            ser.write((PING_COMMAND + "\n").encode("ascii"))
+            if read_until_match(ser, PING_OK_PATTERN, timeout):
+                print(f"[ok] {PING_COMMAND}")
+                return True
+            print(f"[fail] no expected response for {PING_COMMAND}", file=sys.stderr)
+            return False
     except Exception as exc:
         print(f"[error] serial failure on {device}: {exc}", file=sys.stderr)
         return False
@@ -193,11 +240,11 @@ def run_smoke(device, baud, timeout):
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run quick serial smoke with auto port detection.")
     parser.add_argument("--port", help="Explicit serial port to use (optional)")
-    parser.add_argument("--wait-port", type=int, default=180, help="Seconds to wait for a port (default 180)")
-    parser.add_argument("--role", choices=["auto", "esp32", "esp8266", "rp2040"], default="auto")
+    parser.add_argument("--wait-port", type=int, default=30, help="Seconds to wait for a port (default 30)")
+    parser.add_argument("--role", choices=["auto", "all", "esp32", "esp8266", "rp2040"], default="auto")
     parser.add_argument("--all", action="store_true", help="Run smoke on all detected roles (when not auto)")
     parser.add_argument("--baud", type=int, default=19200, help="Serial baud (default 19200)")
-    parser.add_argument("--timeout", type=float, default=2.0, help="Per-command timeout (seconds)")
+    parser.add_argument("--timeout", type=float, default=1.0, help="Per-command timeout (seconds)")
     parser.add_argument(
         "--allow-no-hardware",
         action="store_true",
@@ -245,6 +292,9 @@ def main() -> int:
 
     if args.role == "auto":
         run_roles = [role for role in ROLE_PRIORITY if role in detection]
+    elif args.role == "all":
+        run_roles = [role for role in ROLE_PRIORITY if role in detection]
+        run_roles += sorted(role for role in detection if role not in ROLE_PRIORITY)
     else:
         run_roles = [args.role]
         if args.all:

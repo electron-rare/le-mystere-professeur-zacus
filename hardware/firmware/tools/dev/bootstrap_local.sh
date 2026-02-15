@@ -24,5 +24,6 @@ Optional (recommended once) to warm PlatformIO caches:
 Then:
   ./build_all.sh
   python3 tools/dev/serial_smoke.py --role auto --baud 19200 --wait-port 3 --allow-no-hardware
+  ZACUS_SKIP_PIO=1 ./tools/dev/run_matrix_and_smoke.sh
 
 EOF

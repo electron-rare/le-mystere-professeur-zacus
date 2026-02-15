@@ -10,7 +10,7 @@
   - `src/audio/catalog/*`
   - `src/services/serial/serial_commands_mp3.*`
   - ESP8266 MP3 only:
-    - `screen_esp8266_hw630/src/apps/mp3_app.*`
+    - `../ui/esp8266_oled/src/apps/mp3_app.*`
 
 ## Shared File Rule
 - `src/app/app_orchestrator.cpp` is shared with Story branch.
@@ -23,7 +23,7 @@
 - Ensure keyboard/serial parity and feedback under 250ms.
 
 2. **M2 (MPRC-303)**
-- Move remaining MP3 OLED rendering from `screen_esp8266_hw630/src/main.cpp` into `mp3_app.cpp`.
+- Move remaining MP3 OLED rendering from `../ui/esp8266_oled/src/main.cpp` into `mp3_app.cpp`.
 - Keep `main.cpp` as orchestration only.
 
 3. **M3 (MPRC-304/305)**
@@ -36,7 +36,7 @@
   - `tools/qa/mp3_review_checklist.md`
   - `README.md`
   - `TESTING.md`
-  - `screen_esp8266_hw630/README.md`
+  - `../ui/esp8266_oled/README.md`
 
 ## PR Plan
 - PR M1: UI/parity
@@ -58,7 +58,7 @@
 
 2. **M2 gating prep**
 - Before moving OLED rendering:
-  - locate and list remaining MP3 render entry points in `screen_esp8266_hw630/src/main.cpp`
+  - locate and list remaining MP3 render entry points in `../ui/esp8266_oled/src/main.cpp`
   - move only MP3 rendering, keep link/boot orchestration untouched
 - Commit pattern:
   - `refactor(screen): MPRC-303 move mp3 rendering into mp3_app`
@@ -94,7 +94,8 @@
 - `bash tools/qa/mp3_rc_smoke.sh`
 - `pio run -e esp32dev`
 - `pio run -e esp8266_oled`
-- `cd screen_esp8266_hw630 && pio run -e nodemcuv2`
+- `pio run -e ui_rp2040_ili9488`
+- `pio run -e ui_rp2040_ili9486`
 
 ## Acceptance Gates
 - NOW/BROWSE/QUEUE/SET complete and consistent across serial, keyboard, OLED.

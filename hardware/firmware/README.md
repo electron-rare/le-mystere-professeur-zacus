@@ -40,14 +40,15 @@ make fast-ui-tft UI_TFT_PORT=<PORT_RP2040>
 Smoke série (manuel):
 
 ```sh
-python3 tools/dev/serial_smoke.py --role auto --wait-port 180
+python3 tools/dev/serial_smoke.py --role auto --wait-port 3 --allow-no-hardware
 ```
 
-MacOS CP2102 duplicates share VID/PID=10C4:EA60/0001; the LOCATION (20-6.1.1=ESP32, 20-6.1.2=ESP8266) drives the detector. Adjust `tools/dev/ports_map.json` if your rig changes and `/dev/cu.SLAB_*` should be preferred over `usbserial-*`.
+MacOS CP2102 duplicates share VID/PID=10C4:EA60/0001; the LOCATION (20-6.1.1=ESP32, 20-6.1.2=ESP8266) drives the detector. `tools/dev/ports_map.json` now uses `location -> role` and `vidpid -> role` mappings.
 
 ## Serial smoke commands
 
-- baseline smoke (auto handles already connected boards): `python3 tools/dev/serial_smoke.py --role auto --baud 19200 --wait-port 30 --allow-no-hardware`
+- baseline smoke (auto handles already connected boards): `python3 tools/dev/serial_smoke.py --role auto --baud 19200 --wait-port 3 --allow-no-hardware`
+- run every detected role: `python3 tools/dev/serial_smoke.py --role all --baud 19200 --wait-port 3 --allow-no-hardware`
 - force hardware detection: `ZACUS_REQUIRE_HW=1 python3 tools/dev/serial_smoke.py --role auto --baud 19200 --wait-port 180`
 - skip PlatformIO builds and just run smoke (useful when downloads are impossible): `ZACUS_SKIP_PIO=1 ./tools/dev/run_matrix_and_smoke.sh`
 
@@ -62,8 +63,12 @@ MacOS CP2102 duplicates share VID/PID=10C4:EA60/0001; the LOCATION (20-6.1.1=ESP
 Environment overrides:
 
 - `ZACUS_REQUIRE_HW=1 ./tools/dev/run_matrix_and_smoke.sh` (fail when no hardware).
+- `ZACUS_WAIT_PORT=3 ./tools/dev/run_matrix_and_smoke.sh` (override serial wait window for smoke).
 - `ZACUS_USB_COUNTDOWN=60 ./tools/dev/run_matrix_and_smoke.sh` (longer countdown).
 - `ZACUS_NO_COUNTDOWN=1 ./tools/dev/run_matrix_and_smoke.sh` (skip countdown/bell).
+- `ZACUS_SKIP_SMOKE=1 ./tools/dev/run_matrix_and_smoke.sh` (build only, no serial smoke step).
+- `ZACUS_ENV="esp32dev esp8266_oled" ./tools/dev/run_matrix_and_smoke.sh` (custom env subset).
+- `ZACUS_FORCE_BUILD=1 ./tools/dev/run_matrix_and_smoke.sh` (force rebuild even when artifacts exist).
 
 By default the smoke step exits 0 when no serial hardware is present; use `ZACUS_REQUIRE_HW=1` to enforce detection.
 
@@ -72,4 +77,5 @@ By default the smoke step exits 0 when no serial hardware is present; use `ZACUS
 - Cablage ESP32/UI: `esp32_audio/WIRING.md`
 - Cablage TFT: `ui/rp2040_tft/WIRING.md`
 - Quickstart flash: `docs/QUICKSTART.md`
+- RC board execution: `docs/RC_FINAL_BOARD.md`
 - Protocole: `protocol/ui_link_v2.md`

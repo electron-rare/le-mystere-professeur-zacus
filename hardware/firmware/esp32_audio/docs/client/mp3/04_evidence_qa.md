@@ -17,7 +17,8 @@ Resultats a maintenir a jour avant chaque presentation:
 - `pio run -e esp32dev` -> PASS
 - `pio run -e esp32_release` -> PASS
 - `pio run -e esp8266_oled` -> PASS
-- `cd screen_esp8266_hw630 && pio run -e nodemcuv2` -> PASS
+- `pio run -e ui_rp2040_ili9488` -> PASS
+- `pio run -e ui_rp2040_ili9486` -> PASS
 
 ## Smoke MP3 client
 

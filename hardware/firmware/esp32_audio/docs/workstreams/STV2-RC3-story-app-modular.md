@@ -10,10 +10,10 @@
   - `src/services/la/*`
   - `src/services/serial/serial_commands_story.*`
   - ESP8266 non-MP3:
-    - `screen_esp8266_hw630/src/apps/boot_app.*`
-    - `screen_esp8266_hw630/src/apps/ulock_app.*`
-    - `screen_esp8266_hw630/src/apps/link_app.*`
-    - `screen_esp8266_hw630/src/core/*`
+    - `../ui/esp8266_oled/src/apps/boot_app.*`
+    - `../ui/esp8266_oled/src/apps/ulock_app.*`
+    - `../ui/esp8266_oled/src/apps/link_app.*`
+    - `../ui/esp8266_oled/src/core/*`
 
 ## Shared File Rule
 - `src/app/app_orchestrator.cpp` is shared with MP3 branch.
@@ -43,7 +43,7 @@
   - `src/story/README.md`
   - `README.md`
   - `TESTING.md`
-  - `screen_esp8266_hw630/README.md`
+  - `../ui/esp8266_oled/README.md`
 - Prepare Story convergence PR with QA evidence.
 
 ## PR Plan
@@ -99,7 +99,8 @@
 - `bash tools/qa/story_v2_ci.sh`
 - `pio run -e esp32dev`
 - `pio run -e esp8266_oled`
-- `cd screen_esp8266_hw630 && pio run -e nodemcuv2`
+- `pio run -e ui_rp2040_ili9488`
+- `pio run -e ui_rp2040_ili9486`
 
 ## Acceptance Gates
 - Story flow stable to `STEP_DONE` with coherent MP3 gate.

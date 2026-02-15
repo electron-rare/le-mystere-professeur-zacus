@@ -4,9 +4,38 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
+DEFAULT_ENVS=(esp32dev esp32_release esp8266_oled ui_rp2040_ili9488 ui_rp2040_ili9486)
+BUILD_STATUS="SKIPPED (not run)"
+SMOKE_STATUS="SKIPPED (not run)"
+SMOKE_COMMAND_STRING=""
+
+log_step() {
+  echo "[step] $*"
+}
+
+log_info() {
+  echo "[info] $*"
+}
+
+log_warn() {
+  echo "[warn] $*"
+}
+
+log_error() {
+  echo "[error] $*" >&2
+}
+
+require_cmd() {
+  local cmd=$1
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    log_error "missing command: $cmd"
+    return 1
+  fi
+}
+
 choose_platformio_core_dir() {
   if [[ -n "${PLATFORMIO_CORE_DIR:-}" ]]; then
-    echo "PLATFORMIO_CORE_DIR=${PLATFORMIO_CORE_DIR}"
+    log_info "PLATFORMIO_CORE_DIR=${PLATFORMIO_CORE_DIR}"
     return
   fi
   local candidate="$HOME/.platformio"
@@ -17,13 +46,54 @@ choose_platformio_core_dir() {
     mkdir -p "$candidate"
     export PLATFORMIO_CORE_DIR="$candidate"
   fi
-  echo "PLATFORMIO_CORE_DIR=${PLATFORMIO_CORE_DIR}"
+  log_info "PLATFORMIO_CORE_DIR=${PLATFORMIO_CORE_DIR}"
 }
 
-prepare_pip_cache() {
-  local cache_dir="/tmp/zacus-pip-cache-${USER}"
-  mkdir -p "$cache_dir"
-  export PIP_CACHE_DIR="$cache_dir"
+activate_local_venv_if_present() {
+  if [[ -n "${VIRTUAL_ENV:-}" ]]; then
+    return 0
+  fi
+  if [[ -f ".venv/bin/activate" ]]; then
+    # shellcheck disable=SC1091
+    source .venv/bin/activate
+    log_info "using local venv: .venv"
+  fi
+}
+
+ensure_pyserial() {
+  if python3 -c "import serial" >/dev/null 2>&1; then
+    return 0
+  fi
+  activate_local_venv_if_present
+  if python3 -c "import serial" >/dev/null 2>&1; then
+    return 0
+  fi
+  log_error "pyserial is missing. Run ./tools/dev/bootstrap_local.sh first."
+  return 1
+}
+
+parse_envs() {
+  local raw="${ZACUS_ENV:-}"
+  if [[ -z "$raw" ]]; then
+    ENVS=("${DEFAULT_ENVS[@]}")
+    return
+  fi
+  raw="${raw//,/ }"
+  # shellcheck disable=SC2206
+  ENVS=($raw)
+  if (( ${#ENVS[@]} == 0 )); then
+    ENVS=("${DEFAULT_ENVS[@]}")
+  fi
+}
+
+all_builds_present() {
+  local env
+  for env in "${ENVS[@]}"; do
+    if [[ ! -f ".pio/build/$env/firmware.elf" && ! -f ".pio/build/$env/firmware.bin" && ! -f ".pio/build/$env/firmware.bin.signed" ]]; then
+      return 1
+    fi
+  done
+  return 0
 }
 
 run_pio_env() {
@@ -32,41 +102,40 @@ run_pio_env() {
   logfile="$(mktemp)"
   if ! pio run -e "$env" 2>&1 | tee "$logfile"; then
     if grep -q "HTTPClientError" "$logfile"; then
-      echo
-      echo "PlatformIO failed to download packages due to network restrictions."
-      echo "Please rerun 'pio run -e $env' on a machine with outbound HTTP access."
+      log_error "PlatformIO failed to download packages due to network restrictions."
+      log_error "Rerun: pio run -e $env on a machine with outbound HTTP access."
     else
-      echo
-      echo "PlatformIO build failed for env $env; inspect the log above."
+      log_error "PlatformIO build failed for env $env; inspect the log above."
     fi
     rm -f "$logfile"
-    exit 1
+    return 1
   fi
   rm -f "$logfile"
+  return 0
 }
 
-run_build_all() {
-  local logfile
-  logfile="$(mktemp)"
-  if ! ./build_all.sh 2>&1 | tee "$logfile"; then
-    if grep -q "HTTPClientError" "$logfile"; then
-      echo
-      echo "PlatformIO failed to download packages during build_all due to network restrictions."
-      echo "Please rerun './build_all.sh' on a machine with outbound HTTP access."
-    else
-      echo
-      echo "build_all.sh failed; inspect the output above."
+run_build_matrix() {
+  local env
+  local failed_envs=()
+  for env in "${ENVS[@]}"; do
+    log_info "building env: $env"
+    if ! run_pio_env "$env"; then
+      failed_envs+=("$env")
+      break
     fi
-    rm -f "$logfile"
-    exit 1
+  done
+  if (( ${#failed_envs[@]} > 0 )); then
+    log_error "build matrix failed on: ${failed_envs[*]}"
+    log_error "retry command: pio run -e ${failed_envs[0]}"
+    return 1
   fi
-  rm -f "$logfile"
+  return 0
 }
 
 list_ports_verbose() {
-  echo "  [ports] Available serial ports (best effort):"
+  echo "  [ports] available serial ports (best effort):"
   if ! python3 -m serial.tools.list_ports -v; then
-    echo "    (unable to list ports; install pyserial via 'pip install pyserial')"
+    log_warn "unable to list ports; install pyserial via ./tools/dev/bootstrap_local.sh"
   fi
 }
 
@@ -91,17 +160,17 @@ EOF
 
 run_countdown() {
   if [[ "${ZACUS_NO_COUNTDOWN:-0}" == "1" ]]; then
-    echo "USB countdown skipped (ZACUS_NO_COUNTDOWN=1)."
+    log_info "USB countdown skipped (ZACUS_NO_COUNTDOWN=1)"
     return
   fi
-  local countdown="${ZACUS_USB_COUNTDOWN:-20}"
+  local countdown="${ZACUS_USB_COUNTDOWN:-5}"
   if ! [[ "$countdown" =~ ^[0-9]+$ ]]; then
-    countdown=20
+    countdown=5
   fi
   if (( countdown <= 0 )); then
     countdown=1
   fi
-  echo "Starting USB countdown (${countdown}s)..."
+  log_info "starting USB countdown (${countdown}s)"
   for ((i = countdown; i > 0; i--)); do
     printf '\a'
     printf '  Plug USB now — %ds remaining...\n' "$i"
@@ -111,92 +180,114 @@ run_countdown() {
     fi
     sleep 1
   done
-  echo "USB countdown complete."
+  log_info "USB countdown complete"
 }
 
-choose_platformio_core_dir
-prepare_pip_cache
+run_smoke() {
+  local default_wait_port="${ZACUS_WAIT_PORT:-3}"
+  local smoke_role="${ZACUS_SMOKE_ROLE:-auto}"
+  local smoke_baud="${ZACUS_BAUD:-19200}"
+  local smoke_timeout="${ZACUS_TIMEOUT:-1.0}"
 
-echo "[0/3] Ensuring Python deps..."
-python3 -m pip install --no-cache-dir -U pip pyserial
+  if ! [[ "$default_wait_port" =~ ^[0-9]+$ ]]; then
+    default_wait_port=3
+  fi
 
-BUILD_STATUS="SKIPPED (ZACUS_SKIP_PIO=1)"
-if [[ "${ZACUS_SKIP_PIO:-0}" == "1" ]]; then
-  echo "[1/3] Build matrix… (skipped via ZACUS_SKIP_PIO=1)"
-else
-ENVS=(esp32dev esp32_release esp8266_oled ui_rp2040_ili9488 ui_rp2040_ili9486)
+  SMOKE_CMD=(python3 tools/dev/serial_smoke.py --role "$smoke_role" --baud "$smoke_baud" --timeout "$smoke_timeout")
+  if [[ -n "${ZACUS_SMOKE_PORT:-}" ]]; then
+    SMOKE_CMD+=(--port "${ZACUS_SMOKE_PORT}")
+  fi
+  if [[ "${ZACUS_SMOKE_ALL:-0}" == "1" ]]; then
+    SMOKE_CMD+=(--all)
+  fi
+  if [[ "${ZACUS_REQUIRE_HW:-0}" == "1" ]]; then
+    SMOKE_CMD+=(--wait-port 180)
+  else
+    SMOKE_CMD+=(--wait-port "$default_wait_port" --allow-no-hardware)
+  fi
 
-all_builds_present() {
-  for env in "${ENVS[@]}"; do
-    if [[ ! -f ".pio/build/$env/firmware.bin" && ! -f ".pio/build/$env/firmware.elf" ]]; then
-      return 1
+  SMOKE_COMMAND_STRING="$(printf '%q ' "${SMOKE_CMD[@]}")"
+  log_info "smoke command: $SMOKE_COMMAND_STRING"
+  SMOKE_LOG="$(mktemp)"
+  set +e
+  if "${SMOKE_CMD[@]}" 2>&1 | tee "$SMOKE_LOG"; then
+    if grep -q "SKIP: no hardware detected" "$SMOKE_LOG"; then
+      SMOKE_STATUS="SKIP"
+    else
+      SMOKE_STATUS="OK"
     fi
-  done
+  else
+    SMOKE_STATUS="FAILED"
+    rm -f "$SMOKE_LOG"
+    log_error "smoke step failed; rerun command above when hardware is ready"
+    return 1
+  fi
+  set -e
+  rm -f "$SMOKE_LOG"
   return 0
 }
 
-BUILD_STATUS="SKIPPED (ZACUS_SKIP_PIO=1)"
+parse_envs
+log_info "selected envs: ${ENVS[*]}"
+
+if [[ "${ZACUS_SKIP_PIO:-0}" != "1" ]]; then
+  require_cmd pio || exit 127
+  choose_platformio_core_dir
+fi
+
+if [[ "${ZACUS_SKIP_SMOKE:-0}" != "1" ]]; then
+  require_cmd python3 || exit 127
+  ensure_pyserial || exit 12
+fi
+
 if [[ "${ZACUS_SKIP_PIO:-0}" == "1" ]]; then
-  echo "[1/3] Build matrix… (skipped via ZACUS_SKIP_PIO=1)"
-elif [[ "${ZACUS_FORCE_BUILD:-0}" == "1" ]]; then
-  echo "[1/3] Build matrix… (forced rebuild)"
-  if [[ -x "./build_all.sh" ]]; then
-    run_build_all
-  else
-    for env in "${ENVS[@]}"; do
-      run_pio_env "$env"
-    done
-  fi
-  BUILD_STATUS="OK"
-elif all_builds_present; then
-  echo "[1/3] Build matrix… (already built)"
-  BUILD_STATUS="SKIPPED (already built)"
+  BUILD_STATUS="SKIPPED (ZACUS_SKIP_PIO=1)"
+  log_step "build matrix skipped"
 else
-  echo "[1/3] Build matrix…"
-  if [[ -x "./build_all.sh" ]]; then
-    run_build_all
+  SKIP_IF_BUILT="${ZACUS_SKIP_IF_BUILT:-1}"
+  if [[ "${ZACUS_FORCE_BUILD:-0}" == "1" ]]; then
+    log_step "build matrix forced"
+    if run_build_matrix; then
+      BUILD_STATUS="OK"
+    else
+      BUILD_STATUS="FAILED"
+      exit 10
+    fi
+  elif [[ "$SKIP_IF_BUILT" == "1" ]] && all_builds_present; then
+    BUILD_STATUS="SKIPPED (already built)"
+    log_step "build matrix skipped (artifacts already present)"
   else
-    for env in "${ENVS[@]}"; do
-      run_pio_env "$env"
-    done
+    log_step "build matrix running"
+    if run_build_matrix; then
+      BUILD_STATUS="OK"
+    else
+      BUILD_STATUS="FAILED"
+      exit 10
+    fi
   fi
-  BUILD_STATUS="OK"
-fi
-  BUILD_STATUS="OK"
 fi
 
-echo
-print_usb_alert
-run_countdown
-
-echo "[2/3] Running serial smoke…"
-DEFAULT_WAIT_PORT="${ZACUS_WAIT_PORT:-30}"
-SMOKE_CMD=(python3 tools/dev/serial_smoke.py --role auto --baud 19200)
-if [[ "${ZACUS_REQUIRE_HW:-0}" == "1" ]]; then
-  SMOKE_CMD+=(--wait-port 180)
+if [[ "${ZACUS_SKIP_SMOKE:-0}" == "1" ]]; then
+  SMOKE_STATUS="SKIPPED (ZACUS_SKIP_SMOKE=1)"
+  log_step "serial smoke skipped"
 else
-  SMOKE_CMD+=(--wait-port "$DEFAULT_WAIT_PORT" --allow-no-hardware)
-fi
-SMOKE_COMMAND_STRING="$(printf '%q ' "${SMOKE_CMD[@]}")"
-SMOKE_LOG="$(mktemp)"
-set +e
-if "${SMOKE_CMD[@]}" 2>&1 | tee "$SMOKE_LOG"; then
-  if grep -q "SKIP: no hardware detected" "$SMOKE_LOG"; then
-    SMOKE_STATUS="SKIP"
-  else
-    SMOKE_STATUS="OK"
-  fi
-else
-  SMOKE_STATUS="FAILED"
-  rm -f "$SMOKE_LOG"
   echo
-  echo "Smoke step failed; rerun the command above once the hardware is ready."
-  exit 1
+  print_usb_alert
+  run_countdown
+  log_step "serial smoke running"
+  if run_smoke; then
+    :
+  else
+    exit 20
+  fi
 fi
-set -e
-rm -f "$SMOKE_LOG"
 
 echo
 echo "=== Run summary ==="
-echo "Build status: $BUILD_STATUS"
-echo "Smoke status: $SMOKE_STATUS (command: $SMOKE_COMMAND_STRING)"
+echo "Build status : $BUILD_STATUS"
+if [[ -n "$SMOKE_COMMAND_STRING" ]]; then
+  echo "Smoke status : $SMOKE_STATUS"
+  echo "Smoke cmd    : $SMOKE_COMMAND_STRING"
+else
+  echo "Smoke status : $SMOKE_STATUS"
+fi

@@ -19,8 +19,11 @@ pio run -e esp32_release
 echo "[radio-rc-smoke] build esp8266_oled"
 pio run -e esp8266_oled
 
-echo "[radio-rc-smoke] build screen nodemcuv2"
-( cd screen_esp8266_hw630 && pio run -e nodemcuv2 )
+echo "[radio-rc-smoke] build ui_rp2040_ili9488"
+pio run -e ui_rp2040_ili9488
+
+echo "[radio-rc-smoke] build ui_rp2040_ili9486"
+pio run -e ui_rp2040_ili9486
 
 echo "[radio-rc-smoke] Command checklist (manual serial)"
 cat <<'CMDS'

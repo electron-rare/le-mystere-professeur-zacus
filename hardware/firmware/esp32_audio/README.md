@@ -301,7 +301,9 @@ Depuis la racine de ce dossier (`hardware/firmware/esp32`):
    - `pio run -e esp8266_oled`
    - `pio run -e esp8266_oled -t upload --upload-port /dev/ttyUSB1`
    - `pio device monitor -e esp8266_oled --port /dev/ttyUSB1`
-   - (sous-projet ecran) `cd ../ui/esp8266_oled && pio run -e nodemcuv2`
+3. UI RP2040 TFT:
+   - `pio run -e ui_rp2040_ili9488`
+   - `pio run -e ui_rp2040_ili9486`
 
 Sans variable `PORT`, PlatformIO choisit automatiquement le port serie.
 
@@ -336,7 +338,7 @@ Astuce detection ports:
   - `make story-validate`
   - `make story-gen`
   - `bash tools/qa/story_v2_ci.sh` (mode strict/idempotence)
-  - builds firmware `esp32dev`, `esp32_release`, `esp8266_oled`, `screen:nodemcuv2`
+  - builds firmware `esp32dev`, `esp32_release`, `esp8266_oled`, `ui_rp2040_ili9488`, `ui_rp2040_ili9486`
 
 ## Lecteur audio evolue
 

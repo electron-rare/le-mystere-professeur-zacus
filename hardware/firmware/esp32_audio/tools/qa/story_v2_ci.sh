@@ -42,11 +42,17 @@ if [ "$SKIP_BUILDS" != "1" ]; then
   echo "[qa-story-v2] build esp32dev"
   pio run -e esp32dev
 
+  echo "[qa-story-v2] build esp32_release"
+  pio run -e esp32_release
+
   echo "[qa-story-v2] build esp8266_oled"
   pio run -e esp8266_oled
 
-  echo "[qa-story-v2] build screen nodemcuv2"
-  ( cd screen_esp8266_hw630 && pio run -e nodemcuv2 )
+  echo "[qa-story-v2] build ui_rp2040_ili9488"
+  pio run -e ui_rp2040_ili9488
+
+  echo "[qa-story-v2] build ui_rp2040_ili9486"
+  pio run -e ui_rp2040_ili9486
 else
   echo "[qa-story-v2] builds skipped (QA_STORY_V2_SKIP_BUILDS=1)"
 fi

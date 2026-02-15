@@ -3,15 +3,26 @@ name: firmware-story-v2
 on:
   pull_request:
     paths:
-      - "hardware/firmware/esp32/**"
+      - "hardware/firmware/esp32_audio/**"
+      - "hardware/firmware/ui/esp8266_oled/**"
+      - "hardware/firmware/ui/rp2040_tft/**"
+      - "hardware/firmware/protocol/**"
+      - "hardware/firmware/tools/dev/**"
+      - "hardware/firmware/platformio.ini"
       - ".github/workflows/firmware-story-v2.yml"
       - ".github/PULL_REQUEST_TEMPLATE.md"
   push:
     branches:
       - main
+      - hardware/firmware
       - codex/esp32-audio-mozzi-20260213
     paths:
-      - "hardware/firmware/esp32/**"
+      - "hardware/firmware/esp32_audio/**"
+      - "hardware/firmware/ui/esp8266_oled/**"
+      - "hardware/firmware/ui/rp2040_tft/**"
+      - "hardware/firmware/protocol/**"
+      - "hardware/firmware/tools/dev/**"
+      - "hardware/firmware/platformio.ini"
       - ".github/workflows/firmware-story-v2.yml"
       - ".github/PULL_REQUEST_TEMPLATE.md"
   workflow_dispatch:
@@ -26,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: hardware/firmware/esp32
+        working-directory: hardware/firmware/esp32_audio
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,7 +54,7 @@ jobs:
             ~/.platformio/.cache
             ~/.platformio/packages
             ~/.platformio/platforms
-          key: pio-${{ runner.os }}-${{ hashFiles('hardware/firmware/esp32/platformio.ini') }}
+          key: pio-${{ runner.os }}-${{ hashFiles('hardware/firmware/platformio.ini') }}
           restore-keys: |
             pio-${{ runner.os }}-
 
@@ -62,10 +73,10 @@ jobs:
         with:
           name: story-toolchain-logs
           path: |
-            hardware/firmware/esp32/reports/ci/story_validate.log
-            hardware/firmware/esp32/reports/ci/story_generate.log
-            hardware/firmware/esp32/reports/ci/story_toolchain.log
-            hardware/firmware/esp32/src/story/generated/*
+            hardware/firmware/esp32_audio/reports/ci/story_validate.log
+            hardware/firmware/esp32_audio/reports/ci/story_generate.log
+            hardware/firmware/esp32_audio/reports/ci/story_toolchain.log
+            hardware/firmware/esp32_audio/src/story/generated/*
           if-no-files-found: error
 
   build-firmware:
@@ -75,10 +86,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        env: [esp32dev, esp8266_oled]
+        env: [esp32dev, esp32_release, esp8266_oled]
     defaults:
       run:
-        working-directory: hardware/firmware/esp32
+        working-directory: hardware/firmware
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -95,7 +106,7 @@ jobs:
             ~/.platformio/.cache
             ~/.platformio/packages
             ~/.platformio/platforms
-          key: pio-${{ runner.os }}-${{ hashFiles('hardware/firmware/esp32/platformio.ini') }}
+          key: pio-${{ runner.os }}-${{ hashFiles('hardware/firmware/platformio.ini') }}
           restore-keys: |
             pio-${{ runner.os }}-
 
@@ -111,16 +122,20 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-${{ matrix.env }}-log
-          path: hardware/firmware/esp32/reports/ci/build_${{ matrix.env }}.log
+          path: hardware/firmware/reports/ci/build_${{ matrix.env }}.log
           if-no-files-found: error
 
-  build-screen:
-    name: build nodemcuv2
+  build-ui-rp2040:
+    name: build ${{ matrix.env }}
     runs-on: ubuntu-latest
     needs: story-toolchain
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [ui_rp2040_ili9488, ui_rp2040_ili9486]
     defaults:
       run:
-        working-directory: hardware/firmware/esp32/screen_esp8266_hw630
+        working-directory: hardware/firmware
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -137,21 +152,21 @@ jobs:
             ~/.platformio/.cache
             ~/.platformio/packages
             ~/.platformio/platforms
-          key: pio-${{ runner.os }}-${{ hashFiles('hardware/firmware/esp32/screen_esp8266_hw630/platformio.ini') }}
+          key: pio-${{ runner.os }}-${{ hashFiles('hardware/firmware/platformio.ini') }}
           restore-keys: |
             pio-${{ runner.os }}-
 
       - name: Install PlatformIO
         run: python -m pip install --upgrade pip platformio
 
-      - name: Build screen firmware
+      - name: Build RP2040 firmware
         run: |
-          mkdir -p ../reports/ci
-          pio run -e nodemcuv2 2>&1 | tee ../reports/ci/build_nodemcuv2.log
+          mkdir -p reports/ci
+          pio run -e "${{ matrix.env }}" 2>&1 | tee "reports/ci/build_${{ matrix.env }}.log"
 
-      - name: Upload screen build log
+      - name: Upload RP2040 build log
         uses: actions/upload-artifact@v4
         with:
-          name: build-nodemcuv2-log
-          path: hardware/firmware/esp32/reports/ci/build_nodemcuv2.log
+          name: build-${{ matrix.env }}-log
+          path: hardware/firmware/reports/ci/build_${{ matrix.env }}.log
           if-no-files-found: error

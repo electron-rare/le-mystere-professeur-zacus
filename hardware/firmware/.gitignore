@@ -8,6 +8,7 @@
 
 # Local Python venv
 .venv/
+.local/
 
 # VSCode
 

@@ -211,27 +211,18 @@ static inline bool uiLinkParseLine(const char* line, UiLinkFrame* out) {
   while (line_len > 0u && (line[line_len - 1u] == '\n' || line[line_len - 1u] == '\r')) {
     --line_len;
   }
-  if (line_len == 0u || line_len > UILINK_V2_MAX_LINE) {
+  if (line_len == 0u) {
     return false;
   }
 
-  const char* star = NULL;
-  for (size_t i = 0; i < line_len; ++i) {
-    if (line[i] == '*') {
-      star = &line[i];
-      break;
-    }
-  }
-
+  const char* line_end = line + line_len;
+  const char* star = static_cast<const char*>(memchr(line, '*', line_len));
   size_t payload_len = line_len;
   if (star != NULL) {
     out->has_crc = true;
-    payload_len = (size_t)(star - line);
+    payload_len = static_cast<size_t>(star - line);
     const size_t crc_index = payload_len + 1u;
-    if (crc_index + 2u > line_len) {
-      return false;
-    }
-    if (line_len != (payload_len + 3u)) {
+    if (crc_index + 2u != line_len) {
       return false;
     }
     if (!uiLinkParseHexByte(&line[crc_index], &out->crc_expected)) {
@@ -243,27 +234,25 @@ static inline bool uiLinkParseLine(const char* line, UiLinkFrame* out) {
     return false;
   }
 
-  char payload[UILINK_V2_MAX_LINE + 1u];
-  memcpy(payload, line, payload_len);
-  payload[payload_len] = '\0';
-
-  out->crc_computed = uiLinkCrc8((const uint8_t*)payload, payload_len);
+  out->crc_computed = uiLinkCrc8(reinterpret_cast<const uint8_t*>(line), payload_len);
   out->crc_ok = (!out->has_crc) || (out->crc_expected == out->crc_computed);
   if (out->has_crc && !out->crc_ok) {
     return false;
   }
 
-  char* cursor = payload;
-  char* comma = strchr(cursor, ',');
+  const char* payload_end = line + payload_len;
+  const char* cursor = line;
+  const char* comma =
+      static_cast<const char*>(memchr(cursor, ',', static_cast<size_t>(payload_end - cursor)));
   if (comma == NULL) {
-    if (!uiLinkCopyBounded(out->type_token, sizeof(out->type_token), cursor, strlen(cursor))) {
+    if (!uiLinkCopyBounded(out->type_token, sizeof(out->type_token), cursor, payload_len)) {
       return false;
     }
     out->type = uiLinkMsgTypeFromToken(out->type_token);
     return out->type != UILINK_MSG_UNKNOWN;
   }
 
-  const size_t type_len = (size_t)(comma - cursor);
+  const size_t type_len = static_cast<size_t>(comma - cursor);
   if (!uiLinkCopyBounded(out->type_token, sizeof(out->type_token), cursor, type_len)) {
     return false;
   }
@@ -272,36 +261,37 @@ static inline bool uiLinkParseLine(const char* line, UiLinkFrame* out) {
     return false;
   }
 
-  cursor = comma + 1;
-  while (*cursor != '\0') {
+  cursor = comma + 1u;
+  while (cursor < payload_end) {
     if (out->field_count >= UILINK_V2_MAX_FIELDS) {
       return false;
     }
 
-    char* next = strchr(cursor, ',');
-    size_t token_len = 0u;
-    if (next == NULL) {
-      token_len = strlen(cursor);
-    } else {
-      token_len = (size_t)(next - cursor);
-    }
-
-    char token[UILINK_V2_KEY_MAX + UILINK_V2_VALUE_MAX + 2u];
-    if (!uiLinkCopyBounded(token, sizeof(token), cursor, token_len)) {
+    const size_t remaining = static_cast<size_t>(payload_end - cursor);
+    const char* next = static_cast<const char*>(memchr(cursor, ',', remaining));
+    const size_t token_len = (next == NULL) ? remaining : static_cast<size_t>(next - cursor);
+    if (token_len == 0u) {
       return false;
     }
 
-    char* eq = strchr(token, '=');
-    if (eq == NULL || eq == token || *(eq + 1) == '\0') {
+    const char* eq = static_cast<const char*>(memchr(cursor, '=', token_len));
+    if (eq == NULL) {
       return false;
     }
-    *eq = '\0';
+    const size_t key_len = static_cast<size_t>(eq - cursor);
+    if (key_len == 0u) {
+      return false;
+    }
+    if (token_len <= key_len + 1u) {
+      return false;
+    }
+    const size_t value_len = token_len - key_len - 1u;
 
     UiLinkField* field = &out->fields[out->field_count];
-    if (!uiLinkCopyBounded(field->key, sizeof(field->key), token, strlen(token))) {
+    if (!uiLinkCopyBounded(field->key, sizeof(field->key), cursor, key_len)) {
       return false;
     }
-    if (!uiLinkCopyBounded(field->value, sizeof(field->value), eq + 1, strlen(eq + 1))) {
+    if (!uiLinkCopyBounded(field->value, sizeof(field->value), eq + 1u, value_len)) {
       return false;
     }
 
@@ -309,7 +299,7 @@ static inline bool uiLinkParseLine(const char* line, UiLinkFrame* out) {
     if (next == NULL) {
       break;
     }
-    cursor = next + 1;
+    cursor = next + 1u;
   }
 
   return true;

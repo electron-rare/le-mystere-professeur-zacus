@@ -85,8 +85,9 @@ uint32_t g_crcErrorCount = 0;
 uint32_t g_rxOverflowCount = 0;
 uint32_t g_seqGapCount = 0;
 uint32_t g_seqRollbackCount = 0;
-char g_lineBuffer[220];
-uint8_t g_lineLen = 0;
+constexpr size_t kLinkLineBufferBytes = static_cast<size_t>(UILINK_V2_MAX_LINE + 1u);
+char g_lineBuffer[kLinkLineBufferBytes];
+uint16_t g_lineLen = 0;
 bool g_dropLineUntilNewline = false;
 uint8_t g_oledSdaPin = kInvalidPin;
 uint8_t g_oledSclPin = kInvalidPin;
@@ -97,6 +98,7 @@ bool g_scopeFilled = false;
 uint32_t g_unlockSequenceStartMs = 0;
 uint32_t g_bootSplashUntilMs = 0;
 uint32_t g_lastHelloMs = 0;
+UiLinkFrame g_cachedFrame;
 bool g_linkAcked = false;
 
 uint32_t latestLinkTickMs() {
@@ -1049,17 +1051,17 @@ void handleIncoming() {
     if (c == '\n') {
       if (!g_dropLineUntilNewline) {
         g_lineBuffer[g_lineLen] = '\0';
-        UiLinkFrame frame = {};
-        if (uiLinkParseLine(g_lineBuffer, &frame)) {
+        UiLinkFrame* frame = &g_cachedFrame;
+        if (uiLinkParseLine(g_lineBuffer, frame)) {
           const uint32_t nowMs = millis();
-          if (frame.type == UILINK_MSG_PING) {
+          if (frame->type == UILINK_MSG_PING) {
             sendPongFrame(nowMs);
-          } else if (frame.type == UILINK_MSG_ACK) {
+          } else if (frame->type == UILINK_MSG_ACK) {
             g_linkAcked = true;
             g_stateDirty = true;
           } else {
             screen_core::TelemetryState parsed = g_state;
-            if (screen_core::parseStatFrame(frame, &parsed, nowMs)) {
+            if (screen_core::parseStatFrame(*frame, &parsed, nowMs)) {
               if (g_hasValidState &&
                   (parsed.uptimeMs + kPeerUptimeRollbackSlackMs) < g_state.uptimeMs) {
                 g_linkState.peerRebootUntilMs = millis() + kPeerRebootGraceMs;

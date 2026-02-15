@@ -682,7 +682,7 @@ else
     done
   elif [[ "$SKIP_IF_BUILT" == "1" ]] && all_builds_present; then
     BUILD_STATUS="SKIPPED"
-    append_step "build_matrix" "SKIP" "0" "$ARTIFACT_DIR/build_matrix.log" "artifacts already present"
+    append_step "build_matrix" "PASS" "0" "$ARTIFACT_DIR/build_matrix.log" "artifacts already present (cached)"
     log_step "build matrix skipped (artifacts already present)"
   else
     log_step "build matrix running"

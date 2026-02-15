@@ -207,7 +207,7 @@ def gather_ports(wait_port: int) -> List:
         time.sleep(0.4)
 
 
-def classify(ports: List, prefer_cu: bool, ports_map: Dict[str, Dict[str, str]], allow_probe: bool) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, dict], List[str]]:
+def classify(ports: List, prefer_cu: bool, ports_map: Dict[str, object], allow_probe: bool) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, dict], List[str]]:
     filtered = [p for p in ports if is_candidate_port(p)]
     usb_ports = [p for p in filtered if is_usb_like(p)]
     ports = usb_ports if usb_ports else filtered
@@ -316,6 +316,18 @@ def classify(ports: List, prefer_cu: bool, ports_map: Dict[str, Dict[str, str]],
     return selected, reasons, probe_baud, details, notes
 
 
+def output_result(result: dict, json_path: str, exit_code: int) -> int:
+    if json_path:
+        try:
+            dest = Path(json_path)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+    print(json.dumps(result))
+    return exit_code
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Resolve serial ports for ESP32 + ESP8266")
     parser.add_argument("--port-esp32", default="")
@@ -372,12 +384,10 @@ def main() -> int:
             if args.allow_no_hardware:
                 result["status"] = "skip"
                 result["notes"].append("no serial ports detected")
-                print(json.dumps(result))
-                return 0
+                return output_result(result, args.ports_resolve_json, 0)
             result["status"] = "fail"
             result["notes"].append("no serial ports detected")
-            print(json.dumps(result))
-            return 1
+            return output_result(result, args.ports_resolve_json, 1)
 
         selected, reasons, probe_baud, details, notes = classify(
             ports=ports,
@@ -433,27 +443,16 @@ def main() -> int:
             result["status"] = "fail"
             result["notes"].append(f"unresolved roles: {','.join(unresolved)}")
             result["notes"].append("check USB data cable, CP210x/CH340 driver, and press BOOT for ESP32 upload")
-            print(json.dumps(result))
-            return 1
+            return output_result(result, args.ports_resolve_json, 1)
 
     if result["status"] == "pass":
         if result["ports"].get("esp32") and result["ports"].get("esp8266") and result["ports"]["esp32"] == result["ports"]["esp8266"]:
             result["status"] = "fail"
             result["notes"].append("esp32 and esp8266 resolved to the same device")
             if not args.allow_no_hardware:
-                print(json.dumps(result))
-                return 1
+                return output_result(result, args.ports_resolve_json, 1)
 
-    if args.ports_resolve_json:
-        try:
-            dest = Path(args.ports_resolve_json)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(json.dumps(result, indent=2), encoding="utf-8")
-        except Exception:
-            pass
-
-    print(json.dumps(result))
-    return 0
+    return output_result(result, args.ports_resolve_json, 0)
 
 
 if __name__ == "__main__":

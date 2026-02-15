@@ -56,3 +56,11 @@ Pass rule:
   - use `--allow-no-hardware` for skip mode
 - MP3 commands returning `OUT_OF_CONTEXT`:
   - attach SD card / ensure MP3 context is active
+
+## RC execution support
+
+- Full sprint command replay:
+  - `bash tools/test/run_rc_gate.sh --sprint s1 --allow-no-hardware`
+  - `bash tools/test/run_rc_gate.sh --sprint s5 --esp32-port <PORT_ESP32> --ui-port <PORT_UI>`
+- Final report template:
+  - `hardware/firmware/docs/RC_FINAL_REPORT_TEMPLATE.md`

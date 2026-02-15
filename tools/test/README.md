@@ -15,6 +15,7 @@ bash tools/test/run_content_checks.sh
 python3 tools/test/run_serial_suite.py --list-suites
 python3 tools/test/run_serial_suite.py --suite smoke_plus --role auto --allow-no-hardware
 python3 tools/test/zacus_menu.py
+bash tools/test/run_rc_gate.sh --sprint s1 --allow-no-hardware
 ```
 
 ## Hardware modes
@@ -46,3 +47,9 @@ For teams working from `hardware/firmware`, wrappers are provided under:
 - `hardware/firmware/tools/test/`
 
 They forward to this canonical `tools/test` implementation.
+
+## RC cycle helpers
+
+- Sprint gate runner: `bash tools/test/run_rc_gate.sh --sprint s1..s5 ...`
+- Board seed script: `bash hardware/firmware/tools/dev/rc_execution_seed.sh`
+- RC board source of truth: `hardware/firmware/docs/RC_FINAL_BOARD.md`

@@ -5,30 +5,67 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
 DEFAULT_ENVS=(esp32dev esp32_release esp8266_oled ui_rp2040_ili9488 ui_rp2040_ili9486)
-BUILD_STATUS="SKIPPED (not run)"
-SMOKE_STATUS="SKIPPED (not run)"
+BUILD_STATUS="SKIPPED"
+SMOKE_STATUS="SKIPPED"
 SMOKE_COMMAND_STRING=""
 
+TIMESTAMP="$(date -u +"%Y%m%d-%H%M%S")"
+ARTIFACT_DIR="$ROOT/artifacts/rc_live/$TIMESTAMP"
+LOG_DIR="$ROOT/logs"
+RUN_LOG="$LOG_DIR/run_matrix_and_smoke_${TIMESTAMP}.log"
+STEPS_TSV="$ARTIFACT_DIR/steps.tsv"
+SUMMARY_JSON="$ARTIFACT_DIR/summary.json"
+SUMMARY_MD="$ARTIFACT_DIR/summary.md"
+
+mkdir -p "$ARTIFACT_DIR" "$LOG_DIR"
+: > "$RUN_LOG"
+: > "$STEPS_TSV"
+
+EXIT_CODE=0
+FINALIZED=0
+
+action_log() {
+  local msg="$1"
+  echo "$msg" | tee -a "$RUN_LOG"
+}
+
 log_step() {
-  echo "[step] $*"
+  action_log "[step] $*"
 }
 
 log_info() {
-  echo "[info] $*"
+  action_log "[info] $*"
 }
 
 log_warn() {
-  echo "[warn] $*"
+  action_log "[warn] $*"
 }
 
 log_error() {
-  echo "[error] $*" >&2
+  action_log "[error] $*"
+}
+
+append_step() {
+  local name="$1"
+  local status="$2"
+  local code="$3"
+  local log_file="$4"
+  local details="$5"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$status" "$code" "$log_file" "$details" >> "$STEPS_TSV"
+}
+
+set_failure() {
+  local rc="$1"
+  if [[ "$EXIT_CODE" == "0" ]]; then
+    EXIT_CODE="$rc"
+  fi
 }
 
 require_cmd() {
-  local cmd=$1
+  local cmd="$1"
   if ! command -v "$cmd" >/dev/null 2>&1; then
     log_error "missing command: $cmd"
+    set_failure 127
     return 1
   fi
 }
@@ -51,7 +88,7 @@ choose_platformio_core_dir() {
 
 activate_local_venv_if_present() {
   if [[ -n "${VIRTUAL_ENV:-}" ]]; then
-    return 0
+    return
   fi
   if [[ -f ".venv/bin/activate" ]]; then
     # shellcheck disable=SC1091
@@ -62,13 +99,14 @@ activate_local_venv_if_present() {
 
 ensure_pyserial() {
   if python3 -c "import serial" >/dev/null 2>&1; then
-    return 0
+    return
   fi
   activate_local_venv_if_present
   if python3 -c "import serial" >/dev/null 2>&1; then
-    return 0
+    return
   fi
   log_error "pyserial is missing. Run ./tools/dev/bootstrap_local.sh first."
+  set_failure 12
   return 1
 }
 
@@ -96,51 +134,33 @@ all_builds_present() {
   return 0
 }
 
-run_pio_env() {
-  local env=$1
-  local logfile
-  logfile="$(mktemp)"
-  if ! pio run -e "$env" 2>&1 | tee "$logfile"; then
-    if grep -q "HTTPClientError" "$logfile"; then
-      log_error "PlatformIO failed to download packages due to network restrictions."
-      log_error "Rerun: pio run -e $env on a machine with outbound HTTP access."
-    else
-      log_error "PlatformIO build failed for env $env; inspect the log above."
-    fi
-    rm -f "$logfile"
-    return 1
+run_step_cmd() {
+  local step_name="$1"
+  local log_file="$2"
+  shift 2
+  mkdir -p "$(dirname "$log_file")"
+  printf '[step] %s\n' "$*" | tee -a "$RUN_LOG" "$log_file"
+  set +e
+  "$@" >>"$log_file" 2>&1
+  local rc=$?
+  set -e
+  if [[ "$rc" == "0" ]]; then
+    append_step "$step_name" "PASS" "0" "$log_file" ""
+    return 0
   fi
-  rm -f "$logfile"
-  return 0
-}
-
-run_build_matrix() {
-  local env
-  local failed_envs=()
-  for env in "${ENVS[@]}"; do
-    log_info "building env: $env"
-    if ! run_pio_env "$env"; then
-      failed_envs+=("$env")
-      break
-    fi
-  done
-  if (( ${#failed_envs[@]} > 0 )); then
-    log_error "build matrix failed on: ${failed_envs[*]}"
-    log_error "retry command: pio run -e ${failed_envs[0]}"
-    return 1
-  fi
-  return 0
+  append_step "$step_name" "FAIL" "$rc" "$log_file" ""
+  return "$rc"
 }
 
 list_ports_verbose() {
-  echo "  [ports] available serial ports (best effort):"
-  if ! python3 -m serial.tools.list_ports -v; then
+  action_log "  [ports] available serial ports (best effort):"
+  if ! python3 -m serial.tools.list_ports -v | tee -a "$RUN_LOG"; then
     log_warn "unable to list ports; install pyserial via ./tools/dev/bootstrap_local.sh"
   fi
 }
 
 print_usb_alert() {
-  cat <<'EOF'
+  cat <<'EOM' | tee -a "$RUN_LOG"
 ===========================================
 🚨🚨🚨  USB CONNECT ALERT  🚨🚨🚨
 ===========================================
@@ -155,7 +175,7 @@ macOS devices typically appear as:
   /dev/cu.usbmodem*
 
 Confirm USB connection before smoke starts.
-EOF
+EOM
 }
 
 wait_for_usb_confirmation() {
@@ -169,7 +189,7 @@ wait_for_usb_confirmation() {
 
   print_usb_alert
   for _ in 1 2 3; do
-    printf '\a%s\n' "$warning"
+    printf '\a%s\n' "$warning" | tee -a "$RUN_LOG"
   done
   list_ports_verbose
 
@@ -177,11 +197,11 @@ wait_for_usb_confirmation() {
     log_info "press Enter once USB is connected (ports are listed every ${probe_every_s}s)"
     while true; do
       if read -r -t "$probe_every_s" -p "Press Enter to continue: " _; then
-        echo
+        echo | tee -a "$RUN_LOG"
         break
       fi
-      echo
-      printf '\a%s\n' "$warning"
+      echo | tee -a "$RUN_LOG"
+      printf '\a%s\n' "$warning" | tee -a "$RUN_LOG"
       list_ports_verbose
     done
   else
@@ -197,11 +217,12 @@ wait_for_usb_confirmation() {
   log_info "USB confirmation complete"
 }
 
-run_smoke() {
+run_smoke_auto() {
   local default_wait_port="${ZACUS_WAIT_PORT:-3}"
   local smoke_role="${ZACUS_SMOKE_ROLE:-auto}"
   local smoke_baud="${ZACUS_BAUD:-115200}"
   local smoke_timeout="${ZACUS_TIMEOUT:-1.0}"
+  local smoke_log="$ARTIFACT_DIR/smoke_auto.log"
 
   if ! [[ "$default_wait_port" =~ ^[0-9]+$ ]]; then
     default_wait_port=3
@@ -222,85 +243,191 @@ run_smoke() {
 
   SMOKE_COMMAND_STRING="$(printf '%q ' "${SMOKE_CMD[@]}")"
   log_info "smoke command: $SMOKE_COMMAND_STRING"
-  SMOKE_LOG="$(mktemp)"
   set +e
-  if "${SMOKE_CMD[@]}" 2>&1 | tee "$SMOKE_LOG"; then
-    if grep -q "SKIP: no hardware detected" "$SMOKE_LOG"; then
+  "${SMOKE_CMD[@]}" 2>&1 | tee "$smoke_log" | tee -a "$RUN_LOG"
+  local rc=${PIPESTATUS[0]}
+  set -e
+
+  if [[ "$rc" == "0" ]]; then
+    if grep -q "SKIP: no hardware detected" "$smoke_log"; then
+      append_step "smoke_auto" "SKIP" "0" "$smoke_log" "no hardware"
       SMOKE_STATUS="SKIP"
     else
+      append_step "smoke_auto" "PASS" "0" "$smoke_log" ""
       SMOKE_STATUS="OK"
     fi
-  else
-    SMOKE_STATUS="FAILED"
-    rm -f "$SMOKE_LOG"
-    log_error "smoke step failed; rerun command above when hardware is ready"
-    return 1
+    return 0
   fi
-  set -e
-  rm -f "$SMOKE_LOG"
-  return 0
+
+  append_step "smoke_auto" "FAIL" "$rc" "$smoke_log" ""
+  SMOKE_STATUS="FAILED"
+  return "$rc"
 }
+
+write_summary() {
+  local rc="$1"
+  "$PYTHON_BIN" - "$ARTIFACT_DIR" "$STEPS_TSV" "$SUMMARY_JSON" "$SUMMARY_MD" "$TIMESTAMP" "$BUILD_STATUS" "$SMOKE_STATUS" "$SMOKE_COMMAND_STRING" "$rc" "$RUN_LOG" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+artifact_dir = Path(sys.argv[1])
+steps_tsv = Path(sys.argv[2])
+summary_json = Path(sys.argv[3])
+summary_md = Path(sys.argv[4])
+timestamp = sys.argv[5]
+build_status = sys.argv[6]
+smoke_status = sys.argv[7]
+smoke_cmd = sys.argv[8]
+exit_code = int(sys.argv[9])
+run_log = sys.argv[10]
+
+steps = []
+if steps_tsv.exists():
+    for raw in steps_tsv.read_text(encoding="utf-8").splitlines():
+        if not raw.strip():
+            continue
+        name, status, step_code, log_file, details = raw.split("\t", 4)
+        steps.append(
+            {
+                "name": name,
+                "status": status,
+                "exit_code": int(step_code),
+                "log_file": log_file,
+                "details": details,
+            }
+        )
+
+if any(step["status"] == "FAIL" for step in steps) or exit_code != 0:
+    result = "FAIL"
+elif any(step["status"] == "PASS" for step in steps):
+    result = "PASS"
+else:
+    result = "SKIP"
+
+summary = {
+    "timestamp": timestamp,
+    "result": result,
+    "exit_code": exit_code,
+    "build_status": build_status,
+    "smoke_status": smoke_status,
+    "smoke_command": smoke_cmd,
+    "steps": steps,
+    "logs": {
+        "run_log": run_log,
+    },
+}
+summary_json.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+rows = [
+    "# RC live summary",
+    "",
+    f"- Result: **{result}**",
+    f"- Exit code: `{exit_code}`",
+    f"- Build status: `{build_status}`",
+    f"- Smoke status: `{smoke_status}`",
+    f"- Run log: `{Path(run_log).name}`",
+    "",
+    "| Step | Status | Exit | Log | Details |",
+    "|---|---|---:|---|---|",
+]
+for step in steps:
+    rows.append(
+        f"| {step['name']} | {step['status']} | {step['exit_code']} | `{Path(step['log_file']).name}` | {step['details']} |"
+    )
+summary_md.write_text("\n".join(rows) + "\n", encoding="utf-8")
+PY
+}
+
+finalize() {
+  local rc="$1"
+  if [[ "$FINALIZED" == "1" ]]; then
+    return
+  fi
+  FINALIZED=1
+  trap - EXIT
+  write_summary "$rc"
+  cp "$RUN_LOG" "$ARTIFACT_DIR/run_matrix_and_smoke.log"
+  action_log "[done] summary: $SUMMARY_JSON"
+  action_log "[done] summary: $SUMMARY_MD"
+  exit "$rc"
+}
+
+trap 'finalize "$?"' EXIT
 
 parse_envs
 log_info "selected envs: ${ENVS[*]}"
+log_info "artifacts: $ARTIFACT_DIR"
+
+if [[ -x ".venv/bin/python" ]]; then
+  PYTHON_BIN=".venv/bin/python"
+else
+  PYTHON_BIN="python3"
+fi
 
 if [[ "${ZACUS_SKIP_PIO:-0}" != "1" ]]; then
-  require_cmd pio || exit 127
+  require_cmd pio || exit "$EXIT_CODE"
   choose_platformio_core_dir
 fi
 
 if [[ "${ZACUS_SKIP_SMOKE:-0}" != "1" ]]; then
-  require_cmd python3 || exit 127
-  ensure_pyserial || exit 12
+  require_cmd python3 || exit "$EXIT_CODE"
+  ensure_pyserial || exit "$EXIT_CODE"
 fi
 
 if [[ "${ZACUS_SKIP_PIO:-0}" == "1" ]]; then
-  BUILD_STATUS="SKIPPED (ZACUS_SKIP_PIO=1)"
+  BUILD_STATUS="SKIPPED"
+  append_step "build_matrix" "SKIP" "0" "$ARTIFACT_DIR/build_matrix.log" "ZACUS_SKIP_PIO=1"
   log_step "build matrix skipped"
 else
   SKIP_IF_BUILT="${ZACUS_SKIP_IF_BUILT:-1}"
   if [[ "${ZACUS_FORCE_BUILD:-0}" == "1" ]]; then
     log_step "build matrix forced"
-    if run_build_matrix; then
-      BUILD_STATUS="OK"
-    else
-      BUILD_STATUS="FAILED"
-      exit 10
-    fi
+    BUILD_STATUS="OK"
+    for env in "${ENVS[@]}"; do
+      if ! run_step_cmd "build_${env}" "$ARTIFACT_DIR/build_${env}.log" pio run -e "$env"; then
+        BUILD_STATUS="FAILED"
+        set_failure 10
+        break
+      fi
+    done
   elif [[ "$SKIP_IF_BUILT" == "1" ]] && all_builds_present; then
-    BUILD_STATUS="SKIPPED (already built)"
+    BUILD_STATUS="SKIPPED"
+    append_step "build_matrix" "SKIP" "0" "$ARTIFACT_DIR/build_matrix.log" "artifacts already present"
     log_step "build matrix skipped (artifacts already present)"
   else
     log_step "build matrix running"
-    if run_build_matrix; then
-      BUILD_STATUS="OK"
-    else
-      BUILD_STATUS="FAILED"
-      exit 10
-    fi
+    BUILD_STATUS="OK"
+    for env in "${ENVS[@]}"; do
+      if ! run_step_cmd "build_${env}" "$ARTIFACT_DIR/build_${env}.log" pio run -e "$env"; then
+        BUILD_STATUS="FAILED"
+        set_failure 10
+        break
+      fi
+    done
   fi
 fi
 
 if [[ "${ZACUS_SKIP_SMOKE:-0}" == "1" ]]; then
-  SMOKE_STATUS="SKIPPED (ZACUS_SKIP_SMOKE=1)"
+  SMOKE_STATUS="SKIPPED"
+  append_step "smoke_auto" "SKIP" "0" "$ARTIFACT_DIR/smoke_auto.log" "ZACUS_SKIP_SMOKE=1"
   log_step "serial smoke skipped"
 else
   echo
   wait_for_usb_confirmation
   log_step "serial smoke running"
-  if run_smoke; then
-    :
-  else
-    exit 20
+  if ! run_smoke_auto; then
+    set_failure 20
+    log_error "smoke step failed; inspect $ARTIFACT_DIR/smoke_auto.log"
   fi
 fi
 
-echo
-echo "=== Run summary ==="
-echo "Build status : $BUILD_STATUS"
+echo | tee -a "$RUN_LOG"
+action_log "=== Run summary ==="
+action_log "Build status : $BUILD_STATUS"
+action_log "Smoke status : $SMOKE_STATUS"
 if [[ -n "$SMOKE_COMMAND_STRING" ]]; then
-  echo "Smoke status : $SMOKE_STATUS"
-  echo "Smoke cmd    : $SMOKE_COMMAND_STRING"
-else
-  echo "Smoke status : $SMOKE_STATUS"
+  action_log "Smoke cmd    : $SMOKE_COMMAND_STRING"
 fi
+
+exit "$EXIT_CODE"

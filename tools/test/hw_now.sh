@@ -197,13 +197,17 @@ print("RESOLVE_PORT_ESP32=" + shlex.quote(str(v.get("ports", {}).get("esp32", ""
 print("RESOLVE_PORT_ESP8266=" + shlex.quote(str(v.get("ports", {}).get("esp8266", ""))))
 print("RESOLVE_REASON_ESP32=" + shlex.quote(str(v.get("reasons", {}).get("esp32", ""))))
 print("RESOLVE_REASON_ESP8266=" + shlex.quote(str(v.get("reasons", {}).get("esp8266", ""))))
+print("RESOLVE_LOCATION_ESP32=" + shlex.quote(str(v.get("details", {}).get("esp32", {}).get("location", ""))))
+print("RESOLVE_LOCATION_ESP8266=" + shlex.quote(str(v.get("details", {}).get("esp8266", {}).get("location", ""))))
+print("RESOLVE_ROLE_ESP32=" + shlex.quote(str(v.get("details", {}).get("esp32", {}).get("role", ""))))
+print("RESOLVE_ROLE_ESP8266=" + shlex.quote(str(v.get("details", {}).get("esp8266", {}).get("role", ""))))
 print("RESOLVE_NOTES=" + shlex.quote(" | ".join(v.get("notes", []))))
 ')"
 
   PORT_ESP32="$RESOLVE_PORT_ESP32"
   PORT_ESP8266="$RESOLVE_PORT_ESP8266"
-  action_log "[port] ESP32 = ${PORT_ESP32:-n/a} (${RESOLVE_REASON_ESP32:-unresolved})"
-  action_log "[port] ESP8266 = ${PORT_ESP8266:-n/a} (${RESOLVE_REASON_ESP8266:-unresolved})"
+  action_log "[port] ESP32 = ${PORT_ESP32:-n/a} location=${RESOLVE_LOCATION_ESP32:-unknown} role=${RESOLVE_ROLE_ESP32:-esp32} (${RESOLVE_REASON_ESP32:-unresolved})"
+  action_log "[port] ESP8266 = ${PORT_ESP8266:-n/a} location=${RESOLVE_LOCATION_ESP8266:-unknown} role=${RESOLVE_ROLE_ESP8266:-esp8266_usb} (${RESOLVE_REASON_ESP8266:-unresolved})"
   if [[ -n "$RESOLVE_NOTES" ]]; then
     action_log "[port] notes: $RESOLVE_NOTES"
   fi
@@ -211,19 +215,17 @@ print("RESOLVE_NOTES=" + shlex.quote(" | ".join(v.get("notes", []))))
 }
 
 countdown_usb_prompt() {
-  if [[ "$DRY_RUN" == "1" ]]; then
-    action_log "[dry-run] skip countdown"
+  if [[ "$DRY_RUN" == "1" || "${ZACUS_NO_CONFIRM:-0}" == "1" ]]; then
+    action_log "[info] USB confirm prompt skipped"
     return
   fi
-  local left="$COUNTDOWN_SEC"
-  while (( left > 0 )); do
-    if (( left % 5 == 0 || left == COUNTDOWN_SEC )); then
-      action_log "⚠️ BRANCHE L'USB MAINTENANT ⚠️ ($left s)"
-      printf '\a\a\a' | tee -a "$run_log" >/dev/null
-    fi
-    sleep 1
-    left=$((left - 1))
+  local i
+  for i in 1 2 3; do
+    action_log "⚠️ BRANCHE L’USB MAINTENANT ⚠️"
+    printf '\a' >>"$run_log"
   done
+  read -r -p "USB branchés ? Appuie sur Entrée pour continuer..." < /dev/tty
+  action_log "[info] USB confirmation received"
 }
 
 run_smoke_with_policy() {
@@ -236,8 +238,10 @@ run_smoke_with_policy() {
     bauds=("$SMOKE_BAUD_OVERRIDE")
   elif [[ "$role" == "esp32" ]]; then
     bauds=("115200" "19200")
+  elif [[ "$role" == "esp8266_usb" ]]; then
+    bauds=("115200")
   else
-    bauds=("115200" "19200")
+    bauds=("115200")
   fi
 
   local b
@@ -318,11 +322,35 @@ cd "$FW"
 action_log "[info] FW=$FW"
 action_log "[info] artifacts: $artifact_dir"
 
-if ! resolve_ports; then
-  append_step "resolve_ports" "FAIL" "2" "$artifact_dir/ports_resolve.json" "port resolution failed"
-  exit 2
+if [[ "$AUTO_PORTS" == "1" ]]; then
+  while true; do
+    countdown_usb_prompt
+    if ! resolve_ports 1; then
+      append_step "resolve_ports" "FAIL" "2" "$artifact_dir/ports_resolve.json" "port resolution failed"
+      if [[ "${ZACUS_REQUIRE_HW:-1}" == "1" && "${ZACUS_NO_CONFIRM:-0}" != "1" && "$DRY_RUN" != "1" ]]; then
+        action_log "[warn] hardware required: reconnect USB and retry"
+        continue
+      fi
+      exit 2
+    fi
+    if [[ "${ZACUS_REQUIRE_HW:-1}" == "1" && ( -z "$PORT_ESP32" || -z "$PORT_ESP8266" ) ]]; then
+      append_step "resolve_ports" "FAIL" "2" "$artifact_dir/ports_resolve.json" "missing required roles"
+      if [[ "${ZACUS_NO_CONFIRM:-0}" != "1" && "$DRY_RUN" != "1" ]]; then
+        action_log "[warn] missing role ports, reconnect then confirm again"
+        continue
+      fi
+      exit 2
+    fi
+    append_step "resolve_ports" "PASS" "0" "$artifact_dir/ports_resolve.json" "ok"
+    break
+  done
+else
+  if ! resolve_ports; then
+    append_step "resolve_ports" "FAIL" "2" "$artifact_dir/ports_resolve.json" "port resolution failed"
+    exit 2
+  fi
+  append_step "resolve_ports" "PASS" "0" "$artifact_dir/ports_resolve.json" "ok"
 fi
-append_step "resolve_ports" "PASS" "0" "$artifact_dir/ports_resolve.json" "ok"
 
 if [[ "$SKIP_UPLOAD" == "0" ]]; then
   if [[ "$SKIP_BUILD" == "0" ]]; then
@@ -341,18 +369,8 @@ else
   append_step "upload_esp8266" "SKIP" "0" "$artifact_dir/esp8266_upload.log" "--skip-upload"
 fi
 
-countdown_usb_prompt
-if [[ "$AUTO_PORTS" == "1" && "$DRY_RUN" == "0" ]]; then
-  prev_esp32="$PORT_ESP32"
-  prev_esp8266="$PORT_ESP8266"
-  if resolve_ports 1; then
-    if [[ "$PORT_ESP32" != "$prev_esp32" || "$PORT_ESP8266" != "$prev_esp8266" ]]; then
-      action_log "[port] refreshed after countdown: ESP32=$PORT_ESP32 ESP8266=$PORT_ESP8266"
-    fi
-  fi
-fi
 run_smoke_with_policy "esp32" "$PORT_ESP32" "$artifact_dir/smoke_esp32.log" || true
-run_smoke_with_policy "esp8266" "$PORT_ESP8266" "$artifact_dir/smoke_esp8266.log" || true
+run_smoke_with_policy "esp8266_usb" "$PORT_ESP8266" "$artifact_dir/smoke_esp8266.log" || true
 check_ui_link_status || true
 
 run_step "gate_s1" "$artifact_dir/gate_s1.log" bash "$GATE_SCRIPT" --sprint s1 --port-esp32 "$PORT_ESP32" --port-esp8266 "$PORT_ESP8266" --no-auto-ports --require-hw || true
@@ -370,6 +388,10 @@ port_esp32 = sys.argv[4]
 port_esp8266 = sys.argv[5]
 env_esp32 = sys.argv[6]
 env_esp8266 = sys.argv[7]
+ports_resolve = artifact_dir / "ports_resolve.json"
+resolve_data = {}
+if ports_resolve.exists():
+    resolve_data = json.loads(ports_resolve.read_text(encoding="utf-8"))
 
 steps = []
 for raw in steps_tsv.read_text(encoding="utf-8").splitlines():
@@ -378,7 +400,7 @@ for raw in steps_tsv.read_text(encoding="utf-8").splitlines():
     name, status, exit_code, log_file, details = raw.split("\t", 4)
     steps.append({"name": name, "status": status, "exit_code": int(exit_code), "log_file": log_file, "details": details})
 
-critical = {"resolve_ports", "upload_esp32", "upload_esp8266", "smoke_esp32", "smoke_esp8266", "gate_s1", "gate_s2"}
+critical = {"resolve_ports", "upload_esp32", "upload_esp8266", "smoke_esp32", "smoke_esp8266_usb", "gate_s1", "gate_s2"}
 overall = "PASS"
 if any(s["name"] in critical and s["status"] == "FAIL" for s in steps):
     overall = "FAIL"
@@ -388,7 +410,20 @@ elif all(s["status"] == "SKIP" for s in steps):
 ui_status = next((s for s in steps if s["name"] == "ui_link"), None)
 summary = {
     "timestamp": timestamp,
-    "ports": {"esp32": port_esp32, "esp8266": port_esp8266, "detection_reason": "see ports_resolve.json"},
+    "ports": {
+        "esp32": {
+            "port": port_esp32,
+            "location": resolve_data.get("details", {}).get("esp32", {}).get("location", ""),
+            "role": "esp32",
+            "reason": resolve_data.get("details", {}).get("esp32", {}).get("reason", ""),
+        },
+        "esp8266_usb": {
+            "port": port_esp8266,
+            "location": resolve_data.get("details", {}).get("esp8266", {}).get("location", ""),
+            "role": "esp8266_usb",
+            "reason": resolve_data.get("details", {}).get("esp8266", {}).get("reason", ""),
+        },
+    },
     "envs": {"esp32": env_esp32, "esp8266": env_esp8266},
     "steps": steps,
     "result": overall,
@@ -404,8 +439,8 @@ rows = [
     "# RC live summary",
     "",
     f"- Result: **{overall}**",
-    f"- ESP32 port: `{port_esp32}`",
-    f"- ESP8266 port: `{port_esp8266}`",
+    f"- ESP32 port: `{port_esp32}` (location `{resolve_data.get('details', {}).get('esp32', {}).get('location', '')}`)",
+    f"- ESP8266 USB port: `{port_esp8266}` (location `{resolve_data.get('details', {}).get('esp8266', {}).get('location', '')}`)",
     f"- UI link: `{ui_status['status'] if ui_status else 'n/a'}`",
     "",
     "| Step | Status | Exit | Log | Details |",

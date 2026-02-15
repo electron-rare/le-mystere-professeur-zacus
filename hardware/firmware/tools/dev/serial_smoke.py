@@ -18,21 +18,34 @@ except ImportError:
     sys.exit(2)
 
 PING_COMMAND = "PING"
-PING_OK_PATTERN = re.compile(r"\b(PONG|OK|ACK|UNKNOWN)\b|BOOT|STATUS|HELLO|STAT", re.IGNORECASE)
+PING_OK_PATTERN = re.compile(r"\b(PONG|ACK|OK|UNKNOWN|HELLO|STAT|STATUS)\b", re.IGNORECASE)
+READY_PATTERN = re.compile(r"\[SCREEN\]\s*Ready\.", re.IGNORECASE)
+FATAL_PATTERN = re.compile(
+    r"(User exception|Exception|panic|abort|assert|rst cause|stack smashing|Guru Meditation|Fatal)",
+    re.IGNORECASE,
+)
+REBOOT_PATTERN = re.compile(r"(ets Jan|rst:|boot mode|load:0x|entry 0x)", re.IGNORECASE)
 
 ROOT = Path(__file__).resolve().parents[2]
 PORTS_MAP_PATH = ROOT / "tools" / "dev" / "ports_map.json"
 DEFAULT_PORTS_MAP = {
     "location": {
         "20-6.1.1": "esp32",
-        "20-6.1.2": "esp8266",
+        "20-6.1.2": "esp8266_usb",
     },
     "vidpid": {
         "2e8a:0005": "rp2040",
         "2e8a:000a": "rp2040",
     },
 }
-ROLE_PRIORITY = ["esp32", "esp8266", "rp2040"]
+ROLE_PRIORITY = ["esp32", "esp8266_usb", "rp2040"]
+
+
+def normalize_role(role: str) -> str:
+    value = (role or "").strip().lower()
+    if value in ("esp8266", "esp8266_usb", "ui", "oled"):
+        return "esp8266_usb"
+    return value
 
 
 def exit_no_hw(wait_port, allow, reason=None):
@@ -69,16 +82,16 @@ def normalize_ports_map(raw_map):
         if isinstance(raw_location, dict):
             for key, value in raw_location.items():
                 if isinstance(value, str):
-                    location[str(key).lower()] = value
+                    location[str(key).lower()] = normalize_role(value)
                 elif isinstance(value, dict) and isinstance(value.get("role"), str):
-                    location[str(key).lower()] = value["role"]
+                    location[str(key).lower()] = normalize_role(value["role"])
         raw_vidpid = raw_map.get("vidpid", {})
         if isinstance(raw_vidpid, dict):
             for key, value in raw_vidpid.items():
                 if isinstance(value, str):
-                    vidpid[str(key).lower()] = value
+                    vidpid[str(key).lower()] = normalize_role(value)
                 elif isinstance(value, dict) and isinstance(value.get("role"), str):
-                    vidpid[str(key).lower()] = value["role"]
+                    vidpid[str(key).lower()] = normalize_role(value["role"])
         return {"location": location, "vidpid": vidpid}
 
     # Backward compatibility with the previous shape:
@@ -89,9 +102,9 @@ def normalize_ports_map(raw_map):
             continue
         for key, value in platform_map.items():
             if isinstance(value, dict) and isinstance(value.get("role"), str):
-                location[str(key).lower()] = value["role"]
+                location[str(key).lower()] = normalize_role(value["role"])
             elif isinstance(value, str):
-                location[str(key).lower()] = value
+                location[str(key).lower()] = normalize_role(value)
     return {"location": location, "vidpid": vidpid}
 
 
@@ -207,16 +220,12 @@ def find_port_by_name(name, wait_port):
     return None
 
 
-def read_until_match(ser: Serial, pattern: re.Pattern, timeout_s: float) -> bool:
+def read_lines(ser: Serial, timeout_s: float):
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         line = ser.readline().decode("utf-8", errors="ignore").strip()
-        if not line:
-            continue
-        print(f"[rx] {line}")
-        if pattern.search(line):
-            return True
-    return False
+        if line:
+            yield line
 
 
 def run_smoke(device, baud, timeout):
@@ -225,13 +234,91 @@ def run_smoke(device, baud, timeout):
         with Serial(device, baud, timeout=0.2) as ser:
             time.sleep(0.15)
             ser.reset_input_buffer()
-            print(f"[tx] {PING_COMMAND}")
-            ser.write((PING_COMMAND + "\n").encode("ascii"))
-            if read_until_match(ser, PING_OK_PATTERN, timeout):
-                print(f"[ok] {PING_COMMAND}")
-                return True
-            print(f"[fail] no expected response for {PING_COMMAND}", file=sys.stderr)
-            return False
+            handshake_hits = 0
+            post_handshake = False
+            handshake_deadline = time.time() + max(timeout * 2, 1.2)
+
+            while time.time() < handshake_deadline and handshake_hits < 2:
+                print(f"[tx] {PING_COMMAND}")
+                ser.write((PING_COMMAND + "\n").encode("ascii"))
+                for line in read_lines(ser, max(0.7, timeout)):
+                    print(f"[rx] {line}")
+                    if FATAL_PATTERN.search(line):
+                        print(f"[fail] fatal marker detected: {line}", file=sys.stderr)
+                        return False
+                    if REBOOT_PATTERN.search(line):
+                        # Boot noise can happen before a stable handshake.
+                        continue
+                    if PING_OK_PATTERN.search(line):
+                        handshake_hits += 1
+                        print(f"[ok] handshake {handshake_hits}/2")
+                        if handshake_hits >= 2:
+                            post_handshake = True
+                            break
+                if handshake_hits < 2:
+                    time.sleep(0.15)
+
+            if not post_handshake:
+                print(f"[fail] handshake incomplete ({handshake_hits}/2)", file=sys.stderr)
+                return False
+
+            stable_until = time.time() + 3.0
+            while time.time() < stable_until:
+                for line in read_lines(ser, 0.35):
+                    print(f"[rx] {line}")
+                    if FATAL_PATTERN.search(line):
+                        print(f"[fail] fatal marker after handshake: {line}", file=sys.stderr)
+                        return False
+                    if REBOOT_PATTERN.search(line):
+                        print(f"[fail] reboot marker after handshake: {line}", file=sys.stderr)
+                        return False
+            print(f"[ok] {PING_COMMAND} stable")
+            return True
+    except Exception as exc:
+        print(f"[error] serial failure on {device}: {exc}", file=sys.stderr)
+        return False
+
+
+def run_monitor_smoke(device, baud):
+    print(f"[smoke] monitor-only on {device} (baud={baud})")
+    try:
+        with Serial(device, baud, timeout=0.2) as ser:
+            time.sleep(0.15)
+            ser.reset_input_buffer()
+            ready_deadline = time.time() + 4.0
+            saw_ready = False
+            while time.time() < ready_deadline:
+                line = ser.readline().decode("utf-8", errors="ignore").strip()
+                if not line:
+                    continue
+                print(f"[rx] {line}")
+                if FATAL_PATTERN.search(line):
+                    print(f"[fail] fatal marker detected: {line}", file=sys.stderr)
+                    return False
+                if REBOOT_PATTERN.search(line):
+                    print(f"[fail] reboot marker detected: {line}", file=sys.stderr)
+                    return False
+                if READY_PATTERN.search(line):
+                    saw_ready = True
+                    break
+            if not saw_ready:
+                print("[fail] ready marker missing", file=sys.stderr)
+                return False
+
+            stable_until = time.time() + 3.0
+            while time.time() < stable_until:
+                line = ser.readline().decode("utf-8", errors="ignore").strip()
+                if not line:
+                    continue
+                print(f"[rx] {line}")
+                if FATAL_PATTERN.search(line):
+                    print(f"[fail] fatal marker after ready: {line}", file=sys.stderr)
+                    return False
+                if REBOOT_PATTERN.search(line):
+                    print(f"[fail] reboot marker after ready: {line}", file=sys.stderr)
+                    return False
+            print("[ok] monitor stable")
+            return True
     except Exception as exc:
         print(f"[error] serial failure on {device}: {exc}", file=sys.stderr)
         return False
@@ -241,9 +328,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run quick serial smoke with auto port detection.")
     parser.add_argument("--port", help="Explicit serial port to use (optional)")
     parser.add_argument("--wait-port", type=int, default=30, help="Seconds to wait for a port (default 30)")
-    parser.add_argument("--role", choices=["auto", "all", "esp32", "esp8266", "rp2040"], default="auto")
+    parser.add_argument("--role", choices=["auto", "all", "esp32", "esp8266", "esp8266_usb", "rp2040"], default="auto")
     parser.add_argument("--all", action="store_true", help="Run smoke on all detected roles (when not auto)")
-    parser.add_argument("--baud", type=int, default=19200, help="Serial baud (default 19200)")
+    parser.add_argument("--baud", type=int, default=0, help="Serial baud override (role default when omitted)")
     parser.add_argument("--timeout", type=float, default=1.0, help="Per-command timeout (seconds)")
     parser.add_argument(
         "--allow-no-hardware",
@@ -252,6 +339,7 @@ def main() -> int:
     )
     parser.add_argument("--prefer-cu", action="store_true", default=platform.system() == "Darwin", help="Prefer /dev/cu.* on macOS")
     args = parser.parse_args()
+    args.role = normalize_role(args.role)
     allow_no_hardware = args.allow_no_hardware or os.environ.get("ZACUS_ALLOW_NO_HW") == "1"
 
     ports_map = load_ports_map()
@@ -266,6 +354,13 @@ def main() -> int:
         if not detection and args.role == "auto":
             print("[error] failed to classify the explicit port", file=sys.stderr)
             return 1
+        if args.role in ("esp32", "esp8266_usb", "rp2040") and args.role not in detection:
+            location = parse_location(getattr(port, "hwid", "")) or "unknown"
+            detection[args.role] = {
+                "device": port.device,
+                "hwid": getattr(port, "hwid", ""),
+                "location": location,
+            }
     else:
         baseline_ports = list(list_ports.comports())
         if baseline_ports:
@@ -307,6 +402,15 @@ def main() -> int:
             targets.append({"role": role, **info})
         elif args.role != "auto":
             print(f"[warn] requested role {role} not detected", file=sys.stderr)
+            if args.port:
+                targets.append(
+                    {
+                        "role": role,
+                        "device": args.port,
+                        "hwid": "",
+                        "location": "explicit",
+                    }
+                )
 
     if not targets:
         return 1
@@ -316,8 +420,12 @@ def main() -> int:
         role = entry["role"]
         device = entry["device"]
         location = entry["location"]
+        baud = args.baud or (115200 if role in ("esp32", "esp8266_usb") else 19200)
         print(f"[detect] role={role} device={device} location={location}")
-        ok = run_smoke(device, args.baud, args.timeout)
+        if role == "esp8266_usb":
+            ok = run_monitor_smoke(device, baud)
+        else:
+            ok = run_smoke(device, baud, args.timeout)
         overall_ok = overall_ok and ok
 
     return 0 if overall_ok else 1

@@ -4,6 +4,13 @@
 # Local IDE settings
 .vscode/
 
+# PlatformIO and generated logs
+.pio/
+.platformio/
+logs/
+**/logs/
+**/*.log
+
 # Generated game exports
 game/exports/*
 !game/exports/.gitkeep
@@ -14,14 +21,9 @@ audio/generated/*
 !audio/generated/README.md
 
 # Locally generated printable PDFs (not versioned)
-<<<<<<< Updated upstream
-printables/export/pdf/zacus_v1/*
-!printables/export/pdf/zacus_v1/README.md
-=======
 printables/export/pdf/**
 !printables/export/pdf/zacus_v1/README.md
 
 # Locally generated printable PNGs (not versioned)
 printables/export/png/**
 !printables/export/png/zacus_v1/.gitkeep
->>>>>>> Stashed changes

@@ -13,5 +13,7 @@
     "**/.pio/**": true,
     "**/.platformio/**": true,
     "**/.venv/**": true
-  }
+  },
+  "stm32-for-vscode.openOCDPath": false,
+  "stm32-for-vscode.armToolchainPath": false
 }

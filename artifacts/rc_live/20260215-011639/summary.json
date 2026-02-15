@@ -1,0 +1,82 @@
+{
+  "timestamp": "20260215-011639",
+  "ports": {
+    "esp32": "",
+    "esp8266": "",
+    "detection_reason": "see ports_resolve.json"
+  },
+  "envs": {
+    "esp32": "esp32dev",
+    "esp8266": "esp8266_oled"
+  },
+  "steps": [
+    {
+      "name": "resolve_ports",
+      "status": "PASS",
+      "exit_code": 0,
+      "log_file": "/Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/artifacts/rc_live/20260215-011639/ports_resolve.json",
+      "details": "ok"
+    },
+    {
+      "name": "build_esp32",
+      "status": "SKIP",
+      "exit_code": 0,
+      "log_file": "/Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/artifacts/rc_live/20260215-011639/esp32_upload.log",
+      "details": "dry-run"
+    },
+    {
+      "name": "build_esp8266",
+      "status": "SKIP",
+      "exit_code": 0,
+      "log_file": "/Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/artifacts/rc_live/20260215-011639/esp8266_upload.log",
+      "details": "dry-run"
+    },
+    {
+      "name": "upload_esp32",
+      "status": "SKIP",
+      "exit_code": 0,
+      "log_file": "/Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/artifacts/rc_live/20260215-011639/esp32_upload.log",
+      "details": "dry-run"
+    },
+    {
+      "name": "upload_esp8266",
+      "status": "SKIP",
+      "exit_code": 0,
+      "log_file": "/Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/artifacts/rc_live/20260215-011639/esp8266_upload.log",
+      "details": "dry-run"
+    },
+    {
+      "name": "smoke_esp32",
+      "status": "SKIP",
+      "exit_code": 0,
+      "log_file": "/Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/artifacts/rc_live/20260215-011639/smoke_esp32.log",
+      "details": "dry-run"
+    },
+    {
+      "name": "smoke_esp8266",
+      "status": "SKIP",
+      "exit_code": 0,
+      "log_file": "/Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/artifacts/rc_live/20260215-011639/smoke_esp8266.log",
+      "details": "dry-run"
+    },
+    {
+      "name": "gate_s1",
+      "status": "SKIP",
+      "exit_code": 0,
+      "log_file": "/Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/artifacts/rc_live/20260215-011639/gate_s1.log",
+      "details": "dry-run"
+    },
+    {
+      "name": "gate_s2",
+      "status": "SKIP",
+      "exit_code": 0,
+      "log_file": "/Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/artifacts/rc_live/20260215-011639/gate_s2.log",
+      "details": "dry-run"
+    }
+  ],
+  "result": "PASS",
+  "notes": [
+    "If upload fails: verify USB data cable, CP210x/CH340 driver, and power/reset.",
+    "For ESP32 sync errors: hold BOOT while flashing."
+  ]
+}

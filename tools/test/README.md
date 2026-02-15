@@ -15,7 +15,8 @@ bash tools/test/run_content_checks.sh
 python3 tools/test/run_serial_suite.py --list-suites
 python3 tools/test/run_serial_suite.py --suite smoke_plus --role auto --allow-no-hardware
 python3 tools/test/zacus_menu.py
-bash tools/test/run_rc_gate.sh --sprint s1 --allow-no-hardware
+bash tools/test/run_rc_gate.sh --sprint s1 --port-esp32 /dev/cu.SLAB_USBtoUART
+bash tools/test/hw_now.sh
 ```
 
 ## Hardware modes
@@ -51,5 +52,6 @@ They forward to this canonical `tools/test` implementation.
 ## RC cycle helpers
 
 - Sprint gate runner: `bash tools/test/run_rc_gate.sh --sprint s1..s5 ...`
+- Live one-shot (upload + smoke + s1+s2): `bash tools/test/hw_now.sh`
 - Board seed script: `bash hardware/firmware/tools/dev/rc_execution_seed.sh`
 - RC board source of truth: `hardware/firmware/docs/RC_FINAL_BOARD.md`

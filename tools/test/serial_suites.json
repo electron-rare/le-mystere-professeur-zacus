@@ -1,0 +1,217 @@
+{
+  "version": 1,
+  "defaults": {
+    "baud": 19200,
+    "timeout": 1.5,
+    "wait_port": 3,
+    "read_timeout": 0.2
+  },
+  "suites": {
+    "smoke_plus": {
+      "description": "Quick command smoke with tolerant expectations.",
+      "tests": [
+        {
+          "name": "mp3_status",
+          "command": "MP3_STATUS",
+          "expect": [
+            "\\[MP3\\]\\s+OK\\s+status"
+          ]
+        },
+        {
+          "name": "mp3_scan_status",
+          "command": "MP3_SCAN STATUS",
+          "expect": [
+            "\\[MP3_SCAN\\]\\s+OK\\s+status"
+          ]
+        },
+        {
+          "name": "story_v2_health",
+          "command": "STORY_V2_HEALTH",
+          "expect_any": [
+            "\\[STORY_V2\\]\\s+OK\\b",
+            "\\[STORY_V2\\]\\s+OUT_OF_CONTEXT\\b"
+          ]
+        },
+        {
+          "name": "mp3_caps",
+          "command": "MP3_CAPS",
+          "expect_any": [
+            "\\[MP3_CAPS\\]\\s+OK\\b",
+            "\\[MP3_CAPS\\]\\s+OUT_OF_CONTEXT\\b"
+          ],
+          "tip": "If MP3_CAPS stays OUT_OF_CONTEXT, verify runtime callbacks and app state."
+        }
+      ]
+    },
+    "mp3_basic": {
+      "description": "MP3 status, scan and basic playability checks.",
+      "tests": [
+        {
+          "name": "mp3_status",
+          "command": "MP3_STATUS",
+          "expect": [
+            "\\[MP3\\]\\s+OK\\s+status"
+          ]
+        },
+        {
+          "name": "mp3_ui_status",
+          "command": "MP3_UI_STATUS",
+          "expect": [
+            "\\[MP3_UI\\]\\s+OK\\s+status"
+          ]
+        },
+        {
+          "name": "mp3_list",
+          "command": "MP3_LIST",
+          "expect": [
+            "\\[MP3\\]\\s+OK\\s+list"
+          ],
+          "tip": "If no tracks appear in logs, check SD card content."
+        },
+        {
+          "name": "mp3_play_track_1",
+          "command": "MP3_PLAY 1",
+          "expect_any": [
+            "\\[MP3\\]\\s+OK\\s+play",
+            "\\[MP3\\]\\s+OUT_OF_CONTEXT\\b",
+            "\\[MP3\\]\\s+BUSY\\b"
+          ],
+          "tip": "Attach SD media if you want MP3_PLAY to pass with OK play."
+        },
+        {
+          "name": "mp3_queue_preview",
+          "command": "MP3_QUEUE_PREVIEW 5",
+          "expect_any": [
+            "\\[MP3_QUEUE\\]\\s+OK\\s+preview",
+            "\\[MP3_QUEUE\\]\\s+OUT_OF_CONTEXT\\b"
+          ]
+        }
+      ]
+    },
+    "mp3_fx": {
+      "description": "MP3 FX mode, gain and trigger checks.",
+      "tests": [
+        {
+          "name": "fx_mode_ducking",
+          "command": "MP3_FX_MODE DUCKING",
+          "expect": [
+            "\\[MP3_FX\\]\\s+OK\\s+DUCKING"
+          ]
+        },
+        {
+          "name": "fx_gain",
+          "command": "MP3_FX_GAIN 40 70",
+          "expect": [
+            "\\[MP3_FX\\]\\s+OK\\s+gain"
+          ]
+        },
+        {
+          "name": "fx_trigger",
+          "command": "MP3_FX WIN 800",
+          "expect_any": [
+            "\\[MP3_FX\\]\\s+OK\\s+trigger",
+            "\\[MP3_FX\\]\\s+BUSY\\s+trigger"
+          ]
+        },
+        {
+          "name": "fx_mode_overlay",
+          "command": "MP3_FX_MODE OVERLAY",
+          "expect": [
+            "\\[MP3_FX\\]\\s+OK\\s+OVERLAY"
+          ]
+        },
+        {
+          "name": "fx_stop",
+          "command": "MP3_FX_STOP",
+          "expect": [
+            "\\[MP3_FX\\]\\s+OK\\s+stop"
+          ]
+        }
+      ]
+    },
+    "story_v2_basic": {
+      "description": "Story V2 status and control probes with legacy tolerance.",
+      "tests": [
+        {
+          "name": "v2_enable_status",
+          "command": "STORY_V2_ENABLE STATUS",
+          "expect_any": [
+            "\\[STORY_V2\\]\\s+enabled=",
+            "\\[STORY_V2\\]\\s+OUT_OF_CONTEXT\\b"
+          ]
+        },
+        {
+          "name": "v2_trace_status",
+          "command": "STORY_V2_TRACE STATUS",
+          "expect_any": [
+            "\\[STORY_V2\\]\\s+OK\\s+trace_status",
+            "\\[STORY_V2\\]\\s+OUT_OF_CONTEXT\\b"
+          ]
+        },
+        {
+          "name": "v2_status",
+          "command": "STORY_V2_STATUS",
+          "expect_any": [
+            "\\[STORY_V2\\]\\s+enabled=",
+            "\\[STORY_V2\\]\\s+OUT_OF_CONTEXT\\b"
+          ]
+        },
+        {
+          "name": "v2_health",
+          "command": "STORY_V2_HEALTH",
+          "expect_any": [
+            "\\[STORY_V2\\]\\s+OK\\b",
+            "\\[STORY_V2\\]\\s+OUT_OF_CONTEXT\\b"
+          ]
+        },
+        {
+          "name": "v2_validate",
+          "command": "STORY_V2_VALIDATE",
+          "expect_any": [
+            "\\[STORY_V2\\]\\s+OK\\s+valid",
+            "\\[STORY_V2\\]\\s+OUT_OF_CONTEXT\\b",
+            "\\[STORY_V2\\]\\s+BAD_ARGS\\b"
+          ],
+          "tip": "If validation returns BAD_ARGS, verify scenario generation and active scenario selection."
+        }
+      ]
+    },
+    "story_v2_metrics": {
+      "description": "Story V2 metrics snapshot and reset checks.",
+      "tests": [
+        {
+          "name": "v2_metrics_before",
+          "command": "STORY_V2_METRICS",
+          "expect_any": [
+            "\\[STORY_V2\\]\\s+OK\\s+metrics",
+            "\\[STORY_V2\\]\\s+OUT_OF_CONTEXT\\b"
+          ]
+        },
+        {
+          "name": "v2_metrics_reset",
+          "command": "STORY_V2_METRICS_RESET",
+          "expect_any": [
+            "\\[STORY_V2\\]\\s+OK\\s+metrics_reset",
+            "\\[STORY_V2\\]\\s+OUT_OF_CONTEXT\\b"
+          ]
+        },
+        {
+          "name": "v2_metrics_after",
+          "command": "STORY_V2_METRICS",
+          "expect_any": [
+            "\\[STORY_V2\\]\\s+OK\\s+metrics",
+            "\\[STORY_V2\\]\\s+OUT_OF_CONTEXT\\b"
+          ]
+        },
+        {
+          "name": "v2_trace_level_status",
+          "command": "STORY_V2_TRACE_LEVEL STATUS",
+          "expect_any": [
+            "\\[STORY_V2\\]\\s+OK\\s+trace_level_status",
+            "\\[STORY_V2\\]\\s+OUT_OF_CONTEXT\\b"
+          ]
+        }
+      ]
+    }
+  }
+}

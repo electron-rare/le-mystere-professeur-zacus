@@ -54,8 +54,13 @@ Firmware cockpit
 3) rc live gate (ZACUS_REQUIRE_HW unset)
 4) rc live gate (ZACUS_REQUIRE_HW=1)
 5) watch serial ports
+6) run codex prompt menu
 0) exit
 EOF
+}
+
+run_codex_prompts() {
+  "$FW_ROOT/tools/dev/codex_prompt_menu.sh"
 }
 
 while true; do
@@ -67,6 +72,7 @@ while true; do
     3) ZACUS_REQUIRE_HW=0 run_rc_live ;;
     4) ZACUS_REQUIRE_HW=1 run_rc_live ;;
     5) ports_watch ;;
+    6) run_codex_prompts ;;
     0) exit 0 ;;
     *) echo "Unknown option: $choice" ;;
   esac

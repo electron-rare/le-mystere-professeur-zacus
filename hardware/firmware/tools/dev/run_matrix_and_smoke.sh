@@ -203,49 +203,61 @@ EOM
 wait_for_usb_confirmation() {
   local warning="⚠️ BRANCHE L’USB MAINTENANT ⚠️"
   local probe_every_s=15
-  local warn_interval=5
-  local list_interval=15
 
-  if [[ "${ZACUS_REQUIRE_HW:-0}" != "1" ]]; then
-    if [[ "${ZACUS_NO_COUNTDOWN:-0}" == "1" ]]; then
-      log_info "USB wait gate skipped (ZACUS_NO_COUNTDOWN=1)"
-      return 0
-    fi
+  if [[ "${ZACUS_REQUIRE_HW:-0}" == "1" ]]; then
+    return wait_for_required_usb
+  fi
 
-    print_usb_alert
-    emit_usb_warning "$warning"
-    list_ports_verbose
-
-    if [[ -t 0 ]]; then
-      log_info "press Enter once USB is connected (ports are listed every ${probe_every_s}s)"
-      while true; do
-        if read -r -t "$probe_every_s" -p "Press Enter to continue: " _; then
-          echo | tee -a "$RUN_LOG"
-          break
-        fi
-        echo | tee -a "$RUN_LOG"
-        emit_usb_warning "$warning"
-        list_ports_verbose
-      done
-    else
-      if read -r -t 1 _; then
-        log_info "USB confirmation received from stdin"
-      else
-        log_warn "stdin is non-interactive; waiting ${probe_every_s}s then continuing"
-        sleep "$probe_every_s"
-        list_ports_verbose
-      fi
-    fi
-    log_info "USB confirmation complete"
+  if [[ "${ZACUS_NO_COUNTDOWN:-0}" == "1" ]]; then
+    log_info "USB wait gate skipped (ZACUS_NO_COUNTDOWN=1)"
     return 0
   fi
 
   print_usb_alert
   emit_usb_warning "$warning"
   list_ports_verbose
-  local last_warn
-  last_warn=$(date +%s)
-  local last_list="$last_warn"
+
+  if [[ -t 0 ]]; then
+    log_info "press Enter once USB is connected (ports are listed every ${probe_every_s}s)"
+    while true; do
+      if read -r -t "$probe_every_s" -p "Press Enter to continue: " _; then
+        echo | tee -a "$RUN_LOG"
+        break
+      fi
+      echo | tee -a "$RUN_LOG"
+      emit_usb_warning "$warning"
+      list_ports_verbose
+    done
+  else
+    if read -r -t 1 _; then
+      log_info "USB confirmation received from stdin"
+    else
+      log_warn "stdin is non-interactive; waiting ${probe_every_s}s then continuing"
+      sleep "$probe_every_s"
+      list_ports_verbose
+    fi
+  fi
+  log_info "USB confirmation complete"
+  return 0
+}
+
+
+wait_for_required_usb() {
+  local warning="⚠️ BRANCHE L’USB MAINTENANT ⚠️"
+  local warn_interval=5
+  local list_interval=15
+  local max_wait="${ZACUS_WAIT_MAX_SECS:-0}"
+  local start
+  if ! [[ "$max_wait" =~ ^[0-9]+$ ]]; then
+    max_wait=0
+  fi
+
+  print_usb_alert
+  emit_usb_warning "$warning"
+  list_ports_verbose
+  start=$(date +%s)
+  local last_warn="$start"
+  local last_list="$start"
   local _prev_retry="${RESOLVE_PORTS_ALLOW_RETRY:-0}"
   RESOLVE_PORTS_ALLOW_RETRY="1"
   trap 'RESOLVE_PORTS_ALLOW_RETRY=$_prev_retry' RETURN
@@ -253,10 +265,14 @@ wait_for_usb_confirmation() {
   while true; do
     if resolve_live_ports && [[ "$PORT_STATUS" == "OK" && -n "$PORT_ESP32" && -n "$PORT_ESP8266" ]]; then
       log_info "required ports detected"
-      break
+      return 0
     fi
     local now
     now=$(date +%s)
+    if [[ "$max_wait" -gt 0 ]] && (( now - start >= max_wait )); then
+      log_warn "ZACUS_WAIT_MAX_SECS=${max_wait} reached; exiting USB wait"
+      return 1
+    fi
     if (( now - last_warn >= warn_interval )); then
       emit_usb_warning "$warning"
       log_warn "waiting for CP2102 adapters..."
@@ -268,8 +284,6 @@ wait_for_usb_confirmation() {
     fi
     sleep 1
   done
-
-  return 0
 }
 
 resolve_live_ports() {
@@ -692,13 +706,40 @@ if [[ "${ZACUS_SKIP_SMOKE:-0}" == "1" ]]; then
   append_step "ui_link" "SKIP" "0" "$ARTIFACT_DIR/ui_link.log" "ZACUS_SKIP_SMOKE=1"
   log_step "serial smoke skipped"
 else
-  echo
-  log_step "port resolution"
-  if ! wait_for_usb_confirmation; then
-    set_failure 21
+  local port_loop_success=1
+  if [[ "${ZACUS_REQUIRE_HW:-0}" == "1" ]]; then
+    port_loop_success=0
+    while true; do
+      echo
+      log_step "port resolution"
+      if ! wait_for_usb_confirmation; then
+        set_failure 21
+        break
+      fi
+      if [[ "$PORT_STATUS" != "OK" || -z "$PORT_ESP32" || -z "$PORT_ESP8266" ]]; then
+        log_warn "ports unresolved; retrying"
+        continue
+      fi
+      if [[ ! -e "$PORT_ESP32" || ! -e "$PORT_ESP8266" ]]; then
+        log_warn "required port disappeared; re-waiting"
+        continue
+      fi
+      port_loop_success=1
+      break
+    done
+    if [[ "$port_loop_success" == "0" ]]; then
+      PORT_STATUS="FAILED"
+      log_warn "port resolution aborted"
+    fi
+  else
+    echo
+    log_step "port resolution"
+    if ! wait_for_usb_confirmation; then
+      set_failure 21
+    fi
   fi
 
-  if [[ "$PORT_STATUS" == "OK" ]]; then
+  if [[ "$PORT_STATUS" == "OK" && "$port_loop_success" == "1" ]]; then
     local_smoke_fail=0
     SMOKE_COMMAND_STRING="$PYTHON_BIN tools/dev/serial_smoke.py --role <esp32|esp8266_usb> --port <resolved> --baud 115200"
 

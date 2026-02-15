@@ -174,6 +174,13 @@ list_ports_verbose() {
   fi
 }
 
+emit_usb_warning() {
+  local warning="$1"
+  for _ in 1 2 3; do
+    printf '\a%s\n' "$warning" | tee -a "$RUN_LOG"
+  done
+}
+
 print_usb_alert() {
   cat <<'EOM' | tee -a "$RUN_LOG"
 ===========================================
@@ -196,50 +203,71 @@ EOM
 wait_for_usb_confirmation() {
   local warning="⚠️ BRANCHE L’USB MAINTENANT ⚠️"
   local probe_every_s=15
+  local warn_interval=5
+  local list_interval=15
 
-  if [[ "${ZACUS_NO_COUNTDOWN:-0}" == "1" ]]; then
-    log_info "USB wait gate skipped (ZACUS_NO_COUNTDOWN=1)"
+  if [[ "${ZACUS_REQUIRE_HW:-0}" != "1" ]]; then
+    if [[ "${ZACUS_NO_COUNTDOWN:-0}" == "1" ]]; then
+      log_info "USB wait gate skipped (ZACUS_NO_COUNTDOWN=1)"
+      return 0
+    fi
+
+    print_usb_alert
+    emit_usb_warning "$warning"
+    list_ports_verbose
+
+    if [[ -t 0 ]]; then
+      log_info "press Enter once USB is connected (ports are listed every ${probe_every_s}s)"
+      while true; do
+        if read -r -t "$probe_every_s" -p "Press Enter to continue: " _; then
+          echo | tee -a "$RUN_LOG"
+          break
+        fi
+        echo | tee -a "$RUN_LOG"
+        emit_usb_warning "$warning"
+        list_ports_verbose
+      done
+    else
+      if read -r -t 1 _; then
+        log_info "USB confirmation received from stdin"
+      else
+        log_warn "stdin is non-interactive; waiting ${probe_every_s}s then continuing"
+        sleep "$probe_every_s"
+        list_ports_verbose
+      fi
+    fi
+    log_info "USB confirmation complete"
     return 0
   fi
 
   print_usb_alert
-  for _ in 1 2 3; do
-    printf '\a%s\n' "$warning" | tee -a "$RUN_LOG"
-  done
+  emit_usb_warning "$warning"
   list_ports_verbose
-
+  local last_warn
+  last_warn=$(date +%s)
+  local last_list="$last_warn"
   local _prev_retry="${RESOLVE_PORTS_ALLOW_RETRY:-0}"
   RESOLVE_PORTS_ALLOW_RETRY="1"
   trap 'RESOLVE_PORTS_ALLOW_RETRY=$_prev_retry' RETURN
 
   while true; do
-    if resolve_live_ports; then
-      if [[ -n "$PORT_ESP32" && -n "$PORT_ESP8266" ]]; then
-        break
-      fi
+    if resolve_live_ports && [[ "$PORT_STATUS" == "OK" && -n "$PORT_ESP32" && -n "$PORT_ESP8266" ]]; then
+      log_info "required ports detected"
+      break
     fi
-    if [[ "${ZACUS_REQUIRE_HW:-0}" == "1" ]]; then
-      log_warn "required ports missing; retrying in ${probe_every_s}s"
-      for _ in 1 2 3; do
-        printf '\a%s\n' "$warning" | tee -a "$RUN_LOG"
-      done
-      sleep "$probe_every_s"
+    local now
+    now=$(date +%s)
+    if (( now - last_warn >= warn_interval )); then
+      emit_usb_warning "$warning"
+      log_warn "waiting for CP2102 adapters..."
+      last_warn=$now
+    fi
+    if (( now - last_list >= list_interval )); then
       list_ports_verbose
-      continue
+      last_list=$now
     fi
-    log_warn "required ports missing; continuing without hardware (ZACUS_REQUIRE_HW!=1)"
-    return 1
+    sleep 1
   done
-
-  if [[ -t 0 ]]; then
-    log_info "press Enter once USB is connected (ports are listed every ${probe_every_s}s)"
-    read -r -p "Press Enter to continue: " _ < /dev/tty
-    log_info "USB confirmation complete"
-  else
-    log_warn "stdin non-interactive; waiting ${probe_every_s}s then continuing"
-    sleep "$probe_every_s"
-    list_ports_verbose
-  fi
 
   return 0
 }

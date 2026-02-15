@@ -40,6 +40,8 @@ Attendu:
 ```sh
 ./tools/dev/bootstrap_local.sh
 ./tools/dev/run_matrix_and_smoke.sh
+# depuis la racine du repo:
+./hw_now.sh
 make fast-esp32 ESP32_PORT=<PORT_ESP32>
 make fast-ui-oled UI_OLED_PORT=<PORT_ESP8266>
 make fast-ui-tft UI_TFT_PORT=<PORT_RP2040>
@@ -60,6 +62,8 @@ Baud separation a retenir:
 
 Le script force `PLATFORMIO_CORE_DIR=$HOME/.platformio` pour que les caches PlatformIO restent en dehors du repo.
 Avant le smoke, il affiche `⚠️ BRANCHE L’USB MAINTENANT ⚠️` 3 fois, puis attend Enter en listant les ports toutes les 15s.
+Chaque run dépose `summary.json`, `summary.md`, `ports_resolve.json` et `ui_link.log` dans `artifacts/rc_live/<timestamp>/`.
+Le verdict UI link est strict: `UI_LINK_STATUS connected=1` attendu sur l'ESP32.
 
 Par défaut, la séquence smoke tolère l’absence de matériel et termine avec un code 0 quand rien n’est détecté.
 
@@ -73,7 +77,7 @@ Variantes d'environnement :
 - `ZACUS_ENV="esp32dev esp8266_oled" ./tools/dev/run_matrix_and_smoke.sh` — cible un sous-ensemble d’environnements.
 - `ZACUS_FORCE_BUILD=1 ./tools/dev/run_matrix_and_smoke.sh` — force la rebuild même si les artefacts existent déjà.
 
-Le script affiche un résumé final : `Build status` (OK ou SKIPPED) et `Smoke status` (OK/SKIP) avec la commande exacte.
+Le script affiche un résumé final (`Build/Port/Smoke/UI link`) et écrit le même verdict dans `artifacts/rc_live/<timestamp>/summary.json`.
 
 ## 4.6) Local dev cockpit
 

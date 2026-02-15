@@ -63,10 +63,14 @@ USB console monitoring uses `115200`. ESP8266 internal UI link SoftwareSerial st
 
 ```sh
 ./tools/dev/run_matrix_and_smoke.sh
+# or from repo root:
+./hw_now.sh
 ```
 
 `run_matrix_and_smoke.sh` ensures PlatformIO caches land under `$HOME/.platformio` (via `PLATFORMIO_CORE_DIR`) rather than inside the repo.
 Before smoke it shows `⚠️ BRANCHE L’USB MAINTENANT ⚠️` three times, then waits for Enter while listing ports every 15s.
+Each run writes deterministic artifacts under `artifacts/rc_live/<timestamp>/` (`summary.json`, `summary.md`, `ports_resolve.json`, `ui_link.log`, per-step logs).
+The runner resolves macOS CP2102 by LOCATION (`20-6.1.1` ESP32, `20-6.1.2` ESP8266 USB), then enforces a dedicated `UI_LINK_STATUS connected=1` gate on ESP32.
 
 Environment overrides:
 

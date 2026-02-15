@@ -263,7 +263,7 @@ resolve_live_ports() {
   printf '[step] %s\n' "${resolver_cmd[*]}" | tee -a "$RUN_LOG" "$resolve_log"
   set +e
   local resolve_json
-  resolve_json="$(${resolver_cmd[@]} 2>>"$resolve_log")"
+  resolve_json="$("${resolver_cmd[@]}" 2>>"$resolve_log")"
   local rc=$?
   set -e
   printf '%s\n' "$resolve_json" >> "$resolve_log"

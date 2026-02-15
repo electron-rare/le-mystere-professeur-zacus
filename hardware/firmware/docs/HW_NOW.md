@@ -1,54 +1,36 @@
 Run now
 =======
 
-1. Vérifiez que les deux boards sont câblées : ESP32 Audio Kit A252 et ESP8266 OLED (NodeMCU).
-2. Lancez le script de validation canonique :  
-   `bash tools/test/hw_now.sh` ou `bash tools/test/hw_now_esp32_esp8266.sh` si vous êtes déjà dans `hardware/firmware`.  
-   Le script :
-   - détecte automatiquement les ports série (avec `tools/dev/serial_smoke.py` pour la reconnaissance)
-   - compile et upload les firmwares PlatformIO (`esp32dev` + `esp8266_oled`)
-   - exécute des smokes `serial_smoke.py --role auto` puis AP fallback et collecte le verdict
-   - stocke les traces dans `artifacts/rc_live/<TIMESTAMP>/` (avec `steps.tsv`) et `logs/hw_now_<TIMESTAMP>.log`.
-3. À la fin, lisez les derniers blocs `[PASS]` / `[SKIP]` / `[fail]` dans le log pour détecter les échecs, puis consultez `steps.tsv` si nécessaire.
-4. Si quelque chose échoue, relancez `pio device monitor -e <env>` sur le port correspondant (ESP32 ou ESP8266) pour récupérer les consoles : `pio device monitor -e <env> --port <PORT> --monitor-speed 19200`.
+1. Depuis la racine du repo, lancez `./hw_now.sh`.
+   - équivalent depuis `hardware/firmware`: `./tools/test/hw_now.sh`
+2. Le runner canonique est `tools/dev/run_matrix_and_smoke.sh`:
+   - build matrix PlatformIO (ou skip si artefacts déjà présents)
+   - gate USB locale: `⚠️ BRANCHE L’USB MAINTENANT ⚠️` x3 + attente Enter + listing ports toutes les 15s
+   - résolution de ports via `tools/test/resolve_ports.py` (macOS CP2102: `20-6.1.1=esp32`, `20-6.1.2=esp8266_usb`)
+   - smoke strict USB à `115200` (ESP32 + ESP8266 monitor-only)
+   - gate UI link dédiée: commande ESP32 `UI_LINK_STATUS`, attendu `connected=1`
+3. Les logs/artifacts sont toujours produits, même en FAIL:
+   - `artifacts/rc_live/<TIMESTAMP>/summary.json`
+   - `artifacts/rc_live/<TIMESTAMP>/summary.md`
+   - `artifacts/rc_live/<TIMESTAMP>/ports_resolve.json`
+   - `artifacts/rc_live/<TIMESTAMP>/ui_link.log`
+   - `logs/run_matrix_and_smoke_<TIMESTAMP>.log`
+4. Politique de verdict:
+   - `PASS`: toutes les étapes critiques passent
+   - `FAIL`: port unresolved, panic/reboot/binary junk, smoke fail, ou `UI_LINK_STATUS connected=0`
+   - `SKIP`: aucune carte détectée et mode non strict (pas de faux PASS)
 
-Câblage minimal
-----------------
+Rappels baud
+------------
 
-- Reliez les GND ensembles (ESP32 + ESP8266 + PC). Sans masse commune, les UARTs ne fonctionnent pas.
-- Pour les UARTs de debug, utilisez la paire GPIO1 (TX0) / GPIO3 (RX0) de l’ESP32 et connectez-la au RX/TX du NodeMCU (cross TX/RX).
-- Si vous préférez monitorer le lien UI avec GPIO22/19, gardez les fils séparés du bus de l’écran et connectez-les à un adaptateur USB-TTL.
-- Une seule connexion par board suffit, le script n’a besoin que des port `/dev/cu.*` affectés automatiquement.
+- Console USB PlatformIO/monitor: `115200`
+- Lien interne ESP8266 SoftwareSerial vers ESP32: `19200` (non utilisé pour le monitor USB)
 
-Commandes sans script
-----------------------
+Diagnostic rapide
+-----------------
 
-1. Build + upload manuel :
-   ```
-   pio run -e esp32dev
-   pio run -e esp8266_oled
-   pio run -e esp32dev -t upload --upload-port <PORT_ESP32>
-   pio run -e esp8266_oled -t upload --upload-port <PORT_ESP8266>
-   ```
-2. Smokes série :
-   ```
-   python3 tools/dev/serial_smoke.py --role esp32 --port <PORT_ESP32> --baud 19200 --wait-port 20
-   python3 tools/dev/serial_smoke.py --role esp8266 --port <PORT_ESP8266> --baud 19200 --wait-port 20
-   python3 tools/dev/serial_smoke.py --role auto --baud 19200 --wait-port 20
-   ```
-3. Indicateur UI link : ouvrez `pio device monitor` sur l’ESP32 et cherchez une ligne `UI_LINK` ou `connected=1`.
-4. Status AP fallback : `curl --max-time 5 -sS http://192.168.4.1/api/status` (timeout court pour ne pas bloquer l’exécution).
-
-Logs et artefacts
-------------------
-
-- Les runs `tools/test/hw_now.sh` et `hw_now_esp32_esp8266.sh` déposent les sorties dans `logs/hw_now_<TIMESTAMP>.log`.
-- Le dossier `artifacts/rc_live/<TIMESTAMP>/` contient un `steps.tsv` et un `ports_resolve.json` détaillant les ports détectés.
-- Conservez ces fichiers pour la traçabilité ou pour transmettre des logs à la QA / au RC gate.
-
-Interpréter PASS / FAIL / SKIP
--------------------------------
-
-- **PASS** : chaque étape attendue s’est terminée avec un `[ok]` dans `artifacts/hw_now/<TIMESTAMP>/hw_now.log`, la board répond au `PING`, l’AP fallback répond.
-- **FAIL** : un `pio run`, un `upload`, ou l’un des `serial_smoke` retourne `[fail]`; l’étape correspondant remonte la ligne d’erreur dans le log.
-- **SKIP** : seules les vérifications non critiques (ex. AP fallback absent) émettent un `SKIP`; cela ne bloque pas mais indique que la vérif n’a pas pu être faite. Toutes les étapes critiques échouent avec `FAIL`.
+- Vérifier les consoles USB:
+  - `pio device monitor -e esp32dev --port <PORT_ESP32> --monitor-speed 115200`
+  - `pio device monitor -e esp8266_oled --port <PORT_ESP8266> --monitor-speed 115200`
+- Forcer l'échec sans hardware (QA stricte):
+  - `ZACUS_REQUIRE_HW=1 ./tools/dev/run_matrix_and_smoke.sh`

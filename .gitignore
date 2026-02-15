@@ -3,6 +3,9 @@
 
 # Local IDE settings
 .vscode/
+!hardware/firmware/.vscode/
+hardware/firmware/.vscode/*
+!hardware/firmware/.vscode/tasks.json
 
 # PlatformIO and generated logs
 .pio/

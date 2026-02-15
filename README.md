@@ -33,6 +33,7 @@ Dossier : `printables/`
 - `docs/STYLEGUIDE.md` (ton, structure, prompts)
 - `docs/index.md` + `docs/repo-status.md` pour la navigation et l’état du dépôt
 - `include-humain-IA/` (contenus annexes, renommé pour la portabilité)
+- `tools/dev/zacus.sh codex --prompt tools/dev/codex_prompts/zacus_overhaul_one_shot.md` lance le prompt de Codex directement depuis le dépôt.
 
 ## État du projet
 - **Kit MJ** : complet (script, plan, antic-chaos, solution, checklists, export PDF).

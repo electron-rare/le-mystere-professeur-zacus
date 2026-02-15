@@ -30,6 +30,18 @@
       "presentation": { "panel": "dedicated", "group": "zacus", "reveal": "always" }
     },
     {
+      "label": "Zacus: Firmware · Codex Overhaul",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "./tools/dev/zacus.sh codex --prompt tools/dev/codex_prompts/zacus_overhaul_one_shot.md"
+      ],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "group": "zacus", "reveal": "always" }
+    },
+    {
       "label": "Zacus: Firmware · RC live FAST (--skip-build --skip-upload)",
       "type": "shell",
       "command": "bash",

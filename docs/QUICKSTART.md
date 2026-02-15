@@ -30,6 +30,8 @@ Entrée rapide:
 python3 tools/test/zacus_menu.py
 ```
 
+Codex CLI intégré : `./tools/dev/zacus.sh codex --prompt tools/dev/codex_prompts/zacus_overhaul_one_shot.md`
+
 Checks contenu (sans hardware):
 
 ```bash

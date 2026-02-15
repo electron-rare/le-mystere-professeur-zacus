@@ -22,8 +22,10 @@ namespace {
 constexpr uint8_t kLinkRx = D6;    // ESP8266 RX <- ESP32 TX (GPIO22)
 constexpr uint8_t kLinkTx = D5;    // ESP8266 TX -> ESP32 RX (GPIO19)
 constexpr uint32_t kLinkBaud = 19200;
-constexpr int kLinkRxBufferBytes = 256;
-constexpr int kLinkIsrBufferBytes = 2048;
+constexpr int kLinkRxBufferBytes = 128;
+constexpr int kLinkIsrBufferBytes = 512;
+constexpr uint16_t kLinkReadBudgetBytes = 96;
+constexpr uint16_t kLinkReadBudgetUs = 2500;
 
 constexpr uint8_t kScreenWidth = 128;
 constexpr uint8_t kScreenHeight = 64;
@@ -85,6 +87,7 @@ uint32_t g_seqGapCount = 0;
 uint32_t g_seqRollbackCount = 0;
 char g_lineBuffer[220];
 uint8_t g_lineLen = 0;
+bool g_dropLineUntilNewline = false;
 uint8_t g_oledSdaPin = kInvalidPin;
 uint8_t g_oledSclPin = kInvalidPin;
 uint8_t g_oledAddress = 0;
@@ -1004,31 +1007,39 @@ bool sendLinkFrame(const char* type, const UiLinkField* fields, uint8_t fieldCou
 }
 
 void sendHelloFrame() {
-  UiLinkField fields[5] = {};
-  snprintf(fields[0].key, sizeof(fields[0].key), "proto");
-  snprintf(fields[0].value, sizeof(fields[0].value), "%u", static_cast<unsigned int>(UILINK_V2_PROTO));
-  snprintf(fields[1].key, sizeof(fields[1].key), "ui_type");
-  snprintf(fields[1].value, sizeof(fields[1].value), "OLED");
-  snprintf(fields[2].key, sizeof(fields[2].key), "ui_id");
-  snprintf(fields[2].value, sizeof(fields[2].value), "esp8266-oled");
-  snprintf(fields[3].key, sizeof(fields[3].key), "fw");
-  snprintf(fields[3].value, sizeof(fields[3].value), "v2");
-  snprintf(fields[4].key, sizeof(fields[4].key), "caps");
-  snprintf(fields[4].value, sizeof(fields[4].value), "btn:0;touch:0;display:oled");
-  if (sendLinkFrame("HELLO", fields, 5U)) {
+  static const char kHelloLine[] = "HELLO,proto=2,ui_type=OLED\n";
+  if (!g_linkState.linkEnabled) {
+    return;
+  }
+  const size_t lineLen = sizeof(kHelloLine) - 1U;
+  g_link.write(reinterpret_cast<const uint8_t*>(kHelloLine), lineLen);
+  if (lineLen > 0U) {
     g_lastHelloMs = millis();
   }
 }
 
 void sendPongFrame(uint32_t nowMs) {
-  UiLinkField fields[1] = {};
-  snprintf(fields[0].key, sizeof(fields[0].key), "ms");
-  snprintf(fields[0].value, sizeof(fields[0].value), "%lu", static_cast<unsigned long>(nowMs));
-  sendLinkFrame("PONG", fields, 1U);
+  if (!g_linkState.linkEnabled) {
+    return;
+  }
+  char line[32] = {};
+  const int written = snprintf(line, sizeof(line), "PONG,ms=%lu\n", static_cast<unsigned long>(nowMs));
+  if (written > 0) {
+    g_link.write(reinterpret_cast<const uint8_t*>(line), static_cast<size_t>(written));
+  }
 }
 
 void handleIncoming() {
+  const uint32_t budgetStartUs = micros();
+  uint16_t consumedBytes = 0;
   while (g_link.available() > 0) {
+    if (consumedBytes >= kLinkReadBudgetBytes) {
+      break;
+    }
+    if (static_cast<uint32_t>(micros() - budgetStartUs) >= kLinkReadBudgetUs) {
+      break;
+    }
+    ++consumedBytes;
     g_linkState.lastByteMs = millis();
     const char c = static_cast<char>(g_link.read());
     if (c == '\r') {
@@ -1036,59 +1047,75 @@ void handleIncoming() {
     }
 
     if (c == '\n') {
-      g_lineBuffer[g_lineLen] = '\0';
-      UiLinkFrame frame = {};
-      if (uiLinkParseLine(g_lineBuffer, &frame)) {
-        const uint32_t nowMs = millis();
-        if (frame.type == UILINK_MSG_PING) {
-          sendPongFrame(nowMs);
-        } else if (frame.type == UILINK_MSG_ACK) {
-          g_linkAcked = true;
-          g_stateDirty = true;
-        } else {
-          screen_core::TelemetryState parsed = g_state;
-          if (screen_core::parseStatFrame(frame, &parsed, nowMs)) {
-            if (g_hasValidState &&
-                (parsed.uptimeMs + kPeerUptimeRollbackSlackMs) < g_state.uptimeMs) {
-              g_linkState.peerRebootUntilMs = millis() + kPeerRebootGraceMs;
-              Serial.printf("[SCREEN] Peer reboot detecte: uptime %lu -> %lu\n",
-                            static_cast<unsigned long>(g_state.uptimeMs),
-                            static_cast<unsigned long>(parsed.uptimeMs));
-            }
-            if (g_state.appStage != screen_core::kAppStageUSonFunctional &&
-                parsed.appStage == screen_core::kAppStageUSonFunctional) {
-              g_unlockSequenceStartMs = millis();
-            } else if (g_state.appStage == screen_core::kAppStageUSonFunctional &&
-                       parsed.appStage != screen_core::kAppStageUSonFunctional) {
-              g_unlockSequenceStartMs = 0;
-            }
-            if (g_hasValidState) {
-              if (parsed.frameSeq < g_state.frameSeq) {
-                ++g_seqRollbackCount;
-              } else if (parsed.frameSeq > (g_state.frameSeq + 1U)) {
-                g_seqGapCount += (parsed.frameSeq - g_state.frameSeq - 1U);
-              }
-            }
-            pushScopeSample(parsed.micLevelPercent);
-            g_state = parsed;
-            g_hasValidState = true;
+      if (!g_dropLineUntilNewline) {
+        g_lineBuffer[g_lineLen] = '\0';
+        UiLinkFrame frame = {};
+        if (uiLinkParseLine(g_lineBuffer, &frame)) {
+          const uint32_t nowMs = millis();
+          if (frame.type == UILINK_MSG_PING) {
+            sendPongFrame(nowMs);
+          } else if (frame.type == UILINK_MSG_ACK) {
+            g_linkAcked = true;
             g_stateDirty = true;
+          } else {
+            screen_core::TelemetryState parsed = g_state;
+            if (screen_core::parseStatFrame(frame, &parsed, nowMs)) {
+              if (g_hasValidState &&
+                  (parsed.uptimeMs + kPeerUptimeRollbackSlackMs) < g_state.uptimeMs) {
+                g_linkState.peerRebootUntilMs = millis() + kPeerRebootGraceMs;
+                Serial.printf("[SCREEN] Peer reboot detecte: uptime %lu -> %lu\n",
+                              static_cast<unsigned long>(g_state.uptimeMs),
+                              static_cast<unsigned long>(parsed.uptimeMs));
+              }
+              if (g_state.appStage != screen_core::kAppStageUSonFunctional &&
+                  parsed.appStage == screen_core::kAppStageUSonFunctional) {
+                g_unlockSequenceStartMs = millis();
+              } else if (g_state.appStage == screen_core::kAppStageUSonFunctional &&
+                         parsed.appStage != screen_core::kAppStageUSonFunctional) {
+                g_unlockSequenceStartMs = 0;
+              }
+              if (g_hasValidState) {
+                if (parsed.frameSeq < g_state.frameSeq) {
+                  ++g_seqRollbackCount;
+                } else if (parsed.frameSeq > (g_state.frameSeq + 1U)) {
+                  g_seqGapCount += (parsed.frameSeq - g_state.frameSeq - 1U);
+                }
+              }
+              pushScopeSample(parsed.micLevelPercent);
+              g_state = parsed;
+              g_hasValidState = true;
+              g_stateDirty = true;
+            }
           }
-        }
-      } else if (g_lineLen > 0U) {
-        if (strchr(g_lineBuffer, '*') != nullptr) {
-          ++g_crcErrorCount;
-        } else {
-          ++g_parseErrorCount;
+        } else if (g_lineLen > 0U) {
+          if (strchr(g_lineBuffer, '*') != nullptr) {
+            ++g_crcErrorCount;
+          } else {
+            ++g_parseErrorCount;
+          }
         }
       }
       g_lineLen = 0;
+      g_dropLineUntilNewline = false;
+      continue;
+    }
+
+    const uint8_t uc = static_cast<uint8_t>(c);
+    if (uc < 0x20U || uc > 0x7EU) {
+      g_dropLineUntilNewline = true;
+      g_lineLen = 0;
+      continue;
+    }
+
+    if (g_dropLineUntilNewline) {
       continue;
     }
 
     if (g_lineLen < (sizeof(g_lineBuffer) - 1U)) {
       g_lineBuffer[g_lineLen++] = c;
     } else {
+      ++g_parseErrorCount;
+      g_dropLineUntilNewline = true;
       g_lineLen = 0;
     }
   }
@@ -1164,8 +1191,13 @@ void setup() {
                  kLinkRxBufferBytes,
                  kLinkIsrBufferBytes);
     g_link.enableRxGPIOPullUp(true);
-    g_link.enableIntTx(false);
-    sendHelloFrame();
+    Serial.printf("[SCREEN] LINK init baud=%lu rx=%u tx=%u rx_buf=%d isr_buf=%d\n",
+                  static_cast<unsigned long>(kLinkBaud),
+                  static_cast<unsigned int>(kLinkRx),
+                  static_cast<unsigned int>(kLinkTx),
+                  kLinkRxBufferBytes,
+                  kLinkIsrBufferBytes);
+    g_lastHelloMs = millis();
   }
   Serial.println("[SCREEN] Ready.");
 }

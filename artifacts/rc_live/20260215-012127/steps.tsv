@@ -1,8 +1,0 @@
-resolve_ports	PASS	0	/Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/artifacts/rc_live/20260215-012127/ports_resolve.json	ok
-build_esp32	FAIL	0	/Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/artifacts/rc_live/20260215-012127/esp32_upload.log	
-build_esp8266	FAIL	0	/Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/artifacts/rc_live/20260215-012127/esp8266_upload.log	
-upload_esp32	FAIL	0	/Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/artifacts/rc_live/20260215-012127/esp32_upload.log	
-upload_esp8266	FAIL	0	/Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/artifacts/rc_live/20260215-012127/esp8266_upload.log	
-smoke_esp32	FAIL	1	/Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/artifacts/rc_live/20260215-012127/smoke_esp32.log	tried=19200,115200
-smoke_esp8266	FAIL	1	/Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/artifacts/rc_live/20260215-012127/smoke_esp8266.log	tried=19200,115200
-gate_s1	FAIL	0	/Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/artifacts/rc_live/20260215-012127/gate_s1.log	

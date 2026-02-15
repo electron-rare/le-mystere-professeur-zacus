@@ -4,16 +4,16 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
-import os
 import re
-import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 try:
+    import serial
     from serial.tools import list_ports
 except ImportError:
     print(json.dumps({"status": "fail", "notes": ["pyserial missing: pip install pyserial"]}))
@@ -21,9 +21,7 @@ except ImportError:
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-FW_ROOT = REPO_ROOT / "hardware" / "firmware"
-PORTS_MAP_PATH = FW_ROOT / "tools" / "dev" / "ports_map.json"
-SERIAL_SMOKE = FW_ROOT / "tools" / "dev" / "serial_smoke.py"
+PORTS_MAP_PATH = REPO_ROOT / "hardware" / "firmware" / "tools" / "dev" / "ports_map.json"
 
 USB_HINTS = ("slab", "usbserial", "wch", "ch340", "cp210", "usbmodem")
 ROLE_HINTS = {
@@ -61,19 +59,20 @@ def parse_location(port) -> str:
     return ""
 
 
-def load_ports_map() -> Dict[str, Dict[str, str]]:
-    default = {"location": {}, "vidpid": {}}
+def load_ports_map() -> Dict[str, object]:
+    default = {"location": [], "vidpid": {}}
     if not PORTS_MAP_PATH.exists():
         return default
     try:
         raw = json.loads(PORTS_MAP_PATH.read_text(encoding="utf-8"))
     except Exception:
         return default
-    location: Dict[str, str] = {}
+    location: List[Tuple[str, str]] = []
     for key, value in (raw.get("location") or {}).items():
         role = normalize_role(str(value))
         if role:
-            location[str(key).lower()] = role
+            location.append((str(key).lower(), role))
+    location.sort(key=lambda item: (-len(item[0]), item[0]))
     vidpid: Dict[str, str] = {}
     for key, value in (raw.get("vidpid") or {}).items():
         role = normalize_role(str(value))
@@ -122,10 +121,15 @@ def score_port(port, prefer_cu: bool) -> int:
     return score
 
 
-def role_from_map(port, ports_map: Dict[str, Dict[str, str]]) -> Optional[str]:
+def role_from_map(port, ports_map: Dict[str, object]) -> Optional[str]:
     location = parse_location(port)
-    if location and location in ports_map["location"]:
-        return ports_map["location"][location]
+    if location:
+        location_patterns = ports_map.get("location") or []
+        if isinstance(location_patterns, dict):
+            location_patterns = list(location_patterns.items())
+        for pattern, mapped_role in location_patterns:
+            if fnmatch.fnmatch(location, pattern):
+                return mapped_role
     vid = getattr(port, "vid", None)
     pid = getattr(port, "pid", None)
     if vid is not None and pid is not None:
@@ -150,34 +154,30 @@ def role_from_hint(port) -> Optional[str]:
     return None
 
 
-def probe_port(device: str, role: str, baud: int) -> bool:
-    cmd = [
-        sys.executable,
-        str(SERIAL_SMOKE),
-        "--role",
-        role,
-        "--port",
-        device,
-        "--baud",
-        str(baud),
-        "--timeout",
-        "0.6",
-        "--wait-port",
-        "1",
-    ]
+def fingerprint_port(device: str, timeout: float = 2.0) -> Optional[str]:
+    if serial is None:
+        return None
     try:
-        proc = subprocess.run(
-            cmd,
-            cwd=str(FW_ROOT),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=3.0,
-            check=False,
-        )
+        with serial.Serial(device, 115200, timeout=0.1) as ser:
+            ser.dtr = False
+            ser.rts = False
+            time.sleep(0.05)
+            ser.dtr = True
+            ser.rts = True
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                line = ser.readline().decode("utf-8", errors="ignore").strip()
+                if not line:
+                    continue
+                text = line.lower()
+                if "esp-rom" in text or "rst:" in text:
+                    return "esp32"
+                if "ets jan" in text or "rst cause" in text:
+                    return "esp8266"
     except Exception:
-        return False
-    return proc.returncode == 0
+        return None
+    return None
+
 
 
 def choose_interactive(candidates: List[dict], role: str) -> Optional[str]:
@@ -254,6 +254,7 @@ def classify(ports: List, prefer_cu: bool, ports_map: Dict[str, Dict[str, str]],
     details: Dict[str, dict] = {}
     notes: List[str] = []
 
+    used = set()
     for role in ("esp32", "esp8266"):
         if by_role[role]:
             selected[role] = by_role[role][0]["device"]
@@ -264,28 +265,32 @@ def classify(ports: List, prefer_cu: bool, ports_map: Dict[str, Dict[str, str]],
                 "role": REQUEST_TO_CANONICAL[role],
                 "reason": by_role[role][0]["reason"],
             }
+            used.add(by_role[role][0]["device"])
 
     if allow_probe:
         unresolved = [r for r in ("esp32", "esp8266") if r not in selected]
-        if unresolved and len(candidates) <= 4:
-            for cand in candidates:
-                for role in unresolved:
-                    if role in selected:
-                        continue
-                    for baud in (19200, 115200):
-                        if probe_port(cand["device"], REQUEST_TO_CANONICAL[role], baud):
-                            selected[role] = cand["device"]
-                            reasons[role] = f"probe:{baud}"
-                            probe_baud[role] = str(baud)
-                            details[role] = {
-                                "port": cand["device"],
-                                "location": cand["location"] or "unknown",
-                                "role": REQUEST_TO_CANONICAL[role],
-                                "reason": f"probe:{baud}",
-                            }
-                            break
-                    if role in selected:
-                        break
+        for cand in candidates:
+            if not unresolved:
+                break
+            if cand["device"] in used:
+                continue
+            fingerprint = fingerprint_port(cand["device"])
+            if not fingerprint:
+                continue
+            if fingerprint not in unresolved:
+                continue
+            selected[fingerprint] = cand["device"]
+            reasons[fingerprint] = f"fingerprint:{fingerprint}"
+            probe_baud[fingerprint] = "fingerprint"
+            details[fingerprint] = {
+                "port": cand["device"],
+                "location": cand["location"] or "unknown",
+                "role": REQUEST_TO_CANONICAL[fingerprint],
+                "reason": f"fingerprint:{fingerprint}",
+            }
+            notes.append(f"fingerprint:{fingerprint}={cand['device']}")
+            used.add(cand["device"])
+            unresolved = [r for r in ("esp32", "esp8266") if r not in selected]
 
     used = set(selected.values())
     for role in ("esp32", "esp8266"):
@@ -323,6 +328,7 @@ def main() -> int:
     parser.add_argument("--no-auto-ports", dest="auto_ports", action="store_false")
     parser.add_argument("--prefer-cu", action="store_true")
     parser.add_argument("--interactive", action="store_true")
+    parser.add_argument("--ports-resolve-json", default="")
     args = parser.parse_args()
 
     prefer_cu = args.prefer_cu or sys.platform == "darwin"
@@ -437,6 +443,14 @@ def main() -> int:
             if not args.allow_no_hardware:
                 print(json.dumps(result))
                 return 1
+
+    if args.ports_resolve_json:
+        try:
+            dest = Path(args.ports_resolve_json)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        except Exception:
+            pass
 
     print(json.dumps(result))
     return 0

@@ -11,6 +11,11 @@ logs/
 **/logs/
 **/*.log
 
+# Artifacts and caches
+artifacts/
+__pycache__/
+.venv/
+
 # Generated game exports
 game/exports/*
 !game/exports/.gitkeep

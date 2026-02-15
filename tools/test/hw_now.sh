@@ -166,6 +166,7 @@ resolve_ports() {
     "--wait-port" "$WAIT_PORT"
     "--need-esp32"
     "--need-esp8266"
+    "--ports-resolve-json" "$artifact_dir/ports_resolve.json"
   )
   if [[ "$AUTO_PORTS" == "1" ]]; then
     resolver_args+=("--auto-ports")

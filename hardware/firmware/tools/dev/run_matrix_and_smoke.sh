@@ -20,6 +20,7 @@ STEPS_TSV="$ARTIFACT_DIR/steps.tsv"
 SUMMARY_JSON="$ARTIFACT_DIR/summary.json"
 SUMMARY_MD="$ARTIFACT_DIR/summary.md"
 PORTS_RESOLVE_JSON="$ARTIFACT_DIR/ports_resolve.json"
+RESOLVE_PORTS_ALLOW_RETRY="0"
 
 mkdir -p "$ARTIFACT_DIR" "$LOG_DIR"
 : > "$RUN_LOG"
@@ -69,6 +70,10 @@ set_failure() {
   if [[ "$EXIT_CODE" == "0" ]]; then
     EXIT_CODE="$rc"
   fi
+}
+
+should_record_resolve_failure() {
+  [[ "${RESOLVE_PORTS_ALLOW_RETRY:-0}" != "1" ]]
 }
 
 require_cmd() {
@@ -194,7 +199,7 @@ wait_for_usb_confirmation() {
 
   if [[ "${ZACUS_NO_COUNTDOWN:-0}" == "1" ]]; then
     log_info "USB wait gate skipped (ZACUS_NO_COUNTDOWN=1)"
-    return
+    return 0
   fi
 
   print_usb_alert
@@ -203,28 +208,40 @@ wait_for_usb_confirmation() {
   done
   list_ports_verbose
 
-  if [[ -t 0 ]]; then
-    log_info "press Enter once USB is connected (ports are listed every ${probe_every_s}s)"
-    while true; do
-      if read -r -t "$probe_every_s" -p "Press Enter to continue: " _; then
-        echo | tee -a "$RUN_LOG"
+  local _prev_retry="${RESOLVE_PORTS_ALLOW_RETRY:-0}"
+  RESOLVE_PORTS_ALLOW_RETRY="1"
+  trap 'RESOLVE_PORTS_ALLOW_RETRY=$_prev_retry' RETURN
+
+  while true; do
+    if resolve_live_ports; then
+      if [[ -n "$PORT_ESP32" && -n "$PORT_ESP8266" ]]; then
         break
       fi
-      echo | tee -a "$RUN_LOG"
-      printf '\a%s\n' "$warning" | tee -a "$RUN_LOG"
-      list_ports_verbose
-    done
-  else
-    if read -r -t 1 _; then
-      log_info "USB confirmation received from stdin"
-    else
-      log_warn "stdin is non-interactive; waiting ${probe_every_s}s then continuing"
+    fi
+    if [[ "${ZACUS_REQUIRE_HW:-0}" == "1" ]]; then
+      log_warn "required ports missing; retrying in ${probe_every_s}s"
+      for _ in 1 2 3; do
+        printf '\a%s\n' "$warning" | tee -a "$RUN_LOG"
+      done
       sleep "$probe_every_s"
       list_ports_verbose
+      continue
     fi
+    log_warn "required ports missing; continuing without hardware (ZACUS_REQUIRE_HW!=1)"
+    return 1
+  done
+
+  if [[ -t 0 ]]; then
+    log_info "press Enter once USB is connected (ports are listed every ${probe_every_s}s)"
+    read -r -p "Press Enter to continue: " _ < /dev/tty
+    log_info "USB confirmation complete"
+  else
+    log_warn "stdin non-interactive; waiting ${probe_every_s}s then continuing"
+    sleep "$probe_every_s"
+    list_ports_verbose
   fi
 
-  log_info "USB confirmation complete"
+  return 0
 }
 
 resolve_live_ports() {
@@ -255,6 +272,9 @@ resolve_live_ports() {
   if [[ -n "${ZACUS_PORT_ESP8266:-}" ]]; then
     resolver_cmd+=("--port-esp8266" "${ZACUS_PORT_ESP8266}")
   fi
+  if [[ -n "$PORTS_RESOLVE_JSON" ]]; then
+    resolver_cmd+=("--ports-resolve-json" "$PORTS_RESOLVE_JSON")
+  fi
 
   if [[ "$require_hw" != "1" ]]; then
     resolver_cmd+=("--allow-no-hardware")
@@ -272,7 +292,9 @@ resolve_live_ports() {
   if [[ "$rc" != "0" ]]; then
     PORT_STATUS="FAILED"
     append_step "resolve_ports" "FAIL" "$rc" "$resolve_log" "resolver command failed"
-    set_failure 21
+    if should_record_resolve_failure; then
+      set_failure 21
+    fi
     return 1
   fi
 
@@ -300,13 +322,14 @@ print("RESOLVE_NOTES=" + shlex.quote(" | ".join(v.get("notes", []))))
     local location_guard=0
     local location_notes=()
     if [[ "$(uname -s)" == "Darwin" ]]; then
-      if [[ -z "${ZACUS_PORT_ESP32:-}" && "$RESOLVE_REASON_ESP32" != location-map:* ]]; then
+      local accept_reason='^(location-map:|fingerprint:|usb-hint)'
+      if [[ -z "${ZACUS_PORT_ESP32:-}" && ! "$RESOLVE_REASON_ESP32" =~ $accept_reason ]]; then
         location_guard=1
-        location_notes+=("esp32 reason=${RESOLVE_REASON_ESP32:-unknown} (need location-map)")
+        location_notes+=("esp32 reason=${RESOLVE_REASON_ESP32:-unknown} (need location-map/fingerprint)")
       fi
-      if [[ -z "${ZACUS_PORT_ESP8266:-}" && "$RESOLVE_REASON_ESP8266" != location-map:* ]]; then
+      if [[ -z "${ZACUS_PORT_ESP8266:-}" && ! "$RESOLVE_REASON_ESP8266" =~ $accept_reason ]]; then
         location_guard=1
-        location_notes+=("esp8266 reason=${RESOLVE_REASON_ESP8266:-unknown} (need location-map)")
+        location_notes+=("esp8266 reason=${RESOLVE_REASON_ESP8266:-unknown} (need location-map/fingerprint)")
       fi
     fi
 
@@ -317,7 +340,9 @@ print("RESOLVE_NOTES=" + shlex.quote(" | ".join(v.get("notes", []))))
         PORT_STATUS="FAILED"
         append_step "resolve_ports" "FAIL" "1" "$resolve_log" "$(IFS='; '; echo "${location_notes[*]}")"
         log_error "port resolution rejected: $(IFS='; '; echo "${location_notes[*]}")"
-        set_failure 21
+        if should_record_resolve_failure; then
+          set_failure 21
+        fi
         return 1
       fi
       PORT_STATUS="SKIP"
@@ -343,7 +368,9 @@ print("RESOLVE_NOTES=" + shlex.quote(" | ".join(v.get("notes", []))))
   PORT_STATUS="FAILED"
   append_step "resolve_ports" "FAIL" "1" "$resolve_log" "${RESOLVE_NOTES:-status=fail}"
   log_error "port resolution failed: ${RESOLVE_NOTES:-status=fail}"
-  set_failure 21
+  if should_record_resolve_failure; then
+    set_failure 21
+  fi
   return 1
 }
 
@@ -638,9 +665,8 @@ if [[ "${ZACUS_SKIP_SMOKE:-0}" == "1" ]]; then
   log_step "serial smoke skipped"
 else
   echo
-  wait_for_usb_confirmation
   log_step "port resolution"
-  if ! resolve_live_ports; then
+  if ! wait_for_usb_confirmation; then
     set_failure 21
   fi
 

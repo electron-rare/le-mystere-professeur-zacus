@@ -108,7 +108,7 @@ Le script affiche un résumé final (`Build/Port/Smoke/UI link`) et écrit le m�
 - Final report template:
   - `docs/RC_FINAL_REPORT_TEMPLATE.md`
 - Optional issue/label seed:
-  - `bash tools/dev/rc_execution_seed.sh`
+  - `bash tools/dev/ci/rc_execution_seed.sh`
 
 ## 5) Hot-swap manuel
 

@@ -186,5 +186,5 @@ Final report table must include:
 
 Use:
 
-- `hardware/firmware/tools/dev/rc_execution_seed.sh` to seed labels/cards
+- `hardware/firmware/tools/dev/ci/rc_execution_seed.sh` to seed labels/cards
 - `tools/test/run_rc_gate.sh` to replay sprint gates with exact commands

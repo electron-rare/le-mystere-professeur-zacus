@@ -37,25 +37,13 @@ RESOLVE_LOCATION_ESP32=""
 RESOLVE_LOCATION_ESP8266=""
 
 action_log() {
-  local msg="$1"
-  echo "$msg" | tee -a "$RUN_LOG"
+  log "$1" | tee -a "$RUN_LOG"
 }
 
-log_step() {
-  action_log "[step] $*"
-}
-
-log_info() {
-  action_log "[info] $*"
-}
-
-log_warn() {
-  action_log "[warn] $*"
-}
-
-log_error() {
-  action_log "[error] $*"
-}
+log_step() { action_log "[step] $*"; }
+log_info() { action_log "[info] $*"; }
+log_warn() { action_log "[warn] $*"; }
+log_error() { log "[error] $*"; }
 
 append_step() {
   local name="$1"
@@ -77,14 +65,8 @@ should_record_resolve_failure() {
   [[ "${RESOLVE_PORTS_ALLOW_RETRY:-0}" != "1" ]]
 }
 
-require_cmd() {
-  local cmd="$1"
-  if ! command -v "$cmd" >/dev/null 2>&1; then
-    log_error "missing command: $cmd"
-    set_failure 127
-    return 1
-  fi
-}
+
+# Utilise require_cmd de agent_utils.sh
 
 choose_platformio_core_dir() {
   if [[ -n "${PLATFORMIO_CORE_DIR:-}" ]]; then
@@ -262,7 +244,7 @@ wait_for_required_usb() {
   local last_list="$start"
   local _prev_retry="${RESOLVE_PORTS_ALLOW_RETRY:-0}"
   RESOLVE_PORTS_ALLOW_RETRY="1"
-  trap 'RESOLVE_PORTS_ALLOW_RETRY=$_prev_retry' RETURN
+  trap 'RESOLVE_PORTS_ALLOW_RETRY="${_prev_retry:-0}"' RETURN
 
   while true; do
     if resolve_live_ports && [[ "$PORT_STATUS" == "OK" && -n "$PORT_ESP32" && -n "$PORT_ESP8266" ]]; then
@@ -573,12 +555,39 @@ if ports_json.exists():
     except Exception:
         ports_resolve = {}
 
+dry_run = any(
+    step["status"] == "SKIP"
+    and step["name"].startswith(("build", "upload", "smoke", "gate"))
+    and any(token in step["details"].lower() for token in ("dry-run", "zacus_skip_pio=1", "zacus_skip_smoke=1"))
+    for step in steps
+)
+
 if any(step["status"] == "FAIL" for step in steps) or exit_code != 0:
     result = "FAIL"
+elif dry_run:
+  result = "SKIP"
 elif any(step["status"] == "PASS" for step in steps):
     result = "PASS"
 else:
     result = "SKIP"
+
+ports_payload = ports_resolve.get("ports", {}) if isinstance(ports_resolve, dict) else {}
+esp32_payload = ports_payload.get("esp32")
+if isinstance(esp32_payload, dict):
+  esp32_payload = esp32_payload.get("port")
+resolved_esp32 = esp32_payload or port_esp32
+esp8266_payload = ports_payload.get("esp8266_usb") or ports_payload.get("esp8266")
+if isinstance(esp8266_payload, dict):
+  esp8266_payload = esp8266_payload.get("port")
+resolved_esp8266 = esp8266_payload or port_esp8266
+port_note = ""
+if not resolved_esp32 or not resolved_esp8266:
+  if ports_resolve.get("status") in ("pass", "ok"):
+    port_note = "resolver ok but ports missing"
+  elif ports_resolve:
+    port_note = "resolver data missing"
+  else:
+    port_note = "ports_resolve.json missing"
 
 summary = {
     "timestamp": timestamp,
@@ -591,16 +600,17 @@ summary = {
     "smoke_command": smoke_cmd,
     "ports": {
         "esp32": {
-            "port": port_esp32,
+        "port": resolved_esp32 or "",
             "location": ports_resolve.get("details", {}).get("esp32", {}).get("location", ""),
             "reason": ports_resolve.get("details", {}).get("esp32", {}).get("reason", ""),
         },
         "esp8266_usb": {
-            "port": port_esp8266,
+        "port": resolved_esp8266 or "",
             "location": ports_resolve.get("details", {}).get("esp8266", {}).get("location", ""),
             "reason": ports_resolve.get("details", {}).get("esp8266", {}).get("reason", ""),
         },
     },
+    "ports_note": port_note,
     "steps": steps,
     "logs": {
         "run_log": run_log,
@@ -613,22 +623,27 @@ rows = [
     "# RC live summary",
     "",
     f"- Result: **{result}**",
+    *( ["- Mode: `DRY-RUN`"] if dry_run else [] ),
     f"- Exit code: `{exit_code}`",
     f"- Build status: `{build_status}`",
     f"- Port status: `{port_status}`",
     f"- Smoke status: `{smoke_status}`",
     f"- UI link status: `{ui_link_status}`",
-    f"- ESP32 port: `{port_esp32 or 'n/a'}`",
-    f"- ESP8266 USB port: `{port_esp8266 or 'n/a'}`",
+    f"- ESP32 port: `{resolved_esp32 or 'n/a'}`",
+    f"- ESP8266 USB port: `{resolved_esp8266 or 'n/a'}`",
+    *( [f"- Port detail: `{port_note}`"] if port_note else [] ),
     f"- Run log: `{Path(run_log).name}`",
     "",
     "| Step | Status | Exit | Log | Details |",
     "|---|---|---:|---|---|",
 ]
 for step in steps:
-    rows.append(
-        f"| {step['name']} | {step['status']} | {step['exit_code']} | `{Path(step['log_file']).name}` | {step['details']} |"
-    )
+  log_name = Path(step["log_file"]).name
+  if step["name"] == "resolve_ports" and log_name == "ports_resolve.json":
+    log_name = "resolve_ports.log"
+  rows.append(
+    f"| {step['name']} | {step['status']} | {step['exit_code']} | `{log_name}` | {step['details']} |"
+  )
 summary_md.write_text("\n".join(rows) + "\n", encoding="utf-8")
 PY
 }

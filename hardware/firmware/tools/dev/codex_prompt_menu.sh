@@ -24,7 +24,30 @@ collect_prompts() {
 }
 
 
-# Menu interactif harmonisé pour choisir un prompt (fzf/dialog/texte)
+usage() {
+  cat <<'HELP'
+Usage: codex_prompt_menu.sh [--list] [--run <prompt_path>]
+  --list              List available prompt files.
+  --run <prompt_path> Run a specific prompt file.
+  --help              Show this help.
+HELP
+}
+
+afficher_aide() {
+  echo -e "\n\033[1;36mAide Codex\033[0m"
+  echo "- Utilisez les fleches ou le numero pour naviguer."
+  echo "- Installez fzf/dialog/whiptail pour une meilleure experience."
+  echo "- [Entree] pour valider, [Echap] ou [Entree] vide pour annuler."
+  echo "- Pour toute question, voir README.md."
+  read -n 1 -s -r -p "Appuyez sur une touche pour revenir au menu..."
+}
+
+list_prompts() {
+  collect_prompts
+  for f in "${prompt_files[@]}"; do
+    printf '%s\n' "$f"
+  done
+}
 
 main_menu() {
   collect_prompts
@@ -33,36 +56,36 @@ main_menu() {
     exit 1
   fi
   while true; do
-    local options=(
-      "Prompt 1"
-      "Prompt 2"
-      "Prompt 3"
-      "Aide"
-      "Quitter"
-    )
-    local idx=$(menu_select "Menu Codex" "${options[@]}")
-    case "$idx" in
-      1) run_prompt 1 ;;
-      2) run_prompt 2 ;;
-      3) run_prompt 3 ;;
-      4) afficher_aide ;;
-      5|0) break ;;
-    esac
-  done
-
-  afficher_aide() {
-    echo -e "\n\033[1;36mAide Codex\033[0m"
-    echo "- Utilisez les flèches ou le numéro pour naviguer."
-    echo "- Installez fzf/dialog/whiptail pour une meilleure expérience."
-    echo "- [Entrée] pour valider, [Échap] ou [Entrée] vide pour annuler."
-    echo "- Pour toute question, voir README.md."
-    read -n 1 -s -r -p "Appuyez sur une touche pour revenir au menu..."
-  }
+    local options=()
+    local f
+    for f in "${prompt_files[@]}"; do
+      options+=("$(basename "$f")")
+    done
+    options+=("Aide" "Quitter")
+    local idx
+    idx=$(menu_select "Menu Codex" "${options[@]}")
+    if [[ "$idx" == "0" ]]; then
+      break
+    fi
+    local total_prompts=${#prompt_files[@]}
+    if (( idx >= 1 && idx <= total_prompts )); then
+      run_prompt "${prompt_files[idx-1]}"
+      continue
+    fi
+    if (( idx == total_prompts + 1 )); then
+      afficher_aide
+      continue
+    fi
+    break
   done
 }
 
 run_prompt() {
   local prompt_path="$1"
+  if [[ -z "$prompt_path" || ! -f "$prompt_path" ]]; then
+    echo "Prompt file not found: $prompt_path" >&2
+    exit 1
+  fi
   echo
   echo "Running $(basename "$prompt_path")"
   printf "Log (write-only): %s\n" "$LAST_MESSAGE_FILE"
@@ -72,5 +95,20 @@ run_prompt() {
     codex exec --sandbox workspace-write --output-last-message "$LAST_MESSAGE_FILE" - < "$prompt_path"
   )
 }
+
+case "${1:-}" in
+  --help|-h)
+    usage
+    exit 0
+    ;;
+  --list)
+    list_prompts
+    exit 0
+    ;;
+  --run)
+    run_prompt "${2:-}"
+    exit 0
+    ;;
+esac
 
 main_menu

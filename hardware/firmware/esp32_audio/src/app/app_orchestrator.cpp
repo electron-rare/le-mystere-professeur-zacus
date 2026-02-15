@@ -615,6 +615,9 @@ void sendScreenFrameSnapshot(uint32_t nowMs, uint8_t keyForScreen) {
   } else {
     frame.appStage = 2U;
   }
+  if (!frame.mp3Mode && storyScene != nullptr) {
+    frame.appStage = storyScene->appStageHint;
+  }
   if (!frame.mp3Mode) {
     frame.uiCursor = 0U;
     frame.uiOffset = 0U;

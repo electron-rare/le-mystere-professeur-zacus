@@ -15,5 +15,21 @@
     "**/.venv/**": true
   },
   "stm32-for-vscode.openOCDPath": false,
-  "stm32-for-vscode.armToolchainPath": false
+  "stm32-for-vscode.armToolchainPath": false,
+  "chat.tools.terminal.autoApprove": {
+    "analyse_artefacts_logs": true,
+    "/^export FW_ROOT=\\$\\(pwd\\) && source \\./tools/dev/agent_utils\\.sh && analyse_artefacts_logs$/": {
+      "approve": true,
+      "matchCommandLine": true
+    },
+    "/^export FW_ROOT=\\$\\(pwd\\) && source \\./tools/dev/agent_utils\\.sh && generate_rc_report_md --alert$/": {
+      "approve": true,
+      "matchCommandLine": true
+    },
+    "/^git fetch origin main && git diff --stat origin/main\\.\\.\\.HEAD$/": {
+      "approve": true,
+      "matchCommandLine": true
+    },
+    "gh": true
+  }
 }

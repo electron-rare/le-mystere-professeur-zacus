@@ -5,7 +5,7 @@ Objectif: rejouer rapidement la validation terrain Story V2 (USB, flash, runtime
 ## 0) Prerequis
 
 - Deux cartes connectees en USB (ESP32 + ESP8266)
-- Depuis `hardware/firmware/esp32`
+- Depuis `hardware/firmware/esp32_audio`
 - Python PlatformIO env disponible: `~/.platformio/penv/bin/python`
 
 ## 1) Preflight statique

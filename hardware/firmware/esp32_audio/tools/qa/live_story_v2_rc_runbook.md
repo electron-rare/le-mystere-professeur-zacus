@@ -4,7 +4,7 @@ Objectif: valider la release candidate Story V2 en conditions terrain (soak + re
 
 ## 1) Preflight
 
-Depuis `hardware/firmware/esp32`:
+Depuis `hardware/firmware/esp32_audio`:
 
 ```bash
 make story-validate

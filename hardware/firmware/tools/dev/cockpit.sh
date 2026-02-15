@@ -32,6 +32,35 @@ run_build_all() {
   "$FW_ROOT/build_all.sh"
 }
 
+run_sync_report() {
+  generate_sync_report "$FW_ROOT/logs/audit_sync_report.md"
+}
+
+run_cleanup() {
+  cleanup_audit_files
+}
+
+run_codex_check() {
+  codex_cli_audit
+}
+
+run_audit_all() {
+  run_build_all
+  if [[ "${ZACUS_REQUIRE_HW:-0}" == "1" ]]; then
+    ZACUS_REQUIRE_HW=1 ZACUS_SKIP_PIO=1 "$FW_ROOT/tools/dev/run_matrix_and_smoke.sh"
+  else
+    ZACUS_REQUIRE_HW=0 ZACUS_SKIP_PIO=1 ZACUS_NO_COUNTDOWN=1 "$FW_ROOT/tools/dev/run_matrix_and_smoke.sh"
+  fi
+  analyse_artefacts_logs
+  local platform
+  for platform in esp32dev esp32_release esp8266_oled ui_rp2040_ili9488 ui_rp2040_ili9486; do
+    drivers_audit "$platform"
+    tests_audit "$platform"
+  done
+  run_codex_check
+  run_sync_report
+}
+
 run_rc_live() {
   local artifacts=""
   if ! "$FW_ROOT/tools/dev/run_matrix_and_smoke.sh"; then
@@ -47,9 +76,19 @@ run_rc_live() {
 
 ports_watch() {
   echo "Press Ctrl+C to exit ports watch."
+  local PYTHON_VENV3="$FW_ROOT/.venv/bin/python3"
+  local PYTHON_VENV="$FW_ROOT/.venv/bin/python"
+  if [[ -x "$PYTHON_VENV3" ]]; then
+    PYTHON_EXEC="$PYTHON_VENV3"
+  elif [[ -x "$PYTHON_VENV" ]]; then
+    PYTHON_EXEC="$PYTHON_VENV"
+  else
+    echo "[AGENT][FAIL] Aucun interpréteur Python .venv trouvé pour la détection des ports." >&2
+    exit 1
+  fi
   while true; do
     echo "=== $(date -R) ==="
-    python3 -m serial.tools.list_ports -v || true
+    "$PYTHON_EXEC" -m serial.tools.list_ports -v || true
     sleep 5
   done
 }
@@ -71,6 +110,10 @@ show_menu() {
     "Bootstrap (outils/dev/bootstrap_local.sh)"
     "Watch serial ports"
     "Run codex prompt menu"
+    "Audit full (build + rc + drivers/tests)"
+    "Generate sync report"
+    "Cleanup logs/artefacts"
+    "Codex CLI check"
     "Afficher logs (firmware/logs/)"
     "Aide"
     "Quitter"
@@ -84,9 +127,13 @@ show_menu() {
       4) run_bootstrap ;;
       5) ports_watch ;;
       6) run_codex_prompts ;;
-      7) afficher_logs_menu ;;
-      8) afficher_aide ;;
-      9|0) exit 0 ;;
+      7) run_audit_all ;;
+      8) run_sync_report ;;
+      9) run_cleanup ;;
+      10) run_codex_check ;;
+      11) afficher_logs_menu ;;
+      12) afficher_aide ;;
+      13|0) exit 0 ;;
     esac
   done
 }
@@ -173,17 +220,50 @@ if [[ -n "$command" ]]; then
       run_bootstrap; exit $? ;;
     build)
       run_build_all; exit $? ;;
+    drivers)
+      # Audit des drivers pour la plateforme passée en 2e argument
+      platform=${2:-}
+      if [[ -z "$platform" ]]; then echo "Usage: cockpit.sh drivers <platform>"; exit 1; fi
+      log "[AGENT] Audit drivers $platform"
+      # Appel d’un helper centralisé ou d’un script spécifique si existant
+      if [[ -f "$FW_ROOT/tools/dev/agent_utils.sh" ]]; then
+        source "$FW_ROOT/tools/dev/agent_utils.sh"
+        drivers_audit "$platform"
+      else
+        echo "[TODO] Implémenter drivers_audit pour $platform"; exit 1
+      fi
+      exit $? ;;
+    test)
+      # Audit des tests hardware pour la plateforme passée en 2e argument
+      platform=${2:-}
+      if [[ -z "$platform" ]]; then echo "Usage: cockpit.sh test <platform>"; exit 1; fi
+      log "[AGENT] Audit tests $platform"
+      if [[ -f "$FW_ROOT/tools/dev/agent_utils.sh" ]]; then
+        source "$FW_ROOT/tools/dev/agent_utils.sh"
+        tests_audit "$platform"
+      else
+        echo "[TODO] Implémenter tests_audit pour $platform"; exit 1
+      fi
+      exit $? ;;
     flash)
       # Appel de la logique de flash de zacus.sh (à intégrer ici)
       echo "[TODO] Implémenter la logique de flash ici (voir zacus.sh)"; exit 1 ;;
     rc)
       ZACUS_REQUIRE_HW=1 run_rc_live; exit $? ;;
     rc-autofix)
-      echo "[TODO] Implémenter la logique rc-autofix ici (voir zacus.sh)"; exit 1 ;;
+      "$FW_ROOT/tools/dev/zacus.sh" rc-autofix; exit $? ;;
     ports)
       ports_watch; exit $? ;;
     latest)
       latest_artifacts; exit $? ;;
+    audit)
+      run_audit_all; exit $? ;;
+    report)
+      run_sync_report; exit $? ;;
+    cleanup)
+      run_cleanup; exit $? ;;
+    codex-check)
+      run_codex_check; exit $? ;;
     help|--help|-h)
       afficher_aide; exit 0 ;;
     *)

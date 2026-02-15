@@ -68,7 +68,7 @@ Host:
 
 ## Commandes de generation
 
-Depuis `hardware/firmware/esp32`:
+Depuis `hardware/firmware/esp32_audio`:
 
 ```bash
 make story-validate

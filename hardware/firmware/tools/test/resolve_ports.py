@@ -25,6 +25,8 @@ DEFAULT_PORTS_MAP = {
         "20-6.1.2": "esp8266_usb",
         "20-6.2*": "esp8266_usb",
         "20-6.1*": "esp32",
+        "20-6.4.1": "esp8266_usb",
+        "20-6.4.2": "esp32",
     },
     "vidpid": {
         "2e8a:0005": "rp2040",
@@ -191,6 +193,9 @@ def match_location_entry(entries, location):
 def classify_port(port, location, entries, vidpid_map):
     entry = match_location_entry(entries, location)
     if entry:
+        fp_role, fp_reason = fingerprint_port(port.device)
+        if fp_role and fp_role != entry["role"]:
+            return fp_role, f"fingerprint-override:{entry['pattern']}:{fp_reason}"
         return entry["role"], f"location-map:{entry['pattern']}"
     vidpid = port_vidpid(port)
     if vidpid and vidpid.lower() in vidpid_map:
@@ -304,6 +309,15 @@ def resolve_ports(args):
         "esp32": best_found.get("esp32", ""),
         "esp8266": best_found.get("esp8266", ""),
     }
+
+    if ports_payload["esp32"] and ports_payload["esp8266"]:
+        fp_esp32, fp_reason32 = fingerprint_port(ports_payload["esp32"])
+        fp_esp8266, fp_reason8266 = fingerprint_port(ports_payload["esp8266"])
+        if fp_esp32 == "esp8266" and fp_esp8266 == "esp32":
+            ports_payload["esp32"], ports_payload["esp8266"] = ports_payload["esp8266"], ports_payload["esp32"]
+            details_payload["esp32"]["reason"] = f"fingerprint-swap:{fp_reason32}"
+            details_payload["esp8266"]["reason"] = f"fingerprint-swap:{fp_reason8266}"
+            notes.append("fingerprint swap applied")
 
     result = {
         "status": status,

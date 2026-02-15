@@ -271,7 +271,7 @@ Logs attendus:
 
 ## Build / Flash
 
-Depuis la racine de ce dossier (`hardware/firmware/esp32`):
+Depuis la racine de ce dossier (`hardware/firmware/esp32_audio`):
 
 ### Option 1 (recommandee): via Makefile
 

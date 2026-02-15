@@ -82,9 +82,9 @@ Le script affiche un résumé final (`Build/Port/Smoke/UI link`) et écrit le m�
 ## 4.6) Local dev cockpit
 
 1. Bootstrap the workspace once:
-   ```sh
-   ./tools/dev/bootstrap_local.sh
-   ```
+  ```sh
+  ./tools/dev/bootstrap_local.sh
+  ```
    This creates `.venv`, installs `pyserial`, and reminds you to manually warm PlatformIO caches (`PLATFORMIO_CORE_DIR="$HOME/.platformio"` + `pio platform install espressif32`) when network access is available.
 2. Open VS Code from the repo root and use **Run Task**:
    - `List ports (15s, venv strict)` to list serial ports every 15s (fails clearly before `.venv` exists).

@@ -1,6 +1,3 @@
-envs=(
-echo "[OK] Build global terminé."
-
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"

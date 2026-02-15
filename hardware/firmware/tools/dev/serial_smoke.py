@@ -19,7 +19,7 @@ except ImportError:
 
 PING_COMMAND = "PING"
 PING_OK_PATTERN = re.compile(r"\b(PONG|ACK|OK|UNKNOWN|HELLO|STAT|STATUS)\b", re.IGNORECASE)
-READY_PATTERN = re.compile(r"\[SCREEN\]\s*Ready\.", re.IGNORECASE)
+READY_PATTERN = re.compile(r"(\[SCREEN\]\s*Ready\.|\[SCREEN\]\s*oled=OK)", re.IGNORECASE)
 FATAL_PATTERN = re.compile(
     r"(User exception|Exception|panic|abort|assert|rst cause|stack smashing|Guru Meditation|Fatal)",
     re.IGNORECASE,
@@ -35,6 +35,8 @@ DEFAULT_PORTS_MAP = {
     "location": {
         "20-6.1.1": "esp32",
         "20-6.1.2": "esp8266_usb",
+        "20-6.4.1": "esp8266_usb",
+        "20-6.4.2": "esp32",
     },
     "vidpid": {
         "2e8a:0005": "rp2040",

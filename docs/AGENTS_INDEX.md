@@ -22,3 +22,11 @@
 - `pio run -e esp8266_oled`
 - `pio run -e ui_rp2040_ili9488`
 - `pio run -e ui_rp2040_ili9486`
+
+## Skills
+- Firmware skill: [`skills/firmware/SKILL.md`](../skills/firmware/SKILL.md)
+- Tooling skill: [`skills/tooling/SKILL.md`](../skills/tooling/SKILL.md)
+- Docs skill: [`skills/docs/SKILL.md`](../skills/docs/SKILL.md)
+- Printables skill: [`skills/printables/SKILL.md`](../skills/printables/SKILL.md)
+- Repo hygiene skill: [`skills/repo_hygiene/SKILL.md`](../skills/repo_hygiene/SKILL.md)
+- Optional registry: [`agents/openai.yaml`](../agents/openai.yaml)

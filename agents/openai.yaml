@@ -1,0 +1,12 @@
+version: 1
+skills:
+  - name: firmware
+    path: skills/firmware/SKILL.md
+  - name: tooling
+    path: skills/tooling/SKILL.md
+  - name: docs
+    path: skills/docs/SKILL.md
+  - name: printables
+    path: skills/printables/SKILL.md
+  - name: repo_hygiene
+    path: skills/repo_hygiene/SKILL.md

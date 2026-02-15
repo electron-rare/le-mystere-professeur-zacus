@@ -2,11 +2,14 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+REPO_ROOT="$(cd "$ROOT/../.." && pwd)"
 cd "$ROOT"
 
 DEFAULT_ENVS=(esp32dev esp32_release esp8266_oled ui_rp2040_ili9488 ui_rp2040_ili9486)
 BUILD_STATUS="SKIPPED"
+PORT_STATUS="SKIPPED"
 SMOKE_STATUS="SKIPPED"
+UI_LINK_STATUS="SKIPPED"
 SMOKE_COMMAND_STRING=""
 
 TIMESTAMP="$(date -u +"%Y%m%d-%H%M%S")"
@@ -16,6 +19,7 @@ RUN_LOG="$LOG_DIR/run_matrix_and_smoke_${TIMESTAMP}.log"
 STEPS_TSV="$ARTIFACT_DIR/steps.tsv"
 SUMMARY_JSON="$ARTIFACT_DIR/summary.json"
 SUMMARY_MD="$ARTIFACT_DIR/summary.md"
+PORTS_RESOLVE_JSON="$ARTIFACT_DIR/ports_resolve.json"
 
 mkdir -p "$ARTIFACT_DIR" "$LOG_DIR"
 : > "$RUN_LOG"
@@ -23,6 +27,12 @@ mkdir -p "$ARTIFACT_DIR" "$LOG_DIR"
 
 EXIT_CODE=0
 FINALIZED=0
+PORT_ESP32=""
+PORT_ESP8266=""
+RESOLVE_REASON_ESP32=""
+RESOLVE_REASON_ESP8266=""
+RESOLVE_LOCATION_ESP32=""
+RESOLVE_LOCATION_ESP8266=""
 
 action_log() {
   local msg="$1"
@@ -217,56 +227,202 @@ wait_for_usb_confirmation() {
   log_info "USB confirmation complete"
 }
 
-run_smoke_auto() {
-  local default_wait_port="${ZACUS_WAIT_PORT:-3}"
-  local smoke_role="${ZACUS_SMOKE_ROLE:-auto}"
-  local smoke_baud="${ZACUS_BAUD:-115200}"
-  local smoke_timeout="${ZACUS_TIMEOUT:-1.0}"
-  local smoke_log="$ARTIFACT_DIR/smoke_auto.log"
+resolve_live_ports() {
+  local wait_port="${ZACUS_WAIT_PORT:-3}"
+  local resolve_log="$ARTIFACT_DIR/resolve_ports.log"
+  local require_hw="${ZACUS_REQUIRE_HW:-0}"
 
-  if ! [[ "$default_wait_port" =~ ^[0-9]+$ ]]; then
-    default_wait_port=3
+  if ! [[ "$wait_port" =~ ^[0-9]+$ ]]; then
+    wait_port=3
   fi
 
-  SMOKE_CMD=(python3 tools/dev/serial_smoke.py --role "$smoke_role" --baud "$smoke_baud" --timeout "$smoke_timeout")
-  if [[ -n "${ZACUS_SMOKE_PORT:-}" ]]; then
-    SMOKE_CMD+=(--port "${ZACUS_SMOKE_PORT}")
-  fi
-  if [[ "${ZACUS_SMOKE_ALL:-0}" == "1" ]]; then
-    SMOKE_CMD+=(--all)
-  fi
-  if [[ "${ZACUS_REQUIRE_HW:-0}" == "1" ]]; then
-    SMOKE_CMD+=(--wait-port 180)
-  else
-    SMOKE_CMD+=(--wait-port "$default_wait_port" --allow-no-hardware)
+  local resolver_cmd=(
+    "$PYTHON_BIN"
+    "$RESOLVER"
+    "--wait-port" "$wait_port"
+    "--auto-ports"
+    "--need-esp32"
+    "--need-esp8266"
+  )
+
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    resolver_cmd+=("--prefer-cu")
   fi
 
-  SMOKE_COMMAND_STRING="$(printf '%q ' "${SMOKE_CMD[@]}")"
-  log_info "smoke command: $SMOKE_COMMAND_STRING"
+  if [[ -n "${ZACUS_PORT_ESP32:-}" ]]; then
+    resolver_cmd+=("--port-esp32" "${ZACUS_PORT_ESP32}")
+  fi
+  if [[ -n "${ZACUS_PORT_ESP8266:-}" ]]; then
+    resolver_cmd+=("--port-esp8266" "${ZACUS_PORT_ESP8266}")
+  fi
+
+  if [[ "$require_hw" != "1" ]]; then
+    resolver_cmd+=("--allow-no-hardware")
+  fi
+
+  printf '[step] %s\n' "${resolver_cmd[*]}" | tee -a "$RUN_LOG" "$resolve_log"
   set +e
-  "${SMOKE_CMD[@]}" 2>&1 | tee "$smoke_log" | tee -a "$RUN_LOG"
-  local rc=${PIPESTATUS[0]}
+  local resolve_json
+  resolve_json="$(${resolver_cmd[@]} 2>>"$resolve_log")"
+  local rc=$?
   set -e
+  printf '%s\n' "$resolve_json" >> "$resolve_log"
+  printf '%s\n' "$resolve_json" > "$PORTS_RESOLVE_JSON"
 
-  if [[ "$rc" == "0" ]]; then
-    if grep -q "SKIP: no hardware detected" "$smoke_log"; then
-      append_step "smoke_auto" "SKIP" "0" "$smoke_log" "no hardware"
-      SMOKE_STATUS="SKIP"
-    else
-      append_step "smoke_auto" "PASS" "0" "$smoke_log" ""
-      SMOKE_STATUS="OK"
-    fi
+  if [[ "$rc" != "0" ]]; then
+    PORT_STATUS="FAILED"
+    append_step "resolve_ports" "FAIL" "$rc" "$resolve_log" "resolver command failed"
+    set_failure 21
+    return 1
+  fi
+
+  eval "$(RESOLVE_JSON="$resolve_json" "$PYTHON_BIN" -c '
+import json, os, shlex
+v = json.loads(os.environ["RESOLVE_JSON"])
+print("RESOLVE_STATUS=" + shlex.quote(str(v.get("status", "fail"))))
+print("RESOLVE_PORT_ESP32=" + shlex.quote(str(v.get("ports", {}).get("esp32", ""))))
+print("RESOLVE_PORT_ESP8266=" + shlex.quote(str(v.get("ports", {}).get("esp8266", ""))))
+print("RESOLVE_REASON_ESP32=" + shlex.quote(str(v.get("reasons", {}).get("esp32", ""))))
+print("RESOLVE_REASON_ESP8266=" + shlex.quote(str(v.get("reasons", {}).get("esp8266", ""))))
+print("RESOLVE_LOCATION_ESP32=" + shlex.quote(str(v.get("details", {}).get("esp32", {}).get("location", ""))))
+print("RESOLVE_LOCATION_ESP8266=" + shlex.quote(str(v.get("details", {}).get("esp8266", {}).get("location", ""))))
+print("RESOLVE_NOTES=" + shlex.quote(" | ".join(v.get("notes", []))))
+')"
+
+  PORT_ESP32="$RESOLVE_PORT_ESP32"
+  PORT_ESP8266="$RESOLVE_PORT_ESP8266"
+  RESOLVE_REASON_ESP32="$RESOLVE_REASON_ESP32"
+  RESOLVE_REASON_ESP8266="$RESOLVE_REASON_ESP8266"
+  RESOLVE_LOCATION_ESP32="$RESOLVE_LOCATION_ESP32"
+  RESOLVE_LOCATION_ESP8266="$RESOLVE_LOCATION_ESP8266"
+
+  if [[ "$RESOLVE_STATUS" == "pass" ]]; then
+    PORT_STATUS="OK"
+    append_step "resolve_ports" "PASS" "0" "$resolve_log" "esp32=$PORT_ESP32 esp8266=$PORT_ESP8266"
+    log_info "ESP32=${PORT_ESP32:-n/a} location=${RESOLVE_LOCATION_ESP32:-unknown} (${RESOLVE_REASON_ESP32:-n/a})"
+    log_info "ESP8266=${PORT_ESP8266:-n/a} location=${RESOLVE_LOCATION_ESP8266:-unknown} (${RESOLVE_REASON_ESP8266:-n/a})"
     return 0
   fi
 
-  append_step "smoke_auto" "FAIL" "$rc" "$smoke_log" ""
-  SMOKE_STATUS="FAILED"
+  if [[ "$RESOLVE_STATUS" == "skip" ]]; then
+    PORT_STATUS="SKIP"
+    append_step "resolve_ports" "SKIP" "0" "$resolve_log" "${RESOLVE_NOTES:-no hardware}"
+    log_warn "port resolution skipped: ${RESOLVE_NOTES:-no hardware}"
+    return 0
+  fi
+
+  PORT_STATUS="FAILED"
+  append_step "resolve_ports" "FAIL" "1" "$resolve_log" "${RESOLVE_NOTES:-status=fail}"
+  log_error "port resolution failed: ${RESOLVE_NOTES:-status=fail}"
+  set_failure 21
+  return 1
+}
+
+run_role_smoke() {
+  local role="$1"
+  local port="$2"
+  local log_file="$3"
+  local wait_port="${ZACUS_WAIT_PORT:-3}"
+  local timeout_s="${ZACUS_TIMEOUT:-1.0}"
+  local baud="115200"
+
+  if [[ ! "$wait_port" =~ ^[0-9]+$ ]]; then
+    wait_port=3
+  fi
+
+  local cmd=("$PYTHON_BIN" "$SERIAL_SMOKE" --role "$role" --port "$port" --baud "$baud" --timeout "$timeout_s" --wait-port "$wait_port")
+  printf '[step] %s\n' "${cmd[*]}" | tee -a "$RUN_LOG" "$log_file"
+  set +e
+  "${cmd[@]}" >>"$log_file" 2>&1
+  local rc=$?
+  set -e
+
+  if [[ "$rc" == "0" ]]; then
+    append_step "smoke_${role}" "PASS" "0" "$log_file" "baud=$baud"
+    return 0
+  fi
+  append_step "smoke_${role}" "FAIL" "$rc" "$log_file" "baud=$baud"
+  return "$rc"
+}
+
+run_ui_link_check() {
+  local ui_log="$ARTIFACT_DIR/ui_link.log"
+
+  if [[ -z "$PORT_ESP32" ]]; then
+    UI_LINK_STATUS="SKIP"
+    append_step "ui_link" "SKIP" "0" "$ui_log" "esp32 port unavailable"
+    return 0
+  fi
+
+  UI_LINK_COMMAND="$PYTHON_BIN - <PORT_ESP32> UI_LINK_STATUS"
+  printf '[step] ui-link check on %s\n' "$PORT_ESP32" | tee -a "$RUN_LOG" "$ui_log"
+
+  set +e
+  "$PYTHON_BIN" - "$PORT_ESP32" >"$ui_log" 2>&1 <<'PY'
+import re
+import sys
+import time
+
+import serial
+
+port = sys.argv[1]
+line_seen = ""
+connected = None
+
+try:
+    ser = serial.Serial(port, 115200, timeout=0.25)
+except Exception as exc:
+    print(f"serial open failed: {exc}")
+    raise SystemExit(4)
+
+try:
+    ser.reset_input_buffer()
+    ser.write(b"UI_LINK_STATUS\n")
+    deadline = time.time() + 3.0
+    while time.time() < deadline:
+        line = ser.readline().decode("utf-8", errors="ignore").strip()
+        if not line:
+            continue
+        print(line)
+        if "UI_LINK_STATUS" not in line:
+            continue
+        line_seen = line
+        match = re.search(r"connected=(\d)", line)
+        if match:
+            connected = int(match.group(1))
+        break
+finally:
+    ser.close()
+
+if not line_seen:
+    print("UI_LINK_STATUS missing")
+    raise SystemExit(2)
+if connected != 1:
+    print("UI_LINK_STATUS connected=0")
+    raise SystemExit(3)
+raise SystemExit(0)
+PY
+  local rc=$?
+  set -e
+
+  if [[ "$rc" == "0" ]]; then
+    UI_LINK_STATUS="OK"
+    append_step "ui_link" "PASS" "0" "$ui_log" "connected=1"
+    return 0
+  fi
+
+  UI_LINK_STATUS="FAILED"
+  if [[ "$rc" == "3" ]]; then
+    append_step "ui_link" "FAIL" "$rc" "$ui_log" "connected=0"
+  else
+    append_step "ui_link" "FAIL" "$rc" "$ui_log" "status unavailable"
+  fi
   return "$rc"
 }
 
 write_summary() {
   local rc="$1"
-  "$PYTHON_BIN" - "$ARTIFACT_DIR" "$STEPS_TSV" "$SUMMARY_JSON" "$SUMMARY_MD" "$TIMESTAMP" "$BUILD_STATUS" "$SMOKE_STATUS" "$SMOKE_COMMAND_STRING" "$rc" "$RUN_LOG" <<'PY'
+  "$PYTHON_BIN" - "$ARTIFACT_DIR" "$STEPS_TSV" "$SUMMARY_JSON" "$SUMMARY_MD" "$TIMESTAMP" "$BUILD_STATUS" "$PORT_STATUS" "$SMOKE_STATUS" "$UI_LINK_STATUS" "$SMOKE_COMMAND_STRING" "$PORT_ESP32" "$PORT_ESP8266" "$PORTS_RESOLVE_JSON" "$rc" "$RUN_LOG" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -277,10 +433,15 @@ summary_json = Path(sys.argv[3])
 summary_md = Path(sys.argv[4])
 timestamp = sys.argv[5]
 build_status = sys.argv[6]
-smoke_status = sys.argv[7]
-smoke_cmd = sys.argv[8]
-exit_code = int(sys.argv[9])
-run_log = sys.argv[10]
+port_status = sys.argv[7]
+smoke_status = sys.argv[8]
+ui_link_status = sys.argv[9]
+smoke_cmd = sys.argv[10]
+port_esp32 = sys.argv[11]
+port_esp8266 = sys.argv[12]
+ports_json = Path(sys.argv[13])
+exit_code = int(sys.argv[14])
+run_log = sys.argv[15]
 
 steps = []
 if steps_tsv.exists():
@@ -298,6 +459,13 @@ if steps_tsv.exists():
             }
         )
 
+ports_resolve = {}
+if ports_json.exists():
+    try:
+        ports_resolve = json.loads(ports_json.read_text(encoding="utf-8"))
+    except Exception:
+        ports_resolve = {}
+
 if any(step["status"] == "FAIL" for step in steps) or exit_code != 0:
     result = "FAIL"
 elif any(step["status"] == "PASS" for step in steps):
@@ -310,11 +478,26 @@ summary = {
     "result": result,
     "exit_code": exit_code,
     "build_status": build_status,
+    "port_status": port_status,
     "smoke_status": smoke_status,
+    "ui_link_status": ui_link_status,
     "smoke_command": smoke_cmd,
+    "ports": {
+        "esp32": {
+            "port": port_esp32,
+            "location": ports_resolve.get("details", {}).get("esp32", {}).get("location", ""),
+            "reason": ports_resolve.get("details", {}).get("esp32", {}).get("reason", ""),
+        },
+        "esp8266_usb": {
+            "port": port_esp8266,
+            "location": ports_resolve.get("details", {}).get("esp8266", {}).get("location", ""),
+            "reason": ports_resolve.get("details", {}).get("esp8266", {}).get("reason", ""),
+        },
+    },
     "steps": steps,
     "logs": {
         "run_log": run_log,
+        "ports_resolve_json": str(ports_json),
     },
 }
 summary_json.write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -325,7 +508,11 @@ rows = [
     f"- Result: **{result}**",
     f"- Exit code: `{exit_code}`",
     f"- Build status: `{build_status}`",
+    f"- Port status: `{port_status}`",
     f"- Smoke status: `{smoke_status}`",
+    f"- UI link status: `{ui_link_status}`",
+    f"- ESP32 port: `{port_esp32 or 'n/a'}`",
+    f"- ESP8266 USB port: `{port_esp8266 or 'n/a'}`",
     f"- Run log: `{Path(run_log).name}`",
     "",
     "| Step | Status | Exit | Log | Details |",
@@ -364,6 +551,9 @@ if [[ -x ".venv/bin/python" ]]; then
 else
   PYTHON_BIN="python3"
 fi
+
+SERIAL_SMOKE="$ROOT/tools/dev/serial_smoke.py"
+RESOLVER="$REPO_ROOT/tools/test/resolve_ports.py"
 
 if [[ "${ZACUS_SKIP_PIO:-0}" != "1" ]]; then
   require_cmd pio || exit "$EXIT_CODE"
@@ -410,22 +600,60 @@ fi
 
 if [[ "${ZACUS_SKIP_SMOKE:-0}" == "1" ]]; then
   SMOKE_STATUS="SKIPPED"
-  append_step "smoke_auto" "SKIP" "0" "$ARTIFACT_DIR/smoke_auto.log" "ZACUS_SKIP_SMOKE=1"
+  UI_LINK_STATUS="SKIPPED"
+  PORT_STATUS="SKIPPED"
+  append_step "resolve_ports" "SKIP" "0" "$ARTIFACT_DIR/resolve_ports.log" "ZACUS_SKIP_SMOKE=1"
+  append_step "smoke_esp32" "SKIP" "0" "$ARTIFACT_DIR/smoke_esp32.log" "ZACUS_SKIP_SMOKE=1"
+  append_step "smoke_esp8266_usb" "SKIP" "0" "$ARTIFACT_DIR/smoke_esp8266_usb.log" "ZACUS_SKIP_SMOKE=1"
+  append_step "ui_link" "SKIP" "0" "$ARTIFACT_DIR/ui_link.log" "ZACUS_SKIP_SMOKE=1"
   log_step "serial smoke skipped"
 else
   echo
   wait_for_usb_confirmation
-  log_step "serial smoke running"
-  if ! run_smoke_auto; then
-    set_failure 20
-    log_error "smoke step failed; inspect $ARTIFACT_DIR/smoke_auto.log"
+  log_step "port resolution"
+  if ! resolve_live_ports; then
+    set_failure 21
+  fi
+
+  if [[ "$PORT_STATUS" == "OK" ]]; then
+    local_smoke_fail=0
+    SMOKE_COMMAND_STRING="$PYTHON_BIN tools/dev/serial_smoke.py --role <esp32|esp8266_usb> --port <resolved> --baud 115200"
+
+    if ! run_role_smoke "esp32" "$PORT_ESP32" "$ARTIFACT_DIR/smoke_esp32.log"; then
+      local_smoke_fail=1
+    fi
+    if ! run_role_smoke "esp8266_usb" "$PORT_ESP8266" "$ARTIFACT_DIR/smoke_esp8266_usb.log"; then
+      local_smoke_fail=1
+    fi
+
+    if [[ "$local_smoke_fail" == "1" ]]; then
+      SMOKE_STATUS="FAILED"
+      set_failure 22
+    else
+      SMOKE_STATUS="OK"
+    fi
+
+    if ! run_ui_link_check; then
+      set_failure 23
+    fi
+  else
+    SMOKE_STATUS="SKIPPED"
+    UI_LINK_STATUS="SKIPPED"
+    append_step "smoke_esp32" "SKIP" "0" "$ARTIFACT_DIR/smoke_esp32.log" "port resolution $PORT_STATUS"
+    append_step "smoke_esp8266_usb" "SKIP" "0" "$ARTIFACT_DIR/smoke_esp8266_usb.log" "port resolution $PORT_STATUS"
+    append_step "ui_link" "SKIP" "0" "$ARTIFACT_DIR/ui_link.log" "port resolution $PORT_STATUS"
+    if [[ "$PORT_STATUS" == "FAILED" ]]; then
+      set_failure 21
+    fi
   fi
 fi
 
 echo | tee -a "$RUN_LOG"
 action_log "=== Run summary ==="
 action_log "Build status : $BUILD_STATUS"
+action_log "Port status  : $PORT_STATUS"
 action_log "Smoke status : $SMOKE_STATUS"
+action_log "UI link      : $UI_LINK_STATUS"
 if [[ -n "$SMOKE_COMMAND_STRING" ]]; then
   action_log "Smoke cmd    : $SMOKE_COMMAND_STRING"
 fi

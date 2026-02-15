@@ -25,6 +25,9 @@ FATAL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 REBOOT_PATTERN = re.compile(r"(ets Jan|rst:|boot mode|load:0x|entry 0x)", re.IGNORECASE)
+BINARY_JUNK_RATIO_THRESHOLD = 0.35
+BINARY_JUNK_BURST_LIMIT = 2
+BINARY_JUNK_MIN_BYTES = 8
 
 ROOT = Path(__file__).resolve().parents[2]
 PORTS_MAP_PATH = ROOT / "tools" / "dev" / "ports_map.json"
@@ -223,9 +226,32 @@ def find_port_by_name(name, wait_port):
 def read_lines(ser: Serial, timeout_s: float):
     deadline = time.time() + timeout_s
     while time.time() < deadline:
-        line = ser.readline().decode("utf-8", errors="ignore").strip()
-        if line:
-            yield line
+        raw = ser.readline()
+        if not raw:
+            continue
+        line = raw.decode("utf-8", errors="ignore").strip()
+        yield raw, line
+
+
+def non_printable_ratio(raw: bytes) -> float:
+    if not raw:
+        return 0.0
+    bad = 0
+    for byte in raw:
+        if byte in (9, 10, 13):
+            continue
+        if 32 <= byte <= 126:
+            continue
+        bad += 1
+    return bad / max(1, len(raw))
+
+
+def update_junk_burst(raw: bytes, burst: int) -> int:
+    if len(raw) >= BINARY_JUNK_MIN_BYTES and non_printable_ratio(raw) >= BINARY_JUNK_RATIO_THRESHOLD:
+        burst += 1
+        print(f"[warn] binary-junk line detected ({burst}/{BINARY_JUNK_BURST_LIMIT})")
+        return burst
+    return 0
 
 
 def run_smoke(device, baud, timeout):
@@ -237,19 +263,27 @@ def run_smoke(device, baud, timeout):
             handshake_hits = 0
             post_handshake = False
             handshake_deadline = time.time() + max(timeout * 2, 1.2)
+            junk_burst = 0
 
             while time.time() < handshake_deadline and handshake_hits < 2:
                 print(f"[tx] {PING_COMMAND}")
                 ser.write((PING_COMMAND + "\n").encode("ascii"))
-                for line in read_lines(ser, max(0.7, timeout)):
-                    print(f"[rx] {line}")
-                    if FATAL_PATTERN.search(line):
+                for raw, line in read_lines(ser, max(0.7, timeout)):
+                    if line:
+                        print(f"[rx] {line}")
+                    else:
+                        print(f"[rx-bin] {raw[:24].hex()}")
+                    junk_burst = update_junk_burst(raw, junk_burst)
+                    if junk_burst >= BINARY_JUNK_BURST_LIMIT:
+                        print("[fail] binary junk detected", file=sys.stderr)
+                        return False
+                    if line and FATAL_PATTERN.search(line):
                         print(f"[fail] fatal marker detected: {line}", file=sys.stderr)
                         return False
-                    if REBOOT_PATTERN.search(line):
-                        # Boot noise can happen before a stable handshake.
-                        continue
-                    if PING_OK_PATTERN.search(line):
+                    if line and REBOOT_PATTERN.search(line):
+                        print(f"[fail] reboot marker detected: {line}", file=sys.stderr)
+                        return False
+                    if line and PING_OK_PATTERN.search(line):
                         handshake_hits += 1
                         print(f"[ok] handshake {handshake_hits}/2")
                         if handshake_hits >= 2:
@@ -264,12 +298,19 @@ def run_smoke(device, baud, timeout):
 
             stable_until = time.time() + 3.0
             while time.time() < stable_until:
-                for line in read_lines(ser, 0.35):
-                    print(f"[rx] {line}")
-                    if FATAL_PATTERN.search(line):
+                for raw, line in read_lines(ser, 0.35):
+                    if line:
+                        print(f"[rx] {line}")
+                    else:
+                        print(f"[rx-bin] {raw[:24].hex()}")
+                    junk_burst = update_junk_burst(raw, junk_burst)
+                    if junk_burst >= BINARY_JUNK_BURST_LIMIT:
+                        print("[fail] binary junk detected after handshake", file=sys.stderr)
+                        return False
+                    if line and FATAL_PATTERN.search(line):
                         print(f"[fail] fatal marker after handshake: {line}", file=sys.stderr)
                         return False
-                    if REBOOT_PATTERN.search(line):
+                    if line and REBOOT_PATTERN.search(line):
                         print(f"[fail] reboot marker after handshake: {line}", file=sys.stderr)
                         return False
             print(f"[ok] {PING_COMMAND} stable")
@@ -287,18 +328,27 @@ def run_monitor_smoke(device, baud):
             ser.reset_input_buffer()
             ready_deadline = time.time() + 4.0
             saw_ready = False
+            junk_burst = 0
             while time.time() < ready_deadline:
-                line = ser.readline().decode("utf-8", errors="ignore").strip()
-                if not line:
+                raw = ser.readline()
+                if not raw:
                     continue
-                print(f"[rx] {line}")
-                if FATAL_PATTERN.search(line):
+                line = raw.decode("utf-8", errors="ignore").strip()
+                if line:
+                    print(f"[rx] {line}")
+                else:
+                    print(f"[rx-bin] {raw[:24].hex()}")
+                junk_burst = update_junk_burst(raw, junk_burst)
+                if junk_burst >= BINARY_JUNK_BURST_LIMIT:
+                    print("[fail] binary junk detected", file=sys.stderr)
+                    return False
+                if line and FATAL_PATTERN.search(line):
                     print(f"[fail] fatal marker detected: {line}", file=sys.stderr)
                     return False
-                if REBOOT_PATTERN.search(line):
+                if line and REBOOT_PATTERN.search(line):
                     print(f"[fail] reboot marker detected: {line}", file=sys.stderr)
                     return False
-                if READY_PATTERN.search(line):
+                if line and READY_PATTERN.search(line):
                     saw_ready = True
                     break
             if not saw_ready:
@@ -307,14 +357,22 @@ def run_monitor_smoke(device, baud):
 
             stable_until = time.time() + 3.0
             while time.time() < stable_until:
-                line = ser.readline().decode("utf-8", errors="ignore").strip()
-                if not line:
+                raw = ser.readline()
+                if not raw:
                     continue
-                print(f"[rx] {line}")
-                if FATAL_PATTERN.search(line):
+                line = raw.decode("utf-8", errors="ignore").strip()
+                if line:
+                    print(f"[rx] {line}")
+                else:
+                    print(f"[rx-bin] {raw[:24].hex()}")
+                junk_burst = update_junk_burst(raw, junk_burst)
+                if junk_burst >= BINARY_JUNK_BURST_LIMIT:
+                    print("[fail] binary junk detected after ready", file=sys.stderr)
+                    return False
+                if line and FATAL_PATTERN.search(line):
                     print(f"[fail] fatal marker after ready: {line}", file=sys.stderr)
                     return False
-                if REBOOT_PATTERN.search(line):
+                if line and REBOOT_PATTERN.search(line):
                     print(f"[fail] reboot marker after ready: {line}", file=sys.stderr)
                     return False
             print("[ok] monitor stable")

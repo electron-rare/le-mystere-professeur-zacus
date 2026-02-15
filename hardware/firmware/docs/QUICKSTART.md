@@ -89,6 +89,18 @@ Le script affiche un résumé final : `Build status` (OK ou SKIPPED) et `Smoke 
 - **Hotplug**: unplug a board, run the countdown, plug it back before timeout → new port triggers detection.
 - **Aucun hardware**: run smoke without devices; default behavior logs the skip, `ZACUS_REQUIRE_HW=1` forces failure, and `ZACUS_SKIP_PIO=1` still runs the skip-only sequence.
 
+## 4.8) RC sprint gates
+
+- Sprint replay helper:
+  - `bash ../../tools/test/run_rc_gate.sh --sprint s1 --allow-no-hardware`
+  - `bash ../../tools/test/run_rc_gate.sh --sprint s5 --esp32-port <PORT_ESP32> --ui-port <PORT_UI>`
+- Board source:
+  - `docs/RC_FINAL_BOARD.md`
+- Final report template:
+  - `docs/RC_FINAL_REPORT_TEMPLATE.md`
+- Optional issue/label seed:
+  - `bash tools/dev/rc_execution_seed.sh`
+
 ## 5) Hot-swap manuel
 
 1. Demarrer ESP32 + OLED, verifier affichage.

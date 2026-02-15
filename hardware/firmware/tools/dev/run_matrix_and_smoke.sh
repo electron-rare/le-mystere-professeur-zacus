@@ -707,7 +707,7 @@ if [[ "${ZACUS_SKIP_SMOKE:-0}" == "1" ]]; then
   append_step "ui_link" "SKIP" "0" "$ARTIFACT_DIR/ui_link.log" "ZACUS_SKIP_SMOKE=1"
   log_step "serial smoke skipped"
 else
-  local port_loop_success=1
+    port_loop_success=1
   if [[ "${ZACUS_REQUIRE_HW:-0}" == "1" ]]; then
     port_loop_success=0
     while true; do

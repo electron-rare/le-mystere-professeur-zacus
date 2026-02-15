@@ -3,6 +3,7 @@
 
 # Local IDE settings
 .vscode/
+!.vscode/tasks.json
 !hardware/firmware/.vscode/
 hardware/firmware/.vscode/*
 !hardware/firmware/.vscode/tasks.json

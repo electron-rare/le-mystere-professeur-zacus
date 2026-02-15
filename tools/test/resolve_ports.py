@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import os
 import re
 import sys
 import time
@@ -30,6 +31,11 @@ ROLE_HINTS = {
 }
 REQUEST_TO_CANONICAL = {"esp32": "esp32", "esp8266": "esp8266_usb"}
 CANONICAL_TO_REQUEST = {"esp32": "esp32", "esp8266_usb": "esp8266"}
+LEARNED_MAP_PATH = REPO_ROOT / "hardware" / "firmware" / ".local" / "ports_map.learned.json"
+ESP32_SIGNATURE = re.compile(r"(BOOT_PROTO|U-SON|U_LOCK|STORY_V2|MP3_DBG)", re.IGNORECASE)
+ESP8266_SIGNATURE = re.compile(r"(ets Jan|Exception \(|Stack smashing|\[SCREEN\])", re.IGNORECASE)
+FINGERPRINT_BAUDS = (115200, 19200)
+FINGERPRINT_TIMEOUT = 2.0
 
 
 def is_bluetooth_port(device: str) -> bool:
@@ -59,26 +65,86 @@ def parse_location(port) -> str:
     return ""
 
 
-def load_ports_map() -> Dict[str, object]:
-    default = {"location": [], "vidpid": {}}
-    if not PORTS_MAP_PATH.exists():
-        return default
+def load_map_file(path: Path) -> Dict[str, Dict[str, str]]:
+    data = {"location": {}, "vidpid": {}}
+    if not path.exists():
+        return data
     try:
-        raw = json.loads(PORTS_MAP_PATH.read_text(encoding="utf-8"))
+        raw = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
-        return default
-    location: List[Tuple[str, str]] = []
+        return data
     for key, value in (raw.get("location") or {}).items():
         role = normalize_role(str(value))
         if role:
-            location.append((str(key).lower(), role))
-    location.sort(key=lambda item: (-len(item[0]), item[0]))
-    vidpid: Dict[str, str] = {}
+            data["location"][str(key).lower()] = role
     for key, value in (raw.get("vidpid") or {}).items():
         role = normalize_role(str(value))
         if role:
-            vidpid[str(key).lower()] = role
-    return {"location": location, "vidpid": vidpid}
+            data["vidpid"][str(key).lower()] = role
+    return data
+
+
+def sort_patterns(patterns: List[dict]) -> List[dict]:
+    return sorted(
+        patterns,
+        key=lambda entry: (
+            -len(entry["pattern"]),
+            0 if entry["source"] == "learned-map" else 1,
+            entry["pattern"],
+        ),
+    )
+
+
+def load_ports_map() -> Dict[str, object]:
+    base = load_map_file(PORTS_MAP_PATH)
+    learned = load_map_file(LEARNED_MAP_PATH)
+    patterns = []
+    for pattern, role in base["location"].items():
+        patterns.append({"pattern": pattern, "role": role, "source": "location-map"})
+    for pattern, role in learned["location"].items():
+        patterns.append({"pattern": pattern, "role": role, "source": "learned-map"})
+    patterns = sort_patterns(patterns)
+    vidpid: Dict[str, str] = {}
+    vidpid.update(learned["vidpid"])
+    vidpid.update(base["vidpid"])
+    return {"patterns": patterns, "vidpid": vidpid, "learned": learned}
+
+
+def record_learned_mapping(ports_map: Dict[str, object], location: str, role: str) -> bool:
+    if not location:
+        return False
+    normalized = location.lower()
+    learned = ports_map.get("learned") or {"location": {}, "vidpid": {}}
+    location_map = learned.setdefault("location", {})
+    canonical_role = normalize_role(role)
+    if not canonical_role:
+        return False
+    if location_map.get(normalized) == canonical_role:
+        return False
+    location_map[normalized] = canonical_role
+    patterns = [
+        entry
+        for entry in ports_map["patterns"]
+        if not (entry["pattern"] == normalized and entry["source"] == "learned-map")
+    ]
+    patterns.append({"pattern": normalized, "role": canonical_role, "source": "learned-map"})
+    ports_map["patterns"] = sort_patterns(patterns)
+    ports_map["learned"] = learned
+    return True
+
+
+def persist_learned_map(learned_map: Dict[str, Dict[str, str]]) -> None:
+    if not learned_map:
+        return
+    try:
+        LEARNED_MAP_PATH.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "location": {k: learned_map["location"][k] for k in sorted(learned_map.get("location", {}))},
+            "vidpid": {k: learned_map["vidpid"][k] for k in sorted(learned_map.get("vidpid", {}))},
+        }
+        LEARNED_MAP_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def is_usb_like(port) -> bool:
@@ -121,22 +187,19 @@ def score_port(port, prefer_cu: bool) -> int:
     return score
 
 
-def role_from_map(port, ports_map: Dict[str, object]) -> Optional[str]:
+def role_from_map(port, ports_map: Dict[str, object]) -> Tuple[Optional[str], str, str]:
     location = parse_location(port)
-    if location:
-        location_patterns = ports_map.get("location") or []
-        if isinstance(location_patterns, dict):
-            location_patterns = list(location_patterns.items())
-        for pattern, mapped_role in location_patterns:
-            if fnmatch.fnmatch(location, pattern):
-                return mapped_role
+    for entry in ports_map.get("patterns", []):
+        if location and fnmatch.fnmatch(location, entry["pattern"]):
+            return entry["role"], entry["source"], entry["pattern"]
     vid = getattr(port, "vid", None)
     pid = getattr(port, "pid", None)
     if vid is not None and pid is not None:
         key = f"{vid:04x}:{pid:04x}".lower()
-        if key in ports_map["vidpid"]:
-            return ports_map["vidpid"][key]
-    return None
+        vidpid_map = ports_map.get("vidpid") or {}
+        if key in vidpid_map:
+            return vidpid_map[key], "vidpid-map", ""
+    return None, "", ""
 
 
 def role_from_hint(port) -> Optional[str]:
@@ -154,29 +217,34 @@ def role_from_hint(port) -> Optional[str]:
     return None
 
 
-def fingerprint_port(device: str, timeout: float = 2.0) -> Optional[str]:
+def fingerprint_port(
+    device: str,
+    bauds: Tuple[int, ...] = FINGERPRINT_BAUDS,
+    timeout: float = FINGERPRINT_TIMEOUT,
+) -> Tuple[Optional[str], Optional[int]]:
     if serial is None:
-        return None
-    try:
-        with serial.Serial(device, 115200, timeout=0.1) as ser:
-            ser.dtr = False
-            ser.rts = False
-            time.sleep(0.05)
-            ser.dtr = True
-            ser.rts = True
-            deadline = time.monotonic() + timeout
-            while time.monotonic() < deadline:
-                line = ser.readline().decode("utf-8", errors="ignore").strip()
-                if not line:
-                    continue
-                text = line.lower()
-                if "esp-rom" in text or "rst:" in text:
-                    return "esp32"
-                if "ets jan" in text or "rst cause" in text:
-                    return "esp8266"
-    except Exception:
-        return None
-    return None
+        return None, None
+    for baud in bauds:
+        try:
+            with serial.Serial(device, baud, timeout=0.1) as ser:
+                ser.dtr = False
+                ser.rts = False
+                time.sleep(0.05)
+                ser.dtr = True
+                ser.rts = True
+                deadline = time.monotonic() + timeout
+                while time.monotonic() < deadline:
+                    line = ser.readline().decode("utf-8", errors="ignore").strip()
+                    if not line:
+                        continue
+                    text = line
+                    if ESP32_SIGNATURE.search(text):
+                        return "esp32", baud
+                    if ESP8266_SIGNATURE.search(text):
+                        return "esp8266", baud
+        except Exception:
+            continue
+    return None, None
 
 
 
@@ -207,7 +275,7 @@ def gather_ports(wait_port: int) -> List:
         time.sleep(0.4)
 
 
-def classify(ports: List, prefer_cu: bool, ports_map: Dict[str, object], allow_probe: bool) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, dict], List[str]]:
+def classify(ports: List, prefer_cu: bool, ports_map: Dict[str, object], allow_probe: bool) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, dict], List[str], bool]:
     filtered = [p for p in ports if is_candidate_port(p)]
     usb_ports = [p for p in filtered if is_usb_like(p)]
     ports = usb_ports if usb_ports else filtered
@@ -216,13 +284,13 @@ def classify(ports: List, prefer_cu: bool, ports_map: Dict[str, object], allow_p
         device = str(getattr(port, "device", "") or "")
         if not device:
             continue
-        mapped_role = role_from_map(port, ports_map)
+        mapped_role, mapped_source, _ = role_from_map(port, ports_map)
         hinted_role = role_from_hint(port)
         role = mapped_role or hinted_role
         location = parse_location(port)
         reason = ""
         if mapped_role:
-            reason = f"location-map:{location or 'unknown'}"
+            reason = f"{mapped_source}:{location or 'unknown'}"
         elif hinted_role:
             reason = "usb-hint"
         else:
@@ -253,6 +321,7 @@ def classify(ports: List, prefer_cu: bool, ports_map: Dict[str, object], allow_p
     probe_baud: Dict[str, str] = {}
     details: Dict[str, dict] = {}
     notes: List[str] = []
+    learned_dirty = False
 
     used = set()
     for role in ("esp32", "esp8266"):
@@ -274,21 +343,24 @@ def classify(ports: List, prefer_cu: bool, ports_map: Dict[str, object], allow_p
                 break
             if cand["device"] in used:
                 continue
-            fingerprint = fingerprint_port(cand["device"])
-            if not fingerprint:
+            fingerprint_role, fingerprint_baud = fingerprint_port(cand["device"])
+            if not fingerprint_role:
                 continue
-            if fingerprint not in unresolved:
+            if fingerprint_role not in unresolved:
                 continue
-            selected[fingerprint] = cand["device"]
-            reasons[fingerprint] = f"fingerprint:{fingerprint}"
-            probe_baud[fingerprint] = "fingerprint"
-            details[fingerprint] = {
+            selected[fingerprint_role] = cand["device"]
+            reasons[fingerprint_role] = f"fingerprint:{fingerprint_baud}"
+            probe_baud[fingerprint_role] = str(fingerprint_baud)
+            details[fingerprint_role] = {
                 "port": cand["device"],
                 "location": cand["location"] or "unknown",
-                "role": REQUEST_TO_CANONICAL[fingerprint],
-                "reason": f"fingerprint:{fingerprint}",
+                "role": REQUEST_TO_CANONICAL[fingerprint_role],
+                "reason": f"fingerprint:{fingerprint_baud}",
             }
-            notes.append(f"fingerprint:{fingerprint}={cand['device']}")
+            notes.append(f"fingerprint:{fingerprint_role}={cand['device']}@{fingerprint_baud}")
+            learned_dirty = learned_dirty or record_learned_mapping(
+                ports_map, cand["location"], fingerprint_role
+            )
             used.add(cand["device"])
             unresolved = [r for r in ("esp32", "esp8266") if r not in selected]
 
@@ -313,7 +385,7 @@ def classify(ports: List, prefer_cu: bool, ports_map: Dict[str, object], allow_p
     if len(candidates) > 2:
         notes.append(f"multiple candidates: {len(candidates)}")
 
-    return selected, reasons, probe_baud, details, notes
+    return selected, reasons, probe_baud, details, notes, learned_dirty
 
 
 def output_result(result: dict, json_path: str, exit_code: int) -> int:
@@ -344,29 +416,45 @@ def main() -> int:
     args = parser.parse_args()
 
     prefer_cu = args.prefer_cu or sys.platform == "darwin"
+
+    env_override = {
+        "esp32": False,
+        "esp8266": False,
+    }
+    env_esp32 = os.environ.get("ZACUS_ESP32_PORT", "").strip()
+    env_esp8266 = os.environ.get("ZACUS_ESP8266_PORT", "").strip()
+    if env_esp32 and not args.port_esp32:
+        args.port_esp32 = env_esp32
+        env_override["esp32"] = True
+    if env_esp8266 and not args.port_esp8266:
+        args.port_esp8266 = env_esp8266
+        env_override["esp8266"] = True
+
     ports_map = load_ports_map()
+
+    initial_ports = {"esp32": args.port_esp32, "esp8266": args.port_esp8266}
+
+    def reason_label(role: str) -> str:
+        if env_override.get(role):
+            return "env"
+        return "explicit" if initial_ports.get(role) else ""
+
+    def make_detail(role: str, port: str, reason: str) -> Dict[str, str]:
+        return {
+            "port": port,
+            "location": "explicit" if port else "",
+            "role": REQUEST_TO_CANONICAL[role],
+            "reason": reason,
+        }
 
     result = {
         "status": "pass",
-        "ports": {"esp32": args.port_esp32, "esp8266": args.port_esp8266},
-        "reasons": {
-            "esp32": "explicit" if args.port_esp32 else "",
-            "esp8266": "explicit" if args.port_esp8266 else "",
-        },
+        "ports": initial_ports.copy(),
+        "reasons": {role: reason_label(role) for role in ("esp32", "esp8266")},
         "probe_baud": {"esp32": "", "esp8266": ""},
         "details": {
-            "esp32": {
-                "port": args.port_esp32,
-                "location": "explicit" if args.port_esp32 else "",
-                "role": "esp32" if args.port_esp32 else "",
-                "reason": "explicit" if args.port_esp32 else "",
-            },
-            "esp8266": {
-                "port": args.port_esp8266,
-                "location": "explicit" if args.port_esp8266 else "",
-                "role": "esp8266_usb" if args.port_esp8266 else "",
-                "reason": "explicit" if args.port_esp8266 else "",
-            },
+            "esp32": make_detail("esp32", initial_ports["esp32"], reason_label("esp32")),
+            "esp8266": make_detail("esp8266", initial_ports["esp8266"], reason_label("esp8266")),
         },
         "notes": [],
     }
@@ -389,13 +477,16 @@ def main() -> int:
             result["notes"].append("no serial ports detected")
             return output_result(result, args.ports_resolve_json, 1)
 
-        selected, reasons, probe_baud, details, notes = classify(
+        selected, reasons, probe_baud, details, notes, learned_dirty = classify(
             ports=ports,
             prefer_cu=prefer_cu,
             ports_map=ports_map,
             allow_probe=True,
         )
         result["notes"].extend(notes)
+
+        if learned_dirty:
+            persist_learned_map(ports_map.get("learned", {}))
 
         for role in missing_roles:
             if role in selected:

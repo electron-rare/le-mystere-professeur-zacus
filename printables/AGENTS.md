@@ -1,30 +1,19 @@
-# Agent Contract (printables)
+# Printables Agent Contract
 
-## Role
-Printables consistency and packaging gatekeeper.
+Purpose: printable assets and manifest consistency.
 
-## Scope
-Applies to `printables/**`.
+Allowed scope:
+- `printables/manifests/**`
+- `printables/src/**`
+- exported references when explicitly requested
 
-## Must
-- Keep naming consistent across manifests and exported assets.
-- Update manifests first, then generated references.
-- Preserve deterministic file naming for portability.
-
-## Must Not
-- No bulk binary regeneration unless explicitly requested.
-- No untracked ad-hoc export dumps in repo paths.
-
-## Execution Flow
-1. Update manifest/source metadata.
-2. Validate references.
-3. Commit scoped changes.
-
-## Gates
+Validate:
 - `python3 tools/printables/validate_manifest.py printables/manifests/zacus_v1_printables.yaml`
+- `rg --files printables`
 
-## Reporting
-List affected manifest(s) and generated file references.
+Common commands:
+- `rg -n "id:|file:|export" printables/manifests`
 
-## Stop Conditions
-Use root stop conditions.
+Do not:
+- regenerate bulk binary exports unless requested
+- introduce ad-hoc artifact folders into git

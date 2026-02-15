@@ -1,45 +1,33 @@
-# Agent Contract (hardware/firmware)
+# Firmware Agent Contract
 
-## Role
-Firmware PM/TL/QA contract for PlatformIO and hardware validation.
+Purpose: enforce reproducible PlatformIO builds and strict smoke validation.
 
-## Scope
-Applies to `hardware/firmware/**` and overrides root defaults where specified.
+Scope:
+- all files under `hardware/firmware/**`
+- `hardware/firmware/esp32/` remains read-only
 
-## Must
-- Run commands from repository root; use explicit paths/workdir for `hardware/firmware`.
-- Keep `hardware/firmware/esp32/` read-only.
-- Store operational logs in `hardware/firmware/logs/` only.
-- Enforce local USB wait gate in bash/python scripts (no chat wait loops):
-  - print `⚠️ BRANCHE L’USB MAINTENANT ⚠️` exactly 3 times
-  - ring bell (`\a`)
-  - block until Enter
-- Serial smoke policy:
-  - ESP32 USB default baud: `115200`
-  - ESP8266 USB (CP2102) default baud: `115200`, monitor-only (no binary TX)
-  - UI link verdict from ESP32 side: `UI_LINK_STATUS connected==1`
-  - panic/reboot markers are strict FAIL
+Bootstrap + workspace:
+- `cd hardware/firmware`
+- `./tools/dev/bootstrap_local.sh`
+- use `.venv` for local python tooling (`pyserial`)
 
-## Must Not
-- Do not transmit binary payloads to ESP8266 monitor-only serial path.
-- Do not place runtime logs outside `hardware/firmware/logs/`.
+Build gates:
+- `./build_all.sh`
+- or `pio run -e esp32dev esp32_release esp8266_oled ui_rp2040_ili9488 ui_rp2040_ili9486`
 
-## Execution Flow
-1. Run safety checkpoint.
-2. Run/adjust local scripts under `hardware/firmware/tools/dev` for waits/smokes.
-3. Run firmware gates.
-4. Commit and report.
+Smoke gates:
+- `./tools/dev/run_matrix_and_smoke.sh`
+- strict FAIL on panic/reboot markers
+- UI verdict from ESP32 side: `UI_LINK_STATUS connected==1`
 
-## Gates
-- `pio run -e esp32dev`
-- `pio run -e esp32_release`
-- `pio run -e esp8266_oled`
-- `pio run -e ui_rp2040_ili9488`
-- `pio run -e ui_rp2040_ili9486`
-- Optional smoke entrypoint: `bash hardware/firmware/tools/test/hw_now.sh`
+Port + baud policy:
+- CP2102 mapping by LOCATION: `20-6.1.1=esp32`, `20-6.1.2=esp8266_usb`
+- USB monitor baud is `115200` (esp32 + esp8266_usb monitor-only)
+- internal ESP8266 SoftwareSerial UI link is `19200` (not USB monitor baud)
 
-## Reporting
-Use root reporting format. Keep output concise and evidence-based.
+Fast loop:
+- `make fast-esp32`, `make fast-ui-oled`, `make fast-ui-tft`
 
-## Stop Conditions
-Use root stop conditions.
+Logs/artifacts:
+- logs: `hardware/firmware/logs/`
+- artifacts: `hardware/firmware/artifacts/`

@@ -10,7 +10,7 @@ Scope:
 
 - Tous les utilitaires shell (menus, i18n, gates, helpers) sont centralisés dans `tools/dev/agent_utils.sh`.
 - Le point d'entrée TUI unique est `tools/dev/cockpit.sh` (menu interactif, logs, prompts, etc.).
-- Les scripts batch/CLI (build, flash, rc, etc.) sont accessibles via `tools/dev/zacus.sh`.
+- Les scripts batch/CLI (build, flash, rc, etc.) sont accessibles via `tools/dev/cockpit.sh <commande>`.
 - Les scripts de seed/CI sont dans `tools/dev/ci/`.
 - Onboarding et vérification d'environnement : `tools/dev/onboard.sh`, `tools/dev/check_env.sh`.
 - Les anciens fichiers `menu_utils.sh` et `menu_strings.sh` sont supprimés (fusion dans agent_utils.sh).
@@ -45,6 +45,6 @@ Logs/artifacts:
 
 - Toute logique de menu, i18n, helpers shell, gates (build/smoke/logs/artefacts) doit passer par `agent_utils.sh`.
 - Un seul point d'entrée TUI : cockpit.sh (pas de duplication de menu ailleurs).
-- Scripts batch/CLI : zacus.sh (usage non interactif, scripting, CI).
+- Scripts batch/CLI : cockpit.sh (usage non interactif, scripting, CI).
 - Les scripts de seed/CI doivent être rangés dans `tools/dev/ci/` et référencés dans la doc/CI.
 - Toute modification de structure doit être répercutée dans la documentation et l'onboarding.

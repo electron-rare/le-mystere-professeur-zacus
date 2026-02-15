@@ -164,5 +164,32 @@ afficher_logs_menu() {
 }
 
 
+
+# Mode CLI (compatibilité zacus.sh)
+command=${1:-}
+if [[ -n "$command" ]]; then
+  case "$command" in
+    bootstrap)
+      run_bootstrap; exit $? ;;
+    build)
+      run_build_all; exit $? ;;
+    flash)
+      # Appel de la logique de flash de zacus.sh (à intégrer ici)
+      echo "[TODO] Implémenter la logique de flash ici (voir zacus.sh)"; exit 1 ;;
+    rc)
+      ZACUS_REQUIRE_HW=1 run_rc_live; exit $? ;;
+    rc-autofix)
+      echo "[TODO] Implémenter la logique rc-autofix ici (voir zacus.sh)"; exit 1 ;;
+    ports)
+      ports_watch; exit $? ;;
+    latest)
+      latest_artifacts; exit $? ;;
+    help|--help|-h)
+      afficher_aide; exit 0 ;;
+    *)
+      echo "Usage: cockpit.sh <command>"; exit 1 ;;
+  esac
+fi
+
 # Boucle principale : tout est dans show_menu
 show_menu

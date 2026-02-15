@@ -35,13 +35,13 @@ Dossier : `printables/`
 - `docs/QUICKSTART.md` (mise en place express, licences)
 - `docs/STYLEGUIDE.md` (ton, structure, prompts)
 - `docs/index.md` + `docs/repo-status.md` pour la navigation et l’état du dépôt
-- `include-humain-IA/` (contenus annexes, renommé pour la portabilité)
+- `scenario-ai-coherence/` (cohérence scénario générée par IA, validée par humain)
 
 ## État du projet
 - **Kit MJ** : complet (script, plan, antic-chaos, solution, checklists, export PDF).
 - **Printables** : prompts prêts, workflow documenté (`printables/WORKFLOW.md`), exports par thème organisés.
 - **Game/audio** : scénario canon `zacus_v1`, manifestes, audio narratif et scripts de validation.
-- **Outils** : scripts Python ded validation scenario/audio + guide rapide.
+- **Outils** : scripts Python de validation scenario/audio + guide rapide.
 
 ## Licence / Contribution
 - Contenus créatifs (documents, PDFs, PNG, SVG, assets, prompts) : **CC BY-NC 4.0** (`LICENSES/CC-BY-NC-4.0.txt`).

@@ -12,7 +12,7 @@ Allowed:
 - tools/qa/** (optional)
 - .github/workflows/firmware-*.yml
 Forbidden:
-- game/** audio/** printables/** kit-maitre-du-jeu/** include-humain-IA/** docs/**
+- game/** audio/** printables/** kit-maitre-du-jeu/** scenario-ai-coherence/** docs/**
 
 ### generation/story-esp
 Allowed:
@@ -31,7 +31,7 @@ Allowed:
 - audio/**
 - printables/**
 - kit-maitre-du-jeu/**
-- include-humain-IA/**
+- scenario-ai-coherence/**
 Forbidden:
 - hardware/** (firmware), tools/**
 

@@ -1,8 +1,23 @@
 # macOS Finder metadata
 .DS_Store
+.AppleDouble
+.LSOverride
+
+# macOS Thumbnails
+._*
+
+# macOS Directories that might appear in the root
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
 
 # Local IDE settings
 .vscode/
+.idea/
 
 # Generated game exports
 game/exports/*
@@ -14,14 +29,36 @@ audio/generated/*
 !audio/generated/README.md
 
 # Locally generated printable PDFs (not versioned)
-<<<<<<< Updated upstream
-printables/export/pdf/zacus_v1/*
-!printables/export/pdf/zacus_v1/README.md
-=======
 printables/export/pdf/**
 !printables/export/pdf/zacus_v1/README.md
 
 # Locally generated printable PNGs (not versioned)
 printables/export/png/**
 !printables/export/png/zacus_v1/.gitkeep
->>>>>>> Stashed changes
+
+# Firmware build artifacts
+hardware/firmware/**/build/
+hardware/firmware/**/.pio/
+hardware/firmware/**/.pioenvs/
+hardware/firmware/**/.piolibdeps/
+hardware/firmware/**/lib/
+hardware/firmware/**/bin/
+hardware/firmware/**/*.hex
+hardware/firmware/**/*.bin
+hardware/firmware/**/*.elf
+
+# PlatformIO specific
+.pio
+.pioenvs
+.piolibdeps
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/

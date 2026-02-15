@@ -5,7 +5,7 @@
 - `printables/`: `src/` plus `export/{pdf,png}/` for invitations, cards, badges, and the one-page rule set.
 - `hardware/`: BOMs, wiring docs, and the ESP32/Arduino firmware flow with `.pio` dependencies (libraries such as Adafruit and ESP8266Audio naturally expand here).
 - `docs/`: maintenance plan, repo audit, and asset folder (`docs/assets/` contains the repo map SVG already referenced in `README.md`).
-- `examples/` and `include-humain-IA/` (renamed for portability): auxiliary content and tools, now safe for Windows/CI.
+- `examples/` and `scenario-ai-coherence/` (renamed for portability): auxiliary content and tools, now safe for Windows/CI.
 
 ## Empty / TODO files
 - `printables/invitations/export/pdf/.gitkeep`
@@ -20,7 +20,7 @@
 - `hardware/firmware/esp32/.pio/libdeps/esp32_release/Mozzi/README.md` line 116 → same missing `extras/NEWS.txt`.
 
 ## Naming / portability issues
-- `include-humain-IA/` and `include-humain-IA/version-finale/` now avoid spaces/colon, keeping the tree stable sur Windows/CI tooling. Continue to prefer hyphenated, lowercase identifiers pour tout nouveau sous-dossier.
+- `scenario-ai-coherence/` and `scenario-ai-coherence/version-finale/` now avoid spaces/colon, keeping the tree stable sur Windows/CI tooling. Continue to prefer hyphenated, lowercase identifiers pour tout nouveau sous-dossier.
 
 ## Licences
 - `README.md`, `CONTRIBUTING.md`, and `LICENSE.md` sont alignés autour du modèle CC BY-NC 4.0 pour les contenus créatifs et MIT pour le code (`LICENSES/CC-BY-NC-4.0.txt`, `LICENSES/MIT.txt`). Garder la même nomenclature accélère la revue des contributions.

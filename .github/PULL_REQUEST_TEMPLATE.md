@@ -1,16 +1,34 @@
 ## Scope
-- [ ] Ticket(s) Jira / sprint references:
-- [ ] Base branch cible (`main` ou `codex/*`):
-- [ ] Type de changement: code / docs / tests / infra
-- [ ] Commandes publiques impactées (si oui, lister):
+- [ ] Ticket(s) / Issue references: 
+- [ ] Base branch cible: `main` ou autre branch
+- [ ] Type de changement: 
+  - [ ] Code (firmware, tools, scripts)
+  - [ ] Documentation
+  - [ ] Tests
+  - [ ] Infrastructure / CI/CD
+  - [ ] Contenu créatif (game, audio, printables)
 
-## Contrats STV2
-- [ ] Contrats/API impactés listés (`Story V2`, `SYSTEM`, `SCREEN`, `MP3`)
-- [ ] Compatibilité Story V2 / legacy vérifiée
-- [ ] Impact écran (STAT/seq/CRC + recovery) explicité
-- [ ] Si changement flag default: justification + plan rollback
+## Description
+Brève description des changements effectués et de leur motivation.
 
-## Validation statique obligatoire
+## Changements
+Liste des fichiers/modules modifiés et nature des changements:
+- 
+- 
+
+## Validation
+
+### Pour les changements de code
+- [ ] Code lint/format respecté
+- [ ] Tests existants passent
+- [ ] Nouveaux tests ajoutés (si applicable)
+
+### Pour les changements de contenu (game/audio/printables)
+- [ ] `make scenario-validate` (si scénarios modifiés)
+- [ ] `make audio-validate` (si audio modifié)
+- [ ] `make printables-validate` (si printables modifiés)
+
+### Pour les changements de firmware
 - [ ] `make story-validate`
 - [ ] `make story-gen`
 - [ ] `make qa-story-v2`
@@ -18,21 +36,39 @@
 - [ ] `pio run -e esp8266_oled`
 - [ ] `cd screen_esp8266_hw630 && pio run -e nodemcuv2`
 
+### Pour les changements de documentation
+- [ ] Liens internes vérifiés
+- [ ] Orthographe et grammaire vérifiées
+- [ ] Structure et navigation cohérentes
+
+## Contrats et compatibilité (si firmware)
+- [ ] Contrats/API impactés listés (`Story V2`, `SYSTEM`, `SCREEN`, `MP3`)
+- [ ] Compatibilité Story V2 / legacy vérifiée
+- [ ] Impact écran (STAT/seq/CRC + recovery) explicité
+- [ ] Si changement flag default: justification + plan rollback
+
 ## Validation runtime (si applicable)
-- [ ] smoke debut sprint: `make qa-story-v2-smoke` (ou `qa-story-v2-smoke-fast`)
-- [ ] runbook complet fin sprint: `tools/qa/live_story_v2_runbook.md`
+- [ ] Smoke test: `make qa-story-v2-smoke` (ou `qa-story-v2-smoke-fast`)
+- [ ] Runbook complet: `tools/qa/live_story_v2_runbook.md`
 - [ ] Séquence Story V2 testée (`STEP_DONE` + `gate=1`)
 - [ ] Recovery reset croisé ESP32/ESP8266 validé
 
-## Checklist review STV2-41..48
-- [ ] Checklist exécutée: `tools/qa/story_v2_review_checklist.md`
-- [ ] Preuves (commandes/logs) jointes en commentaire PR
+## Scope des branches
+- [ ] Respect des règles de scope (`CODEX_RULES.md`)
+- [ ] Aucun fichier hors scope modifié
+- [ ] Aucun fichier parasite versionné (`.DS_Store`, builds, etc.)
 
-## Rollback
-- [ ] Procédure runtime (`STORY_V2_ENABLE OFF`) documentée
-- [ ] Procédure release (`kStoryV2EnabledDefault=false`) documentée
-- [ ] Aucun fichier parasite versionné (`.DS_Store`, etc.)
+## Rollback (si applicable)
+- [ ] Procédure de rollback documentée
+- [ ] Breaking changes documentés avec plan de migration
 
-## Risques / points d’attention
+## Risques / Points d'attention
 - [ ] Aucun
-- [ ] Oui (détailler):
+- [ ] Oui (détailler ci-dessous):
+
+## Checklist finale
+- [ ] PR title est clair et descriptif
+- [ ] Description et motivation sont complètes
+- [ ] Changements revus et minimaux
+- [ ] Documentation mise à jour (si nécessaire)
+- [ ] Ready for review

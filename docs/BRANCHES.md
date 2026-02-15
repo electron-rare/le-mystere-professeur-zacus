@@ -15,7 +15,7 @@ Scope: story engine files listed in CODEX_RULES.md
 
 ## generation/story-ia
 Canonical game/story content, prompts, printables, audio manifests.
-Scope: game/** audio/** printables/** kit-maitre-du-jeu/** include-humain-IA/**
+Scope: game/** audio/** printables/** kit-maitre-du-jeu/** scenario-ai-coherence/**
 
 ## scripts/generation
 Generators/validators/exporters + CI validate workflow.

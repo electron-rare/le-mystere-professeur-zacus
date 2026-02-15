@@ -12,7 +12,7 @@ Allowed:
 - tools/qa/** (optional)
 - .github/workflows/firmware-*.yml
 Forbidden:
-- game/** audio/** printables/** kit-maitre-du-jeu/** include-humain-IA/** docs/**
+- game/** audio/** printables/** kit-maitre-du-jeu/** scenario-ai-coherence/** docs/**
 
 ### generation/story-esp
 Allowed:
@@ -25,13 +25,19 @@ Allowed:
 Forbidden:
 - services wifi/web/mp3 stack, tools/**, game/**
 
+**Note**: For firmware development, use Git branches instead of separate directories:
+- `main:hardware/firmware/` → stable releases
+- `hardware/esp32-dev` → active development
+- `hardware/esp32-experimental` → R&D and experimental features
+See `hardware/firmware/README.md` for complete branch strategy.
+
 ### generation/story-ia
 Allowed:
 - game/**
 - audio/**
 - printables/**
 - kit-maitre-du-jeu/**
-- include-humain-IA/**
+- scenario-ai-coherence/**
 Forbidden:
 - hardware/** (firmware), tools/**
 

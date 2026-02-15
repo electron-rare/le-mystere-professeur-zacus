@@ -21,7 +21,7 @@ case "$branch" in
     bad=$(echo "$changed" | egrep -v '^(hardware/firmware/esp32/src/story/|hardware/firmware/esp32/src/controllers/story/|hardware/firmware/esp32/src/services/serial/serial_commands_story\.(cpp|h)$|hardware/firmware/esp32/src/la_detector\.(cpp|h)$|hardware/firmware/esp32/GENERER_UN_SCENARIO_STORY_V2\.md$|hardware/firmware/esp32/RELEASE_STORY_V2\.md$|hardware/firmware/esp32/docs/workstreams/).*' || true)
     ;;
   generation/story-ia)
-    bad=$(echo "$changed" | egrep -v '^(game/|audio/|printables/|kit-maitre-du-jeu/|include-humain-IA/).*' || true)
+    bad=$(echo "$changed" | egrep -v '^(game/|audio/|printables/|kit-maitre-du-jeu/|scenario-ai-coherence/).*' || true)
     ;;
   scripts/generation)
     bad=$(echo "$changed" | egrep -v '^(tools/|Makefile$|\.github/workflows/validate\.yml$).*' || true)

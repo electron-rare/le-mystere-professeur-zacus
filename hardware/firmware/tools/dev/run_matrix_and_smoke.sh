@@ -205,7 +205,8 @@ wait_for_usb_confirmation() {
   local probe_every_s=15
 
   if [[ "${ZACUS_REQUIRE_HW:-0}" == "1" ]]; then
-    return wait_for_required_usb
+    wait_for_required_usb
+    return $?
   fi
 
   if [[ "${ZACUS_NO_COUNTDOWN:-0}" == "1" ]]; then

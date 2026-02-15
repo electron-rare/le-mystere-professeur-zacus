@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-FW_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-REPO_ROOT="$(cd "$FW_ROOT/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR/../.." rev-parse --show-toplevel)"
+FW_ROOT="$REPO_ROOT/hardware/firmware"
 ARTIFACTS_ROOT="$FW_ROOT/artifacts/rc_live"
 PROMPT_DIR="$FW_ROOT/tools/dev/codex_prompts"
 RC_PROMPT="$PROMPT_DIR/rc_live_fail.prompt.md"
@@ -50,8 +51,9 @@ menu() {
 Firmware cockpit
 1) bootstrap (tools/dev/bootstrap_local.sh)
 2) build all firmware (hardware/firmware/build_all.sh)
-3) rc live gate (hardware/firmware/tools/dev/run_matrix_and_smoke.sh)
-4) watch serial ports
+3) rc live gate (ZACUS_REQUIRE_HW unset)
+4) rc live gate (ZACUS_REQUIRE_HW=1)
+5) watch serial ports
 0) exit
 EOF
 }
@@ -62,8 +64,9 @@ while true; do
   case "$choice" in
     1) run_bootstrap ;;
     2) run_build_all ;;
-    3) run_rc_live ;;
-    4) ports_watch ;;
+    3) ZACUS_REQUIRE_HW=0 run_rc_live ;;
+    4) ZACUS_REQUIRE_HW=1 run_rc_live ;;
+    5) ports_watch ;;
     0) exit 0 ;;
     *) echo "Unknown option: $choice" ;;
   esac

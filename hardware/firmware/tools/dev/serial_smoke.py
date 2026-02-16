@@ -514,7 +514,7 @@ def run_wifi_debug(device, baud, duration_s, wifi_regex):
         return False
 
 
-def main() -> int:
+def parse_args(args=None):
     parser = argparse.ArgumentParser(description="Run quick serial smoke with auto port detection.")
     parser.add_argument("--port", help="Explicit serial port to use (optional)")
     parser.add_argument("--wait-port", type=int, default=30, help="Seconds to wait for a port (default 30)")
@@ -533,8 +533,12 @@ def main() -> int:
     parser.add_argument("--wifi-debug", action="store_true", help="Run WiFi serial debug monitor")
     parser.add_argument("--wifi-debug-seconds", type=int, default=600, help="WiFi debug duration in seconds")
     parser.add_argument("--wifi-debug-regex", default="", help="Regex for WiFi debug filter")
-    args = parser.parse_args()
-    args.role = normalize_role(args.role)
+    parsed = parser.parse_args(args)
+    parsed.role = normalize_role(parsed.role)
+    return parsed
+
+def main() -> int:
+    args = parse_args()
     allow_no_hardware = args.allow_no_hardware or os.environ.get("ZACUS_ALLOW_NO_HW") == "1"
 
     evidence = None

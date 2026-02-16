@@ -75,7 +75,18 @@ run_rc_live() {
     elif [[ -f "$RC_PROMPT" ]]; then
       codex exec - < "$RC_PROMPT"
     fi
+    # Export synthétique du rapport de santé
+    if [[ -n "$artifacts" && -f "$artifacts/summary.md" ]]; then
+      echo -e "\n\033[1;32m[Rapport santé] Exporté : $artifacts/summary.md\033[0m"
+      tail -20 "$artifacts/summary.md"
+    fi
     return 1
+  else
+    artifacts="$(latest_artifacts)"
+    if [[ -n "$artifacts" && -f "$artifacts/summary.md" ]]; then
+      echo -e "\n\033[1;32m[Rapport santé] Exporté : $artifacts/summary.md\033[0m"
+      tail -20 "$artifacts/summary.md"
+    fi
   fi
 }
 
@@ -111,6 +122,7 @@ show_menu() {
   local options=(
     "RC live gate (ZACUS_REQUIRE_HW unset)"
     "RC live gate (ZACUS_REQUIRE_HW=1)"
+    "RC Live + AutoFix (auto-correct simple erreurs)"
     "Build all firmware (hardware/firmware/build_all.sh)"
     "Bootstrap (outils/dev/bootstrap_local.sh)"
     "Watch serial ports"
@@ -129,18 +141,19 @@ show_menu() {
     case "$idx" in
       1) ZACUS_REQUIRE_HW=0 run_rc_live ;;
       2) ZACUS_REQUIRE_HW=1 run_rc_live ;;
-      3) run_build_all ;;
-      4) run_bootstrap ;;
-      5) ports_watch ;;
-      6) monitor_wifi_debug_serial ;;
-      7) run_codex_prompts ;;
-      8) run_audit_all ;;
-      9) run_sync_report ;;
-      10) run_cleanup ;;
-      11) run_codex_check ;;
-      12) afficher_logs_menu ;;
-      13) afficher_aide ;;
-      14|0) exit 0 ;;
+      3) "$FW_ROOT/tools/dev/cockpit.sh" rc-autofix ;;
+      4) run_build_all ;;
+      5) run_bootstrap ;;
+      6) ports_watch ;;
+      7) monitor_wifi_debug_serial ;;
+      8) run_codex_prompts ;;
+      9) run_audit_all ;;
+      10) run_sync_report ;;
+      11) run_cleanup ;;
+      12) run_codex_check ;;
+      13) afficher_logs_menu ;;
+      14) afficher_aide ;;
+      15|0) exit 0 ;;
     esac
   done
 }
@@ -337,6 +350,25 @@ if [[ -n "$command" ]]; then
       run_cleanup; exit $? ;;
     codex-check)
       run_codex_check; exit $? ;;
+    codex-audit)
+      # Audit Codex manuel (audit + autogen)
+      codex_cli_audit
+      if command -v codex >/dev/null 2>&1; then
+        if [[ -d "$PROMPT_DIR" ]]; then
+          PROMPT_FILE=$(ls -1 "$PROMPT_DIR"/*.prompt*.md 2>/dev/null | head -n1)
+          if [[ -n "$PROMPT_FILE" ]]; then
+            echo "codex: génération automatique (prompt: $PROMPT_FILE)"
+            codex "$PROMPT_FILE" > "$ARTIFACTS_ROOT/codex_autogen_$(date -u +"%Y%m%d-%H%M%S").md" 2>&1 || echo "codex: génération échouée"
+          else
+            echo "codex: aucun prompt trouvé pour génération automatique"
+          fi
+        else
+          echo "codex: dossier de prompts manquant"
+        fi
+      else
+        echo "codex: non disponible, génération automatique sautée"
+      fi
+      exit $? ;;
     help|--help|-h)
       afficher_aide; exit 0 ;;
     wifi-debug)

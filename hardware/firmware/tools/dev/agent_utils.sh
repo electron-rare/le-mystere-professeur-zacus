@@ -73,7 +73,8 @@ flash_all() {
   if [[ ! -x "$python_exec" ]]; then
     python_exec="python3"
   fi
-  read -r port_esp32 port_esp8266 port_rp2040 < <("$python_exec" - "$ports_json" <<'PY'
+  # Correction : exécute le script Python dans un sous-shell et capture la sortie
+  ports_out=$("$python_exec" - "$ports_json" <<'PY'
 import json, sys
 try:
     data = json.load(open(sys.argv[1]))
@@ -83,7 +84,8 @@ ports = data.get("ports", {})
 values = [ports.get("esp32", ""), ports.get("esp8266", ""), ports.get("rp2040", "")]
 print(" ".join(values))
 PY
-)
+  )
+  read -r port_esp32 port_esp8266 port_rp2040 <<< "$ports_out"
 
   if [[ -z "$port_esp32" || -z "$port_esp8266" ]]; then
     fail "port resolution failed (esp32=$port_esp32 esp8266=$port_esp8266)"

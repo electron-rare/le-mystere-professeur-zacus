@@ -7,6 +7,7 @@ Workspace PlatformIO unique pour 3 firmwares:
 - `ui/rp2040_tft/`: UI TFT tactile (LVGL)
 - `protocol/`: contrat UART partage (`ui_link_v2.md`, `ui_link_v2.h`)
 
+
 ## 📚 Documentation
 
 **Nouvelle documentation complète disponible :**
@@ -15,6 +16,7 @@ Workspace PlatformIO unique pour 3 firmwares:
 - **[Architecture UML](docs/ARCHITECTURE_UML.md)** - Diagrammes classes, séquence, composants
 - **[État des lieux](docs/STATE_ANALYSIS.md)** - Analyse complète du firmware
 - **[Recommandations Sprint](docs/SPRINT_RECOMMENDATIONS.md)** - Actions prioritaires
+- **[Recovery WiFi/AP & Health](docs/WIFI_RECOVERY_AND_HEALTH.md)** - Procédure recovery AP, healthcheck, troubleshooting
 
 Pour débuter : [docs/QUICKSTART.md](docs/QUICKSTART.md)
 

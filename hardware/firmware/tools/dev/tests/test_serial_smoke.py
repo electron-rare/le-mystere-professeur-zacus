@@ -8,7 +8,8 @@ from serial_smoke import parse_args
 def test_parse_args_default():
     args = parse_args([])
     assert args.role == 'auto'
-    assert args.baud == 115200
+    # La valeur par défaut de --baud est 0 (utilisé pour déclencher la détection automatique dans le script principal)
+    assert args.baud == 0
 
 def test_parse_args_custom():
     args = parse_args(['--role', 'esp32', '--baud', '19200'])

@@ -1,10 +1,25 @@
+
 # Test & Script Coordinator
 
 ## Mission
 
 Own cross-project coherence of tests, scripts, and evidence. Keep cockpit commands, docs, and runbooks aligned, and ensure every gate produces the expected artifacts.
 
-## Definitions (shared terms)
+
+## Matrice de tests & suivi health/recovery
+
+| Test                | Commande/Script                        | Statut      | Dernier log/artifact                      |
+|---------------------|----------------------------------------|-------------|-------------------------------------------|
+| Build (all targets) | ./build_all.sh                         | OK          | artifacts/baseline_*/1_build/             |
+| Flash               | ./tools/dev/cockpit.sh flash           | OK          | artifacts/baseline_*/2_flash_tests/       |
+| Smoke               | ./tools/dev/run_matrix_and_smoke.sh    | FAIL        | artifacts/baseline_*/3_smoke_001-010/     |
+| HTTP API            | ./tools/dev/test_story_http_api.sh     | BLOQUÉ      | artifacts/rc_live/ (à relancer)           |
+| WebSocket           | ./tools/dev/test_story_http_api.sh     | NON TESTÉ   | (wscat non installé)                      |
+| Health WiFi/AP      | ./tools/dev/healthcheck_wifi.sh        | À FAIRE     | artifacts/rc_live/healthcheck_<date>.log  |
+| Recovery AP         | docs/WIFI_RECOVERY_AND_HEALTH.md       | DOC         | (voir procédure et logs recovery)         |
+
+Mise à jour : 2026-02-16
+
 
 - Cockpit: the single entry point `tools/dev/cockpit.sh` and its CLI subcommands.
 - Gate: a scripted validation sequence with a clear PASS/FAIL exit code.

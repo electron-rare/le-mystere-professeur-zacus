@@ -43,12 +43,14 @@ Bienvenue dans la documentation du firmware multi-MCU du projet **Le Mystère du
   - UI Link v2 (UART frames)
   - Audio pipeline
 
+
 ### 🔧 Hardware & Testing
 
 - **[HW NOW](HW_NOW.md)** - Status hardware rapide
 - **[RC Final Board](RC_FINAL_BOARD.md)** - Tableau de bord tests RC
 - **[RC Report Template](RC_FINAL_REPORT_TEMPLATE.md)** - Template rapports
 - **[RTOS + WiFi Health](RTOS_WIFI_HEALTH.md)** - Checks stabilite et recovery
+- **[Recovery WiFi/AP & Health](WIFI_RECOVERY_AND_HEALTH.md)** - Procédure recovery AP, healthcheck, troubleshooting
 - **[Test & Script Coordinator](TEST_SCRIPT_COORDINATOR.md)** - Coherence tests/scripts et evidence
 
 ---
@@ -198,6 +200,24 @@ hardware/firmware/docs/
 | 🔄 DRAFT | Document en cours de rédaction |
 | ⚠️ OUTDATED | Document obsolète, nécessite mise à jour |
 | 🗑️ DEPRECATED | Document remplacé par nouvelle version |
+
+
+## 🌐 Synthèse WebUI utilisateur & portail captif
+
+### Synthèse
+
+La phase WebUI utilisateur (portail captif, configuration WiFi, diagnostic réseau) est critique pour l’expérience et la robustesse du système. Les scripts de test et d’audit sont robustes : ils valident la connexion, la récupération d’état, la gestion des erreurs et la génération d’évidence (logs/artéfacts). Cependant, le code source des endpoints WebUI (ex : /api/status, /api/wifi, /api/rtos) n’est pas présent dans le workspace actuel : la documentation et les scripts couvrent bien la logique, mais la partie firmware exposant ces endpoints reste à intégrer ou documenter.
+
+### Recommandations
+
+- **Centraliser la logique WebUI** : toute la logique de portail captif, endpoints API et diagnostic doit être centralisée côté ESP32, avec gestion d’état robuste et artefacts d’évidence.
+- **Automatiser les tests** : utiliser les scripts existants (`run_matrix_and_smoke.sh`, `rtos_wifi_health.sh`, etc.) pour valider chaque build/merge.
+- **Documenter les endpoints** : ajouter la spécification des endpoints REST (routes, payloads, statuts) dans la doc technique.
+- **Évidence systématique** : chaque test doit générer un log/artéfact, stocké dans `artifacts/` et référencé dans les rapports.
+- **Gestion des erreurs** : tout échec de connexion, reboot ou panic doit être détecté, loggé et affiché dans les rapports de santé.
+- **Onboarding** : compléter l’onboarding pour inclure la configuration, le test et le troubleshooting du portail captif/WebUI.
+
+---
 
 ### Mise à jour
 

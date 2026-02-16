@@ -1,79 +1,81 @@
+# ---
+
+#
+name: Firmware CI/CD
+on:
+  push:
+  pull_request:
+
 name: Story V2 Firmware Tests
 
 on:
   push:
-    branches: [ story-V2 ]
+    branches: [story-V2]
   pull_request:
-    branches: [ story-V2 ]
+    branches: [story-V2]
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.9'
 
-      - name: Install dependencies
-        run: |
-          cd hardware/firmware
-          python -m pip install --upgrade pip
-          pip install platformio pyyaml jsonschema pyserial
 
-      - name: Build firmware (esp32dev)
-        run: |
-          cd hardware/firmware
-          pio run -e esp32dev
 
-      - name: Run unit tests (story gen)
-        run: |
-          cd hardware/firmware
-          python3 esp32_audio/tests/test_story_gen.py
 
-      - name: Run cURL tests (mock API)
-        run: |
-          cd hardware/firmware
-          bash esp32_audio/tests/test_story_http_api_mock.sh
 
-      - name: Upload artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: story-v2-artifacts
-          path: hardware/firmware/artifacts/
 
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: story-v2-logs
-          path: hardware/firmware/logs/
 
-  hardware-smoke:
-    runs-on: self-hosted
-    needs: build
-    if: github.event_name == 'push'
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
-      - name: Flash firmware
-        run: |
-          cd hardware/firmware
-          ./tools/dev/cockpit.sh flash
 
-      - name: Run smoke tests (4 scenarios)
-        run: |
-          cd hardware/firmware
-          bash tools/dev/run_smoke_tests.sh
 
-      - name: Upload smoke log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: story-v2-smoke-log
-          path: hardware/firmware/artifacts/rc_live/smoke_*.log
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

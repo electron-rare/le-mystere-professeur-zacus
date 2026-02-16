@@ -866,6 +866,10 @@ if [[ -n "$SMOKE_COMMAND_STRING" ]]; then
   log "Smoke cmd    : $SMOKE_COMMAND_STRING"
 fi
 
+
+# Audit Codex et hook génération automatique
+
+
 artefact_gate "$ARTIFACT_DIR" "artifacts/rc_live/${TIMESTAMP}_agent"
 logs_gate "$LOG_DIR" "artifacts/rc_live/${TIMESTAMP}_logs"
 

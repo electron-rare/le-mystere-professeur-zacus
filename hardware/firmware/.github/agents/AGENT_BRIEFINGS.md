@@ -93,6 +93,10 @@ Status: In progress (verification pending)
 - If you ran additional tests, report results in the status format (Completed / In Progress / Blocked).
 
 **Reporting template (use in updates):**
+
+**⚠️ Rappel recovery WiFi/AP**
+- Si l'ESP32 n'est pas visible comme AP ou l'API ne répond pas, suivre la procédure : [docs/WIFI_RECOVERY_AND_HEALTH.md](../../docs/WIFI_RECOVERY_AND_HEALTH.md)
+- Utiliser le script healthcheck : `tools/dev/healthcheck_wifi.sh` (log dans artifacts/rc_live/)
 ```
 **Update**
 - ✅ Completed:
@@ -124,8 +128,10 @@ Status: In progress (verification pending)
 **Test/Script Coordinator:**
 - Role doc: [docs/TEST_SCRIPT_COORDINATOR.md](docs/TEST_SCRIPT_COORDINATOR.md)
 
+
 **RTOS/WiFi reference:**
 - Health doc: [docs/RTOS_WIFI_HEALTH.md](docs/RTOS_WIFI_HEALTH.md)
+- Recovery WiFi/AP: [docs/WIFI_RECOVERY_AND_HEALTH.md](../../docs/WIFI_RECOVERY_AND_HEALTH.md)
 - Firmware/RTOS brief: [.github/agents/briefings/PHASE_2B_FIRMWARE_RTOS.md](.github/agents/briefings/PHASE_2B_FIRMWARE_RTOS.md)
 
 ## ✅ Handoff Addendum (RTOS/WiFi)

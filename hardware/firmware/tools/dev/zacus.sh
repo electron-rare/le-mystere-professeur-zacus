@@ -60,36 +60,12 @@ choose_autofix_prompt() {
   local summary_file="$1"
   local esp8266_log="$2"
   local port_status=""
+  local summary_file="$1"
+  local esp8266_log="$2"
+  local port_status=""
   local ui_status=""
   if [[ -f "$summary_file" ]]; then
     read -r port_status ui_status < <(python3 - "$summary_file" <<'PY'
-import json
-import sys
-try:
-    data = json.load(open(sys.argv[1]))
-except Exception:
-    data = {}
-print(data.get('port_status', ''))
-print(data.get('ui_link_status', ''))
-PY
-)
-  fi
-  local prompt="$PROMPT_DIR/auto_fix_generic.prompt.md"
-  local reason="generic"
-  if [[ "${port_status^^}" == "FAILED" ]]; then
-    prompt="$PROMPT_DIR/auto_fix_ports.prompt.md"
-    reason="port_status"
-  elif [[ "${ui_status^^}" == "FAILED" ]]; then
-    prompt="$PROMPT_DIR/auto_fix_ui_link.prompt.md"
-    reason="ui_link"
-  elif [[ -f "$esp8266_log" && $(grep -i "panic" "$esp8266_log" 2>/dev/null || true) ]]; then
-    prompt="$PROMPT_DIR/auto_fix_esp8266_panic.prompt.md"
-    reason="esp8266_panic"
-  fi
-  printf '%s\n%s\n' "$prompt" "$reason"
-}
-
-cmd_rc() {
   if run_rc_gate; then
     log "RC live finished"
     return 0
@@ -99,6 +75,22 @@ cmd_rc() {
 }
 
 cmd_rc_autofix() {
+    )
+  fi
+  local prompt="$PROMPT_DIR/auto_fix_generic.prompt.md"
+  local reason="generic"
+  # Utilise tr pour la compatibilité Bash (équivalent à ^^)
+  if [[ "$(echo "$port_status" | tr '[:lower:]' '[:upper:]')" == "FAILED" ]]; then
+    prompt="$PROMPT_DIR/auto_fix_ports.prompt.md"
+    reason="port_status"
+  elif [[ "$(echo "$ui_status" | tr '[:lower:]' '[:upper:]')" == "FAILED" ]]; then
+    prompt="$PROMPT_DIR/auto_fix_ui_link.prompt.md"
+    reason="ui_link"
+  elif [[ -f "$esp8266_log" && $(grep -i "panic" "$esp8266_log" 2>/dev/null || true) ]]; then
+    prompt="$PROMPT_DIR/auto_fix_esp8266_panic.prompt.md"
+    reason="esp8266_panic"
+  fi
+  printf '%s\n%s\n' "$prompt" "$reason"
   if cmd_rc; then
     return 0
   fi
@@ -106,9 +98,10 @@ cmd_rc_autofix() {
   artifact=$(latest_artifact_dir) || die "no artifact directory available after RC"
   log "artifact path: $artifact"
   require_cmd codex
-  local prompt_info=($(choose_autofix_prompt "$artifact/summary.json" "$artifact/smoke_esp8266_usb.log"))
-  local prompt_file="${prompt_info[0]}"
-  local prompt_reason="${prompt_info[1]:-generic}"
+  local prompt_info
+  IFS=$'\n' read -r -d '' prompt_file prompt_reason < <(choose_autofix_prompt "$artifact/summary.json" "$artifact/smoke_esp8266_usb.log" && printf '\0')
+  prompt_file="${prompt_file:-$PROMPT_DIR/auto_fix_generic.prompt.md}"
+  prompt_reason="${prompt_reason:-generic}"
   if [[ ! -f "$prompt_file" ]]; then
     die "prompt file not found: $prompt_file"
   fi
@@ -120,7 +113,6 @@ prompt=$prompt_file
 reason=$prompt_reason
 codex_output=$codex_output
 LOGEOF
-  
   # Optional: auto-commit changes if ZACUS_GIT_AUTOCOMMIT=1
   if [[ "${ZACUS_GIT_AUTOCOMMIT:-0}" == "1" ]]; then
     log "auto-committing changes (ZACUS_GIT_AUTOCOMMIT=1)"
@@ -133,7 +125,6 @@ LOGEOF
       printf '%s\n' "git_autocommit=failed" >> "$artifact/rc_autofix.log"
     fi
   fi
-  
   log "rerunning RC live after fix"
   run_rc_gate
 }

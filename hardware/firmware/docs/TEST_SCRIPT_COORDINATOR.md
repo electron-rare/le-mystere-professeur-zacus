@@ -109,6 +109,39 @@ If baseline fails mid-run:
 - **Total**: 45–65 minutes (includes overhead + log collection)
 
 
+## Flash Gate Testing (Phase 1 - Task 2)
+
+The **flash gate** validates that `./tools/dev/cockpit.sh flash` reproducibly detects and flashes all 3 device types with 100% reliability.
+
+### Test Scenarios
+
+**3 mandatory tests** (see [FLASH_GATE_VALIDATION_GUIDE.md](./FLASH_GATE_VALIDATION_GUIDE.md) for details):
+
+1. **Auto-detect** — Port resolution without overrides (fastest, most common)
+2. **Explicit ports** — Manual ZACUS_PORT_ESP32/ESP8266 env vars (CI/CD, reproducible)
+3. **Learned cache** — Using previously discovered mappings (persistent, fast)
+
+**Optional:**
+4. **RP2040 detection** — If hardware available (ZACUS_REQUIRE_RP2040=1)
+
+### Expected Outcome
+
+- All 3 flash tests PASS
+- Port resolution < 5 seconds each
+- Evidence: `artifacts/rc_live/flash-<timestamp>/ports_resolve.json`
+- Learned cache: `.local/ports_map.learned.json` (updated after successful auto-detect)
+
+### Deliverable
+
+Phase 1 sign-off requires:
+- ✅ All 3 test scenarios validated
+- ✅ At least 5 consecutive successful flash cycles
+- ✅ Evidence collected in `artifacts/flash_gate_validation_*`
+- ✅ Runbook updated (this section)
+
+See [FIRMWARE_EMBEDDED_EXPERT.md](../FIRMWARE_EMBEDDED_EXPERT.md#phase-1-flashgate-100-reproducible) for full Phase 1 acceptance criteria.
+
+
 ## Evidence Standard
 
 All gates and test scripts must accept `--outdir` (or `ZACUS_OUTDIR`) and write:

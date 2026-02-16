@@ -143,11 +143,18 @@ commands:
       See docs/FIRMWARE_HEALTH_BASELINE.md for interpretation guide.
 
   - id: flash
-    description: Flash firmware (auto port resolution)
+    description: Flash firmware (auto port resolution with ESP32/ESP8266/RP2040 support)
     entrypoint: tools/dev/cockpit.sh
     args: ["flash"]
-    runbook_ref: docs/QUICKSTART.md
-    evidence_outputs: []
+    runbook_ref: docs/FLASH_GATE_VALIDATION_GUIDE.md
+    evidence_outputs:
+      - artifacts/rc_live/flash-<timestamp>/ports_resolve.json
+      - logs/flash_<timestamp>.log
+    notes: |
+      Auto-detects serial ports using resolve_ports.py (LOCATION + VIDPID + fingerprint).
+      Supports manual overrides via ZACUS_PORT_ESP32/ESP8266/RP2040 env vars.
+      Optional RP2040 detection with ZACUS_REQUIRE_RP2040=1
+      Learned cache in .local/ports_map.learned.json for faster detection
   - id: help
     description: Print cockpit help
     entrypoint: tools/dev/cockpit.sh

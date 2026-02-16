@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  --ink-900: #0b1324;
+  --ink-700: #1f2a44;
+  --ink-500: #3a4b6b;
+  --glass: rgba(255, 255, 255, 0.75);
+  --accent-500: #ff7a59;
+  --accent-700: #d14e36;
+  --teal-500: #2fb3a2;
+  --mist-200: #f0f5ff;
+  --mist-400: #c6d4f1;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Trebuchet MS", "Gill Sans", "Gill Sans MT", sans-serif;
+  color: var(--ink-900);
+  background: radial-gradient(circle at 20% 20%, #fff8f2 0%, #eef2ff 30%, #dae6ff 55%, #c9d9ff 100%);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+h1,
+h2,
+h3 {
+  font-family: Georgia, "Times New Roman", serif;
+  letter-spacing: -0.02em;
+}
+
+.glass-panel {
+  background: var(--glass);
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(14px);
+}
+
+.focus-ring:focus-visible {
+  outline: 3px solid var(--accent-500);
+  outline-offset: 2px;
+}

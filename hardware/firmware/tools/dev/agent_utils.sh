@@ -17,6 +17,111 @@ require_cmd() {
   fi
 }
 
+resolve_ports_for_flash() {
+  local fw_root
+  fw_root=$(get_fw_root)
+  local python_exec="$fw_root/.venv/bin/python3"
+  if [[ ! -x "$python_exec" ]]; then
+    python_exec="python3"
+  fi
+  local wait_secs="${ZACUS_PORT_WAIT:-5}"
+  local allow_no_hw="${ZACUS_ALLOW_NO_HW:-0}"
+  local require_rp2040="${ZACUS_REQUIRE_RP2040:-0}"
+  local resolver="$fw_root/tools/test/resolve_ports.py"
+  local ports_json="$1"
+
+  local args=("--auto-ports" "--need-esp32" "--need-esp8266" "--wait-port" "$wait_secs" "--ports-resolve-json" "$ports_json")
+  if [[ "$require_rp2040" == "1" ]]; then
+    args+=("--need-rp2040")
+  fi
+  if [[ "$allow_no_hw" == "1" ]]; then
+    args+=("--allow-no-hardware")
+  fi
+  if [[ -n "${ZACUS_PORT_ESP32:-}" ]]; then
+    args+=("--port-esp32" "$ZACUS_PORT_ESP32")
+  fi
+  if [[ -n "${ZACUS_PORT_ESP8266:-}" ]]; then
+    args+=("--port-esp8266" "$ZACUS_PORT_ESP8266")
+  fi
+  if [[ -n "${ZACUS_PORT_RP2040:-}" ]]; then
+    args+=("--port-rp2040" "$ZACUS_PORT_RP2040")
+  fi
+
+  "$python_exec" "$resolver" "${args[@]}"
+}
+
+flash_all() {
+  local fw_root
+  fw_root=$(get_fw_root)
+  require_cmd python3
+  require_cmd pio
+
+  local artifacts_root="$fw_root/artifacts/rc_live"
+  local logs_dir="$fw_root/logs"
+  local timestamp
+  timestamp=$(date -u +"%Y%m%d-%H%M%S")
+  local run_dir="$artifacts_root/flash-$timestamp"
+  local log_file="$logs_dir/flash_$timestamp.log"
+  local ports_json="$run_dir/ports_resolve.json"
+
+  mkdir -p "$run_dir" "$logs_dir"
+  log "[step] resolve ports"
+  resolve_ports_for_flash "$ports_json" 2>&1 | tee "$log_file"
+
+  local port_esp32 port_esp8266 port_rp2040
+  local python_exec="$fw_root/.venv/bin/python3"
+  if [[ ! -x "$python_exec" ]]; then
+    python_exec="python3"
+  fi
+  read -r port_esp32 port_esp8266 port_rp2040 < <("$python_exec" - "$ports_json" <<'PY'
+import json, sys
+try:
+    data = json.load(open(sys.argv[1]))
+except Exception:
+    data = {}
+ports = data.get("ports", {})
+values = [ports.get("esp32", ""), ports.get("esp8266", ""), ports.get("rp2040", "")]
+print(" ".join(values))
+PY
+)
+
+  if [[ -z "$port_esp32" || -z "$port_esp8266" ]]; then
+    fail "port resolution failed (esp32=$port_esp32 esp8266=$port_esp8266)"
+  fi
+
+  local esp32_envs
+  esp32_envs="${ZACUS_FLASH_ESP32_ENVS:-esp32dev}"
+  local esp8266_env="${ZACUS_FLASH_ESP8266_ENV:-esp8266_oled}"
+  local rp2040_envs
+  rp2040_envs="${ZACUS_FLASH_RP2040_ENVS:-ui_rp2040_ili9488 ui_rp2040_ili9486}"
+  local require_rp2040="${ZACUS_REQUIRE_RP2040:-0}"
+
+  log "[step] flash esp32 ($esp32_envs)"
+  for env in $esp32_envs; do
+    log "[step] pio run -e $env -t upload --upload-port $port_esp32"
+    (cd "$fw_root" && pio run -e "$env" -t upload --upload-port "$port_esp32") 2>&1 | tee -a "$log_file"
+  done
+
+  log "[step] flash esp8266 ($esp8266_env)"
+  log "[step] pio run -e $esp8266_env -t upload --upload-port $port_esp8266"
+  (cd "$fw_root" && pio run -e "$esp8266_env" -t upload --upload-port "$port_esp8266") 2>&1 | tee -a "$log_file"
+
+  if [[ -n "$port_rp2040" ]]; then
+    log "[step] flash rp2040 ($rp2040_envs)"
+    for env in $rp2040_envs; do
+      log "[step] pio run -e $env -t upload --upload-port $port_rp2040"
+      (cd "$fw_root" && pio run -e "$env" -t upload --upload-port "$port_rp2040") 2>&1 | tee -a "$log_file"
+    done
+  elif [[ "$require_rp2040" == "1" ]]; then
+    fail "rp2040 port missing (set ZACUS_PORT_RP2040 or connect board)"
+  else
+    log "[step] rp2040 not found; skipping rp2040 flash"
+  fi
+
+  log "flash artifacts: $run_dir"
+  log "flash log: $log_file"
+}
+
 get_repo_root() {
   if [[ -n "${REPO_ROOT:-}" && -d "${REPO_ROOT}/.git" ]]; then
     printf '%s' "$REPO_ROOT"
@@ -31,6 +136,137 @@ get_fw_root() {
     return 0
   fi
   printf '%s' "$(get_repo_root)/hardware/firmware"
+}
+
+write_git_info() {
+  local repo_root="$1"
+  local dest="$2"
+  {
+    echo "branch: $(git -C "$repo_root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo n/a)"
+    echo "commit: $(git -C "$repo_root" rev-parse HEAD 2>/dev/null || echo n/a)"
+    echo "status:"
+    git -C "$repo_root" status --porcelain 2>/dev/null || true
+  } > "$dest"
+}
+
+write_meta_json() {
+  local dest="$1"
+  local phase="$2"
+  local cmdline="$3"
+  local fw_root
+  fw_root=$(get_fw_root)
+  local repo_root
+  repo_root=$(get_repo_root)
+  local now
+  now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  python3 - "$dest" <<'PY'
+import json
+import os
+import sys
+
+dest = sys.argv[1]
+payload = {
+    "timestamp": os.environ.get("EVIDENCE_TIMESTAMP", ""),
+    "phase": os.environ.get("EVIDENCE_PHASE", ""),
+    "utc": os.environ.get("EVIDENCE_UTC", ""),
+    "command": os.environ.get("EVIDENCE_CMDLINE", ""),
+    "cwd": os.getcwd(),
+    "repo_root": os.environ.get("EVIDENCE_REPO_ROOT", ""),
+    "fw_root": os.environ.get("EVIDENCE_FW_ROOT", ""),
+}
+with open(dest, "w", encoding="utf-8") as fp:
+    json.dump(payload, fp, indent=2)
+PY
+}
+
+evidence_init() {
+  local phase="$1"
+  local outdir="${2:-}"
+  local fw_root
+  fw_root=$(get_fw_root)
+  local repo_root
+  repo_root=$(get_repo_root)
+  local stamp
+  stamp=$(date -u +"%Y%m%d-%H%M%S")
+
+  if [[ -n "$outdir" ]]; then
+    if [[ "$outdir" = /* ]]; then
+      EVIDENCE_DIR="$outdir"
+    else
+      EVIDENCE_DIR="$fw_root/$outdir"
+    fi
+  else
+    EVIDENCE_DIR="$fw_root/artifacts/$phase/$stamp"
+  fi
+
+  EVIDENCE_PHASE="$phase"
+  EVIDENCE_TIMESTAMP="$stamp"
+  EVIDENCE_META="$EVIDENCE_DIR/meta.json"
+  EVIDENCE_GIT="$EVIDENCE_DIR/git.txt"
+  EVIDENCE_COMMANDS="$EVIDENCE_DIR/commands.txt"
+  EVIDENCE_SUMMARY="$EVIDENCE_DIR/summary.md"
+  EVIDENCE_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  EVIDENCE_REPO_ROOT="$repo_root"
+  EVIDENCE_FW_ROOT="$fw_root"
+  export EVIDENCE_DIR EVIDENCE_PHASE EVIDENCE_TIMESTAMP EVIDENCE_META EVIDENCE_GIT EVIDENCE_COMMANDS EVIDENCE_SUMMARY EVIDENCE_UTC EVIDENCE_REPO_ROOT EVIDENCE_FW_ROOT
+
+  mkdir -p "$EVIDENCE_DIR"
+  write_git_info "$repo_root" "$EVIDENCE_GIT"
+  printf '# Commands\n' > "$EVIDENCE_COMMANDS"
+  write_meta_json "$EVIDENCE_META" "$phase" "${EVIDENCE_CMDLINE:-}"
+}
+
+evidence_record_command() {
+  local cmd="$1"
+  if [[ -n "${EVIDENCE_COMMANDS:-}" ]]; then
+    printf '%s\n' "$cmd" >> "$EVIDENCE_COMMANDS"
+  fi
+}
+
+git_cmd() {
+  local repo_root
+  repo_root=$(get_repo_root)
+  if [[ -n "${EVIDENCE_COMMANDS:-}" ]]; then
+    evidence_record_command "git $*"
+  fi
+  git -C "$repo_root" "$@"
+}
+
+# Git write operations: require ZACUS_GIT_ALLOW_WRITE=1
+git_write_check() {
+  if [[ "${ZACUS_GIT_ALLOW_WRITE:-0}" != "1" ]]; then
+    fail "Git write operation requires ZACUS_GIT_ALLOW_WRITE=1"
+  fi
+  if [[ "${ZACUS_GIT_NO_CONFIRM:-0}" != "1" ]]; then
+    local prompt="$1"
+    echo "[WARN] $prompt" >&2
+    echo -n "Continue? (y/N): " >&2
+    local answer
+    read -r answer
+    if [[ "$answer" != "y" && "$answer" != "Y" ]]; then
+      fail "Cancelled by user"
+    fi
+  fi
+}
+
+git_add() {
+  git_write_check "git add $*"
+  git_cmd add "$@"
+}
+
+git_commit() {
+  git_write_check "git commit $*"
+  git_cmd commit "$@"
+}
+
+git_stash() {
+  git_write_check "git stash $*"
+  git_cmd stash "$@"
+}
+
+git_push() {
+  git_write_check "git push $*"
+  git_cmd push "$@"
 }
 
 # Gate: build (strict, log)
@@ -185,6 +421,51 @@ cleanup_audit_files() {
   fi
 }
 
+prune_rc_live_runs() {
+  local fw_root
+  fw_root=$(get_fw_root)
+  local rc_dir="${1:-$fw_root/artifacts/rc_live}"
+  local keep_runs="${2:-2}"
+
+  if [[ ! -d "$rc_dir" ]]; then
+    return 0
+  fi
+  if ! [[ "$keep_runs" =~ ^[0-9]+$ ]]; then
+    keep_runs=2
+  fi
+
+  local runs=()
+  local run
+  local had_nullglob=0
+  if shopt -q nullglob; then
+    had_nullglob=1
+  else
+    shopt -s nullglob
+  fi
+
+  for run in "$rc_dir"/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]; do
+    [[ -d "$run" ]] || continue
+    runs+=("$(basename "$run")")
+  done
+
+  if [[ "$had_nullglob" == "0" ]]; then
+    shopt -u nullglob
+  fi
+
+  if (( ${#runs[@]} <= keep_runs )); then
+    return 0
+  fi
+
+  IFS=$'\n' runs=($(printf '%s\n' "${runs[@]}" | sort -r))
+  unset IFS
+
+  local to_prune=("${runs[@]:$keep_runs}")
+  for run in "${to_prune[@]}"; do
+    rm -rf "$rc_dir/$run" "$rc_dir/${run}_agent" "$rc_dir/${run}_logs"
+  done
+  log "rc_live prune: kept $keep_runs, removed ${#to_prune[@]}"
+}
+
 # Codex CLI check (prompts + command)
 codex_cli_audit() {
   local fw_root
@@ -282,6 +563,7 @@ tests_audit() {
       fw_root=$(get_fw_root)
       local smoke_script="$fw_root/esp32_audio/tools/qa/story_v2_ci.sh"
       local rc_script="$fw_root/esp32_audio/tools/qa/live_story_v2_smoke.sh"
+      local rtos_script="$fw_root/tools/dev/rtos_wifi_health.sh"
       local ok=1
       if [[ ! -f "$smoke_script" ]]; then
         log "[WARN] missing smoke script: $smoke_script"
@@ -289,6 +571,10 @@ tests_audit() {
       fi
       if [[ ! -f "$rc_script" ]]; then
         log "[WARN] missing RC smoke script: $rc_script"
+        ok=0
+      fi
+      if [[ ! -f "$rtos_script" ]]; then
+        log "[WARN] missing RTOS/WiFi health script: $rtos_script"
         ok=0
       fi
       if [[ "$ok" == "1" ]]; then

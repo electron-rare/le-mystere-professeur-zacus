@@ -66,7 +66,12 @@ run_rc_live() {
   if ! "$FW_ROOT/tools/dev/run_matrix_and_smoke.sh"; then
     artifacts="$(latest_artifacts)"
     if [[ -n "$artifacts" && -f "$RC_PROMPT" ]]; then
-      ARTIFACT_PATH="$artifacts" codex exec - < "$RC_PROMPT"
+      local codex_last="$artifacts/codex_last_message.md"
+      local cmd="codex exec --output-last-message $codex_last - < $RC_PROMPT"
+      if [[ -f "$artifacts/commands.txt" ]]; then
+        printf '%s\n' "$cmd" >> "$artifacts/commands.txt"
+      fi
+      ARTIFACT_PATH="$artifacts" codex exec --output-last-message "$codex_last" - < "$RC_PROMPT"
     elif [[ -f "$RC_PROMPT" ]]; then
       codex exec - < "$RC_PROMPT"
     fi
@@ -151,6 +156,49 @@ afficher_aide() {
 run_codex_prompts() {
   "$FW_ROOT/tools/dev/codex_prompt_menu.sh"
 }
+
+run_git() {
+  local action="${1:-status}"
+  shift || true
+  case "$action" in
+    status)
+      git_cmd status "$@"
+      ;;
+    diff)
+      git_cmd diff "$@"
+      ;;
+    log)
+      local count="20"
+      if [[ "${1:-}" =~ ^[0-9]+$ ]]; then
+        count="$1"
+        shift
+      fi
+      git_cmd log --oneline -n "$count" "$@"
+      ;;
+    branch)
+      git_cmd branch -vv
+      ;;
+    show)
+      git_cmd show "$@"
+      ;;
+    add)
+      git_add "$@"
+      ;;
+    commit)
+      git_commit "$@"
+      ;;
+    stash)
+      git_stash "$@"
+      ;;
+    push)
+      git_push "$@"
+      ;;
+    *)
+      fail "Unknown git action: $action. Use: status, diff, log, branch, show, add, commit, stash, push"
+      ;;
+  esac
+}
+
 
 
 
@@ -246,14 +294,17 @@ if [[ -n "$command" ]]; then
       fi
       exit $? ;;
     flash)
-      # Appel de la logique de flash de zacus.sh (à intégrer ici)
-      echo "[TODO] Implémenter la logique de flash ici (voir zacus.sh)"; exit 1 ;;
+      flash_all; exit $? ;;
     rc)
       ZACUS_REQUIRE_HW=1 run_rc_live; exit $? ;;
     rc-autofix)
       "$FW_ROOT/tools/dev/zacus.sh" rc-autofix; exit $? ;;
     ports)
       ports_watch; exit $? ;;
+
+    git)
+      shift || true
+      run_git "$@"; exit $? ;;
     latest)
       latest_artifacts; exit $? ;;
     audit)

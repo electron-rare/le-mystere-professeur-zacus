@@ -1,0 +1,138 @@
+commands:
+  - id: rc
+    description: Run RC live gate (build matrix + smoke)
+    entrypoint: tools/dev/cockpit.sh
+    args: ["rc"]
+    runbook_ref: docs/QUICKSTART.md
+    evidence_outputs:
+      - artifacts/rc_live/<timestamp>/summary.json
+      - artifacts/rc_live/<timestamp>/summary.md
+      - artifacts/rc_live/<timestamp>/steps.tsv
+      - artifacts/rc_live/<timestamp>/run_matrix_and_smoke.log
+  - id: rc-autofix
+    description: Run RC live gate with auto-fix helper
+    entrypoint: tools/dev/cockpit.sh
+    args: ["rc-autofix"]
+    runbook_ref: docs/QUICKSTART.md
+    evidence_outputs:
+      - artifacts/rc_live/<timestamp>/summary.json
+      - artifacts/rc_live/<timestamp>/summary.md
+  - id: build
+    description: Build all firmware targets
+    entrypoint: tools/dev/cockpit.sh
+    args: ["build"]
+    runbook_ref: README.md
+    evidence_outputs: []
+  - id: bootstrap
+    description: Bootstrap local tooling (.venv, pyserial)
+    entrypoint: tools/dev/cockpit.sh
+    args: ["bootstrap"]
+    runbook_ref: docs/QUICKSTART.md
+    evidence_outputs: []
+  - id: ports
+    description: Watch serial ports list
+    entrypoint: tools/dev/cockpit.sh
+    args: ["ports"]
+    runbook_ref: docs/QUICKSTART.md
+    evidence_outputs: []
+  - id: latest
+    description: Print latest artifact directory
+    entrypoint: tools/dev/cockpit.sh
+    args: ["latest"]
+    runbook_ref: docs/QUICKSTART.md
+    evidence_outputs: []
+  - id: audit
+    description: Run full audit (build + rc + driver/test checks)
+    entrypoint: tools/dev/cockpit.sh
+    args: ["audit"]
+    runbook_ref: docs/TEST_SCRIPT_COORDINATOR.md
+    evidence_outputs:
+      - logs/agent_build.log
+      - logs/agent_smoke.log
+      - logs/audit_sync_report.md
+  - id: report
+    description: Generate sync report
+    entrypoint: tools/dev/cockpit.sh
+    args: ["report"]
+    runbook_ref: docs/TEST_SCRIPT_COORDINATOR.md
+    evidence_outputs:
+      - logs/audit_sync_report.md
+  - id: cleanup
+    description: Archive old logs and artifacts
+    entrypoint: tools/dev/cockpit.sh
+    args: ["cleanup"]
+    runbook_ref: docs/TEST_SCRIPT_COORDINATOR.md
+    evidence_outputs:
+      - logs/archive/<timestamp>/
+      - artifacts/archive/<timestamp>/
+  - id: codex-check
+    description: Check codex CLI + prompts inventory
+    entrypoint: tools/dev/cockpit.sh
+    args: ["codex-check"]
+    runbook_ref: docs/TEST_SCRIPT_COORDINATOR.md
+    evidence_outputs: []
+  - id: drivers
+    description: Run driver audit for a specific platform
+    entrypoint: tools/dev/cockpit.sh
+    args: ["drivers", "<platform>"]
+    runbook_ref: docs/TEST_SCRIPT_COORDINATOR.md
+    evidence_outputs: []
+  - id: test
+    description: Run tests audit for a specific platform
+    entrypoint: tools/dev/cockpit.sh
+    args: ["test", "<platform>"]
+    runbook_ref: docs/TEST_SCRIPT_COORDINATOR.md
+    evidence_outputs: []
+
+  - id: git
+    description: Run git commands via cockpit (status, diff, log, branch, show, add, commit, stash, push)
+    entrypoint: tools/dev/cockpit.sh
+    args: ["git", "<action>", "[args...]"]
+    runbook_ref: docs/TEST_SCRIPT_COORDINATOR.md#git-operations-policy
+    evidence_outputs: []
+    notes: |
+      Read actions: status, diff, log, branch, show
+      Write actions (require ZACUS_GIT_ALLOW_WRITE=1): add, commit, stash, push
+      All git commands are logged in evidence/commands.txt
+  - id: git-add
+    description: Stage files for commit (requires ZACUS_GIT_ALLOW_WRITE=1)
+    entrypoint: tools/dev/cockpit.sh
+    args: ["git", "add", "<pathspec>"]
+    runbook_ref: docs/TEST_SCRIPT_COORDINATOR.md#git-operations-policy
+    evidence_outputs: []
+    notes: "Set ZACUS_GIT_NO_CONFIRM=1 to skip confirmation prompt"
+  - id: git-commit
+    description: Commit staged changes (requires ZACUS_GIT_ALLOW_WRITE=1)
+    entrypoint: tools/dev/cockpit.sh
+    args: ["git", "commit", "-m", "<message>"]
+    runbook_ref: docs/TEST_SCRIPT_COORDINATOR.md#git-operations-policy
+    evidence_outputs: []
+    notes: "Set ZACUS_GIT_NO_CONFIRM=1 to skip confirmation prompt"
+  - id: git-stash
+    description: Stash working tree changes (requires ZACUS_GIT_ALLOW_WRITE=1)
+    entrypoint: tools/dev/cockpit.sh
+    args: ["git", "stash", "[save|pop|list]"]
+    runbook_ref: docs/TEST_SCRIPT_COORDINATOR.md#git-operations-policy
+    evidence_outputs: []
+    notes: "Set ZACUS_GIT_NO_CONFIRM=1 to skip confirmation prompt"
+  - id: git-push
+    description: Push commits to remote (requires ZACUS_GIT_ALLOW_WRITE=1)
+    entrypoint: tools/dev/cockpit.sh
+    args: ["git", "push", "[remote]", "[branch]"]
+    runbook_ref: docs/TEST_SCRIPT_COORDINATOR.md#git-operations-policy
+    evidence_outputs: []
+    notes: "Set ZACUS_GIT_NO_CONFIRM=1 to skip confirmation prompt. Dangerous operation!"
+
+
+  - id: flash
+    description: Flash firmware (auto port resolution)
+    entrypoint: tools/dev/cockpit.sh
+    args: ["flash"]
+    runbook_ref: docs/QUICKSTART.md
+    evidence_outputs: []
+  - id: help
+    description: Print cockpit help
+    entrypoint: tools/dev/cockpit.sh
+    args: ["help"]
+    runbook_ref: docs/QUICKSTART.md
+    evidence_outputs: []

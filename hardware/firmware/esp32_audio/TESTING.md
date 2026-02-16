@@ -33,6 +33,55 @@ Runbook live semi-automatique disponible:
 - `tools/qa/mp3_rc_smoke.sh` (smoke RC MP3)
 - `tools/qa/mp3_rc_runbook.md` (runbook RC MP3)
 
+## Story V2 - tests QA (E2E, smoke, stress)
+
+### E2E WebUI (Cypress)
+
+Prerequis:
+- ESP32 flash et WebUI dispo.
+- URL UI (par defaut `http://localhost:8080/story-ui`).
+
+Commande:
+
+```bash
+export ESP_UI_URL="http://<ESP_IP>:8080/story-ui"
+npx cypress run --config-file esp32_audio/tests/e2e/cypress.config.js
+```
+
+Artefacts Cypress:
+- `cypress/videos/` et `cypress/screenshots/` (sur echec)
+
+### Smoke test 40s (4 scenarios)
+
+```bash
+cd hardware/firmware
+bash tools/dev/run_smoke_tests.sh
+```
+
+Options utiles:
+- `ZACUS_PORT_ESP32=/dev/cu.SLAB_USBtoUART7` (override port)
+- `ZACUS_REQUIRE_HW=1` (fail si pas de hardware)
+
+Log attendu:
+- `artifacts/rc_live/smoke_<timestamp>.log`
+
+### Stress test 4h
+
+```bash
+cd hardware/firmware
+python3 tools/dev/run_stress_tests.py --hours 4 --port /dev/cu.SLAB_USBtoUART7
+```
+
+Option heap (WebSocket status):
+
+```bash
+pip install websocket-client
+python3 tools/dev/run_stress_tests.py --hours 4 --ws-url ws://<ESP_IP>:8080/api/story/stream
+```
+
+Log attendu:
+- `artifacts/stress_test_4h_<timestamp>.log`
+
 ## 0) Tooling STORY V2 (hors carte)
 
 1. Validation stricte:

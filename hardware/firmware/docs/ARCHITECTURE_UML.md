@@ -19,7 +19,7 @@ Le firmware suit une **architecture multi-MCU** avec 3 firmwares indépendants c
 │  └──────────────────────────────────────────────────────┘  │
 └────────────────────┬───────────────────┬────────────────────┘
                      │ UI Link v2        │ UI Link v2
-                     │ UART 19200        │ UART 19200
+                     │ UART 57600        │ UART 57600
         ┌────────────┴────────┐   ┌──────┴─────────┐
         │   ESP8266 OLED      │   │  RP2040 TFT    │
         │  (UI légère C++)    │   │ (LVGL tactile) │
@@ -30,9 +30,9 @@ Le firmware suit une **architecture multi-MCU** avec 3 firmwares indépendants c
 
 | MCU | Role | Plateforme | Framework | Baud UART |
 |-----|------|------------|-----------|-----------|
-| ESP32 | Audio + logique | Espressif32 v6.12.0 | Arduino | 115200 (USB)<br>19200 (UI) |
-| ESP8266 | UI OLED | Espressif8266 v4.2.1 | Arduino | 19200 (UI) |
-| RP2040 | UI TFT tactile | RaspberryPi custom | Arduino | 19200 (UI) |
+| ESP32 | Audio + logique | Espressif32 v6.12.0 | Arduino | 115200 (USB)<br>57600 (UI) |
+| ESP8266 | UI OLED | Espressif8266 v4.2.1 | Arduino | 57600 (UI) |
+| RP2040 | UI TFT tactile | RaspberryPi custom | Arduino | 57600 (UI) |
 
 ## Architecture ESP32 (firmware principal)
 
@@ -512,7 +512,7 @@ Le firmware suit une **architecture multi-MCU** avec 3 firmwares indépendants c
 │  │ - serial_: HardwareSerial&                               │  │
 │  │ - rxPin_: uint8_t (GPIO19)                               │  │
 │  │ - txPin_: uint8_t (GPIO22)                               │  │
-│  │ - baud_: uint32_t (19200)                                │  │
+│  │ - baud_: uint32_t (57600)                                │  │
 │  │ - updatePeriodMs_: uint16_t (250)                        │  │
 │  │ - heartbeatMs_: uint16_t (1000)                          │  │
 │  │ - timeoutMs_: uint16_t (1500)                            │  │
@@ -562,7 +562,7 @@ Le firmware suit une **architecture multi-MCU** avec 3 firmwares indépendants c
 │  ┌─────────────────────────────────────────────────────────┐  │
 │  │ main.cpp (global scope)                                  │  │
 │  ├──────────────────────────────────────────────────────────┤ │
-│  │ - g_link: SoftwareSerial (D6 RX, D5 TX, 19200)          │  │
+│  │ - g_link: SoftwareSerial (D6 RX, D5 TX, 57600)          │  │
 │  │ - g_display: Adafruit_SSD1306 (128x64, I2C)             │  │
 │  │ - g_state: TelemetryState (état UI reçu)                │  │
 │  │ - g_linkState: LinkMonitorState (monitoring link)       │  │
@@ -633,7 +633,7 @@ Le firmware suit une **architecture multi-MCU** avec 3 firmwares indépendants c
 │  ├──────────────────────────────────────────────────────────┤ │
 │  │ - g_tft: TFT_eSPI (ILI9488/ILI9486 SPI)                 │  │
 │  │ - g_touch: XPT2046_Touchscreen (CS:GP9, IRQ:GP15)       │  │
-│  │ - g_link: UiLinkClient (UART1 GP0/GP1, 19200)           │  │
+│  │ - g_link: UiLinkClient (UART1 GP0/GP1, 57600)           │  │
 │  │ - g_snapshot: UiSnapshot (état UI local)                │  │
 │  │ - LVGL widgets: g_labelLink, g_labelMode, etc.          │  │
 │  └──────────────────────────────────────────────────────────┘  │

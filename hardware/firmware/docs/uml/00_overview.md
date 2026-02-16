@@ -7,7 +7,7 @@ This firmware is a multi-MCU system with three independent firmwares linked by U
 ```
 ESP32 Audio Kit (main firmware)
   - App -> AppOrchestrator -> Controllers -> Services
-  - UI Link v2 (UART 19200)
+  - UI Link v2 (UART 57600)
 
     |-> ESP8266 OLED UI (lightweight UI, 128x64)
     |-> RP2040 TFT UI (LVGL, touch)

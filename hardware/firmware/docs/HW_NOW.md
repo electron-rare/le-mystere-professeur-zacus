@@ -24,7 +24,7 @@ Rappels baud
 ------------
 
 - Console USB PlatformIO/monitor: `115200`
-- Lien interne ESP8266 SoftwareSerial vers ESP32: `19200` (non utilisé pour le monitor USB)
+- Lien interne ESP8266 SoftwareSerial vers ESP32: `57600` (non utilisé pour le monitor USB)
 
 Diagnostic rapide
 -----------------

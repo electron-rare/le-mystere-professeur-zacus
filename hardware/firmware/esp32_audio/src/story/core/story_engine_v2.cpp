@@ -197,6 +197,10 @@ bool StoryEngineV2::consumeStepChanged() {
   return changed;
 }
 
+const char* StoryEngineV2::lastTransitionId() const {
+  return lastTransitionId_[0] != '\0' ? lastTransitionId_ : nullptr;
+}
+
 const char* StoryEngineV2::lastError() const {
   return lastError_;
 }
@@ -213,6 +217,11 @@ bool StoryEngineV2::transitionTo(uint8_t nextStepIndex, uint32_t nowMs, const ch
   currentStepIndex_ = nextStepIndex;
   enteredAtMs_ = nowMs;
   stepChanged_ = true;
+  if (reason != nullptr && reason[0] != '\0') {
+    snprintf(lastTransitionId_, sizeof(lastTransitionId_), "%s", reason);
+  } else {
+    lastTransitionId_[0] = '\0';
+  }
   Serial.printf("[STORY_V2] transition %s -> %s via=%s\n",
                 scenario_->steps[previousStepIndex_].id,
                 scenario_->steps[currentStepIndex_].id,

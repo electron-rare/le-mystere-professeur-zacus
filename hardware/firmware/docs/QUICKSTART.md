@@ -52,7 +52,7 @@ python3 tools/dev/serial_smoke.py --role all --baud 115200 --wait-port 3 --allow
 Sur macOS les deux CP2102 partagent VID/PID=10C4:EA60/0001; utilisez `LOCATION=20-6.1.1` pour l’ESP32 et `20-6.1.2` pour l’ESP8266. `tools/dev/ports_map.json` suit le format `location -> role` + `vidpid -> role`.
 Baud separation a retenir:
 - console USB PlatformIO: `115200`
-- lien interne ESP8266 SoftwareSerial vers ESP32: `19200`
+- lien interne ESP8266 SoftwareSerial vers ESP32: `57600`
 
 ## 4.5) Build + smoke runner
 

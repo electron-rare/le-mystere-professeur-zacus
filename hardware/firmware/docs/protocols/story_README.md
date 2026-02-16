@@ -91,6 +91,7 @@ Depuis `hardware/firmware/esp32_audio`:
 ```bash
 make story-validate
 make story-gen
+python3 tools/story_gen/story_gen.py deploy --strict
 make qa-story-v2
 ```
 

@@ -61,7 +61,7 @@ python3 tools/dev/serial_smoke.py --role auto --baud 115200 --wait-port 3 --allo
 ```
 
 MacOS CP2102 duplicates share VID/PID=10C4:EA60/0001; the LOCATION (20-6.1.1=ESP32, 20-6.1.2=ESP8266) drives the detector. `tools/dev/ports_map.json` now uses `location -> role` and `vidpid -> role` mappings.
-USB console monitoring uses `115200`. ESP8266 internal UI link SoftwareSerial stays at `19200` (internal link only).
+USB console monitoring uses `115200`. ESP8266 internal UI link SoftwareSerial stays at `57600` (internal link only).
 
 ## Serial smoke commands
 

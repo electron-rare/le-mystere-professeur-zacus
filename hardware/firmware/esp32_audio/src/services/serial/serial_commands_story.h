@@ -7,6 +7,7 @@
 
 class StoryController;
 class StoryControllerV2;
+class StoryFsManager;
 
 struct StorySerialRuntimeContext {
   bool* storyV2Enabled = nullptr;
@@ -14,6 +15,7 @@ struct StorySerialRuntimeContext {
   bool storyV2Default = false;
   StoryController* legacy = nullptr;
   StoryControllerV2* v2 = nullptr;
+  StoryFsManager* fsManager = nullptr;
   void (*armAfterUnlock)(uint32_t nowMs) = nullptr;
   void (*updateStoryTimeline)(uint32_t nowMs) = nullptr;
   void (*printHelp)() = nullptr;

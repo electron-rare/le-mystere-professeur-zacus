@@ -131,7 +131,7 @@ make fast-ui-tft         # Build ui_rp2040_ili9488 + ili9486
 /dev/cu.SLAB_USBtoUART4 → 20-6.4.4 → (libre)
 ```
 
-**Note :** ESP8266 OLED communique en interne via SoftwareSerial (19200 baud) vers ESP32 sur pins D6/D5 (pas USB).
+**Note :** ESP8266 OLED communique en interne via SoftwareSerial (57600 baud) vers ESP32 sur pins D6/D5 (pas USB).
 
 ### Smoke gates strictes
 
@@ -404,19 +404,19 @@ Untracked files:
 - Headphone out, Mic in, Line in
 - SD card slot (MP3 storage)
 - USB : CP2102 serial @ 115200 baud
-- UI Link : UART2 GPIO19 (RX), GPIO22 (TX) @ 19200 baud
+- UI Link : UART2 GPIO19 (RX), GPIO22 (TX) @ 57600 baud
 
 **ESP8266 NodeMCU OLED :**
 - MCU : ESP8266 (4MB flash)
 - Display : SSD1306 128x64 OLED I2C (addr 0x3C)
-- UI Link : SoftwareSerial D6 (RX), D5 (TX) @ 19200 baud
+- UI Link : SoftwareSerial D6 (RX), D5 (TX) @ 57600 baud
 - USB : CP2102 serial @ 115200 baud (debug only, UI Link via pins)
 
 **RP2040 Pico TFT :**
 - MCU : RP2040 (2MB flash)
 - Display : ILI9488 320x480 TFT SPI (ou ILI9486 480x320)
 - Touch : XPT2046 résistif SPI
-- UI Link : UART1 GPIO0 (RX), GPIO1 (TX) @ 19200 baud
+- UI Link : UART1 GPIO0 (RX), GPIO1 (TX) @ 57600 baud
 - USB : UF2 bootloader (drag-drop .uf2)
 
 ### Wiring
@@ -437,8 +437,8 @@ GND ─────────────────────────�
 
 **Baud rates :**
 - USB monitors : 115200 (ESP32, ESP8266 debug)
-- UI Link UART : 19200 (ESP32 ↔ ESP8266, ESP32 ↔ RP2040)
-- ⚠️ **Important** : Ne pas confondre USB monitor baud (115200) avec internal UI Link baud (19200)
+- UI Link UART : 57600 (ESP32 ↔ ESP8266, ESP32 ↔ RP2040)
+- ⚠️ **Important** : Ne pas confondre USB monitor baud (115200) avec internal UI Link baud (57600)
 
 ---
 

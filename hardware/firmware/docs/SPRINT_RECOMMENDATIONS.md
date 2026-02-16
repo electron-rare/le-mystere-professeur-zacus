@@ -265,7 +265,7 @@ pio test -e native  # run tests on host (no hardware)
     "overlay_timeout_ms": 5000
   },
   "ui_link": {
-    "baud": 19200,
+    "baud": 57600,
     "timeout_ms": 1500,
     "heartbeat_ms": 1000
   }

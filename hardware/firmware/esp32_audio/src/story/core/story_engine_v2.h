@@ -20,6 +20,7 @@ class StoryEngineV2 {
   const StepDef* currentStep() const;
 
   bool consumeStepChanged();
+  const char* lastTransitionId() const;
   const char* lastError() const;
   uint32_t droppedEvents() const;
 
@@ -37,4 +38,5 @@ class StoryEngineV2 {
   bool stepChanged_ = false;
   uint32_t enteredAtMs_ = 0U;
   char lastError_[32] = "OK";
+  char lastTransitionId_[32] = "";
 };

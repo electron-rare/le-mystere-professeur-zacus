@@ -1,12 +1,45 @@
 #include "web_ui_service.h"
 
+#include <ArduinoJson.h>
+#include <LittleFS.h>
 #include <ESPAsyncWebServer.h>
+#include <cctype>
+#include <cstring>
 
+#include "../../audio/mp3_player.h"
+#include "../../controllers/story/story_controller_v2.h"
+#include "../../story/fs/story_fs_manager.h"
+#include "../../story/generated/scenarios_gen.h"
 #include "../network/wifi_service.h"
 #include "../radio/radio_service.h"
-#include "../../audio/mp3_player.h"
+#include "../serial/serial_commands_story.h"
 
 namespace {
+
+class StringPrint : public Print {
+ public:
+  size_t write(uint8_t c) override {
+    buffer_ += static_cast<char>(c);
+    return 1U;
+  }
+
+  size_t write(const uint8_t* data, size_t size) override {
+    if (data == nullptr || size == 0U) {
+      return 0U;
+    }
+    buffer_.reserve(buffer_.length() + size + 1U);
+    for (size_t i = 0U; i < size; ++i) {
+      buffer_ += static_cast<char>(data[i]);
+    }
+    return size;
+  }
+
+  const String& str() const { return buffer_; }
+  void clear() { buffer_ = ""; }
+
+ private:
+  String buffer_;
+};
 
 void copyText(char* out, size_t outLen, const char* text) {
   if (out == nullptr || outLen == 0U) {
@@ -80,6 +113,10 @@ void WebUiService::begin(WifiService* wifi,
   wifi_ = wifi;
   radio_ = radio;
   mp3_ = mp3;
+  lastStatusPingMs_ = 0U;
+  lastStepId_[0] = '\0';
+  auditHead_ = 0U;
+  auditCount_ = 0U;
   config_ = Config();
   if (cfg != nullptr) {
     config_ = *cfg;
@@ -98,14 +135,126 @@ void WebUiService::begin(WifiService* wifi,
     return;
   }
 
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  DefaultHeaders::Instance().addHeader("Access-Control-Max-Age", "3600");
+
+  if (ws_ != nullptr) {
+    delete ws_;
+    ws_ = nullptr;
+  }
+  ws_ = new AsyncWebSocket("/api/story/stream");
+  if (ws_ != nullptr) {
+    ws_->onEvent([this](AsyncWebSocket* server,
+                        AsyncWebSocketClient* client,
+                        AwsEventType type,
+                        void* arg,
+                        uint8_t* data,
+                        size_t len) {
+      (void)server;
+      (void)arg;
+      (void)data;
+      (void)len;
+      if (type != WS_EVT_CONNECT || client == nullptr) {
+        return;
+      }
+      for (size_t i = 0U; i < auditCount_; ++i) {
+        const size_t idx = (auditHead_ + i) % kAuditBufferSize;
+        if (auditBuffer_[idx].length() > 0U) {
+          client->text(auditBuffer_[idx]);
+        }
+      }
+    });
+    server_->addHandler(ws_);
+  }
+
   setupRoutes();
   server_->begin();
   snap_.started = true;
   setRoute("BEGIN");
 }
 
+void WebUiService::setStoryContext(StoryControllerV2* story, StoryFsManager* fsManager) {
+  story_ = story;
+  storyFs_ = fsManager;
+}
+
 void WebUiService::update(uint32_t nowMs) {
-  (void)nowMs;
+  if (ws_ != nullptr) {
+    ws_->cleanupClients();
+  }
+
+  if (story_ != nullptr) {
+    const StoryControllerV2::StoryControllerV2Snapshot snap = story_->snapshot(true, nowMs);
+    const char* stepId = (snap.stepId != nullptr) ? snap.stepId : "";
+    if (stepId[0] != '\0' && strcmp(stepId, lastStepId_) != 0) {
+      char prevStep[32] = "";
+      copyText(prevStep, sizeof(prevStep), lastStepId_);
+      copyText(lastStepId_, sizeof(lastStepId_), stepId);
+
+      const ScenarioDef* scenario = story_->scenario();
+      uint8_t stepCount = (scenario != nullptr) ? scenario->stepCount : 0U;
+      uint8_t stepIndex = 0U;
+      if (scenario != nullptr) {
+        for (uint8_t i = 0U; i < scenario->stepCount; ++i) {
+          if (scenario->steps[i].id != nullptr && strcmp(scenario->steps[i].id, stepId) == 0) {
+            stepIndex = i;
+            break;
+          }
+        }
+      }
+      const uint8_t progress = (stepCount > 1U) ? static_cast<uint8_t>((stepIndex * 100U) / (stepCount - 1U)) : 0U;
+
+      StaticJsonDocument<256> doc;
+      doc["type"] = "step_change";
+      doc["timestamp"] = nowMs;
+      JsonObject data = doc.createNestedObject("data");
+      data["previous_step"] = prevStep;
+      data["current_step"] = stepId;
+      data["progress_pct"] = progress;
+      String json;
+      serializeJson(doc, json);
+      if (ws_ != nullptr) {
+        ws_->textAll(json);
+      }
+      pushAuditEvent(json.c_str());
+
+      const char* transitionId = story_->lastTransitionId();
+      if (transitionId != nullptr && transitionId[0] != '\0') {
+        StaticJsonDocument<192> transDoc;
+        transDoc["type"] = "transition";
+        transDoc["timestamp"] = nowMs;
+        JsonObject transData = transDoc.createNestedObject("data");
+        transData["event"] = "transition";
+        transData["transition_id"] = transitionId;
+        String transJson;
+        serializeJson(transDoc, transJson);
+        if (ws_ != nullptr) {
+          ws_->textAll(transJson);
+        }
+        pushAuditEvent(transJson.c_str());
+      }
+
+      StaticJsonDocument<192> auditDoc;
+      auditDoc["type"] = "audit_log";
+      auditDoc["timestamp"] = nowMs;
+      JsonObject auditData = auditDoc.createNestedObject("data");
+      auditData["event_type"] = "step_execute";
+      auditData["step_id"] = stepId;
+      String auditJson;
+      serializeJson(auditDoc, auditJson);
+      if (ws_ != nullptr) {
+        ws_->textAll(auditJson);
+      }
+      pushAuditEvent(auditJson.c_str());
+    }
+  }
+
+  if (static_cast<int32_t>(nowMs - lastStatusPingMs_) >= 5000) {
+    lastStatusPingMs_ = nowMs;
+    broadcastStatus(nowMs);
+  }
 }
 
 WebUiService::Snapshot WebUiService::snapshot() const {
@@ -330,10 +479,164 @@ void WebUiService::setupRoutes() {
     request->send(ok ? 200 : 400, "application/json", ok ? "{\"ok\":true}" : "{\"error\":\"ap_on\"}");
   });
 
+  server_->on("/api/story/list", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    if (!checkAuth(request)) {
+      return;
+    }
+    setRoute("/api/story/list");
+    ++snap_.requestCount;
+    sendStoryList(request);
+  });
+
+  server_->on("/api/story/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    if (!checkAuth(request)) {
+      return;
+    }
+    setRoute("/api/story/status");
+    ++snap_.requestCount;
+    sendStoryStatus(request);
+  });
+
+  server_->on("/api/story/start", HTTP_POST, [this](AsyncWebServerRequest* request) {
+    if (!checkAuth(request)) {
+      return;
+    }
+    setRoute("/api/story/start");
+    ++snap_.requestCount;
+    handleStoryStart(request);
+  });
+
+  server_->on("/api/story/pause", HTTP_POST, [this](AsyncWebServerRequest* request) {
+    if (!checkAuth(request)) {
+      return;
+    }
+    setRoute("/api/story/pause");
+    ++snap_.requestCount;
+    handleStoryPause(request);
+  });
+
+  server_->on("/api/story/resume", HTTP_POST, [this](AsyncWebServerRequest* request) {
+    if (!checkAuth(request)) {
+      return;
+    }
+    setRoute("/api/story/resume");
+    ++snap_.requestCount;
+    handleStoryResume(request);
+  });
+
+  server_->on("/api/story/skip", HTTP_POST, [this](AsyncWebServerRequest* request) {
+    if (!checkAuth(request)) {
+      return;
+    }
+    setRoute("/api/story/skip");
+    ++snap_.requestCount;
+    handleStorySkip(request);
+  });
+
+  server_->on("/api/story/validate", HTTP_POST,
+              [this](AsyncWebServerRequest* request) {
+                (void)request;
+              },
+              nullptr,
+              [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+                if (!checkAuth(request)) {
+                  return;
+                }
+                setRoute("/api/story/validate");
+                if (index == 0U) {
+                  request->_tempObject = new String();
+                }
+                String* body = reinterpret_cast<String*>(request->_tempObject);
+                if (body != nullptr && data != nullptr && len > 0U) {
+                  body->reserve(total + 1U);
+                  body->concat(reinterpret_cast<char*>(data), len);
+                }
+                if (index + len >= total) {
+                  const String payload = body != nullptr ? *body : String();
+                  if (body != nullptr) {
+                    delete body;
+                    request->_tempObject = nullptr;
+                  }
+                  handleStoryValidate(request, payload.c_str());
+                }
+              });
+
+  server_->on("/api/story/deploy", HTTP_POST,
+              [this](AsyncWebServerRequest* request) {
+                (void)request;
+              },
+              nullptr,
+              [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+                if (!checkAuth(request)) {
+                  return;
+                }
+                setRoute("/api/story/deploy");
+                handleStoryDeploy(request, data, len, index, total);
+              });
+
+  server_->on("/api/story/serial-command", HTTP_POST,
+              [this](AsyncWebServerRequest* request) {
+                (void)request;
+              },
+              nullptr,
+              [this](AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+                if (!checkAuth(request)) {
+                  return;
+                }
+                setRoute("/api/story/serial-command");
+                if (index == 0U) {
+                  request->_tempObject = new String();
+                }
+                String* body = reinterpret_cast<String*>(request->_tempObject);
+                if (body != nullptr && data != nullptr && len > 0U) {
+                  body->reserve(total + 1U);
+                  body->concat(reinterpret_cast<char*>(data), len);
+                }
+                if (index + len >= total) {
+                  const String payload = body != nullptr ? *body : String();
+                  if (body != nullptr) {
+                    delete body;
+                    request->_tempObject = nullptr;
+                  }
+                  handleStorySerial(request, payload.c_str());
+                }
+              });
+
+  server_->on("/api/story/fs-info", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    if (!checkAuth(request)) {
+      return;
+    }
+    setRoute("/api/story/fs-info");
+    ++snap_.requestCount;
+    sendStoryFsInfo(request);
+  });
+
+  server_->on("/api/audit/log", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    if (!checkAuth(request)) {
+      return;
+    }
+    setRoute("/api/audit/log");
+    ++snap_.requestCount;
+    sendAuditLog(request);
+  });
+
   server_->onNotFound([this](AsyncWebServerRequest* request) {
+    if (request != nullptr && request->method() == HTTP_OPTIONS) {
+      handleOptions(request);
+      return;
+    }
+    if (request != nullptr && request->method() == HTTP_POST) {
+      const String url = request->url();
+      if (url.startsWith("/api/story/select/")) {
+        setRoute("/api/story/select");
+        ++snap_.requestCount;
+        handleStorySelect(request);
+        return;
+      }
+    }
     setRoute("404");
     ++snap_.requestCount;
-    request->send(404, "application/json", "{\"error\":\"not_found\"}");
+    sendError(request, 404, "Not found", "Route not found");
   });
 }
 
@@ -475,4 +778,526 @@ void WebUiService::setRoute(const char* route) {
 
 void WebUiService::setError(const char* error) {
   copyText(snap_.lastError, sizeof(snap_.lastError), error);
+}
+
+void WebUiService::sendJson(AsyncWebServerRequest* request, int code, const String& json) {
+  if (request == nullptr) {
+    return;
+  }
+  AsyncWebServerResponse* response = request->beginResponse(code, "application/json", json);
+  addCorsHeaders(response);
+  request->send(response);
+}
+
+void WebUiService::sendError(AsyncWebServerRequest* request,
+                             int code,
+                             const char* message,
+                             const char* details) {
+  StaticJsonDocument<256> doc;
+  JsonObject err = doc.createNestedObject("error");
+  err["code"] = code;
+  err["message"] = message != nullptr ? message : "error";
+  if (details != nullptr && details[0] != '\0') {
+    err["details"] = details;
+  }
+  String json;
+  serializeJson(doc, json);
+  sendJson(request, code, json);
+}
+
+void WebUiService::addCorsHeaders(AsyncWebServerResponse* response) {
+  if (response == nullptr) {
+    return;
+  }
+  response->addHeader("Access-Control-Allow-Origin", "*");
+  response->addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  response->addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  response->addHeader("Access-Control-Max-Age", "3600");
+}
+
+void WebUiService::handleOptions(AsyncWebServerRequest* request) {
+  if (request == nullptr) {
+    return;
+  }
+  AsyncWebServerResponse* response = request->beginResponse(200);
+  addCorsHeaders(response);
+  request->send(response);
+}
+
+void WebUiService::pushAuditEvent(const char* json) {
+  if (json == nullptr || json[0] == '\0') {
+    return;
+  }
+  const size_t idx = (auditHead_ + auditCount_) % kAuditBufferSize;
+  if (auditCount_ < kAuditBufferSize) {
+    auditBuffer_[idx] = json;
+    ++auditCount_;
+    return;
+  }
+  auditBuffer_[auditHead_] = json;
+  auditHead_ = (auditHead_ + 1U) % kAuditBufferSize;
+}
+
+void WebUiService::broadcastStatus(uint32_t nowMs) {
+  if (ws_ == nullptr) {
+    return;
+  }
+  const uint32_t freeHeap = ESP.getFreeHeap();
+  const uint32_t heapSize = ESP.getHeapSize();
+  const uint8_t heapPct = heapSize > 0U ? static_cast<uint8_t>((freeHeap * 100U) / heapSize) : 0U;
+
+  String statusLabel = "idle";
+  if (story_ != nullptr) {
+    if (story_->isPaused()) {
+      statusLabel = "paused";
+    } else if (story_->isRunning()) {
+      statusLabel = "running";
+    }
+  }
+
+  StaticJsonDocument<192> doc;
+  doc["type"] = "status";
+  doc["timestamp"] = nowMs;
+  JsonObject data = doc.createNestedObject("data");
+  data["status"] = statusLabel;
+  data["memory_free"] = freeHeap;
+  data["heap_pct"] = heapPct;
+  String json;
+  serializeJson(doc, json);
+  ws_->textAll(json);
+  pushAuditEvent(json.c_str());
+}
+
+void WebUiService::sendStoryList(AsyncWebServerRequest* request) {
+  if (request == nullptr) {
+    return;
+  }
+  StaticJsonDocument<768> doc;
+  JsonArray scenarios = doc.createNestedArray("scenarios");
+
+  bool listed = false;
+  if (storyFs_ != nullptr) {
+    StoryScenarioInfo infos[16];
+    size_t count = 0U;
+    if (storyFs_->listScenarios(infos, 16U, &count) && count > 0U) {
+      for (size_t i = 0U; i < count; ++i) {
+        JsonObject item = scenarios.createNestedObject();
+        item["id"] = infos[i].id;
+        item["version"] = infos[i].version;
+        item["estimated_duration_s"] = infos[i].estimatedDurationS;
+      }
+      listed = true;
+    }
+  }
+
+  if (!listed) {
+    const uint8_t count = generatedScenarioCount();
+    for (uint8_t i = 0U; i < count; ++i) {
+      const char* id = generatedScenarioIdAt(i);
+      const ScenarioDef* scenario = generatedScenarioById(id);
+      JsonObject item = scenarios.createNestedObject();
+      item["id"] = id != nullptr ? id : "";
+      item["version"] = scenario != nullptr ? scenario->version : 0U;
+      item["estimated_duration_s"] = 0U;
+    }
+  }
+
+  String json;
+  serializeJson(doc, json);
+  sendJson(request, 200, json);
+}
+
+void WebUiService::sendStoryStatus(AsyncWebServerRequest* request) {
+  if (request == nullptr) {
+    return;
+  }
+  if (story_ == nullptr) {
+    sendError(request, 500, "Story controller unavailable", "story_controller_missing");
+    return;
+  }
+
+  const StoryControllerV2::StoryControllerV2Snapshot snap = story_->snapshot(true, millis());
+  String statusLabel = "idle";
+  if (snap.paused) {
+    statusLabel = "paused";
+  } else if (snap.running) {
+    statusLabel = "running";
+  }
+
+  const ScenarioDef* scenario = story_->scenario();
+  uint8_t stepIndex = 0U;
+  uint8_t stepCount = scenario != nullptr ? scenario->stepCount : 0U;
+  if (scenario != nullptr && snap.stepId != nullptr) {
+    for (uint8_t i = 0U; i < scenario->stepCount; ++i) {
+      if (scenario->steps[i].id != nullptr && strcmp(scenario->steps[i].id, snap.stepId) == 0) {
+        stepIndex = i;
+        break;
+      }
+    }
+  }
+  const uint8_t progress = (stepCount > 1U) ? static_cast<uint8_t>((stepIndex * 100U) / (stepCount - 1U)) : 0U;
+
+  StaticJsonDocument<384> doc;
+  doc["status"] = statusLabel;
+  doc["scenario_id"] = snap.scenarioId != nullptr ? snap.scenarioId : "";
+  doc["current_step"] = snap.stepId != nullptr ? snap.stepId : "";
+  doc["progress_pct"] = progress;
+  doc["started_at_ms"] = storyStartedAtMs_;
+  doc["selected"] = storySelected_ ? selectedScenarioId_ : "";
+  doc["queue_depth"] = snap.queueDepth;
+  String json;
+  serializeJson(doc, json);
+  sendJson(request, 200, json);
+}
+
+void WebUiService::handleStorySelect(AsyncWebServerRequest* request) {
+  if (request == nullptr) {
+    return;
+  }
+  const String url = request->url();
+  const int slash = url.lastIndexOf('/');
+  if (slash < 0 || slash >= static_cast<int>(url.length() - 1)) {
+    sendError(request, 400, "Invalid scenario ID", "missing scenario id");
+    return;
+  }
+  const String id = url.substring(slash + 1);
+  if (id.length() == 0U) {
+    sendError(request, 400, "Invalid scenario ID", "empty scenario id");
+    return;
+  }
+  const ScenarioDef* scenario = generatedScenarioById(id.c_str());
+  if (scenario == nullptr) {
+    sendError(request, 404, "Scenario not found", id.c_str());
+    return;
+  }
+  copyText(selectedScenarioId_, sizeof(selectedScenarioId_), id.c_str());
+  storySelected_ = true;
+
+  StaticJsonDocument<128> doc;
+  doc["selected"] = selectedScenarioId_;
+  doc["status"] = "ready";
+  String json;
+  serializeJson(doc, json);
+  sendJson(request, 200, json);
+}
+
+void WebUiService::handleStoryStart(AsyncWebServerRequest* request) {
+  if (request == nullptr) {
+    return;
+  }
+  if (story_ == nullptr) {
+    sendError(request, 500, "Story controller unavailable", "story_controller_missing");
+    return;
+  }
+  if (!storySelected_ || selectedScenarioId_[0] == '\0') {
+    sendError(request, 412, "Scenario not selected", "call /api/story/select/{scenario_id}");
+    return;
+  }
+  if (story_->isRunning()) {
+    sendError(request, 409, "Story already running", "already running");
+    return;
+  }
+  if (story_->isPaused()) {
+    sendError(request, 409, "Story paused", "resume required");
+    return;
+  }
+  const uint32_t nowMs = millis();
+  if (!story_->setScenario(selectedScenarioId_, nowMs, "web_story_start")) {
+    sendError(request, 500, "Failed to start scenario", selectedScenarioId_);
+    return;
+  }
+  storyStartedAtMs_ = nowMs;
+  const StoryControllerV2::StoryControllerV2Snapshot snap = story_->snapshot(true, nowMs);
+
+  StaticJsonDocument<192> doc;
+  doc["status"] = "running";
+  doc["current_step"] = snap.stepId != nullptr ? snap.stepId : "";
+  doc["started_at_ms"] = storyStartedAtMs_;
+  String json;
+  serializeJson(doc, json);
+  sendJson(request, 200, json);
+}
+
+void WebUiService::handleStoryPause(AsyncWebServerRequest* request) {
+  if (request == nullptr) {
+    return;
+  }
+  if (story_ == nullptr) {
+    sendError(request, 500, "Story controller unavailable", "story_controller_missing");
+    return;
+  }
+  if (!story_->pause(millis(), "web_story_pause")) {
+    sendError(request, 409, "Story not running", "cannot pause");
+    return;
+  }
+  const StoryControllerV2::StoryControllerV2Snapshot snap = story_->snapshot(true, millis());
+  StaticJsonDocument<160> doc;
+  doc["status"] = "paused";
+  doc["paused_at_step"] = snap.stepId != nullptr ? snap.stepId : "";
+  String json;
+  serializeJson(doc, json);
+  sendJson(request, 200, json);
+}
+
+void WebUiService::handleStoryResume(AsyncWebServerRequest* request) {
+  if (request == nullptr) {
+    return;
+  }
+  if (story_ == nullptr) {
+    sendError(request, 500, "Story controller unavailable", "story_controller_missing");
+    return;
+  }
+  if (!story_->resume(millis(), "web_story_resume")) {
+    sendError(request, 409, "Story not paused", "cannot resume");
+    return;
+  }
+  StaticJsonDocument<96> doc;
+  doc["status"] = "running";
+  String json;
+  serializeJson(doc, json);
+  sendJson(request, 200, json);
+}
+
+void WebUiService::handleStorySkip(AsyncWebServerRequest* request) {
+  if (request == nullptr) {
+    return;
+  }
+  if (story_ == nullptr) {
+    sendError(request, 500, "Story controller unavailable", "story_controller_missing");
+    return;
+  }
+  const char* prevStep = nullptr;
+  const char* nextStep = nullptr;
+  if (!story_->skipToNextStep(millis(), "web_story_skip", &prevStep, &nextStep)) {
+    sendError(request, 409, "Skip not available", "no transition");
+    return;
+  }
+  StaticJsonDocument<160> doc;
+  doc["previous_step"] = prevStep != nullptr ? prevStep : "";
+  doc["current_step"] = nextStep != nullptr ? nextStep : "";
+  String json;
+  serializeJson(doc, json);
+  sendJson(request, 200, json);
+}
+
+void WebUiService::handleStoryValidate(AsyncWebServerRequest* request, const char* body) {
+  if (request == nullptr) {
+    return;
+  }
+  if (body == nullptr || body[0] == '\0') {
+    sendError(request, 400, "Missing payload", "body empty");
+    return;
+  }
+  StaticJsonDocument<512> doc;
+  const DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    sendError(request, 400, "Invalid JSON", err.c_str());
+    return;
+  }
+  const char* yaml = doc["yaml"] | "";
+  if (yaml[0] == '\0') {
+    sendError(request, 400, "Missing yaml", "yaml field required");
+    return;
+  }
+
+  StaticJsonDocument<192> out;
+  out["valid"] = true;
+  String json;
+  serializeJson(out, json);
+  sendJson(request, 200, json);
+}
+
+void WebUiService::handleStoryDeploy(AsyncWebServerRequest* request,
+                                     uint8_t* data,
+                                     size_t len,
+                                     size_t index,
+                                     size_t total) {
+  if (request == nullptr) {
+    return;
+  }
+
+  if (index == 0U) {
+    if (!LittleFS.exists("/story")) {
+      LittleFS.mkdir("/story");
+    }
+    const uint32_t freeBytes = LittleFS.totalBytes() - LittleFS.usedBytes();
+    const uint32_t contentLen = request->contentLength();
+    if (contentLen > 0U && contentLen > freeBytes) {
+      sendError(request, 507, "Insufficient storage", "not enough space");
+      return;
+    }
+    const String path = String("/story/upload_") + String(millis()) + ".tar.gz";
+    fs::File* file = new fs::File(LittleFS.open(path, "w"));
+    if (file == nullptr || !(*file)) {
+      if (file != nullptr) {
+        delete file;
+      }
+      sendError(request, 500, "Deploy failed", "open failed");
+      return;
+    }
+    request->_tempObject = file;
+  }
+
+  fs::File* file = reinterpret_cast<fs::File*>(request->_tempObject);
+  if (file != nullptr && data != nullptr && len > 0U) {
+    file->write(data, len);
+  }
+
+  if (index + len >= total) {
+    if (file != nullptr) {
+      file->close();
+      delete file;
+      request->_tempObject = nullptr;
+    }
+    StaticJsonDocument<160> doc;
+    doc["deployed"] = "UPLOAD";
+    doc["status"] = "ok";
+    String json;
+    serializeJson(doc, json);
+    sendJson(request, 200, json);
+  }
+}
+
+void WebUiService::handleStorySerial(AsyncWebServerRequest* request, const char* body) {
+  if (request == nullptr) {
+    return;
+  }
+  if (body == nullptr || body[0] == '\0') {
+    sendError(request, 400, "Missing payload", "body empty");
+    return;
+  }
+  StaticJsonDocument<256> doc;
+  const DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    sendError(request, 400, "Invalid JSON", err.c_str());
+    return;
+  }
+  const char* command = doc["command"] | "";
+  if (command[0] == '\0') {
+    sendError(request, 400, "Missing command", "command field required");
+    return;
+  }
+  if (story_ == nullptr) {
+    sendError(request, 500, "Story controller unavailable", "story_controller_missing");
+    return;
+  }
+
+  char lineBuf[192] = {};
+  snprintf(lineBuf, sizeof(lineBuf), "%s", command);
+
+  size_t start = 0U;
+  size_t end = strlen(lineBuf);
+  while (lineBuf[start] != '\0' && isspace(static_cast<unsigned char>(lineBuf[start])) != 0) {
+    ++start;
+  }
+  while (end > start && isspace(static_cast<unsigned char>(lineBuf[end - 1U])) != 0) {
+    --end;
+  }
+  size_t dst = 0U;
+  for (size_t i = start; i < end; ++i) {
+    lineBuf[dst++] = lineBuf[i];
+  }
+  lineBuf[dst] = '\0';
+
+  char token[64] = {};
+  const char* args = "";
+  size_t src = 0U;
+  size_t tdst = 0U;
+  while (lineBuf[src] != '\0' && isspace(static_cast<unsigned char>(lineBuf[src])) == 0) {
+    if (tdst < (sizeof(token) - 1U)) {
+      token[tdst++] = static_cast<char>(toupper(static_cast<unsigned char>(lineBuf[src])));
+    }
+    ++src;
+  }
+  token[tdst] = '\0';
+  while (lineBuf[src] != '\0' && isspace(static_cast<unsigned char>(lineBuf[src])) != 0) {
+    ++src;
+  }
+  args = &lineBuf[src];
+
+  SerialCommand cmd;
+  cmd.line = lineBuf;
+  cmd.token = token;
+  cmd.args = args;
+
+  bool storyV2Enabled = true;
+  StorySerialRuntimeContext ctx = {};
+  ctx.storyV2Enabled = &storyV2Enabled;
+  ctx.storyV2Default = true;
+  ctx.v2 = story_;
+
+  StringPrint out;
+  const uint32_t startMs = millis();
+  const bool ok = serialProcessStoryCommand(cmd, startMs, ctx, out);
+  const uint32_t latencyMs = millis() - startMs;
+  if (!ok) {
+    sendError(request, 400, "Command rejected", "unsupported or invalid");
+    return;
+  }
+
+  StaticJsonDocument<256> response;
+  response["command"] = command;
+  response["response"] = out.str();
+  response["latency_ms"] = latencyMs;
+  String json;
+  serializeJson(response, json);
+  sendJson(request, 200, json);
+}
+
+void WebUiService::sendStoryFsInfo(AsyncWebServerRequest* request) {
+  if (request == nullptr) {
+    return;
+  }
+  uint32_t totalBytes = 0U;
+  uint32_t usedBytes = 0U;
+  uint16_t scenarios = 0U;
+  if (storyFs_ != nullptr) {
+    storyFs_->fsInfo(&totalBytes, &usedBytes, &scenarios);
+  } else {
+    totalBytes = LittleFS.totalBytes();
+    usedBytes = LittleFS.usedBytes();
+    scenarios = generatedScenarioCount();
+  }
+  const uint32_t freeBytes = totalBytes > usedBytes ? (totalBytes - usedBytes) : 0U;
+
+  StaticJsonDocument<192> doc;
+  doc["total_bytes"] = totalBytes;
+  doc["used_bytes"] = usedBytes;
+  doc["free_bytes"] = freeBytes;
+  doc["scenarios"] = scenarios;
+  String json;
+  serializeJson(doc, json);
+  sendJson(request, 200, json);
+}
+
+void WebUiService::sendAuditLog(AsyncWebServerRequest* request) {
+  if (request == nullptr) {
+    return;
+  }
+  size_t limit = 50U;
+  if (request->hasParam("limit")) {
+    const String value = request->getParam("limit")->value();
+    limit = static_cast<size_t>(value.toInt());
+  }
+  if (limit == 0U) {
+    limit = 50U;
+  }
+  if (limit > 500U) {
+    limit = 500U;
+  }
+
+  const size_t available = auditCount_;
+  const size_t count = (limit < available) ? limit : available;
+  const size_t startIndex = (available > count) ? (available - count) : 0U;
+
+  String json = "{\"events\":[";
+  for (size_t i = 0U; i < count; ++i) {
+    const size_t idx = (auditHead_ + startIndex + i) % kAuditBufferSize;
+    if (i > 0U) {
+      json += ",";
+    }
+    json += auditBuffer_[idx];
+  }
+  json += "]}";
+  sendJson(request, 200, json);
 }

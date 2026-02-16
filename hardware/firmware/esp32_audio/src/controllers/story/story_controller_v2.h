@@ -21,6 +21,7 @@ class StoryControllerV2 {
   struct StoryControllerV2Snapshot {
     bool enabled = false;
     bool running = false;
+    bool paused = false;
     const char* scenarioId = nullptr;
     const char* stepId = nullptr;
     bool mp3GateOpen = true;
@@ -73,6 +74,11 @@ class StoryControllerV2 {
   void reset(uint32_t nowMs, const char* source);
   void onUnlock(uint32_t nowMs, const char* source);
   void update(uint32_t nowMs);
+  bool pause(uint32_t nowMs, const char* source);
+  bool resume(uint32_t nowMs, const char* source);
+  bool skipToNextStep(uint32_t nowMs, const char* source, const char** outPrevStep, const char** outNextStep);
+  bool isPaused() const;
+  bool isRunning() const;
 
   bool isMp3GateOpen() const;
   void forceEtape2DueNow(uint32_t nowMs, const char* source);
@@ -99,6 +105,8 @@ class StoryControllerV2 {
   const char* stepId() const;
   const char* activeScreenSceneId() const;
   const char* lastError() const;
+  const char* lastTransitionId() const;
+  const ScenarioDef* scenario() const;
 
  private:
   bool postEvent(StoryEventType type,
@@ -126,6 +134,8 @@ class StoryControllerV2 {
   uint32_t testDelayMs_ = 5000U;
   uint32_t etape2DueMs_ = 0U;
   bool etape2DuePosted_ = false;
+  bool paused_ = false;
+  uint32_t pausedAtMs_ = 0U;
   TraceLevel traceLevel_ = TraceLevel::kOff;
   StoryEvent lastPostedEvent_ = {};
   bool hasLastPostedEvent_ = false;

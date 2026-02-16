@@ -9,6 +9,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,7 @@ ALLOWED_TRIGGER = {"on_event", "after_ms", "immediate"}
 ALLOWED_EVENT = {"none", "unlock", "audio_done", "timer", "serial", "action"}
 ALLOWED_APP = {"LA_DETECTOR", "AUDIO_PACK", "SCREEN_SCENE", "MP3_GATE"}
 
-ROOT_FIELDS = {"id", "version", "initial_step", "app_bindings", "steps"}
+ROOT_FIELDS = {"id", "version", "initial_step", "app_bindings", "steps", "estimated_duration_s"}
 APP_BINDING_FIELDS = {"id", "app", "config"}
 LA_APP_CONFIG_FIELDS = {"hold_ms", "unlock_event", "require_listening"}
 STEP_FIELDS = {
@@ -63,8 +64,23 @@ class ValidationIssue:
         return f"{self.file}: line=n/a code={self.code} field={self.field}: {self.reason}"
 
 
+@dataclass
+class ValidationNotice:
+    file: str
+    field: str
+    reason: str
+    code: str
+
+    def format(self) -> str:
+        return f"{self.file}: line=n/a code={self.code} field={self.field}: {self.reason}"
+
+
 def add_issue(issues: list[ValidationIssue], file: str, field: str, reason: str, code: str) -> None:
     issues.append(ValidationIssue(file=file, field=field, reason=reason, code=code))
+
+
+def add_notice(notices: list[ValidationNotice], file: str, field: str, reason: str, code: str) -> None:
+    notices.append(ValidationNotice(file=file, field=field, reason=reason, code=code))
 
 
 def run_ruby_yaml_to_json(path: Path) -> Any:
@@ -152,17 +168,21 @@ def check_unknown_keys(
         )
 
 
-def normalize_scenario(path: Path, strict: bool) -> tuple[dict[str, Any] | None, list[ValidationIssue]]:
+def normalize_scenario(
+    path: Path,
+    strict: bool,
+) -> tuple[dict[str, Any] | None, list[ValidationIssue], list[ValidationNotice]]:
     issues: list[ValidationIssue] = []
+    notices: list[ValidationNotice] = []
     file = path.as_posix()
 
     try:
         doc = run_ruby_yaml_to_json(path)
     except RuntimeError as exc:
-        return None, [ValidationIssue(file=file, field="root", reason=str(exc), code="YAML_PARSE_ERROR")]
+        return None, [ValidationIssue(file=file, field="root", reason=str(exc), code="YAML_PARSE_ERROR")], []
 
     if not expect_type(doc, dict, file, "root", issues, "ROOT_TYPE"):
-        return None, issues
+        return None, issues, notices
 
     check_unknown_keys(doc, ROOT_FIELDS, file, "", issues, strict, "ROOT")
 
@@ -174,6 +194,26 @@ def normalize_scenario(path: Path, strict: bool) -> tuple[dict[str, Any] | None,
         version = version_raw
     else:
         add_issue(issues, file, "version", "entier requis", "SCENARIO_VERSION")
+
+    estimated_duration_s = doc.get("estimated_duration_s")
+    if estimated_duration_s is None:
+        add_notice(
+            notices,
+            file,
+            "estimated_duration_s",
+            "champ optionnel absent",
+            "SCENARIO_DURATION_MISSING",
+        )
+        estimated_duration_s = 0
+    elif not isinstance(estimated_duration_s, int) or estimated_duration_s < 0:
+        add_issue(
+            issues,
+            file,
+            "estimated_duration_s",
+            "entier >= 0 requis",
+            "SCENARIO_DURATION_INVALID",
+        )
+        estimated_duration_s = 0
 
     initial_step = expect_non_empty_string(doc.get("initial_step"), file, "initial_step", issues, "SCENARIO_INITIAL")
 
@@ -453,13 +493,14 @@ def normalize_scenario(path: Path, strict: bool) -> tuple[dict[str, Any] | None,
     scenario = {
         "id": scenario_id,
         "version": version,
+        "estimated_duration_s": int(estimated_duration_s),
         "initial_step": initial_step,
         "app_bindings": app_bindings,
         "steps": steps,
         "source": file,
     }
 
-    return (scenario if not issues else None), issues
+    return (scenario if not issues else None), issues, notices
 
 
 def cstr(value: str | None) -> str:
@@ -476,6 +517,7 @@ def scenario_spec_hash(scenarios: list[dict[str, Any]]) -> str:
             {
                 "id": scenario["id"],
                 "version": scenario["version"],
+                "estimated_duration_s": scenario.get("estimated_duration_s", 0),
                 "initial_step": scenario["initial_step"],
                 "app_bindings": scenario["app_bindings"],
                 "steps": scenario["steps"],
@@ -799,11 +841,18 @@ def write_file(path: Path, content: str) -> None:
     path.write_text(content + "\n", encoding="utf-8")
 
 
-def collect_scenarios(spec_dir: Path, strict: bool) -> tuple[list[dict[str, Any]], list[ValidationIssue]]:
+def collect_scenarios(
+    spec_dir: Path,
+    strict: bool,
+) -> tuple[list[dict[str, Any]], list[ValidationIssue], list[ValidationNotice]]:
     scenarios: list[dict[str, Any]] = []
     issues: list[ValidationIssue] = []
+    notices: list[ValidationNotice] = []
 
-    files = sorted(spec_dir.glob("*.yaml"))
+    if spec_dir.is_file():
+        files = [spec_dir]
+    else:
+        files = sorted(spec_dir.glob("*.yaml"))
     if not files:
         issues.append(
             ValidationIssue(
@@ -813,15 +862,17 @@ def collect_scenarios(spec_dir: Path, strict: bool) -> tuple[list[dict[str, Any]
                 code="SCENARIO_NOT_FOUND",
             )
         )
-        return [], issues
+        return [], issues, notices
 
     scenario_ids: set[str] = set()
     for path in files:
-        scenario, scenario_issues = normalize_scenario(path, strict)
+        scenario, scenario_issues, scenario_notices = normalize_scenario(path, strict)
         if scenario_issues:
             issues.extend(scenario_issues)
+            notices.extend(scenario_notices)
             continue
         assert scenario is not None
+        notices.extend(scenario_notices)
 
         scenario_id = scenario["id"]
         if scenario_id in scenario_ids:
@@ -838,16 +889,19 @@ def collect_scenarios(spec_dir: Path, strict: bool) -> tuple[list[dict[str, Any]
         scenario_ids.add(scenario_id)
         scenarios.append(scenario)
 
-    return scenarios, issues
+    return scenarios, issues, notices
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
     spec_dir = Path(args.spec_dir)
-    scenarios, issues = collect_scenarios(spec_dir, args.strict)
+    scenarios, issues, notices = collect_scenarios(spec_dir, args.strict)
     if issues:
         for issue in issues:
             print(f"[story-validate] ERR {issue.format()}")
         return 1
+
+    for notice in notices:
+        print(f"[story-validate] WARN {notice.format()}")
 
     for scenario in scenarios:
         print(
@@ -862,11 +916,14 @@ def cmd_generate(args: argparse.Namespace) -> int:
     spec_dir = Path(args.spec_dir)
     out_dir = Path(args.out_dir)
 
-    scenarios, issues = collect_scenarios(spec_dir, args.strict)
+    scenarios, issues, notices = collect_scenarios(spec_dir, args.strict)
     if issues:
         for issue in issues:
             print(f"[story-gen] ERR {issue.format()}")
         return 1
+
+    for notice in notices:
+        print(f"[story-gen] WARN {notice.format()}")
 
     scenarios.sort(key=lambda sc: sc["id"])
     spec_hash = scenario_spec_hash(scenarios)
@@ -888,6 +945,170 @@ def cmd_generate(args: argparse.Namespace) -> int:
     return 0
 
 
+def json_dumps_compact(payload: Any) -> str:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def compute_sha256_hex(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def write_json_with_checksum(root: Path, rel_path: str, payload: dict[str, Any]) -> None:
+    json_blob = json_dumps_compact(payload).encode("utf-8")
+    json_path = root / rel_path
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.write_bytes(json_blob)
+    checksum = compute_sha256_hex(json_blob)
+    checksum_path = json_path.with_suffix(".sha256")
+    checksum_path.write_text(checksum + "\n", encoding="utf-8")
+
+
+def collect_resource_ids(scenarios: list[dict[str, Any]]) -> dict[str, set[str]]:
+    resources = {
+        "screens": set(),
+        "audio": set(),
+        "actions": set(),
+        "apps": set(),
+    }
+    for scenario in scenarios:
+        for binding in scenario.get("app_bindings", []):
+            if binding.get("id"):
+                resources["apps"].add(binding["id"])
+        for step in scenario.get("steps", []):
+            screen_id = step.get("screen_scene_id") or ""
+            audio_id = step.get("audio_pack_id") or ""
+            if screen_id:
+                resources["screens"].add(screen_id)
+            if audio_id:
+                resources["audio"].add(audio_id)
+            for action in step.get("actions", []) or []:
+                if action:
+                    resources["actions"].add(action)
+    return resources
+
+
+def build_story_fs(root: Path, scenarios: list[dict[str, Any]]) -> None:
+    for scenario in scenarios:
+        scenario_payload = {
+            "id": scenario["id"],
+            "version": scenario["version"],
+            "estimated_duration_s": scenario.get("estimated_duration_s", 0),
+            "initial_step": scenario["initial_step"],
+            "app_bindings": scenario["app_bindings"],
+            "steps": scenario["steps"],
+        }
+        write_json_with_checksum(root, f"story/scenarios/{scenario['id']}.json", scenario_payload)
+
+    resources = collect_resource_ids(scenarios)
+
+    binding_map: dict[str, dict[str, Any]] = {}
+    for scenario in scenarios:
+        for binding in scenario.get("app_bindings", []):
+            bid = binding.get("id")
+            if not bid:
+                continue
+            binding_map[bid] = {
+                "id": bid,
+                "app": binding.get("app"),
+                "config": binding.get("config"),
+            }
+
+    for app_id in sorted(resources["apps"]):
+        payload = binding_map.get(app_id, {"id": app_id, "app": None, "config": None})
+        write_json_with_checksum(root, f"story/apps/{app_id}.json", payload)
+
+    for screen_id in sorted(resources["screens"]):
+        write_json_with_checksum(root, f"story/screens/{screen_id}.json", {"id": screen_id})
+
+    for audio_id in sorted(resources["audio"]):
+        write_json_with_checksum(root, f"story/audio/{audio_id}.json", {"id": audio_id})
+
+    for action_id in sorted(resources["actions"]):
+        write_json_with_checksum(root, f"story/actions/{action_id}.json", {"id": action_id})
+
+
+def create_tarball(root: Path, out_path: Path) -> None:
+    import tarfile
+
+    with tarfile.open(out_path, "w:gz") as tar:
+        for path in sorted(root.rglob("*")):
+            if path.is_file():
+                tar.add(path, arcname=path.relative_to(root))
+
+
+def cmd_deploy(args: argparse.Namespace) -> int:
+    spec_dir = Path(args.spec_dir)
+    out_dir = Path(args.out_dir)
+
+    scenarios, issues, notices = collect_scenarios(spec_dir, args.strict)
+    if issues:
+        for issue in issues:
+            print(f"[story-deploy] ERR {issue.format()}")
+        return 1
+
+    for notice in notices:
+        print(f"[story-deploy] WARN {notice.format()}")
+
+    if args.scenario_id:
+        scenarios = [sc for sc in scenarios if sc["id"] == args.scenario_id]
+        if not scenarios:
+            print(f"[story-deploy] ERR scenario '{args.scenario_id}' introuvable")
+            return 1
+
+    scenarios.sort(key=lambda sc: sc["id"])
+    root = out_dir / "deploy"
+    if root.exists():
+        for child in root.rglob("*"):
+            if child.is_file():
+                child.unlink()
+
+    build_story_fs(root, scenarios)
+
+    archive_path = Path(args.archive)
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    create_tarball(root, archive_path)
+
+    print(
+        f"[story-deploy] OK scenarios={len(scenarios)} root={root.as_posix()} archive={archive_path.as_posix()}"
+    )
+
+    if args.port:
+        if not deploy_via_serial(args.port, args.baud, args.scenario_id or scenarios[0]["id"], archive_path):
+            return 2
+    return 0
+
+
+def deploy_via_serial(port: str, baud: int, scenario_id: str, archive_path: Path) -> bool:
+    try:
+        import serial
+    except ImportError:
+        print("[story-deploy] ERR pyserial manquant (pip install pyserial)")
+        return False
+
+    if not archive_path.exists():
+        print(f"[story-deploy] ERR archive introuvable: {archive_path}")
+        return False
+
+    with serial.Serial(port, baud, timeout=1.0) as ser:
+        time_limit = 5.0
+        command = f"STORY_DEPLOY {scenario_id} {archive_path.as_posix()}"
+        ser.write((command + "\n").encode("utf-8"))
+        ser.flush()
+        deadline = time.time() + time_limit
+        while time.time() < deadline:
+            line = ser.readline().decode("utf-8", errors="ignore").strip()
+            if not line:
+                continue
+            if "STORY_DEPLOY_OK" in line:
+                print("[story-deploy] OK serial deploy ack")
+                return True
+            if "STORY_DEPLOY_ERR" in line:
+                print(f"[story-deploy] ERR serial deploy: {line}")
+                return False
+        print("[story-deploy] ERR serial deploy timeout")
+        return False
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="StorySpec YAML validator/generator")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -902,6 +1123,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     generate_p.add_argument("--out-dir", default="src/story/generated")
     generate_p.add_argument("--strict", action="store_true", help="validate in strict mode before generate")
     generate_p.set_defaults(func=cmd_generate)
+
+    deploy_p = sub.add_parser("deploy", help="generate JSON + checksums + tar archive")
+    deploy_p.add_argument("--spec-dir", default="../docs/protocols/story_specs/scenarios")
+    deploy_p.add_argument("--out-dir", default="artifacts/story_fs")
+    deploy_p.add_argument("--archive", default="artifacts/story_fs/story_deploy.tar.gz")
+    deploy_p.add_argument("--scenario-id", default="", help="deploy single scenario id only")
+    deploy_p.add_argument("--strict", action="store_true", help="validate in strict mode before deploy")
+    deploy_p.add_argument("--port", default="", help="serial port for STORY_DEPLOY")
+    deploy_p.add_argument("--baud", type=int, default=115200, help="serial baud (default 115200)")
+    deploy_p.set_defaults(func=cmd_deploy)
 
     return parser
 

@@ -95,6 +95,8 @@ bool StoryControllerV2::setScenario(const char* scenarioId, uint32_t nowMs, cons
   }
 
   safeCopy(scenarioId_, sizeof(scenarioId_), scenario->id);
+  paused_ = false;
+  pausedAtMs_ = 0U;
   resetRuntimeState();
   applyCurrentStep(nowMs, "start");
   initialized_ = true;
@@ -110,6 +112,8 @@ void StoryControllerV2::reset(uint32_t nowMs, const char* source) {
   if (!engine_.start(scenarioId_[0] != '\0' ? scenarioId_ : options_.defaultScenarioId, nowMs)) {
     return;
   }
+  paused_ = false;
+  pausedAtMs_ = 0U;
   resetRuntimeState();
   applyCurrentStep(nowMs, source);
   Serial.printf("[STORY_V2] reset via=%s\n", source);
@@ -125,6 +129,9 @@ void StoryControllerV2::onUnlock(uint32_t nowMs, const char* source) {
 
 void StoryControllerV2::update(uint32_t nowMs) {
   if (!initialized_) {
+    return;
+  }
+  if (paused_) {
     return;
   }
 
@@ -151,6 +158,89 @@ void StoryControllerV2::update(uint32_t nowMs) {
   if (afterTick.queuedEvents > maxQueueDepth_) {
     maxQueueDepth_ = afterTick.queuedEvents;
   }
+}
+
+bool StoryControllerV2::pause(uint32_t nowMs, const char* source) {
+  const StorySnapshot snap = engine_.snapshot();
+  if (!snap.running || paused_) {
+    return false;
+  }
+  paused_ = true;
+  pausedAtMs_ = nowMs;
+  Serial.printf("[STORY_V2] pause via=%s\n", source != nullptr ? source : "-");
+  return true;
+}
+
+bool StoryControllerV2::resume(uint32_t nowMs, const char* source) {
+  if (!paused_) {
+    return false;
+  }
+  paused_ = false;
+  Serial.printf("[STORY_V2] resume via=%s\n", source != nullptr ? source : "-");
+  (void)nowMs;
+  return true;
+}
+
+bool StoryControllerV2::skipToNextStep(uint32_t nowMs,
+                                       const char* source,
+                                       const char** outPrevStep,
+                                       const char** outNextStep) {
+  if (outPrevStep != nullptr) {
+    *outPrevStep = nullptr;
+  }
+  if (outNextStep != nullptr) {
+    *outNextStep = nullptr;
+  }
+  if (!initialized_ || paused_) {
+    return false;
+  }
+  const ScenarioDef* scenario = engine_.scenario();
+  const StorySnapshot snap = engine_.snapshot();
+  if (scenario == nullptr || !snap.running || snap.stepIndex >= scenario->stepCount) {
+    return false;
+  }
+
+  const StepDef& step = scenario->steps[snap.stepIndex];
+  if (step.transitionCount == 0U) {
+    return false;
+  }
+
+  uint8_t selected = 0U;
+  uint8_t selectedPriority = 0U;
+  for (uint8_t i = 0U; i < step.transitionCount; ++i) {
+    const TransitionDef& transition = step.transitions[i];
+    if (i == 0U || transition.priority > selectedPriority) {
+      selected = i;
+      selectedPriority = transition.priority;
+    }
+  }
+
+  const TransitionDef& transition = step.transitions[selected];
+  if (transition.targetStepId == nullptr || transition.targetStepId[0] == '\0') {
+    return false;
+  }
+  if (outPrevStep != nullptr) {
+    *outPrevStep = step.id;
+  }
+  if (!engine_.jumpToStep(transition.targetStepId,
+                          transition.id != nullptr ? transition.id : source,
+                          nowMs)) {
+    return false;
+  }
+  ++transitionCount_;
+  applyCurrentStep(nowMs, source);
+  if (outNextStep != nullptr) {
+    *outNextStep = stepId();
+  }
+  return true;
+}
+
+bool StoryControllerV2::isPaused() const {
+  return paused_;
+}
+
+bool StoryControllerV2::isRunning() const {
+  return engine_.snapshot().running && !paused_;
 }
 
 bool StoryControllerV2::isMp3GateOpen() const {
@@ -249,6 +339,7 @@ StoryControllerV2::StoryControllerV2Snapshot StoryControllerV2::snapshot(bool en
   const StorySnapshot snap = engine_.snapshot();
   out.enabled = enabled;
   out.running = snap.running;
+  out.paused = paused_;
   out.scenarioId = snap.scenarioId;
   out.stepId = snap.stepId;
   out.mp3GateOpen = snap.mp3GateOpen;
@@ -389,6 +480,14 @@ const char* StoryControllerV2::activeScreenSceneId() const {
 
 const char* StoryControllerV2::lastError() const {
   return engine_.lastError();
+}
+
+const char* StoryControllerV2::lastTransitionId() const {
+  return engine_.lastTransitionId();
+}
+
+const ScenarioDef* StoryControllerV2::scenario() const {
+  return engine_.scenario();
 }
 
 bool StoryControllerV2::postEvent(StoryEventType type,

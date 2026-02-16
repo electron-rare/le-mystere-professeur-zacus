@@ -27,7 +27,7 @@ Transport: trames ASCII ligne par ligne:
 - ESP32 `GPIO22 (TX)` -> ESP8266 `D6 (RX)`
 - ESP8266 `D5 (TX)` -> ESP32 `GPIO19 (RX)`
 - GND commun obligatoire
-- Baud par defaut: `19200`
+- Baud par defaut: `57600`
 
 ## Cablage OLED I2C
 

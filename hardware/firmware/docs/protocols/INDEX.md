@@ -15,6 +15,7 @@ Ce dossier est la référence unique des interfaces partagées firmware.
 | `GENERER_UN_SCENARIO_STORY_V2.md` | Guide | Process auteur STORY |
 | `story_README.md` | Guide | Usage général specs/scénarios STORY |
 | `STORY_V2_PIPELINE.md` | Guide | Pipeline YAML -> gen -> runtime -> apps -> screen |
+| `STORY_V2_WEBUI.md` | Guide | API HTTP/WebSocket Story V2 (WebUI) |
 | `RELEASE_STORY_V2.md` | Guide | Release Story V2 (gates, rollback, checks) |
 | `story_specs/README.md` | Guide | Organisation des specs STORY |
 | `README.md` | Guide | Règles d'évolution et validation |

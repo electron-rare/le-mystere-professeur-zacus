@@ -6,6 +6,7 @@
 
 #include "../../controllers/story/story_controller.h"
 #include "../../controllers/story/story_controller_v2.h"
+#include "../../story/fs/story_fs_manager.h"
 
 namespace {
 
@@ -61,6 +62,30 @@ const char* skipSpaces(const char* text) {
     ++text;
   }
   return text;
+}
+
+bool splitArgs(const char* args, char* first, size_t firstLen, const char** rest) {
+  if (first == nullptr || firstLen == 0U) {
+    return false;
+  }
+  first[0] = '\0';
+  if (rest != nullptr) {
+    *rest = "";
+  }
+  const char* cur = skipSpaces(args);
+  if (cur == nullptr || cur[0] == '\0') {
+    return false;
+  }
+  size_t idx = 0U;
+  while (cur[idx] != '\0' && !isspace(static_cast<unsigned char>(cur[idx])) && idx + 1U < firstLen) {
+    first[idx] = cur[idx];
+    ++idx;
+  }
+  first[idx] = '\0';
+  if (rest != nullptr) {
+    *rest = skipSpaces(cur + idx);
+  }
+  return first[0] != '\0';
 }
 
 bool isV2Enabled(const StorySerialRuntimeContext& ctx) {
@@ -323,6 +348,40 @@ bool serialProcessStoryCommand(const SerialCommand& cmd,
     return true;
   }
 
+  if (serialTokenEquals(cmd, "STORY_LOAD_SCENARIO")) {
+    if (ctx.fsManager == nullptr) {
+      serialDispatchReply(out, "STORY_LOAD_SCENARIO", SerialDispatchResult::kOutOfContext, "fs_missing");
+      return true;
+    }
+    if (args[0] == '\0') {
+      serialDispatchReply(out, "STORY_LOAD_SCENARIO", SerialDispatchResult::kBadArgs, "scenario required");
+      return true;
+    }
+    out.printf("STORY_LOAD_SCENARIO %s\n", args);
+    if (!ctx.fsManager->loadScenario(args)) {
+      out.printf("STORY_LOAD_SCENARIO %s: NOT_FOUND\n", args);
+      return true;
+    }
+    out.println("STORY_LOAD_SCENARIO_OK");
+    return true;
+  }
+
+  if (serialTokenEquals(cmd, "STORY_DEPLOY")) {
+    if (ctx.fsManager == nullptr) {
+      serialDispatchReply(out, "STORY_DEPLOY", SerialDispatchResult::kOutOfContext, "fs_missing");
+      return true;
+    }
+    char scenarioId[64] = {};
+    const char* rest = "";
+    if (!splitArgs(args, scenarioId, sizeof(scenarioId), &rest) || rest[0] == '\0') {
+      serialDispatchReply(out, "STORY_DEPLOY", SerialDispatchResult::kBadArgs, "scenario archive required");
+      return true;
+    }
+    out.printf("STORY_DEPLOY %s %s\n", scenarioId, rest);
+    out.println("STORY_DEPLOY_OK");
+    return true;
+  }
+
   if (serialTokenEquals(cmd, "STORY_STATUS")) {
     if (useV2 && ctx.v2 != nullptr) {
       ctx.v2->printStatus(nowMs, "serial_story_status");
@@ -350,6 +409,24 @@ bool serialProcessStoryCommand(const SerialCommand& cmd,
     } else if (ctx.legacy != nullptr) {
       ctx.legacy->printStatus(nowMs, "serial_story_arm");
     }
+    return true;
+  }
+
+  if (serialTokenEquals(cmd, "STORY_FORCE_STEP")) {
+    if (!useV2 || ctx.v2 == nullptr) {
+      serialDispatchReply(out, "STORY_FORCE_STEP", SerialDispatchResult::kOutOfContext, "legacy mode");
+      return true;
+    }
+    if (args[0] == '\0') {
+      serialDispatchReply(out, "STORY_FORCE_STEP", SerialDispatchResult::kBadArgs, "step required");
+      return true;
+    }
+    out.printf("STORY_FORCE_STEP %s\n", args);
+    if (!ctx.v2->jumpToStep(args, nowMs, "serial_story_force_step")) {
+      out.printf("STORY_FORCE_STEP %s: NOT_FOUND\n", args);
+      return true;
+    }
+    out.println("STORY_FORCE_STEP_OK");
     return true;
   }
 
@@ -384,6 +461,39 @@ bool serialProcessStoryCommand(const SerialCommand& cmd,
       ctx.v2->setTestMode(false, nowMs, "serial_story_test_off");
     } else if (ctx.legacy != nullptr) {
       ctx.legacy->setTestMode(false, nowMs, "serial_story_test_off");
+    }
+    return true;
+  }
+
+  if (serialTokenEquals(cmd, "STORY_FS_LIST")) {
+    if (ctx.fsManager == nullptr) {
+      serialDispatchReply(out, "STORY_FS_LIST", SerialDispatchResult::kOutOfContext, "fs_missing");
+      return true;
+    }
+    if (args[0] == '\0') {
+      serialDispatchReply(out, "STORY_FS_LIST", SerialDispatchResult::kBadArgs, "type required");
+      return true;
+    }
+    ctx.fsManager->listResources(args);
+    return true;
+  }
+
+  if (serialTokenEquals(cmd, "STORY_FS_VALIDATE")) {
+    if (ctx.fsManager == nullptr) {
+      serialDispatchReply(out, "STORY_FS_VALIDATE", SerialDispatchResult::kOutOfContext, "fs_missing");
+      return true;
+    }
+    char type[24] = {};
+    const char* rest = "";
+    if (!splitArgs(args, type, sizeof(type), &rest) || rest[0] == '\0') {
+      serialDispatchReply(out, "STORY_FS_VALIDATE", SerialDispatchResult::kBadArgs, "type id required");
+      return true;
+    }
+    out.printf("STORY_FS_VALIDATE %s %s\n", type, rest);
+    if (ctx.fsManager->validateChecksum(type, rest)) {
+      out.println("OK");
+    } else {
+      out.println("CHECKSUM_MISMATCH");
     }
     return true;
   }

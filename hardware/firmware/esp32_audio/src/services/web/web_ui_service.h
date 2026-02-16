@@ -5,8 +5,11 @@
 class Mp3Player;
 class WifiService;
 class RadioService;
+class StoryControllerV2;
+class StoryFsManager;
 class AsyncWebServer;
 class AsyncWebServerRequest;
+class AsyncWebSocket;
 
 class WebUiService {
  public:
@@ -29,6 +32,7 @@ class WebUiService {
              Mp3Player* mp3,
              uint16_t port = 80U,
              const Config* cfg = nullptr);
+  void setStoryContext(StoryControllerV2* story, StoryFsManager* fsManager);
   void update(uint32_t nowMs);
   Snapshot snapshot() const;
 
@@ -41,11 +45,41 @@ class WebUiService {
   void sendJsonWifi(AsyncWebServerRequest* request);
   void setRoute(const char* route);
   void setError(const char* error);
+  void sendStoryList(AsyncWebServerRequest* request);
+  void sendStoryStatus(AsyncWebServerRequest* request);
+  void handleStorySelect(AsyncWebServerRequest* request);
+  void handleStoryStart(AsyncWebServerRequest* request);
+  void handleStoryPause(AsyncWebServerRequest* request);
+  void handleStoryResume(AsyncWebServerRequest* request);
+  void handleStorySkip(AsyncWebServerRequest* request);
+  void handleStoryValidate(AsyncWebServerRequest* request, const char* body);
+  void handleStoryDeploy(AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total);
+  void handleStorySerial(AsyncWebServerRequest* request, const char* body);
+  void sendStoryFsInfo(AsyncWebServerRequest* request);
+  void sendAuditLog(AsyncWebServerRequest* request);
+  void broadcastStatus(uint32_t nowMs);
+  void pushAuditEvent(const char* json);
+  void sendJson(AsyncWebServerRequest* request, int code, const String& json);
+  void sendError(AsyncWebServerRequest* request, int code, const char* message, const char* details);
+  void addCorsHeaders(AsyncWebServerResponse* response);
+  void handleOptions(AsyncWebServerRequest* request);
 
   WifiService* wifi_ = nullptr;
   RadioService* radio_ = nullptr;
   Mp3Player* mp3_ = nullptr;
   AsyncWebServer* server_ = nullptr;
+  AsyncWebSocket* ws_ = nullptr;
+  StoryControllerV2* story_ = nullptr;
+  StoryFsManager* storyFs_ = nullptr;
+  char selectedScenarioId_[32] = "";
+  bool storySelected_ = false;
+  uint32_t storyStartedAtMs_ = 0U;
+  uint32_t lastStatusPingMs_ = 0U;
+  char lastStepId_[32] = "";
+  static constexpr size_t kAuditBufferSize = 50U;
+  String auditBuffer_[kAuditBufferSize];
+  size_t auditHead_ = 0U;
+  size_t auditCount_ = 0U;
   Config config_;
   Snapshot snap_;
 };

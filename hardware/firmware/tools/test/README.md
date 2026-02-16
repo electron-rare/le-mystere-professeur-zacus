@@ -12,7 +12,7 @@ the root scripts:
 
 ```
 tools/test/hw_now.sh --env-esp32 esp32_release --wait-port 40
-tools/test/hw_now_esp32_esp8266.sh --skip-build --baud 19200
+tools/test/hw_now_esp32_esp8266.sh --skip-build --baud 57600
 tools/test/run_rc_gate.sh --help
 ```
 

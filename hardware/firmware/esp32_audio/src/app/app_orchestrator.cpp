@@ -22,6 +22,7 @@
 #include "../services/input/input_router.h"
 #include "../services/input/input_service.h"
 #include "../services/la/la_detector_runtime_service.h"
+#include "../services/network/wifi_service.h"
 #include "../services/serial/serial_dispatch.h"
 #include "../services/serial/serial_commands_boot.h"
 #include "../services/serial/serial_commands_codec.h"
@@ -31,7 +32,10 @@
 #include "../services/serial/serial_commands_system.h"
 #include "../services/serial/serial_router.h"
 #include "../services/screen/screen_sync_service.h"
+#include "../services/web/web_ui_service.h"
+#include "../story/fs/story_fs_manager.h"
 #include "../story/resources/screen_scene_registry.h"
+#include "../story/fs/story_fs_manager.h"
 #include "../story/story_engine.h"
 #include "../ui/player_ui_model.h"
 
@@ -65,6 +69,9 @@ StoryEngine::Options makeStoryOptions() {
   return options;
 }
 StoryEngine g_story(makeStoryOptions());
+StoryFsManager g_storyFs;
+WifiService g_wifi;
+WebUiService g_web;
 
 struct ULockSearchAudioCueState {
   bool pending = false;
@@ -338,6 +345,11 @@ StoryControllerV2& storyV2Controller() {
   }();
   static StoryControllerV2 controller(audioService(), hooks, options);
   return controller;
+}
+
+StoryFsManager& storyFsManager() {
+  static StoryFsManager manager("/story");
+  return manager;
 }
 
 bool bootControllerIsActiveHook() {
@@ -936,6 +948,10 @@ void setupInternalLittleFs() {
                   config::kInternalLittleFsFormatOnFail ? 1U : 0U);
     Serial.println("[FS] Upload assets with: pio run -e esp32dev -t uploadfs");
     return;
+  }
+
+  if (!storyFsManager().init()) {
+    Serial.println("[STORY_FS] init failed.");
   }
 
   printLittleFsInfo("boot");
@@ -2478,6 +2494,9 @@ void printStoryDebugHelp() {
   Serial.println("[STORY] Cmd: STORY_V2_STATUS | STORY_V2_LIST | STORY_V2_VALIDATE | STORY_V2_HEALTH");
   Serial.println("[STORY] Cmd: STORY_V2_METRICS | STORY_V2_METRICS_RESET");
   Serial.println("[STORY] Cmd: STORY_V2_EVENT <name> | STORY_V2_STEP <id> | STORY_V2_SCENARIO <id>");
+  Serial.println("[STORY] Cmd: STORY_LOAD_SCENARIO <id> | STORY_FORCE_STEP <id>");
+  Serial.println("[STORY] Cmd: STORY_FS_LIST <type> | STORY_FS_VALIDATE <type> <id>");
+  Serial.println("[STORY] Cmd: STORY_DEPLOY <scenario_id> <archive>");
 }
 
 StorySerialRuntimeContext makeStorySerialRuntimeContext() {
@@ -2487,6 +2506,7 @@ StorySerialRuntimeContext makeStorySerialRuntimeContext() {
   context.storyV2Default = config::kStoryV2EnabledDefault;
   context.legacy = &storyController();
   context.v2 = &storyV2Controller();
+  context.fsManager = &storyFsManager();
   context.armAfterUnlock = armStoryTimelineAfterUnlock;
   context.updateStoryTimeline = updateStoryTimeline;
   context.printHelp = printStoryDebugHelp;
@@ -2535,6 +2555,9 @@ void printKeyTuneHelp() {
   Serial.println("[KEY_TUNE] Cmd: STORY_V2_STATUS | STORY_V2_LIST | STORY_V2_VALIDATE | STORY_V2_HEALTH");
   Serial.println("[KEY_TUNE] Cmd: STORY_V2_METRICS | STORY_V2_METRICS_RESET");
   Serial.println("[KEY_TUNE] Cmd: STORY_V2_EVENT <name> | STORY_V2_STEP <id> | STORY_V2_SCENARIO <id>");
+  Serial.println("[KEY_TUNE] Cmd: STORY_LOAD_SCENARIO <id> | STORY_FORCE_STEP <id>");
+  Serial.println("[KEY_TUNE] Cmd: STORY_FS_LIST <type> | STORY_FS_VALIDATE <type> <id>");
+  Serial.println("[KEY_TUNE] Cmd: STORY_DEPLOY <scenario_id> <archive>");
   Serial.println("[KEY_TUNE] Cmd: CODEC_STATUS | CODEC_DUMP | CODEC_RD/WR | CODEC_VOL");
   Serial.println("[KEY_TUNE] Cmd: MP3_STATUS | MP3_UNLOCK | MP3_REFRESH | MP3_LIST | MP3_TEST_START | MP3_FX");
   Serial.println("[KEY_TUNE] Cmd: MP3_SCAN_PROGRESS | MP3_BACKEND_STATUS | MP3_UI_STATUS | MP3_QUEUE_PREVIEW | MP3_CAPS");
@@ -2701,7 +2724,9 @@ bool isCanonicalSerialCommand(const char* token) {
       "BOOT_FS_TEST",               "BOOT_FX_FM",      "BOOT_FX_SONAR","BOOT_FX_MORSE",
       "BOOT_FX_WIN",                "STORY_STATUS",    "STORY_HELP",  "STORY_RESET",
       "STORY_ARM",                  "STORY_FORCE_ETAPE2", "STORY_TEST_ON",
-      "STORY_TEST_OFF",             "STORY_TEST_DELAY","STORY_V2_ENABLE",
+      "STORY_TEST_OFF",             "STORY_TEST_DELAY","STORY_LOAD_SCENARIO",
+      "STORY_FORCE_STEP",           "STORY_FS_LIST",  "STORY_FS_VALIDATE",
+      "STORY_DEPLOY",               "STORY_V2_ENABLE",
       "STORY_V2_STATUS",            "STORY_V2_LIST",   "STORY_V2_VALIDATE",
       "STORY_V2_HEALTH",            "STORY_V2_TRACE",  "STORY_V2_TRACE_LEVEL",
       "STORY_V2_METRICS",           "STORY_V2_METRICS_RESET",
@@ -3170,6 +3195,10 @@ void app_orchestrator::setup() {
                   static_cast<unsigned int>(config::kPinDacSine));
   }
   setupInternalLittleFs();
+  g_storyFs.init();
+  g_wifi.begin("uson-esp32");
+  g_web.begin(&g_wifi, nullptr, &g_mp3, 8080U, nullptr);
+  g_web.setStoryContext(&storyV2Controller(), &g_storyFs);
   g_mp3.begin();
   g_mp3.setFxMode(config::kMp3FxOverlayModeDefault ? Mp3FxMode::kOverlay : Mp3FxMode::kDucking);
   g_mp3.setFxDuckingGain(config::kMp3FxDuckingGainDefault);
@@ -3247,6 +3276,8 @@ void app_orchestrator::setup() {
 void app_orchestrator::loop() {
   const uint32_t loopStartMs = millis();
   uint32_t nowMs = millis();
+  g_wifi.update(nowMs);
+  g_web.update(nowMs);
   updateAsyncAudioService(nowMs);
   serviceStoryAudioCaptureGuard(nowMs);
   nowMs = millis();

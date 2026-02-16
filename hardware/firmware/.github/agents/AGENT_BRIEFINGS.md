@@ -1,8 +1,8 @@
 # Agent Briefings (All Phases)
 
-Version: 1.1  
+Version: 1.0  
 Date: Feb 16, 2026  
-Status: Phase 1 complete; Phases 2-5 queued
+Status: In progress (verification pending)
 
 ---
 
@@ -16,13 +16,83 @@ Status: Phase 1 complete; Phases 2-5 queued
 
 **For coordination:**
 - All agents report to Coordination Hub (current conversation) **every 3 days**
-- Status format: ✅ Completed / 🔄 In Progress / ⏸️ Blocked / 📋 Next 3 days / 📈 Health
+- Status format: ✅ Completed / 🔄 In Progress / ⏸️ Blocked / 📋 Next 3 days / 📈 Health / 🧪 Tests run / 📁 Evidence
 - Blockers escalated immediately
 
 **Approval workflow:**
 - Agent reports phase complete
 - Coordination Hub verifies checklist
 - Coordination Hub approves handoff to next phase(s)
+
+---
+
+## 🧪 Cross-team Expert: Test & Script Coordinator
+
+**Mission:** Own all test and script coherence across the project. Ensure scripts, gates, and evidence are consistent with docs, cockpit workflows, and RC reporting.
+
+**Responsibilities:**
+- Keep `tools/dev/` and `tools/test/` scripts aligned with documented gates.
+- Validate that cockpit commands map 1:1 to recommended runbooks.
+- Review any test/script changes for cross-phase impact.
+- Maintain the reporting template and evidence requirements.
+- Flag regressions, missing evidence, or drift between docs and scripts.
+- Implement git write actions in cockpit (`git add`, `git commit`, `git stash`, `git push`) with safety guards and evidence logging.
+  - Use `tools/dev/cockpit.sh git <action> [args]` for all git operations; scripts must call `git_cmd` in `tools/dev/agent_utils.sh` so commands are recorded in evidence.
+
+---
+
+## 🤖 Cross-team Expert: Codex Script Expert
+
+**Mission:** Own Codex prompts and scripting integration around RC live gate, reduce credit usage, and ensure evidence logging.
+
+**Responsibilities:**
+- Keep `tools/dev/codex_prompts/` minimal and deterministic.
+- Ensure RC live gate uses scripted Codex prompts on failure paths.
+- Reduce prompt length while preserving signal.
+- Ensure git actions in RC live flow use cockpit scripts and log evidence.
+
+**Briefing:** [.github/agents/briefings/CODEX_SCRIPT_EXPERT.md](.github/agents/briefings/CODEX_SCRIPT_EXPERT.md)
+
+---
+
+## 🧭 PM Responsibilities (Coordination Hub)
+
+- Maintain phase readiness and dependencies (Phase 2/2B/3/4/5).
+- Ensure each phase delivers artifacts in `logs/` and `artifacts/`.
+- Keep briefings and reporting templates up to date.
+- Enforce gate policy (build/smoke/RC) or document waivers.
+- Track risks, blockers, and owner assignments.
+- Collect handoff notes and approval signoffs.
+
+---
+
+## 🧭 Coordination Hub Update (Feb 16, 2026)
+
+**Current state:**
+- Phase 1 + Phase 2 code landed on `story-V2` (commit `53e444c`).
+- Verification still pending: HTTP API tests and WebSocket stability checks not yet confirmed.
+
+**Vigilance points (audit):**
+- Smoke shows a reset marker during Story V2 actions; treat as stability blocker until triaged.
+- EXPRESS/EXPRESS_DONE/SPECTRE transitions reported missing in long-run logs; re-validate scenario data vs engine flow.
+- UI link is not gated in tests; ensure `UI_LINK_STATUS connected==1` before passing.
+- Phase 2B (WiFi/RTOS) artifacts not yet collected; no reconnect/RTOS snapshot evidence.
+
+**Requests to other agents:**
+- Before starting Phase 3/4/5, confirm Phase 2 tests are green or coordinate with the hub.
+- If you ran additional tests, report results in the status format (Completed / In Progress / Blocked).
+
+**Reporting template (use in updates):**
+```
+**Update**
+- ✅ Completed:
+- 🔄 In progress:
+- ⏸️ Blocked:
+- 📋 Next 3 days:
+- 🧪 Tests run: (commands + result)
+- 📁 Evidence: (artifacts/logs path)
+- 📈 Health: (green/yellow/red)
+```
 
 ---
 
@@ -34,6 +104,31 @@ Status: Phase 1 complete; Phases 2-5 queued
 - Logs must go to `hardware/firmware/logs/`
 - Artifacts must go to `hardware/firmware/artifacts/`
 - Avoid machine-specific serial paths in committed scripts
+
+## ✅ Agent Management Checklist (All Phases)
+
+- Update test scripts relevant to the phase (smoke/E2E/stress/HTTP).
+- Update AI generation scripts as relevant (`story_gen` and related tooling).
+- Update docs that reflect the change (README/tests/protocols).
+
+**Test/Script Coordinator:**
+- Role doc: [docs/TEST_SCRIPT_COORDINATOR.md](docs/TEST_SCRIPT_COORDINATOR.md)
+
+**RTOS/WiFi reference:**
+- Health doc: [docs/RTOS_WIFI_HEALTH.md](docs/RTOS_WIFI_HEALTH.md)
+- Firmware/RTOS brief: [.github/agents/briefings/PHASE_2B_FIRMWARE_RTOS.md](.github/agents/briefings/PHASE_2B_FIRMWARE_RTOS.md)
+
+## ✅ Handoff Addendum (RTOS/WiFi)
+
+Include this snippet in handoffs when relevant:
+
+```
+**RTOS/WiFi Health (Addendum)**
+- ✅ RTOS/WiFi health script run: artifacts/rtos_wifi_health_[timestamp].log
+- ✅ WiFi reconnect (AP loss) verified ≤30s
+- ✅ WebSocket recovers after reconnect
+- ✅ UI link gated on connected==1 (or waiver noted)
+```
 
 ## Verification By Phase (Minimum Expectations)
 
@@ -203,25 +298,13 @@ STORY_FORCE_STEP {step_id}
   → Jumps to step (bypasses transitions, for testing)
   → Logs: "STORY_FORCE_STEP unlock_event" → "STORY_FORCE_STEP_OK"
 
-STORY_V2_STATUS
-  → Prints Story V2 runtime snapshot
-  → Logs: "[STORY_V2] ..." + "STORY_V2_STATUS_OK"
+STORY_TEST_ON
+  → Enables test mode (fast timings, verbose logging)
+  → Logs: "STORY_TEST_MODE: ON"
 
-STORY_V2_ENABLE {STATUS|ON|OFF}
-  → Enables/disables Story V2 controller
-  → Logs: "STORY_V2_ENABLE ..." → "STORY_V2_OK"
-
-STORY_V2_TRACE {STATUS|ON|OFF}
-  → Toggles V2 trace logging
-  → Logs: "STORY_V2_TRACE ..." → "STORY_V2_OK"
-
-STORY_V2_TRACE_LEVEL {OFF|ERR|INFO|DEBUG}
-  → Sets V2 trace verbosity
-  → Logs: "STORY_V2_TRACE_LEVEL ..." → "STORY_V2_OK"
-
-STORY_V2_HEALTH
-  → Prints health summary snapshot
-  → Logs: "[STORY_V2] HEALTH ..." + "STORY_V2_OK"
+STORY_TEST_OFF
+  → Disables test mode
+  → Logs: "STORY_TEST_MODE: OFF"
 
 STORY_FS_LIST {resource_type}
   → Lists resources from /story/ (e.g., "scenarios", "apps", "screens")
@@ -237,7 +320,7 @@ STORY_FS_VALIDATE {resource_type} {resource_id}
 - Story engine: `esp32_audio/src/controllers/story/story_controller_v2.cpp`
 
 **Acceptance Criteria:**
-- ✅ All listed commands parse correctly from serial input
+- ✅ All 7 commands parse correctly from serial input
 - ✅ Commands execute and log results
 - ✅ Error messages are clear (e.g., "STORY_LOAD_SCENARIO DEFAULT: NOT_FOUND")
 - ✅ No blocking operations (all async or fast sync-only)
@@ -262,7 +345,10 @@ STORY_FS_VALIDATE {resource_type} {resource_id}
 2. **Unit tests: StoryFsManager** (C++, `esp32_audio/tests/test_story_fs_manager.cpp`)
   ```
   test_init_creates_cache() → init() succeeds
+  test_load_scenario_valid() → loads DEFAULT scenario
   test_load_scenario_missing() → returns false for unknown id
+  test_get_step_cached() → cached data retrieved correctly
+  test_validate_checksum_ok() → checksum validates
   test_validate_checksum_corrupted() → detects mismatch
   ```
 
@@ -274,10 +360,9 @@ STORY_FS_VALIDATE {resource_type} {resource_id}
      - Deploy scenario via STORY_DEPLOY
      - Run: STORY_LOAD_SCENARIO {id} → OK
      - Run: STORY_ARM → OK
-     - Run: STORY_FORCE_STEP unlock_event → OK
-     - Run: STORY_V2_STATUS → OK
-     - Verify step transitions (2 steps each, ~10 sec total per scenario)
-     - Log success to artifacts/rc_live/test_4scenarios_{date}.log
+    - Run: STORY_FORCE_STEP unlock_event → OK
+    - Verify step transitions (2 steps each, ~10 sec total per scenario)
+    - Log success to artifacts/rc_live/test_4scenarios_{date}.log
    ```
 
 **Test data:**
@@ -391,7 +476,7 @@ If you encounter blockers:
 
 ## 📌 Briefing: ESP_Agent
 
-**Your mission:** Implement 12 REST API endpoints + WebSocket integration for Story V2 on the ESP32 HTTP server. This phase depends on Phase 1 (StoryFsManager must be working).
+**Your mission:** Implement 11 REST API endpoints + WebSocket integration for Story V2 on the ESP32 HTTP server. This phase depends on Phase 1 (StoryFsManager must be working).
 
 **Prerequisites for this phase:**
 - ✅ Phase 1 complete: storyGen.py + StoryFsManager working
@@ -402,7 +487,7 @@ If you encounter blockers:
 
 ### 📋 Tasks
 
-#### Task 2.1: HTTP Server (Port 8080) — 12 REST Endpoints
+#### Task 2.1: HTTP Server (Port 8080) — 11 REST Endpoints
 
 **What:** Extend ESP32 HTTP server to expose Story V2 resource + control endpoints.
 
@@ -492,7 +577,7 @@ POST /api/story/serial-command
 - StoryFsManager: `esp32_audio/src/story/fs/story_fs_manager.h`
 
 **Acceptance Criteria:**
-- ✅ All 12 endpoints implemented and responding
+- ✅ All 11 endpoints implemented and responding
 - ✅ Correct HTTP status codes (200, 404, 409, etc.)
 - ✅ JSON responses valid and schema-compliant
 - ✅ Error messages clear and helpful
@@ -584,7 +669,7 @@ Server → Client messages (JSON):
 
 ---
 
-#### Task 2.3: Serial ↔ HTTP Bridging
+#### Task 2.3: Serial ↔ HTTP Bridging (Optional)
 
 **What:** Forward STORY_V2 serial commands and responses through HTTP endpoints (optional but useful for testing).
 
@@ -666,7 +751,7 @@ Access-Control-Max-Age: 3600
 
 #### Task 2.5: Testing — cURL + WebSocket Validation
 
-**What:** Write test suite to validate all 12 endpoints + WebSocket stability.
+**What:** Write test suite to validate all 11 endpoints + WebSocket stability.
 
 **Test suite: `esp32_audio/tests/test_story_http_api.sh`**
 
@@ -692,15 +777,19 @@ curl -s -X POST "$ESP_URL/api/story/start" -H "Content-Type: application/json" -
 echo "TEST 4: GET /api/story/status"
 curl -s "$ESP_URL/api/story/status" | jq . || echo "FAIL"
 
-# ... (continue for all 12 endpoints)
+# ... (continue for all 11 endpoints)
 
 # WebSocket test (using wscat)
 echo "TEST 12: WebSocket /api/story/stream (30 sec)"
 timeout 30 wscat -c "ws://192.168.1.100:8080/api/story/stream" --execute 'ping' || echo "FAIL"
+
+# Optional: serial-command endpoint test if enabled
+# echo "TEST 13: POST /api/story/serial-command"
+# curl -s -X POST "$ESP_URL/api/story/serial-command" -H "Content-Type: application/json" -d '{"command":"STORY_LOAD_SCENARIO DEFAULT"}' | jq . || echo "FAIL"
 ```
 
 **Acceptance Criteria:**
-- ✅ All 12 endpoints respond with 2xx or expected 4xx status
+- ✅ All 11 endpoints respond with 2xx or expected 4xx status
 - ✅ JSON responses parse without errors
 - ✅ WebSocket connection stable for 30 seconds
 - ✅ No dropped frames during stress test (100+ rapid requests)
@@ -710,7 +799,7 @@ timeout 30 wscat -c "ws://192.168.1.100:8080/api/story/stream" --execute 'ping' 
 
 ### 📋 Acceptance Criteria (Phase 2 Complete)
 
-- ✅ **12 REST endpoints** implemented and responding
+- ✅ **11 REST endpoints** implemented and responding
   - All respond with correct HTTP status codes
   - JSON responses valid and schema-compliant
   - Error messages clear
@@ -724,7 +813,7 @@ timeout 30 wscat -c "ws://192.168.1.100:8080/api/story/stream" --execute 'ping' 
   - Headers present on all endpoints
   - OPTIONS preflight handled
   
-- ✅ **cURL tests pass** (all 12 endpoints)
+- ✅ **cURL tests pass** (all 11 endpoints)
   - Test script: `esp32_audio/tests/test_story_http_api.sh`
   - Zero failures
   
@@ -767,7 +856,7 @@ If you encounter blockers, escalate to Coordination Hub:
 **Report to Coordination Hub:**
 ```
 **Phase 2 Complete**
-- ✅ 12 REST endpoints implemented + tested
+- ✅ 11 REST endpoints implemented + tested
 - ✅ WebSocket stable (10+ min stream, no drops)
 - ✅ CORS enabled
 - ✅ cURL test suite passing
@@ -787,7 +876,7 @@ If you encounter blockers, escalate to Coordination Hub:
 **Your mission:** Build a responsive React WebUI for Story V2 with 3 main components: Scenario Selector, Live Orchestrator, and Story Designer. This phase depends on Phase 2 (REST API + WebSocket endpoints must be stable).
 
 **Prerequisites for this phase:**
-- ✅ Phase 2 complete: 12 REST endpoints + WebSocket stable
+- ✅ Phase 2 complete: 11 REST endpoints + WebSocket stable
 - ✅ cURL tests passing
 - ✅ API server running on ESP at http://[ESP_IP]:8080
 
@@ -1214,7 +1303,7 @@ If you encounter blockers:
 **Your mission:** Build comprehensive test suite for Story V2 covering E2E scenarios, smoke tests, and 4-hour stress tests. Integrate with CI (GitHub Actions). This phase depends on Phases 2-3 (API + WebUI stable).
 
 **Prerequisites for this phase:**
-- ✅ Phase 2 complete: 12 REST endpoints + WebSocket stable
+- ✅ Phase 2 complete: 11 REST endpoints + WebSocket stable
 - ✅ Phase 3 complete: WebUI Selector/Orchestrator/Designer functional
 - ✅ Both layers integrated and ready for end-to-end testing
 
@@ -1877,7 +1966,7 @@ If you encounter blockers:
    }
    \`\`\`
    
-  ... (continue for all 12 endpoints)
+  ... (continue for all 11 endpoints)
    
    ## WebSocket
    
@@ -1912,7 +2001,7 @@ If you encounter blockers:
 **Acceptance Criteria:**
 - ✅ User Guide covers authoring, templates, common patterns
 - ✅ Installation Guide covers hardware + firmware + WebUI
-- ✅ API Reference complete (all 12 endpoints + WebSocket)
+- ✅ API Reference complete (all 11 endpoints + WebSocket)
 - ✅ Troubleshooting Guide covers ≥5 common issues
 - ✅ All docs are copy-paste ready (no placeholders)
 - ✅ Docs reviewed by team (spelling + clarity)
@@ -1946,7 +2035,7 @@ If you encounter blockers:
 - ✏️ YAML Story Designer (validate + deploy on-device)
 
 ### API
-- 🔌 REST API (12 endpoints)
+- 🔌 REST API (11 endpoints)
 - 📡 WebSocket real-time updates
 - 🔧 Serial command integration
 
@@ -2329,7 +2418,7 @@ Checksums:
 - ✅ **Documentation** complete
   - User Guide (authoring, templates, patterns)
   - Installation Guide (hardware + firmware + WebUI)
-  - API Reference (12 endpoints + WebSocket)
+  - API Reference (11 endpoints + WebSocket)
   - Troubleshooting Guide (≥5 issues)
   - All reviewed + approved by team
   
@@ -2420,7 +2509,8 @@ Story V2 is now live! 🎉
 | Phase | Agent | Duration | Key Deliverables | Status |
 |-------|-------|----------|------------------|--------|
 | 1 | Backend_Agent | 5 days (Feb 16-20) | story_gen.py + StoryFsManager | ⏳ START |
-| 2 | ESP_Agent | 2 weeks (Feb 21 - Mar 5) | 12 REST endpoints + WebSocket | ⏳ AFTER 1 |
+| 2 | ESP_Agent | 2 weeks (Feb 21 - Mar 5) | 11 REST endpoints + WebSocket | ⏳ AFTER 1 |
+| 2B | Firmware_RTOS_Agent | 1 week (parallel) | Firmware coordination + audits + fixes (WiFi/RTOS focus) | ⏳ PARALLEL 2 |
 | 3 | Frontend_Agent | 2 weeks (Feb 21 - Mar 9) | WebUI Selector/Orchestrator/Designer | ⏳ PARALLEL 2 |
 | 4 | QA_Agent | 2 weeks (Mar 5-19) | E2E + Smoke + Stress tests + CI | ⏳ AFTER 2-3 |
 | 5 | Release_Agent | 1 week (Mar 16-23) | Docs + RC build + GitHub release | ⏳ AFTER 4 |
@@ -2442,6 +2532,9 @@ Story V2 is now live! 🎉
 4. 🔄 **Phases 2-5 queued**
    - Awaiting Phase 1 completion
    - Ready to kick off on Feb 21
+5. 🔄 **Firmware/RTOS parallel track**
+  - Open Conversation: Firmware_RTOS_Agent
+  - Use: .github/agents/briefings/PHASE_2B_FIRMWARE_RTOS.md
 
 ---
 

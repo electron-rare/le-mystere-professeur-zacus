@@ -11,7 +11,11 @@ Permettre d'ajouter/modifier un scenario STORY sans toucher au moteur C++:
 
 Le flux par defaut migre est:
 
-`UNLOCK -> U_SON_PROTO -> WAIT_ETAPE2 -> ETAPE2 -> DONE`
+```
+UNLOCK → U_SON_PROTO → WAIT_ETAPE2 → ETAPE2 → DONE
+```
+
+**Tous les nouveaux scénarios doivent suivre ce flux par défaut** (ou l'étendre, jamais le modifier).
 
 ## Source de verite
 
@@ -142,4 +146,5 @@ Aucune modification du moteur V2 n'est requise pour un nouveau flux tant que le 
 - checklist review PR:
   - `tools/qa/story_v2_review_checklist.md`
 - CI firmware:
-  - `.github/workflows/firmware-story-v2.yml`
+  - `.github/workflows/firmware-ci.yml` (build + smoke gates)
+  - Story-specific validation steps can be added to a future `firmware-story-v2.yml` workflow

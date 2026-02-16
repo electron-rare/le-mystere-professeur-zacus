@@ -1,34 +1,41 @@
-# Agent Contract (hardware/firmware/tools/dev)
+# Agent Contract (Tooling-Specific Rules)
+
+**📌 For global agent contract and expectations**, see [Firmware Agent Contract](../../AGENTS.md).
+
+---
 
 ## Role
-Tooling conventions for firmware helper scripts.
+Conventions pour les scripts outillage firmware.
 
 ## Scope
-Applies to `hardware/firmware/tools/dev/**` scripts and helpers.
+S'applique aux scripts et helpers dans `hardware/firmware/tools/dev/**`.
 
-## Must
-- Provide `--help` and sane non-interactive defaults.
-- Use clear exit codes (`0` success, non-zero actionable failure).
-- Keep port resolution and timeouts script-local and configurable by flags/env.
-- Write logs to `hardware/firmware/logs/` with timestamped filenames.
-- Keep CLI output short and grep-friendly (`[step]`, `[ok]`, `[fail]`).
+## Doit
+- Fournir `--help` et des valeurs par defaut non interactives.
+- Utiliser des codes de sortie clairs (`0` succes, non-zero echec exploitable).
+- Garder la resolution des ports et timeouts locales et configurables via flags/env.
+- Ecrire les logs dans `hardware/firmware/logs/` avec des noms horodates.
+- Garder une sortie CLI courte et grep-friendly (`[step]`, `[ok]`, `[fail]`).
+- Les changements structurels d'outillage sont autorises, mais doivent etre reflites dans la doc/onboarding.
 
-## Must Not
-- Do not require chat/operator interaction for waiting when script automation is possible.
-- Do not hardcode machine-specific serial paths in committed scripts.
+## Interdit
+- Ne pas exiger d'interaction chat/operator quand l'automatisation est possible.
+- Ne pas hardcoder des chemins series machine-specifiques dans les scripts commits.
 
-## Execution Flow
-1. Detect dependencies.
-2. Resolve ports with timeout.
-3. Execute steps with per-step logging.
-4. Emit clear summary status.
+## Flow d'execution
+1. Detecter les dependances.
+2. Resoudre les ports avec timeout.
+3. Executer les etapes avec logs par etape.
+4. Emettre un resume clair du statut.
 
 ## Gates
 - `python3 hardware/firmware/tools/dev/serial_smoke.py --help`
-- `bash hardware/firmware/tools/dev/run_matrix_and_smoke.sh` (when hardware context is available)
+- `bash hardware/firmware/tools/dev/run_matrix_and_smoke.sh` (quand le contexte hardware est disponible)
+
+Les gates sont recommandees, mais obligatoires uniquement si demande explicite.
 
 ## Reporting
-Surface exact rerun command on failure.
+Afficher la commande exacte de relance en cas d'echec.
 
 ## Stop Conditions
-Use root stop conditions.
+Utiliser les conditions d'arret racine.

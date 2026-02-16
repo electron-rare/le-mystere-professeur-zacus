@@ -9,9 +9,15 @@ Permettre d'ajouter/modifier un scenario STORY sans toucher au moteur C++:
 3. generer le code C++
 4. compiler/flasher
 
-Le flux par defaut migre est:
+## Flux par défaut (Story V2)
 
-`UNLOCK -> U_SON_PROTO -> WAIT_ETAPE2 -> ETAPE2 -> DONE`
+Le flux par défaut migré et normalisé est:
+
+```
+UNLOCK → U_SON_PROTO → WAIT_ETAPE2 → ETAPE2 → DONE
+```
+
+**Tous les nouveaux scénarios doivent suivre ce flux par défaut** (ou l'étendre, jamais le modifier).
 
 ## Source de verite
 
@@ -31,6 +37,16 @@ Le generateur expose aussi la config app LA:
 
 - `LaDetectorAppConfigDef`
 - `generatedLaDetectorConfigByBindingId(const char* id)`
+
+## Prompts d'authoring Story
+
+Story authoring prompts sont **distincts des ops/debug prompts** et servent à assister la création de nouveaux scénarios YAML.
+
+- **Localisation:** `docs/protocols/story_specs/prompts/*.prompt.md`
+- **Exemples:** `spectre_radio_lab.prompt.md`
+- **Usages:** Comme aides d'authoring, ou via outils Codex si nécessaire
+
+Voir [Story Authoring Prompts README](story_specs/prompts/README.md) pour la taxonomie complète.
 
 ## Mini Apps FSM
 
@@ -146,7 +162,8 @@ Aucune modification du moteur V2 n'est requise pour un nouveau flux tant que le 
 - checklist review PR:
 	- `esp32_audio/tools/qa/story_v2_review_checklist.md`
 - CI firmware:
-	- `.github/workflows/firmware-story-v2.yml`
+	- `.github/workflows/firmware-ci.yml` (build + smoke gates)
+	- Story-specific validation steps can be added to a future `firmware-story-v2.yml` workflow
 
 ## Mode auto (recommande)
 
@@ -162,3 +179,17 @@ Ce mode auto:
 - detecte les ports via la politique CP2102 (LOCATION)
 - rejoue les checks smoke + UI link
 - genere les artefacts dans `artifacts/rc_live/`
+
+## Architecture Complète (FS + WebUI)
+
+**Authoring → Generation → Filesystem → Runtime**
+
+- **Authoring:** `docs/protocols/story_specs/scenarios/*.yaml`
+- **Generation:** `story_gen.py validate + deploy` (converts YAML → JSON to FS)
+- **Filesystem:** `/story/` on ESP (scenarios, apps, screens, actions)
+- **Runtime:** StoryEngineV2 loads from FS, Story_n_CodePackApp orchestrates
+- **WebUI:** Smartphone/browser interface (select, orchestrate, design stories)
+
+**Related documentation:**
+- [`STORY_V2_APP_STORAGE.md`](./STORY_V2_APP_STORAGE.md) — FS structure, data models, JSON storage
+- [`STORY_V2_WEBUI.md`](./STORY_V2_WEBUI.md) — REST API, WebSocket, React/Vue architecture

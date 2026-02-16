@@ -509,6 +509,40 @@ set -e
   return "$rc"
 }
 
+run_story_screen_smoke() {
+  local log_file="$ARTIFACT_DIR/story_screen_smoke.log"
+
+  if [[ "${ZACUS_SKIP_SCREEN_CHECK:-0}" == "1" ]]; then
+    append_step "story_screen" "SKIP" "0" "$log_file" "ZACUS_SKIP_SCREEN_CHECK=1"
+    log_step "story screen smoke skipped"
+    return 0
+  fi
+
+  if [[ -z "$PORT_ESP32" ]]; then
+    append_step "story_screen" "SKIP" "0" "$log_file" "esp32 port unavailable"
+    return 0
+  fi
+
+  if [[ "$UI_LINK_STATUS" != "OK" ]]; then
+    append_step "story_screen" "SKIP" "0" "$log_file" "ui_link status=$UI_LINK_STATUS"
+    return 0
+  fi
+
+  local cmd=("$PYTHON_BIN" "$STORY_SCREEN_SMOKE" --port "$PORT_ESP32" --baud 115200)
+  printf '[step] %s\n' "${cmd[*]}" | tee -a "$RUN_LOG" "$log_file"
+  set +e
+  "${cmd[@]}" >>"$log_file" 2>&1
+  local rc=$?
+  set -e
+
+  if [[ "$rc" == "0" ]]; then
+    append_step "story_screen" "PASS" "0" "$log_file" "screen scene changed"
+    return 0
+  fi
+  append_step "story_screen" "FAIL" "$rc" "$log_file" "screen scene unchanged"
+  return "$rc"
+}
+
 write_summary() {
   local rc="$1"
   "$PYTHON_BIN" - "$ARTIFACT_DIR" "$STEPS_TSV" "$SUMMARY_JSON" "$SUMMARY_MD" "$TIMESTAMP" "$BUILD_STATUS" "$PORT_STATUS" "$SMOKE_STATUS" "$UI_LINK_STATUS" "$SMOKE_COMMAND_STRING" "$PORT_ESP32" "$PORT_ESP8266" "$PORTS_RESOLVE_JSON" "$rc" "$RUN_LOG" <<'PY'
@@ -675,6 +709,7 @@ else
 fi
 
 SERIAL_SMOKE="$ROOT/tools/dev/serial_smoke.py"
+STORY_SCREEN_SMOKE="$ROOT/tools/dev/story_screen_smoke.py"
 RESOLVER="$REPO_ROOT/tools/test/resolve_ports.py"
 
 if [[ "${ZACUS_SKIP_PIO:-0}" != "1" ]]; then
@@ -728,6 +763,7 @@ if [[ "${ZACUS_SKIP_SMOKE:-0}" == "1" ]]; then
   append_step "smoke_esp32" "SKIP" "0" "$ARTIFACT_DIR/smoke_esp32.log" "ZACUS_SKIP_SMOKE=1"
   append_step "smoke_esp8266_usb" "SKIP" "0" "$ARTIFACT_DIR/smoke_esp8266_usb.log" "ZACUS_SKIP_SMOKE=1"
   append_step "ui_link" "SKIP" "0" "$ARTIFACT_DIR/ui_link.log" "ZACUS_SKIP_SMOKE=1"
+  append_step "story_screen" "SKIP" "0" "$ARTIFACT_DIR/story_screen_smoke.log" "ZACUS_SKIP_SMOKE=1"
   log_step "serial smoke skipped"
 else
     port_loop_success=1
@@ -783,6 +819,10 @@ else
 
     if ! run_ui_link_check; then
       set_failure 23
+    fi
+
+    if ! run_story_screen_smoke; then
+      set_failure 24
     fi
   else
     SMOKE_STATUS="SKIPPED"

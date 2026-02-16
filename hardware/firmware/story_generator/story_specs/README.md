@@ -1,7 +1,18 @@
-# README - story_specs (ancien emplacement)
+# ⚠️ DEPRECATED — Voir la source de vérité
 
-Les specs, prompts, templates et exemples STORY V2 sont désormais centralisés dans :
+**TOUS les specs, prompts, templates et scénarios Story V2 sont centralisés dans :**
 
-`../docs/protocols/`
+```
+hardware/firmware/docs/protocols/story_specs/
+```
 
-Merci de vous référer à ce dossier pour toute modification ou consultation.
+Ce dossier (`story_generator/story_specs/`) n'est qu'une **référence historique** et n'est **PLUS MAINTENU**.
+
+## Redirects
+
+- **Prompts authoring**: `../docs/protocols/story_specs/prompts/`
+- **Schéma + templates**: `../docs/protocols/story_specs/schema/` et `templates/`
+- **Scénarios exemples**: `../docs/protocols/story_specs/scenarios/`
+- **Guide authoring**: `../docs/protocols/GENERER_UN_SCENARIO_STORY_V2.md`
+
+Merci de mettre à jour tous vos repères vers la source de vérité canonique dans `docs/protocols/`.

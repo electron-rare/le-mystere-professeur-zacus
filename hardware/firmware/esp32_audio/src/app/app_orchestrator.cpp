@@ -615,7 +615,8 @@ void sendScreenFrameSnapshot(uint32_t nowMs, uint8_t keyForScreen) {
   } else {
     frame.appStage = 2U;
   }
-  if (!frame.mp3Mode && storyScene != nullptr) {
+  if (storyScene != nullptr) {
+    // Story V2 always overrides appStage when active
     frame.appStage = storyScene->appStageHint;
   }
   if (!frame.mp3Mode) {
@@ -624,7 +625,8 @@ void sendScreenFrameSnapshot(uint32_t nowMs, uint8_t keyForScreen) {
     frame.uiCount = 0U;
     frame.queueCount = 0U;
   }
-  if (!frame.mp3Mode && storyScene != nullptr) {
+  if (storyScene != nullptr) {
+    // Story V2 always sets uiPage when active, regardless of mp3Mode
     frame.uiPage = storyScene->uiPage;
   }
 

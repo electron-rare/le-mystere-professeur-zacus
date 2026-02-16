@@ -76,8 +76,8 @@ constexpr uint32_t kBootFxLittleFsMaxDurationMs = 22000;
 
 // UI link v2: UART bidirectionnel ESP32 <-> UI (OLED/TFT) en 3.3V TTL.
 // On garde ces valeurs stables pour permettre le hot-swap UI sans reflasher l'ESP32.
-constexpr uint8_t kUiUartTxPin = 22;
-constexpr uint8_t kUiUartRxPin = 19;
+constexpr uint8_t kUiUartTxPin = 18;
+constexpr uint8_t kUiUartRxPin = 23;
 constexpr uint32_t kUiUartBaud = 19200;
 constexpr uint16_t kUiHeartbeatMs = 1000;
 constexpr uint16_t kUiTimeoutMs = 1500;

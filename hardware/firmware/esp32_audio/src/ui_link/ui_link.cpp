@@ -65,7 +65,27 @@ UiLink::UiLink(HardwareSerial& serial,
       timeoutMs_(timeoutMs) {}
 
 void UiLink::begin() {
+  // Configure Serial2 with proper RX/TX pins
   serial_.begin(baud_, SERIAL_8N1, rxPin_, txPin_);
+  serial_.setRxBufferSize(512);  // Larger RX buffer for clean startup
+  
+  // Wait for pin stabilization and any boot garbage from peer
+  delay(100);
+  
+  // Flush any garbage data that may have arrived during boot
+  while (serial_.available() > 0) {
+    serial_.read();
+  }
+  serial_.flush();
+  
+  // Reset connection state (may be set from previous session)
+  connected_ = false;
+  ackPending_ = false;
+  forceKeyframePending_ = true;  // Request keyframe on fresh connect
+  lastPingMs_ = 0u;  // Enable ping on first poll() call
+  lastRxMs_ = 0u;
+  rxLineLen_ = 0u;
+  dropCurrentLine_ = false;
 }
 
 bool UiLink::enqueueInput(const UiLinkInputEvent& event) {
@@ -347,7 +367,9 @@ void UiLink::poll(uint32_t nowMs) {
     }
   }
 
-  if (connected_ && (lastPingMs_ == 0u || static_cast<uint32_t>(nowMs - lastPingMs_) >= heartbeatMs_)) {
+  // Send PING either to maintain connection (if connected) or to initiate handshake (if not yet connected)
+  const bool shouldSendPing = !connected_ || (lastPingMs_ == 0u || static_cast<uint32_t>(nowMs - lastPingMs_) >= heartbeatMs_);
+  if (shouldSendPing) {
     if (sendPing(nowMs)) {
       lastPingMs_ = nowMs;
     }

@@ -331,7 +331,7 @@ Astuce detection ports:
 
 ### CI / Review policy
 
-- Workflow GitHub Actions: `.github/workflows/firmware-story-v2.yml`
+- Workflow GitHub Actions: `.github/workflows/firmware-ci.yml` (build + smoke gates; story-specific steps can be added to a future `firmware-story-v2.yml` workflow)
 - PR template avec gate STV2: `.github/PULL_REQUEST_TEMPLATE.md`
 - Checklist review ticketisee: `tools/qa/story_v2_review_checklist.md`
 - En CI:

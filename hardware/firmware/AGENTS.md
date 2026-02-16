@@ -1,12 +1,17 @@
 # Firmware Agent Contract
 
-
 Purpose: enforce reproducible PlatformIO builds and strict smoke validation.
 
-Scope:
+Scope: all files under `hardware/firmware/**`
 
-- all files under `hardware/firmware/**`
-- `hardware/firmware/esp32/` remains read-only
+---
+
+**📌 For tooling-specific rules**, see [Agent Contract (tools/dev)](tools/dev/AGENTS.md).
+
+---
+
+Les agents peuvent modifier la structure (dossiers/deplacements/suppressions) si necessaire.
+Toute modification structurelle doit etre repercutee dans la documentation et l'onboarding.
 
 
 ## Structure et scripts principaux
@@ -63,3 +68,5 @@ Logs/artifacts:
 - Scripts batch/CLI : cockpit.sh (usage non interactif, scripting, CI).
 - Les scripts de seed/CI doivent être rangés dans `tools/dev/ci/` et référencés dans la doc/CI.
 - Toute modification de structure doit être répercutée dans la documentation et l'onboarding.
+- Les grosses reviews sont autorisees (rapport detaille + recommandations).
+- Les gates build/smoke sont recommandees, mais non obligatoires sauf demande explicite.

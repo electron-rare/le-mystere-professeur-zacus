@@ -221,7 +221,6 @@ bool UiLink::sendAck() {
   const int available = serial_.availableForWrite();
   if (available >= 0 && static_cast<size_t>(available) < lineLen) {
     ++txDropCount_;
-    return false;
   }
   serial_.write(reinterpret_cast<const uint8_t*>(line), lineLen);
   lastTxMs_ = millis();
@@ -243,7 +242,6 @@ bool UiLink::sendPing(uint32_t nowMs) {
   const int available = serial_.availableForWrite();
   if (available >= 0 && static_cast<size_t>(available) < lineLen) {
     ++txDropCount_;
-    return false;
   }
   serial_.write(reinterpret_cast<const uint8_t*>(line), lineLen);
   lastTxMs_ = nowMs;
@@ -310,7 +308,6 @@ bool UiLink::sendStateFrame(const ScreenFrame& frame, bool keyframe) {
   const int available = serial_.availableForWrite();
   if (available >= 0 && static_cast<size_t>(available) < lineLen) {
     ++txDropCount_;
-    return false;
   }
   serial_.write(reinterpret_cast<const uint8_t*>(line), lineLen);
   lastTxMs_ = frame.nowMs;

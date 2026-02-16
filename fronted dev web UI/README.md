@@ -1,73 +1,46 @@
-# React + TypeScript + Vite
+# Story V2 WebUI
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## Agent Briefing
+Frontend WebUI with three core views:
+- Scenario Selector: list scenarios, select and start.
+- Live Orchestrator: real time stream, controls, audit log.
+- Story Designer: YAML editor, validate, deploy, test run.
 
-Currently, two official plugins are available:
+Phase 3 goals:
+- Responsive layout (desktop, tablet, mobile).
+- WebSocket auto reconnect with clear connection status.
+- Friendly error handling for 400, 404, 409, 507.
+- Touch friendly controls and keyboard navigation.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Status (Current)
+- App shell wired for selector, orchestrator, designer views.
+- Tailwind theme and responsive layout in place.
+- API client and WebSocket hook implemented.
+- Templates are placeholders and must be replaced with real YAML.
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## How To Run
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Optional env override:
 ```
+VITE_API_BASE=http://<ESP_IP>:8080
+```
+
+## Acceptance Checklist (Phase 3)
+- Scenario list loads from GET /api/story/list
+- Play calls POST /api/story/select/{id} then POST /api/story/start
+- Orchestrator receives step updates from WS /api/story/stream
+- Pause, resume, skip buttons call POST endpoints
+- Audit log keeps last 100 events and auto scrolls
+- Designer validates and deploys YAML
+- Responsive layouts work at 1920x1080, 768x1024, 375x667
+- Loading states visible during API calls
+- Error messages are clear and recoverable
+
+## Next Steps
+- Replace YAML templates with real scenario files.
+- Add E2E test notes for select, run, skip, deploy flow.
+- Verify WS stability for 10 minute stream.

@@ -39,6 +39,76 @@ See the agent briefing in [.github/agents/AGENT_BRIEFINGS.md](../.github/agents/
 - **For details**: See `.github/agents/AGENT_BRIEFINGS.md` (full rules, examples, safeguards)
 
 
+## Baseline Generation (Phase 1)
+
+The **Phase 1 firmware baseline** is a coordinated test run: **3 builds → 5 flash tests → 10 smoke runs**.
+
+### Command
+
+```bash
+./tools/dev/generate_baseline.sh
+```
+
+This creates `artifacts/baseline_YYYYMMDD_###/` with:
+
+```
+baseline_YYYYMMDD_###/
+  ├── 1_build/
+  │   ├── build_1.log
+  │   ├── build_2.log
+  │   └── build_3.log
+  ├── 2_flash_tests/
+  │   ├── flash_1.log
+  │   ├── flash_2.log
+  │   ├── flash_3.log
+  │   ├── flash_4.log
+  │   └── flash_5.log
+  ├── 3_smoke_001-010/
+  │   ├── smoke_001/  (full artifact directory with run_matrix_and_smoke.log, etc.)
+  │   ├── smoke_002/
+  │   ├── ...
+  │   └── smoke_010/
+  └── 4_healthcheck/
+      └── health_snapshot_YYYYMMDD-HHMMSS.txt
+```
+
+### Metrics Collected
+
+- **Build reproducibility**: 3 consecutive builds of all 5 environments
+- **Flash consistency**: 5 auto-port flashes (no interaction)
+- **Smoke stability**: 10 RC live gates → panic marker tracking
+- **RTOS health**: heap, stack, task count snapshots
+- **Evidence completeness**: all required metadata + logs
+
+### Interpretation
+
+See [FIRMWARE_HEALTH_BASELINE.md](./FIRMWARE_HEALTH_BASELINE.md) for:
+
+- Success criteria (pass/fail counts)
+- Panic incident analysis
+- WiFi resilience data
+- RTOS memory health assessment
+- Root cause tracing for failures
+
+### Failure Handling
+
+If baseline fails mid-run:
+
+1. **Check logs**: `less logs/generate_baseline_*.log`
+2. **Inspect specific phase**: `cat artifacts/baseline_*/1_build/build_1.log`
+3. **Retry single phase**:
+   - Build: `./tools/dev/cockpit.sh build`
+   - Flash: `./tools/dev/cockpit.sh flash`
+   - Smoke: Use `cockpit.sh rc` in a loop (see autofix for Codex assistance)
+
+### Expected Duration
+
+- **Build**: 2-3 min per cycle × 3 = 6–9 min
+- **Flash**: ~1 min per test × 5 = 5 min
+- **Smoke**: ~3–5 min per run × 10 = 30–50 min
+- **Total**: 45–65 minutes (includes overhead + log collection)
+
+
 ## Evidence Standard
 
 All gates and test scripts must accept `--outdir` (or `ZACUS_OUTDIR`) and write:

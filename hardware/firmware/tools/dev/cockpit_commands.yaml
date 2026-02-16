@@ -123,6 +123,24 @@ commands:
     evidence_outputs: []
     notes: "Set ZACUS_GIT_NO_CONFIRM=1 to skip confirmation prompt. Dangerous operation!"
 
+  - id: baseline
+    description: Generate Phase 1 firmware health baseline (3 builds, 5 flash tests, 10 smoke runs)
+    entrypoint: tools/dev/generate_baseline.sh
+    args: []
+    runbook_ref: docs/FIRMWARE_HEALTH_BASELINE.md
+    evidence_outputs:
+      - artifacts/baseline_YYYYMMDD_###/1_build/build_*.log
+      - artifacts/baseline_YYYYMMDD_###/2_flash_tests/flash_*.log
+      - artifacts/baseline_YYYYMMDD_###/3_smoke_001-010/smoke_**/
+      - artifacts/baseline_YYYYMMDD_###/4_healthcheck/health_snapshot_*.txt
+      - logs/generate_baseline_YYYYMMDD-HHMMSS.log
+    duration_estimate: "45-60 minutes (depends on smoke test speed)"
+    notes: |
+      Automatic baseline generation for Phase 1 (Stabilize + Observe).
+      Ensures firmware reproducibility: 3 builds × 5 flash gates × 10 smoke runs.
+      Captures all evidence in artifacts/baseline_YYYYMMDD_###/
+      Requires working ESP32 hardware and network connectivity.
+      See docs/FIRMWARE_HEALTH_BASELINE.md for interpretation guide.
 
   - id: flash
     description: Flash firmware (auto port resolution)

@@ -37,7 +37,7 @@ constexpr int8_t kPinUartRx = 1;
 #ifdef UI_SERIAL_BAUD
 constexpr uint32_t kSerialBaud = static_cast<uint32_t>(UI_SERIAL_BAUD);
 #else
-constexpr uint32_t kSerialBaud = 115200U;
+constexpr uint32_t kSerialBaud = 57600U;  // Match ESP32 UI Link v2 default
 #endif
 
 #ifdef UI_ROTATION

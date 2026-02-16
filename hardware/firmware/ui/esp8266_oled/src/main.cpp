@@ -21,7 +21,7 @@ namespace {
 
 constexpr uint8_t kLinkRx = D6;    // ESP8266 RX <- ESP32 TX (GPIO22)
 constexpr uint8_t kLinkTx = D5;    // ESP8266 TX -> ESP32 RX (GPIO19)
-constexpr uint32_t kLinkBaud = 19200;
+constexpr uint32_t kLinkBaud = 57600;  // 3x plus rapide, stable SoftwareSerial
 constexpr int kLinkRxBufferBytes = 128;
 constexpr int kLinkIsrBufferBytes = 512;
 constexpr uint16_t kLinkReadBudgetBytes = 96;

@@ -367,9 +367,10 @@ void UiLink::poll(uint32_t nowMs) {
     }
   }
 
-  // Send PING either to maintain connection (if connected) or to initiate handshake (if not yet connected)
-  const bool shouldSendPing = !connected_ || (lastPingMs_ == 0u || static_cast<uint32_t>(nowMs - lastPingMs_) >= heartbeatMs_);
-  if (shouldSendPing) {
+  // Send PING heartbeat: either periodic (if connected) or retry (if waiting for HELLO)
+  // Don't spam when disconnected - wait 500ms between retry attempts
+  const uint32_t pingIntervalMs = connected_ ? heartbeatMs_ : 500u;
+  if (lastPingMs_ == 0u || static_cast<uint32_t>(nowMs - lastPingMs_) >= pingIntervalMs) {
     if (sendPing(nowMs)) {
       lastPingMs_ = nowMs;
     }

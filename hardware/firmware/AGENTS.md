@@ -48,7 +48,7 @@ Port + baud policy:
 
 - CP2102 mapping by LOCATION: `20-6.1.1=esp32`, `20-6.1.2=esp8266_usb`
 - USB monitor baud is `115200` (esp32 + esp8266_usb monitor-only)
-- internal ESP8266 SoftwareSerial UI link is `19200` (not USB monitor baud)
+- internal ESP8266 SoftwareSerial UI link is `57600` (not USB monitor baud)
 
 
 Fast loop:

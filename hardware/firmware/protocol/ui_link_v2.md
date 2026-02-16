@@ -9,7 +9,8 @@ This document defines the canonical UART link between ESP32 audio firmware and i
   - TX: GPIO22
   - RX: GPIO19
   - GND: common ground required
-- Default baud: 19200 (configurable, both sides must match).
+- Default baud: 57600 (configurable, both sides must match).
+- Note: 57600 is 3x faster than 19200, stable on ESP8266 SoftwareSerial.
 - Frame format (ASCII, line based):
 
 ```

@@ -696,7 +696,7 @@ finalize() {
   exit "$rc"
 }
 
-trap 'finalize "$?"' EXIT
+trap 'finalize "$EXIT_CODE"' EXIT
 
 parse_envs
 log_info "selected envs: ${ENVS[*]}"

@@ -10,6 +10,9 @@ RESOLVER="$REPO_ROOT/tools/test/resolve_ports.py"
 RC_RUNNER="$REPO_ROOT/tools/dev/run_matrix_and_smoke.sh"
 PROMPT_DIR="$SCRIPT_DIR/codex_prompts"
 
+# Shared helpers (agent_utils.sh)
+source "$SCRIPT_DIR/agent_utils.sh"
+
 # Détection TUI (dialog/whiptail)
 if command -v dialog >/dev/null 2>&1; then
   TUI_CMD="dialog"
@@ -117,39 +120,43 @@ prompt=$prompt_file
 reason=$prompt_reason
 codex_output=$codex_output
 LOGEOF
+  
+  # Optional: auto-commit changes if ZACUS_GIT_AUTOCOMMIT=1
+  if [[ "${ZACUS_GIT_AUTOCOMMIT:-0}" == "1" ]]; then
+    log "auto-committing changes (ZACUS_GIT_AUTOCOMMIT=1)"
+    export ZACUS_GIT_ALLOW_WRITE=1
+    if git_auto_commit "Auto-fix: $prompt_reason (via Codex)" "$artifact"; then
+      log "committed changes successfully"
+      printf '%s\n' "git_autocommit=success" >> "$artifact/rc_autofix.log"
+    else
+      log "auto-commit failed; continuing without commit"
+      printf '%s\n' "git_autocommit=failed" >> "$artifact/rc_autofix.log"
+    fi
+  fi
+  
   log "rerunning RC live after fix"
   run_rc_gate
 }
 
-cmd_flash() {
-  require_cmd python3
-  require_cmd pio
-  mkdir -p "$ARTIFACT_ROOT"
-  local timestamp
-  timestamp=$(date -u +"%Y%m%d-%H%M%S")
-  local run_dir="$ARTIFACT_ROOT/flash-$timestamp"
-  mkdir -p "$run_dir"
-  local ports_json="$run_dir/ports_resolve.json"
-  log "resolving ports for flash"
-  (cd "$REPO_ROOT" && python3 "$RESOLVER" --auto-ports --need-esp32 --need-esp8266 --wait-port 5 --ports-resolve-json "$ports_json")
-  local port_esp32 port_esp8266
-  read -r port_esp32 port_esp8266 < <(python3 - "$ports_json" <<'PY'
-import json, sys
-try:
-    data = json.load(open(sys.argv[1]))
-except Exception:
-    data = {}
-ports = data.get('ports', {})
-print(ports.get('esp32', ''))
-print(ports.get('esp8266', ''))
-PY
-)
-  if [[ -z "$port_esp32" || -z "$port_esp8266" ]]; then
-    die "could not resolve both ports (esp32=$port_esp32 esp8266=$port_esp8266)"
+git_auto_commit() {
+  local msg="$1"
+  local artifact="$2"
+  
+  # Check for modified files
+  if ! git_cmd diff --quiet 2>/dev/null; then
+    log "detected changes; staging and committing"
+    git_add -A || return 1
+    git_commit -m "$msg" || return 1
+    printf '%s\n' "git_commit_msg=$msg" >> "$artifact/rc_autofix.log"
+    return 0
+  else
+    log "no changes detected; skipping commit"
+    return 0
   fi
-  log "ESP32 port=$port_esp32 ESP8266 port=$port_esp8266"
-  (cd "$REPO_ROOT" && pio run -e esp32dev -t upload --upload-port "$port_esp32")
-  (cd "$REPO_ROOT" && pio run -e esp8266_oled -t upload --upload-port "$port_esp8266")
+}
+
+cmd_flash() {
+  flash_all
 }
 
 cmd_ports() {
@@ -196,9 +203,22 @@ Commands:
   build         run build_all.sh
   flash         upload esp32 + esp8266 via resolved ports
   rc            strict RC live (ZACUS_REQUIRE_HW=1)
-  rc-autofix    RC + codex autofix loop
+  rc-autofix    RC + codex autofix loop [+ optional git commit]
   ports         ports watch (15s)
   latest        show latest RC artifact path
+
+Environment Variables:
+  ZACUS_REQUIRE_HW=1          RC live requires hardware (wait for ports)
+  ZACUS_GIT_AUTOCOMMIT=1      Auto-commit changes after codex fix
+  ZACUS_GIT_ALLOW_WRITE=1     Allow git write operations (required for autocommit)
+  ZACUS_GIT_NO_CONFIRM=1      Skip confirmation prompts (for CI/CD)
+
+Examples:
+  # Auto-fix with automatic git commit (CI/CD mode)
+  ZACUS_GIT_AUTOCOMMIT=1 ZACUS_GIT_ALLOW_WRITE=1 ZACUS_GIT_NO_CONFIRM=1 zacus.sh rc-autofix
+
+  # Auto-fix with manual commit approval
+  ZACUS_GIT_AUTOCOMMIT=1 ZACUS_GIT_ALLOW_WRITE=1 zacus.sh rc-autofix
 HELP
 }
 

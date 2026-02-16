@@ -4,14 +4,25 @@
 #include <cstdio>
 #include <cstring>
 
+#include "../../config.h"
+
 #include <AudioFileSourceFS.h>
 #include <AudioGenerator.h>
-#include <AudioGeneratorAAC.h>
-#include <AudioGeneratorFLAC.h>
 #include <AudioGeneratorMP3.h>
-#include <AudioGeneratorOpus.h>
 #include <AudioGeneratorWAV.h>
 #include <AudioOutputI2S.h>
+
+#if USON_ENABLE_CODEC_AAC
+#include <AudioGeneratorAAC.h>
+#endif
+
+#if USON_ENABLE_CODEC_FLAC
+#include <AudioGeneratorFLAC.h>
+#endif
+
+#if USON_ENABLE_CODEC_OPUS
+#include <AudioGeneratorOpus.h>
+#endif
 
 AsyncAudioService::AsyncAudioService(uint8_t i2sBclk,
                                      uint8_t i2sLrc,
@@ -64,15 +75,21 @@ AsyncAudioService::FsCodec AsyncAudioService::codecFromPath(const char* path) {
   if (strcmp(ext, "wav") == 0) {
     return FsCodec::kWav;
   }
+#if USON_ENABLE_CODEC_AAC
   if (strcmp(ext, "aac") == 0) {
     return FsCodec::kAac;
   }
+#endif
+#if USON_ENABLE_CODEC_FLAC
   if (strcmp(ext, "flac") == 0) {
     return FsCodec::kFlac;
   }
+#endif
+#if USON_ENABLE_CODEC_OPUS
   if (strcmp(ext, "opus") == 0 || strcmp(ext, "ogg") == 0) {
     return FsCodec::kOpus;
   }
+#endif
   return FsCodec::kUnknown;
 }
 
@@ -82,12 +99,18 @@ AudioGenerator* AsyncAudioService::createDecoder(FsCodec codec) {
       return new AudioGeneratorMP3();
     case FsCodec::kWav:
       return new AudioGeneratorWAV();
+#if USON_ENABLE_CODEC_AAC
     case FsCodec::kAac:
       return new AudioGeneratorAAC();
+#endif
+#if USON_ENABLE_CODEC_FLAC
     case FsCodec::kFlac:
       return new AudioGeneratorFLAC();
+#endif
+#if USON_ENABLE_CODEC_OPUS
     case FsCodec::kOpus:
       return new AudioGeneratorOpus();
+#endif
     default:
       return nullptr;
   }

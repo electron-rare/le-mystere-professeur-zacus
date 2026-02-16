@@ -114,6 +114,7 @@ show_menu() {
     "Build all firmware (hardware/firmware/build_all.sh)"
     "Bootstrap (outils/dev/bootstrap_local.sh)"
     "Watch serial ports"
+    "Monitor WiFi debug (serial ESP32)"
     "Run codex prompt menu"
     "Audit full (build + rc + drivers/tests)"
     "Generate sync report"
@@ -131,21 +132,42 @@ show_menu() {
       3) run_build_all ;;
       4) run_bootstrap ;;
       5) ports_watch ;;
-      6) run_codex_prompts ;;
-      7) run_audit_all ;;
-      8) run_sync_report ;;
-      9) run_cleanup ;;
-      10) run_codex_check ;;
-      11) afficher_logs_menu ;;
-      12) afficher_aide ;;
-      13|0) exit 0 ;;
+      6) monitor_wifi_debug_serial ;;
+      7) run_codex_prompts ;;
+      8) run_audit_all ;;
+      9) run_sync_report ;;
+      10) run_cleanup ;;
+      11) run_codex_check ;;
+      12) afficher_logs_menu ;;
+      13) afficher_aide ;;
+      14|0) exit 0 ;;
     esac
   done
+}
+
+# --- WiFi Debug Serial Monitor (ESP32) ---
+monitor_wifi_debug_serial() {
+  echo -e "\n\033[1;36m[WiFi Debug Serial] Monitoring ESP32 serial port (logs, WiFi, scan, connect, errors)\033[0m"
+  local PYTHON_VENV3="$FW_ROOT/.venv/bin/python3"
+  local PYTHON_VENV="$FW_ROOT/.venv/bin/python"
+  if [[ -x "$PYTHON_VENV3" ]]; then
+    PYTHON_EXEC="$PYTHON_VENV3"
+  elif [[ -x "$PYTHON_VENV" ]]; then
+    PYTHON_EXEC="$PYTHON_VENV"
+  else
+    echo "[AGENT][FAIL] Aucun interpréteur Python .venv trouvé pour le debug série." >&2
+    exit 1
+  fi
+  # Lancement du script serial_smoke.py en mode monitor-only sur l'ESP32
+  "$PYTHON_EXEC" "$FW_ROOT/tools/dev/serial_smoke.py" --role esp32 --baud 115200 --timeout 1.0
+  echo -e "\033[1;36m--- Fin du monitoring série ---\033[0m"
+  read -n 1 -s -r -p "Appuyez sur une touche pour revenir au menu..."
 }
 
 afficher_aide() {
   echo -e "\n\033[1;36mAide Zacus Cockpit\033[0m"
   echo "- Utilisez les flèches ou le numéro pour naviguer."
+  echo "- 'Monitor WiFi debug (serial ESP32)' : lance le monitoring live du port série ESP32 (logs WiFi, scan, connect, erreurs)."
   echo "- Installez fzf/dialog/whiptail pour une meilleure expérience."
   echo "- [Entrée] pour valider, [Échap] ou [Entrée] vide pour annuler."
   echo "- Logs : 15 dernières lignes de chaque fichier dans logs/"
@@ -317,6 +339,8 @@ if [[ -n "$command" ]]; then
       run_codex_check; exit $? ;;
     help|--help|-h)
       afficher_aide; exit 0 ;;
+    wifi-debug)
+      monitor_wifi_debug_serial; exit $? ;;
     *)
       echo "Usage: cockpit.sh <command>"; exit 1 ;;
   esac

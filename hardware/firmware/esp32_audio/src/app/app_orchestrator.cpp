@@ -4,6 +4,10 @@
 #include <cctype>
 #include <cstdio>
 
+#include <esp_heap_caps.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
 #include <FS.h>
 #include <LittleFS.h>
 #include <SD_MMC.h>
@@ -17,6 +21,7 @@
 #include "../controllers/story/story_controller_v2.h"
 #include "../runtime/app_scheduler.h"
 #include "../runtime/loop_budget_manager.h"
+#include "../runtime/radio_runtime.h"
 #include "../runtime/runtime_state.h"
 #include "../services/audio/audio_service.h"
 #include "../services/input/input_router.h"
@@ -72,6 +77,7 @@ StoryEngine g_story(makeStoryOptions());
 StoryFsManager g_storyFs;
 WifiService g_wifi;
 WebUiService g_web;
+RadioRuntime g_radioRuntime;
 
 struct ULockSearchAudioCueState {
   bool pending = false;
@@ -152,6 +158,7 @@ bool triggerMp3Fx(Mp3FxEffect effect, uint32_t durationMs, const char* source);
 void printMp3UiStatusHook(const char* source);
 void printLoopBudgetStatus(const char* source, uint32_t nowMs);
 void resetLoopBudgetStats(uint32_t nowMs, const char* source);
+void printRtosStatus(const char* source, uint32_t nowMs);
 void printScreenLinkStatus(const char* source, uint32_t nowMs);
 void resetScreenLinkStats(const char* source);
 bool processSystemDebugCommand(const char* cmd, uint32_t nowMs);
@@ -1246,10 +1253,12 @@ void startBootAudioLoopCycle(uint32_t nowMs, const char* source) {
   stopBootRadioScan("boot_proto_cycle");
   audioService().stopBase("boot_proto_cycle");
 
-  bool startedAudio = startRandomTokenFxAsync("BOOT", source, false);
+  // TODO: Boot audio disabled temporarily due to corrupted MP3 in LittleFS
+  // This prevents crashes from loop budget saturation during heavy I/O
+  bool startedAudio = false;  // DISABLED: startRandomTokenFxAsync("BOOT", source, false);
   if (!startedAudio) {
-    Serial.println("[BOOT_PROTO] Aucun fichier contenant 'BOOT': fallback FX standard.");
-    startedAudio = startBootAudioPrimaryFxAsync(source);
+    // DISABLED: startedAudio = startBootAudioPrimaryFxAsync(source);
+    Serial.println("[BOOT_PROTO] Boot audio disabled (corrupted file recovery).");
   }
   if (!g_bootAudioProtocol.active) {
     Serial.printf("[BOOT_PROTO] LOOP aborted after key action (%s)\n", source);
@@ -2371,6 +2380,61 @@ void updateMp3FormatTest(uint32_t nowMs) {
   g_mp3FormatTest.stageResultLogged = false;
 }
 
+struct RtosHealthSnapshot {
+  uint32_t taskCount = 0U;
+  uint32_t heapFree = 0U;
+  uint32_t heapMin = 0U;
+  uint32_t heapSize = 0U;
+  uint32_t stackMinWords = 0U;
+  uint32_t stackMinBytes = 0U;
+};
+
+RtosHealthSnapshot captureRtosHealth() {
+  RtosHealthSnapshot snap;
+  snap.taskCount = static_cast<uint32_t>(uxTaskGetNumberOfTasks());
+  snap.heapFree = ESP.getFreeHeap();
+  snap.heapSize = ESP.getHeapSize();
+  snap.heapMin = heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
+  const UBaseType_t stackWords = uxTaskGetStackHighWaterMark(nullptr);
+  snap.stackMinWords = static_cast<uint32_t>(stackWords);
+  snap.stackMinBytes = static_cast<uint32_t>(stackWords * sizeof(StackType_t));
+  return snap;
+}
+
+void printRtosStatus(const char* source, uint32_t nowMs) {
+  const RtosHealthSnapshot snap = captureRtosHealth();
+  const uint8_t heapPct = snap.heapSize > 0U
+                             ? static_cast<uint8_t>((snap.heapFree * 100U) / snap.heapSize)
+                             : 0U;
+  Serial.printf(
+      "[SYS_RTOS] %s tasks=%lu heap_free=%lu heap_min=%lu heap_size=%lu heap_pct=%u stack_min_words=%lu stack_min_bytes=%lu\n",
+      source != nullptr ? source : "status",
+      static_cast<unsigned long>(snap.taskCount),
+      static_cast<unsigned long>(snap.heapFree),
+      static_cast<unsigned long>(snap.heapMin),
+      static_cast<unsigned long>(snap.heapSize),
+      static_cast<unsigned int>(heapPct),
+      static_cast<unsigned long>(snap.stackMinWords),
+      static_cast<unsigned long>(snap.stackMinBytes));
+  RadioRuntime::TaskSnapshot tasks[6] = {};
+  const size_t count = g_radioRuntime.taskSnapshots(tasks, sizeof(tasks) / sizeof(tasks[0]));
+  for (size_t i = 0U; i < count; ++i) {
+    const RadioRuntime::TaskSnapshot& task = tasks[i];
+    if (task.name == nullptr) {
+      continue;
+    }
+    Serial.printf(
+        "[SYS_RTOS_TASK] name=%s core=%u stack_min_words=%lu stack_min_bytes=%lu ticks=%lu last_tick_ms=%lu\n",
+        task.name,
+        static_cast<unsigned int>(task.core),
+        static_cast<unsigned long>(task.stackMinWords),
+        static_cast<unsigned long>(task.stackMinBytes),
+        static_cast<unsigned long>(task.ticks),
+        static_cast<unsigned long>(task.lastTickMs));
+  }
+  (void)nowMs;
+}
+
 void printLoopBudgetStatus(const char* source, uint32_t nowMs) {
   const LoopBudgetSnapshot snap = g_loopBudget.snapshot();
   const uint32_t avgLoopMs = (snap.sampleCount > 0U) ? (snap.totalLoopMs / snap.sampleCount) : 0U;
@@ -2472,6 +2536,11 @@ bool processSystemDebugCommand(const char* cmd, uint32_t nowMs) {
     return true;
   }
 
+  if (commandMatches(cmd, "SYS_RTOS_STATUS")) {
+    printRtosStatus("status", nowMs);
+    return true;
+  }
+
   if (strcmp(cmd, "UI_LINK_STATUS") == 0 || strcmp(cmd, "SCREEN_LINK_STATUS") == 0) {
     printScreenLinkStatus("status", nowMs);
     return true;
@@ -2562,7 +2631,7 @@ void printKeyTuneHelp() {
   Serial.println("[KEY_TUNE] Cmd: MP3_STATUS | MP3_UNLOCK | MP3_REFRESH | MP3_LIST | MP3_TEST_START | MP3_FX");
   Serial.println("[KEY_TUNE] Cmd: MP3_SCAN_PROGRESS | MP3_BACKEND_STATUS | MP3_UI_STATUS | MP3_QUEUE_PREVIEW | MP3_CAPS");
   Serial.println(
-      "[KEY_TUNE] Cmd: SYS_LOOP_BUDGET STATUS|RESET | UI_LINK_STATUS | UI_LINK_RESET_STATS");
+      "[KEY_TUNE] Cmd: SYS_LOOP_BUDGET STATUS|RESET | SYS_RTOS_STATUS | UI_LINK_STATUS | UI_LINK_RESET_STATS");
 }
 
 void processKeyTuneSerialCommand(const char* rawCmd, uint32_t nowMs) {
@@ -2744,7 +2813,8 @@ bool isCanonicalSerialCommand(const char* token) {
       "KEY_RESET",                  "KEY_SET",         "KEY_SET_ALL", "KEY_TEST_START",
       "KEY_TEST_STATUS",            "KEY_TEST_RESET",  "KEY_TEST_STOP", "CODEC_HELP",
       "CODEC_STATUS",               "CODEC_DUMP",      "CODEC_RD",    "CODEC_WR",
-      "CODEC_VOL",                  "CODEC_VOL_RAW",   "SYS_LOOP_BUDGET",
+        "CODEC_VOL",                  "CODEC_VOL_RAW",   "SYS_LOOP_BUDGET",
+        "SYS_RTOS_STATUS",
       "UI_LINK_STATUS",             "UI_LINK_RESET_STATS",
       "SCREEN_LINK_STATUS",         "SCREEN_LINK_RESET_STATS",
   };
@@ -3199,6 +3269,8 @@ void app_orchestrator::setup() {
   g_wifi.begin("uson-esp32");
   g_web.begin(&g_wifi, nullptr, &g_mp3, 8080U, nullptr);
   g_web.setStoryContext(&storyV2Controller(), &g_storyFs);
+  g_radioRuntime.begin(config::kEnableRadioRuntimeTasks, &g_wifi, nullptr, &g_web);
+  g_web.setRuntime(&g_radioRuntime);
   g_mp3.begin();
   g_mp3.setFxMode(config::kMp3FxOverlayModeDefault ? Mp3FxMode::kOverlay : Mp3FxMode::kDucking);
   g_mp3.setFxDuckingGain(config::kMp3FxDuckingGainDefault);
@@ -3260,7 +3332,7 @@ void app_orchestrator::setup() {
   Serial.println(
       "[MP3_DBG] Serial: MP3_BROWSE LS [path] | MP3_BROWSE CD <path> | MP3_PLAY_PATH <path> | MP3_UI STATUS|PAGE ... | MP3_UI_STATUS");
   Serial.println("[MP3_DBG] Serial: MP3_QUEUE_PREVIEW [n] | MP3_CAPS | MP3_STATE SAVE|LOAD|RESET");
-  Serial.println("[SYS] Serial: SYS_LOOP_BUDGET STATUS|RESET | UI_LINK_STATUS | UI_LINK_RESET_STATS");
+  Serial.println("[SYS] Serial: SYS_LOOP_BUDGET STATUS|RESET | SYS_RTOS_STATUS | UI_LINK_STATUS | UI_LINK_RESET_STATS");
   Serial.println("[FS] Serial: BOOT_FS_INFO | BOOT_FS_LIST | BOOT_FS_TEST");
   Serial.printf("[FS] Boot FX path: %s (%s)\n",
                 config::kBootFxLittleFsPath,
@@ -3276,8 +3348,7 @@ void app_orchestrator::setup() {
 void app_orchestrator::loop() {
   const uint32_t loopStartMs = millis();
   uint32_t nowMs = millis();
-  g_wifi.update(nowMs);
-  g_web.update(nowMs);
+  g_radioRuntime.updateCooperative(nowMs);
   updateAsyncAudioService(nowMs);
   serviceStoryAudioCaptureGuard(nowMs);
   nowMs = millis();

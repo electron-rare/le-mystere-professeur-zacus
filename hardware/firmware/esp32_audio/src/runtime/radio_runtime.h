@@ -30,6 +30,7 @@ class RadioRuntime {
     uint32_t cmdQueued = 0U;
     uint32_t cmdDropped = 0U;
     uint32_t evtPushed = 0U;
+    uint32_t taskCreateFail = 0U;
     uint32_t streamTicks = 0U;
     uint32_t webTicks = 0U;
     uint32_t uiTicks = 0U;
@@ -37,10 +38,22 @@ class RadioRuntime {
     uint32_t audioTicks = 0U;
   };
 
+  struct TaskSnapshot {
+    const char* name = nullptr;
+    uint32_t stackMinWords = 0U;
+    uint32_t stackMinBytes = 0U;
+    uint32_t ticks = 0U;
+    uint32_t lastTickMs = 0U;
+    uint8_t core = 0U;
+  };
+
   void begin(bool enableTasks, WifiService* wifi, RadioService* radio, WebUiService* web);
   void updateCooperative(uint32_t nowMs);
   bool enqueueCommand(const Command& cmd);
   Metrics metrics() const;
+  size_t taskSnapshots(TaskSnapshot* out, size_t max) const;
+  bool enabled() const;
+  bool started() const;
 
  private:
   static void taskAudioThunk(void* arg);
@@ -71,5 +84,11 @@ class RadioRuntime {
   TaskHandle_t taskStorage_ = nullptr;
   TaskHandle_t taskWeb_ = nullptr;
   TaskHandle_t taskUi_ = nullptr;
+  uint32_t lastAudioTickMs_ = 0U;
+  uint32_t lastStreamTickMs_ = 0U;
+  uint32_t lastStorageTickMs_ = 0U;
+  uint32_t lastWebTickMs_ = 0U;
+  uint32_t lastUiTickMs_ = 0U;
+  bool wdtEnabled_ = false;
   Metrics metrics_;
 };

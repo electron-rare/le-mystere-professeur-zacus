@@ -41,6 +41,16 @@ Status: In progress (verification pending)
 
 ---
 
+## 🧠 Firmware Embedded Expert (Addendum)
+
+- Optimize code footprint when needed by moving heavy assets/config to FS, with before/after evidence and rollback plan.
+- Own WiFi stack flows: AP captive portal, saved SSID connect, and debug visibility.
+- Own serial stack health: UI link and debug/monitor stability.
+- Own firmware stack logging for WiFi + MP3 across all layers.
+- Stay aligned with Test & Script Coordinator on gates, scripts, and evidence format.
+
+---
+
 ## 🤖 Cross-team Expert: Codex Script Expert
 
 **Mission:** Own Codex prompts and scripting integration around RC live gate, reduce credit usage, and ensure evidence logging.
@@ -69,8 +79,8 @@ Status: In progress (verification pending)
 ## 🧭 Coordination Hub Update (Feb 16, 2026)
 
 **Current state:**
-- Phase 1 + Phase 2 code landed on `story-V2` (commit `53e444c`).
-- Verification still pending: HTTP API tests and WebSocket stability checks not yet confirmed.
+- Phase 1 + Phase 2 code landed on `story-V2`; verification still pending.
+- HTTP API tests and WebSocket stability checks not yet confirmed.
 
 **Vigilance points (audit):**
 - Smoke shows a reset marker during Story V2 actions; treat as stability blocker until triaged.
@@ -850,7 +860,7 @@ If you encounter blockers, escalate to Coordination Hub:
 **On completion, provide:**
 1. ✅ Commit hash for Phase 2 work
 2. ✅ Test results: `esp32_audio/tests/test_story_http_api_{timestamp}.log`
-3. ✅ Endpoint count: confirm all 12 implemented
+3. ✅ Endpoint count: confirm 11 core endpoints (plus `/api/story/serial-command` if enabled)
 4. ✅ WebSocket stability log: 10 min stream with no drops
 
 **Report to Coordination Hub:**
@@ -1412,23 +1422,29 @@ describe('Story V2 E2E Tests', () => {
 # Smoke test: 4 scenarios (10 sec each)
 # Total time: ~40 sec
 
+PORT="${ZACUS_PORT_ESP32:-$(python3 tools/test/resolve_ports.py --need-esp32 --print-esp32 2>/dev/null)}"
+if [ -z "$PORT" ]; then
+  echo "FAIL: ESP32 port not found. Set ZACUS_PORT_ESP32 or run ./tools/dev/cockpit.sh ports"
+  exit 1
+fi
+
 for scenario in DEFAULT EXPRESS EXPRESS_DONE SPECTRE; do
   echo "Smoke test: $scenario"
   
   # 1. Load scenario via serial
-  echo "STORY_LOAD_SCENARIO $scenario" > /dev/cu.SLAB_USBtoUART7
+  echo "STORY_LOAD_SCENARIO $scenario" > "$PORT"
   sleep 0.5
   
   # 2. Verify loaded in serial output
-  response=$(timeout 2 cat /dev/cu.SLAB_USBtoUART7)
+  response=$(timeout 2 cat "$PORT")
   grep -q "STORY_LOAD_SCENARIO_OK" "$response" || { echo "FAIL: $scenario load"; exit 1; }
   
   # 3. Arm scenario
-  echo "STORY_ARM" > /dev/cu.SLAB_USBtoUART7
+  echo "STORY_ARM" > "$PORT"
   sleep 0.5
   
   # 4. Verify armed
-  response=$(timeout 2 cat /dev/cu.SLAB_USBtoUART7)
+  response=$(timeout 2 cat "$PORT")
   grep -q "STORY_ARM_OK" "$response" || { echo "FAIL: $scenario arm"; exit 1; }
   
   # 5. Verify UI link is connected
@@ -1467,12 +1483,15 @@ echo "✓ All smoke tests passed (40 sec)"
 
 ```python
 #!/usr/bin/env python3
+import os
 import serial
 import time
 import sys
 from pathlib import Path
 
-PORT = '/dev/cu.SLAB_USBtoUART7'
+PORT = os.environ.get("ZACUS_PORT_ESP32")
+if not PORT:
+  raise RuntimeError("Set ZACUS_PORT_ESP32 or run ./tools/dev/cockpit.sh ports")
 BAUD = 115200
 DURATION_HOURS = 4
 SCENARIOS = ['DEFAULT', 'EXPRESS', 'EXPRESS_DONE', 'SPECTRE']
@@ -1744,7 +1763,7 @@ Expected: ≥98% success rate, zero panics/reboots
 - Recompile with optimizations enabled
 
 ### Smoke test times out
-- Check serial port: `ls /dev/cu.*`
+- Check serial port: `./tools/dev/cockpit.sh ports`
 - Verify baud rate: 115200 for ESP32
 
 ### WebSocket disconnects
@@ -2184,9 +2203,14 @@ sha256sum *.bin > CHECKSUMS.txt
 
 # 5. Verify on hardware (4 units minimum)
 echo "Verifying on hardware..."
+PORT="${ZACUS_PORT_ESP32:-$(python3 tools/test/resolve_ports.py --need-esp32 --print-esp32 2>/dev/null)}"
+if [ -z "$PORT" ]; then
+  echo "FAIL: ESP32 port not found. Set ZACUS_PORT_ESP32 or run ./tools/dev/cockpit.sh ports"
+  exit 1
+fi
 for variant in esp32dev esp32_release; do
   echo "Flashing $variant to board..."
-  pio run -e $variant --target upload --upload-port /dev/cu.SLAB_USBtoUART7
+  pio run -e $variant --target upload --upload-port "$PORT"
   
   # Run smoke test
   bash ../../tools/dev/run_smoke_tests.sh || { echo "FAIL: $variant"; exit 1; }

@@ -33,9 +33,13 @@ struct CatalogStats {
   bool metadataBestEffort = true;
 };
 
+#ifndef USON_TRACK_CATALOG_MAX_TRACKS
+#define USON_TRACK_CATALOG_MAX_TRACKS 250
+#endif
+
 class TrackCatalog {
  public:
-  static constexpr uint16_t kMaxTracks = 250;
+  static constexpr uint16_t kMaxTracks = USON_TRACK_CATALOG_MAX_TRACKS;
   static constexpr uint8_t kDefaultMaxDepth = 4;
 
   void clear();

@@ -5,10 +5,79 @@ source "$(dirname "$0")/agent_utils.sh"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
-TIMESTAMP="$(date -u +"%Y%m%d-%H%M%S")"
-ARTIFACT_DIR="$ROOT/artifacts/rc_live"
-LOG_PATH="$ARTIFACT_DIR/smoke_${TIMESTAMP}.log"
-PORTS_JSON="$ARTIFACT_DIR/smoke_ports_${TIMESTAMP}.json"
+PHASE="smoke_tests"
+OUTDIR="${ZACUS_OUTDIR:-}"
+ORIG_ARGS=("$@")
+
+usage() {
+    cat <<'USAGE'
+Usage: ./tools/dev/run_smoke_tests.sh [--outdir <path>]
+
+Options:
+    --outdir <path>   Evidence output directory (default: artifacts/smoke_tests/<timestamp>)
+    -h, --help        Show this help
+USAGE
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --outdir)
+            OUTDIR="${2:-}"
+            shift 2
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "[error] unknown option: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+EVIDENCE_CMDLINE="$0 ${ORIG_ARGS[*]}"
+export EVIDENCE_CMDLINE
+evidence_init "$PHASE" "$OUTDIR"
+
+RESULT_OVERRIDE=""
+
+FINALIZED=0
+finalize() {
+    local rc="$1"
+    if [[ "$FINALIZED" == "1" ]]; then
+        return
+    fi
+    FINALIZED=1
+    trap - EXIT
+    local result="PASS"
+    if [[ "$rc" != "0" ]]; then
+        result="FAIL"
+    fi
+    if [[ -n "$RESULT_OVERRIDE" ]]; then
+        result="$RESULT_OVERRIDE"
+    fi
+    cat > "$EVIDENCE_SUMMARY" <<EOF
+# Smoke tests summary
+
+- Result: **${result}**
+- Log: $(basename "$LOG_PATH")
+- Ports: $(basename "$PORTS_JSON")
+- Scenarios: ${SCENARIOS}
+- Baud: ${BAUD}
+- Duration per scenario: ${SCENARIO_DURATION_S}s
+EOF
+    echo "RESULT=${result}"
+    exit "$rc"
+}
+
+trap 'finalize "$?"' EXIT
+
+TIMESTAMP="$EVIDENCE_TIMESTAMP"
+ARTIFACT_DIR="$EVIDENCE_DIR"
+LOG_PATH="$ARTIFACT_DIR/smoke_tests.log"
+PORTS_JSON="$ARTIFACT_DIR/ports_resolve.json"
 
 SCENARIOS_DEFAULT="DEFAULT,EXPRESS,EXPRESS_DONE,SPECTRE"
 SCENARIOS="${ZACUS_SMOKE_SCENARIOS:-$SCENARIOS_DEFAULT}"
@@ -24,6 +93,7 @@ fi
 
 log "Resolving ESP32 port..."
 set +e
+evidence_record_command "python3 tools/test/resolve_ports.py --auto-ports --need-esp32 --allow-no-hardware --ports-resolve-json $PORTS_JSON"
 python3 tools/test/resolve_ports.py \
     --auto-ports --need-esp32 --allow-no-hardware \
     --ports-resolve-json "$PORTS_JSON" >/dev/null 2>&1
@@ -35,6 +105,7 @@ if [[ "$resolve_rc" != "0" ]]; then
     fail "port resolution failed"
   fi
   log "Port resolution failed but ZACUS_REQUIRE_HW=0; skipping"
+    RESULT_OVERRIDE="SKIP"
   exit 0
 fi
 
@@ -64,10 +135,13 @@ if [[ "$status" != "pass" || -z "$port" ]]; then
     fail "ESP32 port missing (status=$status)"
   fi
   log "No ESP32 port found (status=$status). Skipping smoke."
+    RESULT_OVERRIDE="SKIP"
   exit 0
 fi
 
 log "Running smoke on $port (baud=$BAUD)"
+evidence_record_command "python3 - <inline> port=$port baud=$BAUD scenarios=$SCENARIOS duration_s=$SCENARIO_DURATION_S"
+set +e
 python3 - "$port" "$BAUD" "$LOG_PATH" "$SCENARIOS" "$SCENARIO_DURATION_S" <<'PY'
 import re
 import sys
@@ -194,3 +268,6 @@ except Exception as exc:
     log(f"ERROR serial failure: {exc}")
     sys.exit(2)
 PY
+exit_code=$?
+set -e
+exit "$exit_code"

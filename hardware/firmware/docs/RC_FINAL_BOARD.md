@@ -162,6 +162,13 @@ python3 tools/test/ui_link_sim.py --port <PORT_UI> --script "NEXT:click,OK:long,
 python3 tools/test/zacus_menu.py --action console --port <PORT_ESP32> --timeout 1.5
 ```
 
+### Evidence outputs
+
+- `tools/test/run_rc_gate.sh` -> `artifacts/rc_gate/<timestamp>/`
+- `tools/dev/run_matrix_and_smoke.sh` -> `artifacts/rc_live/<timestamp>/`
+
+Use `--outdir <path>` or `ZACUS_OUTDIR=<path>` to override.
+
 ## Mandatory live scenarios each sprint
 
 1. ports already connected
@@ -181,6 +188,7 @@ Final report table must include:
 - `ui_link -> OK/KO`
 - exact command
 - root cause for KO + corrective action
+- Test/Script Coordinator signoff (coherence check)
 
 ## Automation helper
 
@@ -188,3 +196,4 @@ Use:
 
 - `hardware/firmware/tools/dev/ci/rc_execution_seed.sh` to seed labels/cards
 - `tools/test/run_rc_gate.sh` to replay sprint gates with exact commands
+- `docs/_generated/COCKPIT_COMMANDS.md` for cockpit command registry

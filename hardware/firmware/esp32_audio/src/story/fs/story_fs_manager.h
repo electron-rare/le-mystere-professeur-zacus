@@ -45,6 +45,10 @@ class StoryFsManager {
   const ScenarioDef* scenario() const;
 
  private:
+  static constexpr size_t kMaxSteps = 12U;
+  static constexpr size_t kAppConfigCacheCount = 4U;
+  static constexpr size_t kStringPoolSize = 2048U;
+
   struct StepRuntime {
     TransitionDef transitions[12] = {};
     const char* actionIds[8] = {};
@@ -62,6 +66,7 @@ class StoryFsManager {
 
   bool loadJson(const char* path, DynamicJsonDocument& doc);
   bool verifyChecksum(const char* resource_path);
+  bool ensureBuffers();
   bool ensureStoryDirs();
   bool loadScenarioInfoFromFile(const char* path, StoryScenarioInfo* out) const;
   bool parseScenarioJson(fs::File& file, StoryScenarioInfo* out) const;
@@ -76,12 +81,13 @@ class StoryFsManager {
   char storyRoot_[32] = {};
   bool initialized_ = false;
   ScenarioDef scenario_ = {};
-  StepDef steps_[16] = {};
-  StepRuntime stepRuntime_[16] = {};
+  StepDef* steps_ = nullptr;
+  StepRuntime* stepRuntime_ = nullptr;
   uint8_t stepCount_ = 0U;
 
-  char stringPool_[4096] = {};
+  char* stringPool_ = nullptr;
   size_t stringOffset_ = 0U;
+  size_t stringCapacity_ = 0U;
 
-  AppConfigCache appConfigs_[8] = {};
+  AppConfigCache* appConfigs_ = nullptr;
 };

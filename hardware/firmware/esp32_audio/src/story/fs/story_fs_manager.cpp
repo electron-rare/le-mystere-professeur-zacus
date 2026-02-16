@@ -1,226 +1,9 @@
 #include "story_fs_manager.h"
 
-#include <cstring>
-#include <LittleFS.h>
-
-namespace {
-
-void copyText(char* out, size_t outLen, const char* text) {
-	if (out == nullptr || outLen == 0U) {
-		return;
-	}
-	out[0] = '\0';
-	if (text == nullptr || text[0] == '\0') {
-		return;
-	}
-	snprintf(out, outLen, "%s", text);
-}
-
-}  // namespace
-
-StoryFsManager::StoryFsManager(const char* story_root) {
-	copyText(storyRoot_, sizeof(storyRoot_), story_root != nullptr ? story_root : "/story");
-}
-
-bool StoryFsManager::init() {
-	initialized_ = ensureStoryDirs();
-	return initialized_;
-}
-
-void StoryFsManager::cleanup() {
-	resetScenarioData();
-	initialized_ = false;
-}
-
-bool StoryFsManager::loadScenario(const char* scenario_id) {
-	(void)scenario_id;
-	resetScenarioData();
-	return false;
-}
-
-bool StoryFsManager::listScenarios(StoryScenarioInfo* out, size_t maxCount, size_t* outCount) const {
-	if (outCount != nullptr) {
-		*outCount = 0U;
-	}
-	if (out == nullptr || maxCount == 0U) {
-		return false;
-	}
-
-	fs::File root = LittleFS.open(storyRoot_);
-	if (!root || !root.isDirectory()) {
-		return false;
-	}
-
-	size_t count = 0U;
-	fs::File entry = root.openNextFile();
-	while (entry && count < maxCount) {
-		if (entry.isDirectory()) {
-			char path[96] = {};
-			snprintf(path, sizeof(path), "%s/%s/scenario.json", storyRoot_, entry.name());
-			StoryScenarioInfo info = {};
-			if (loadScenarioInfoFromFile(path, &info)) {
-				out[count++] = info;
-			}
-		}
-		entry = root.openNextFile();
-	}
-
-	if (outCount != nullptr) {
-		*outCount = count;
-	}
-	return true;
-}
-
-bool StoryFsManager::fsInfo(uint32_t* totalBytes, uint32_t* usedBytes, uint16_t* scenarioCount) const {
-	if (totalBytes != nullptr) {
-		*totalBytes = LittleFS.totalBytes();
-	}
-	if (usedBytes != nullptr) {
-		*usedBytes = LittleFS.usedBytes();
-	}
-	if (scenarioCount != nullptr) {
-		StoryScenarioInfo infos[16];
-		size_t count = 0U;
-		if (listScenarios(infos, 16U, &count)) {
-			*scenarioCount = static_cast<uint16_t>(count);
-		} else {
-			*scenarioCount = 0U;
-		}
-	}
-	return true;
-}
-
-const StepDef* StoryFsManager::getStep(const char* step_id) const {
-	(void)step_id;
-	return nullptr;
-}
-
-const ResourceBindings* StoryFsManager::getResources(const char* step_id) const {
-	(void)step_id;
-	return nullptr;
-}
-
-const AppConfig* StoryFsManager::getAppConfig(const char* app_id) {
-	(void)app_id;
-	return nullptr;
-}
-
-bool StoryFsManager::validateChecksum(const char* resource_type, const char* resource_id) {
-	(void)resource_type;
-	(void)resource_id;
-	return false;
-}
-
-void StoryFsManager::listResources(const char* resource_type) {
-	(void)resource_type;
-}
-
-const ScenarioDef* StoryFsManager::scenario() const {
-	return initialized_ ? &scenario_ : nullptr;
-}
-
-bool StoryFsManager::loadJson(const char* path, DynamicJsonDocument& doc) {
-	if (path == nullptr || path[0] == '\0') {
-		return false;
-	}
-	fs::File file = LittleFS.open(path, "r");
-	if (!file) {
-		return false;
-	}
-	const DeserializationError err = deserializeJson(doc, file);
-	file.close();
-	return !err;
-}
-
-bool StoryFsManager::verifyChecksum(const char* resource_path) {
-	(void)resource_path;
-	return true;
-}
-
-bool StoryFsManager::ensureStoryDirs() {
-	if (!LittleFS.exists(storyRoot_)) {
-		return LittleFS.mkdir(storyRoot_);
-	}
-	return true;
-}
-
-bool StoryFsManager::loadScenarioInfoFromFile(const char* path, StoryScenarioInfo* out) const {
-	if (path == nullptr || out == nullptr) {
-		return false;
-	}
-	fs::File file = LittleFS.open(path, "r");
-	if (!file) {
-		return false;
-	}
-	const bool ok = parseScenarioJson(file, out);
-	file.close();
-	return ok;
-}
-
-bool StoryFsManager::parseScenarioJson(fs::File& file, StoryScenarioInfo* out) const {
-	if (!file || out == nullptr) {
-		return false;
-	}
-	StaticJsonDocument<512> doc;
-	const DeserializationError err = deserializeJson(doc, file);
-	if (err) {
-		return false;
-	}
-	const char* id = doc["id"] | "";
-	if (id[0] == '\0') {
-		return false;
-	}
-	copyText(out->id, sizeof(out->id), id);
-	out->version = static_cast<uint16_t>(doc["version"] | 0U);
-	out->estimatedDurationS = static_cast<uint32_t>(doc["estimated_duration_s"] | 0U);
-	return true;
-}
-
-const char* StoryFsManager::buildResourcePath(const char* resource_type,
-																							const char* resource_id,
-																							const char* extension,
-																							char* out,
-																							size_t out_len) const {
-	if (out == nullptr || out_len == 0U) {
-		return nullptr;
-	}
-	if (resource_type == nullptr || resource_id == nullptr) {
-		out[0] = '\0';
-		return out;
-	}
-	const char* ext = (extension != nullptr) ? extension : "";
-	snprintf(out, out_len, "%s/%s/%s%s", storyRoot_, resource_type, resource_id, ext);
-	return out;
-}
-
-const char* StoryFsManager::storeString(const char* value) {
-	if (value == nullptr || value[0] == '\0') {
-		return nullptr;
-	}
-	const size_t len = strlen(value) + 1U;
-	if (stringOffset_ + len >= sizeof(stringPool_)) {
-		return nullptr;
-	}
-	char* dst = &stringPool_[stringOffset_];
-	memcpy(dst, value, len);
-	stringOffset_ += len;
-	return dst;
-}
-
-void StoryFsManager::resetScenarioData() {
-	scenario_ = {};
-	stepCount_ = 0U;
-	stringOffset_ = 0U;
-	for (auto& cache : appConfigs_) {
-		cache.valid = false;
-		cache.params = JsonObject();
-	}
-}
-#include "story_fs_manager.h"
-
 #include <LittleFS.h>
 #include <mbedtls/sha256.h>
 
+#include <cstdlib>
 #include <cstring>
 
 namespace {
@@ -351,6 +134,10 @@ StoryFsManager::StoryFsManager(const char* story_root) {
 }
 
 bool StoryFsManager::init() {
+	if (!ensureBuffers()) {
+		Serial.println("[STORY_FS] buffer allocation failed.");
+		return false;
+	}
 	resetScenarioData();
 	if (!LittleFS.begin(false)) {
 		Serial.println("[STORY_FS] LittleFS not mounted.");
@@ -367,6 +154,24 @@ bool StoryFsManager::init() {
 
 void StoryFsManager::cleanup() {
 	resetScenarioData();
+	if (steps_ != nullptr) {
+		free(steps_);
+		steps_ = nullptr;
+	}
+	if (stepRuntime_ != nullptr) {
+		free(stepRuntime_);
+		stepRuntime_ = nullptr;
+	}
+	if (appConfigs_ != nullptr) {
+		free(appConfigs_);
+		appConfigs_ = nullptr;
+	}
+	if (stringPool_ != nullptr) {
+		free(stringPool_);
+		stringPool_ = nullptr;
+	}
+	stringCapacity_ = 0U;
+	stringOffset_ = 0U;
 	initialized_ = false;
 }
 
@@ -432,7 +237,7 @@ bool StoryFsManager::loadScenario(const char* scenario_id) {
 	}
 
 	for (JsonVariant stepVal : steps) {
-		if (stepCount_ >= static_cast<uint8_t>(sizeof(steps_) / sizeof(steps_[0]))) {
+		if (stepCount_ >= static_cast<uint8_t>(kMaxSteps)) {
 			Serial.println("[STORY_FS] too many steps.");
 			break;
 		}
@@ -593,6 +398,9 @@ const StepDef* StoryFsManager::getStep(const char* step_id) const {
 	if (step_id == nullptr || step_id[0] == '\0') {
 		return nullptr;
 	}
+	if (steps_ == nullptr) {
+		return nullptr;
+	}
 	for (uint8_t i = 0U; i < stepCount_; ++i) {
 		const StepDef& step = steps_[i];
 		if (step.id != nullptr && strcmp(step.id, step_id) == 0) {
@@ -611,14 +419,19 @@ const AppConfig* StoryFsManager::getAppConfig(const char* app_id) {
 	if (app_id == nullptr || app_id[0] == '\0') {
 		return nullptr;
 	}
-	for (auto& cache : appConfigs_) {
+	if (appConfigs_ == nullptr) {
+		return nullptr;
+	}
+	for (size_t i = 0U; i < kAppConfigCacheCount; ++i) {
+		AppConfigCache& cache = appConfigs_[i];
 		if (cache.valid && textEquals(cache.appId, app_id)) {
 			return &cache.appConfig;
 		}
 	}
 
 	AppConfigCache* slot = nullptr;
-	for (auto& cache : appConfigs_) {
+	for (size_t i = 0U; i < kAppConfigCacheCount; ++i) {
+		AppConfigCache& cache = appConfigs_[i];
 		if (!cache.valid) {
 			slot = &cache;
 			break;
@@ -855,7 +668,10 @@ const char* StoryFsManager::storeString(const char* value) {
 	if (len == 0U) {
 		return "";
 	}
-	if (stringOffset_ + len + 1U >= sizeof(stringPool_)) {
+	if (stringPool_ == nullptr || stringCapacity_ == 0U) {
+		return "";
+	}
+	if (stringOffset_ + len + 1U >= stringCapacity_) {
 		return "";
 	}
 	char* target = &stringPool_[stringOffset_];
@@ -869,19 +685,53 @@ void StoryFsManager::resetScenarioData() {
 	scenario_ = {};
 	stepCount_ = 0U;
 	stringOffset_ = 0U;
-	memset(stringPool_, 0, sizeof(stringPool_));
-	for (auto& cache : appConfigs_) {
-		cache.valid = false;
-		cache.doc.clear();
-		cache.params = JsonObject();
-		cache.appConfig = {};
-		memset(cache.appId, 0, sizeof(cache.appId));
-		memset(cache.appType, 0, sizeof(cache.appType));
+	if (stringPool_ != nullptr && stringCapacity_ > 0U) {
+		memset(stringPool_, 0, stringCapacity_);
 	}
-	for (auto& step : steps_) {
-		step = {};
+	if (appConfigs_ != nullptr) {
+		for (size_t i = 0U; i < kAppConfigCacheCount; ++i) {
+			AppConfigCache& cache = appConfigs_[i];
+			cache.valid = false;
+			cache.doc.clear();
+			cache.params = JsonObject();
+			cache.appConfig = {};
+			memset(cache.appId, 0, sizeof(cache.appId));
+			memset(cache.appType, 0, sizeof(cache.appType));
+		}
 	}
-	for (auto& runtime : stepRuntime_) {
-		runtime = {};
+	if (steps_ != nullptr) {
+		memset(steps_, 0, sizeof(StepDef) * kMaxSteps);
 	}
+	if (stepRuntime_ != nullptr) {
+		memset(stepRuntime_, 0, sizeof(StepRuntime) * kMaxSteps);
+	}
+}
+
+bool StoryFsManager::ensureBuffers() {
+	if (steps_ == nullptr) {
+		steps_ = static_cast<StepDef*>(calloc(kMaxSteps, sizeof(StepDef)));
+		if (steps_ == nullptr) {
+			return false;
+		}
+	}
+	if (stepRuntime_ == nullptr) {
+		stepRuntime_ = static_cast<StepRuntime*>(calloc(kMaxSteps, sizeof(StepRuntime)));
+		if (stepRuntime_ == nullptr) {
+			return false;
+		}
+	}
+	if (appConfigs_ == nullptr) {
+		appConfigs_ = static_cast<AppConfigCache*>(calloc(kAppConfigCacheCount, sizeof(AppConfigCache)));
+		if (appConfigs_ == nullptr) {
+			return false;
+		}
+	}
+	if (stringPool_ == nullptr) {
+		stringPool_ = static_cast<char*>(calloc(kStringPoolSize, sizeof(char)));
+		if (stringPool_ == nullptr) {
+			return false;
+		}
+		stringCapacity_ = kStringPoolSize;
+	}
+	return true;
 }

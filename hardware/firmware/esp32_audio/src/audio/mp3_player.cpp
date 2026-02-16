@@ -3,17 +3,26 @@
 #include <new>
 #include <strings.h>
 
+#include "../config.h"
+
 #include <AudioFileSourceFS.h>
 #include <AudioGenerator.h>
-#include <AudioGeneratorAAC.h>
-#include <AudioGeneratorFLAC.h>
 #include <AudioGeneratorMP3.h>
-#include <AudioGeneratorOpus.h>
 #include <AudioGeneratorWAV.h>
 #include <FS.h>
 #include <SD_MMC.h>
 
-#include "../config.h"
+#if USON_ENABLE_CODEC_AAC
+#include <AudioGeneratorAAC.h>
+#endif
+
+#if USON_ENABLE_CODEC_FLAC
+#include <AudioGeneratorFLAC.h>
+#endif
+
+#if USON_ENABLE_CODEC_OPUS
+#include <AudioGeneratorOpus.h>
+#endif
 #include "effects/audio_effect_id.h"
 
 namespace {
@@ -1161,15 +1170,21 @@ AudioCodec Mp3Player::codecForPath(const String& filename) {
   if (lower.endsWith(".wav")) {
     return AudioCodec::kWav;
   }
+#if USON_ENABLE_CODEC_AAC
   if (lower.endsWith(".aac") || lower.endsWith(".m4a")) {
     return AudioCodec::kAac;
   }
+#endif
+#if USON_ENABLE_CODEC_FLAC
   if (lower.endsWith(".flac")) {
     return AudioCodec::kFlac;
   }
+#endif
+#if USON_ENABLE_CODEC_OPUS
   if (lower.endsWith(".opus") || lower.endsWith(".ogg")) {
     return AudioCodec::kOpus;
   }
+#endif
   return AudioCodec::kUnknown;
 }
 
@@ -1197,12 +1212,18 @@ AudioGenerator* Mp3Player::createDecoder(AudioCodec codec) {
       return new (std::nothrow) AudioGeneratorMP3();
     case AudioCodec::kWav:
       return new (std::nothrow) AudioGeneratorWAV();
+#if USON_ENABLE_CODEC_AAC
     case AudioCodec::kAac:
       return new (std::nothrow) AudioGeneratorAAC();
+#endif
+#if USON_ENABLE_CODEC_FLAC
     case AudioCodec::kFlac:
       return new (std::nothrow) AudioGeneratorFLAC();
+#endif
+#if USON_ENABLE_CODEC_OPUS
     case AudioCodec::kOpus:
       return new (std::nothrow) AudioGeneratorOpus();
+#endif
     case AudioCodec::kUnknown:
     default:
       return nullptr;

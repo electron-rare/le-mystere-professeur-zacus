@@ -6,6 +6,26 @@
 #define USON_STORY_V2_DEFAULT 1
 #endif
 
+#ifndef USON_ENABLE_CODEC_MP3
+#define USON_ENABLE_CODEC_MP3 1
+#endif
+
+#ifndef USON_ENABLE_CODEC_WAV
+#define USON_ENABLE_CODEC_WAV 1
+#endif
+
+#ifndef USON_ENABLE_CODEC_AAC
+#define USON_ENABLE_CODEC_AAC 0
+#endif
+
+#ifndef USON_ENABLE_CODEC_FLAC
+#define USON_ENABLE_CODEC_FLAC 0
+#endif
+
+#ifndef USON_ENABLE_CODEC_OPUS
+#define USON_ENABLE_CODEC_OPUS 0
+#endif
+
 namespace config {
 
 constexpr uint8_t kPinLedR = 16;
@@ -64,13 +84,16 @@ constexpr uint16_t kBootRadioScanChunkMs = 18;
 constexpr uint32_t kLoopBudgetBootThresholdMs = 40U;
 constexpr uint32_t kLoopBudgetRuntimeThresholdMs = 25U;
 constexpr uint32_t kLoopBudgetWarnThrottleMs = 2500U;
+constexpr bool kEnableRadioRuntimeTasks = true;
+constexpr bool kEnableRadioRuntimeWdt = true;
+constexpr uint32_t kRadioRuntimeWdtTimeoutSec = 5U;
 constexpr uint32_t kStoryEtape2DelayMs = 15UL * 60UL * 1000UL;
 constexpr uint32_t kStoryEtape2TestDelayMs = 5000U;
 constexpr bool kStoryV2EnabledDefault = (USON_STORY_V2_DEFAULT != 0);
 constexpr bool kEnableInternalLittleFs = true;
 constexpr bool kInternalLittleFsFormatOnFail = false;
-constexpr bool kPreferLittleFsBootFx = true;
-constexpr char kBootFxLittleFsPath[] = "/uson_boot_arcade_lowmono.mp3";
+constexpr bool kPreferLittleFsBootFx = false;  // DISABLED: temp fix for audio init crash
+constexpr char kBootFxLittleFsPath[] = "";  // EMPTY: disable boot audio file entirely
 constexpr float kBootFxLittleFsGain = 0.24f;
 constexpr uint32_t kBootFxLittleFsMaxDurationMs = 22000;
 
@@ -100,6 +123,12 @@ constexpr uint16_t kKey3Max = 1340;
 constexpr uint16_t kKey4Max = 1500;
 constexpr uint16_t kKey5Max = 1770;
 constexpr uint16_t kKey6Max = 2200;
+
+constexpr bool kEnableCodecMp3 = (USON_ENABLE_CODEC_MP3 != 0);
+constexpr bool kEnableCodecWav = (USON_ENABLE_CODEC_WAV != 0);
+constexpr bool kEnableCodecAac = (USON_ENABLE_CODEC_AAC != 0);
+constexpr bool kEnableCodecFlac = (USON_ENABLE_CODEC_FLAC != 0);
+constexpr bool kEnableCodecOpus = (USON_ENABLE_CODEC_OPUS != 0);
 
 constexpr char kMp3Path[] = "/track001.mp3";
 constexpr bool kMp3FxOverlayModeDefault = false;  // false=DUCKING, true=OVERLAY

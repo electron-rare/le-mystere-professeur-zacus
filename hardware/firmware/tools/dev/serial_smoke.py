@@ -6,6 +6,7 @@ import json
 import os
 import platform
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -25,6 +26,10 @@ FATAL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 REBOOT_PATTERN = re.compile(r"(ets Jan|rst:|boot mode|load:0x|entry 0x)", re.IGNORECASE)
+BASIC_WIFI_PATTERN = re.compile(
+    r"(wifi|wlan|ssid|rssi|disconnect|reconnect|dhcp|ip=|got ip|sta|ap)",
+    re.IGNORECASE,
+)
 BINARY_JUNK_RATIO_THRESHOLD = 0.35
 BINARY_JUNK_BURST_LIMIT = 2
 BINARY_JUNK_MIN_BYTES = 8
@@ -44,6 +49,94 @@ DEFAULT_PORTS_MAP = {
     },
 }
 ROLE_PRIORITY = ["esp32", "esp8266_usb", "rp2040"]
+
+FW_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = FW_ROOT.parent.parent
+PHASE = "serial_smoke"
+
+
+def init_evidence(outdir: str) -> dict:
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    if outdir:
+        path = Path(outdir)
+        if not path.is_absolute():
+            path = FW_ROOT / path
+    else:
+        path = FW_ROOT / "artifacts" / PHASE / stamp
+    path.mkdir(parents=True, exist_ok=True)
+    return {
+        "dir": path,
+        "meta": path / "meta.json",
+        "git": path / "git.txt",
+        "commands": path / "commands.txt",
+        "summary": path / "summary.md",
+    }
+
+
+def write_git_info(dest: Path) -> None:
+    lines = []
+    try:
+        branch = subprocess.check_output([
+            "git",
+            "-C",
+            str(REPO_ROOT),
+            "rev-parse",
+            "--abbrev-ref",
+            "HEAD",
+        ], text=True).strip()
+    except Exception:
+        branch = "n/a"
+    try:
+        commit = subprocess.check_output([
+            "git",
+            "-C",
+            str(REPO_ROOT),
+            "rev-parse",
+            "HEAD",
+        ], text=True).strip()
+    except Exception:
+        commit = "n/a"
+    lines.append(f"branch: {branch}")
+    lines.append(f"commit: {commit}")
+    lines.append("status:")
+    try:
+        status = subprocess.check_output([
+            "git",
+            "-C",
+            str(REPO_ROOT),
+            "status",
+            "--porcelain",
+        ], text=True).strip()
+    except Exception:
+        status = ""
+    if status:
+        lines.append(status)
+    dest.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_meta_json(dest: Path, command: str) -> None:
+    payload = {
+        "timestamp": time.strftime("%Y%m%d-%H%M%S", time.gmtime()),
+        "phase": PHASE,
+        "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "command": command,
+        "cwd": str(Path.cwd()),
+        "repo_root": str(REPO_ROOT),
+        "fw_root": str(FW_ROOT),
+    }
+    dest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def record_command(commands_path: Path, cmd: str) -> None:
+    with commands_path.open("a", encoding="utf-8") as fp:
+        fp.write(cmd + "\n")
+
+
+def write_summary(dest: Path, result: str, notes: list[str]) -> None:
+    lines = ["# Serial smoke summary", "", f"- Result: **{result}**"]
+    for note in notes:
+        lines.append(f"- {note}")
+    dest.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def normalize_role(role: str) -> str:
@@ -322,13 +415,12 @@ def run_smoke(device, baud, timeout):
         return False
 
 
-def run_monitor_smoke(device, baud):
+def run_monitor_smoke(device, baud, ready_timeout):
     print(f"[smoke] monitor-only on {device} (baud={baud})")
     try:
         with Serial(device, baud, timeout=0.2) as ser:
             time.sleep(0.15)
-            ser.reset_input_buffer()
-            ready_deadline = time.time() + 4.0
+            ready_deadline = time.time() + ready_timeout
             saw_ready = False
             junk_burst = 0
             while time.time() < ready_deadline:
@@ -384,6 +476,44 @@ def run_monitor_smoke(device, baud):
         return False
 
 
+def run_wifi_debug(device, baud, duration_s, wifi_regex):
+    print(f"[wifi-debug] listening on {device} (baud={baud}, duration={duration_s}s)")
+    matches = []
+    saw_reboot = False
+    try:
+        with Serial(device, baud, timeout=0.3) as ser:
+            time.sleep(0.15)
+            ser.reset_input_buffer()
+            deadline = time.time() + max(1.0, duration_s)
+            while time.time() < deadline:
+                for raw, line in read_lines(ser, 0.35):
+                    if line:
+                        print(f"[rx] {line}")
+                    else:
+                        print(f"[rx-bin] {raw[:24].hex()}")
+                    if line and wifi_regex.search(line):
+                        matches.append(line)
+                    if line and (FATAL_PATTERN.search(line) or REBOOT_PATTERN.search(line)):
+                        saw_reboot = True
+                        break
+                if saw_reboot:
+                    break
+        print("[wifi-debug] === WIFI FILTER ===")
+        print(f"[wifi-debug] regex={wifi_regex.pattern}")
+        if matches:
+            for line in matches:
+                print(f"[wifi] {line}")
+        else:
+            print("[wifi] (no matches)")
+        if saw_reboot:
+            print("[fail] reboot or fatal marker detected during wifi debug", file=sys.stderr)
+            return False
+        return True
+    except Exception as exc:
+        print(f"[error] serial failure on {device}: {exc}", file=sys.stderr)
+        return False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run quick serial smoke with auto port detection.")
     parser.add_argument("--port", help="Explicit serial port to use (optional)")
@@ -398,9 +528,30 @@ def main() -> int:
         help="Exit cleanly when no hardware is detected instead of failing.",
     )
     parser.add_argument("--prefer-cu", action="store_true", default=platform.system() == "Darwin", help="Prefer /dev/cu.* on macOS")
+    parser.add_argument("--outdir", default="", help="Evidence output directory")
+    parser.add_argument("--no-evidence", action="store_true", help="Disable evidence output files")
+    parser.add_argument("--wifi-debug", action="store_true", help="Run WiFi serial debug monitor")
+    parser.add_argument("--wifi-debug-seconds", type=int, default=600, help="WiFi debug duration in seconds")
+    parser.add_argument("--wifi-debug-regex", default="", help="Regex for WiFi debug filter")
     args = parser.parse_args()
     args.role = normalize_role(args.role)
     allow_no_hardware = args.allow_no_hardware or os.environ.get("ZACUS_ALLOW_NO_HW") == "1"
+
+    evidence = None
+    if not args.no_evidence:
+        outdir = args.outdir or os.environ.get("ZACUS_OUTDIR", "")
+        evidence = init_evidence(outdir)
+        write_git_info(evidence["git"])
+        evidence["commands"].write_text("# Commands\n", encoding="utf-8")
+        record_command(evidence["commands"], " ".join(sys.argv))
+        write_meta_json(evidence["meta"], " ".join(sys.argv))
+
+    def finalize(exit_code: int, notes: list[str]) -> int:
+        result = "PASS" if exit_code == 0 else "FAIL"
+        if evidence is not None:
+            write_summary(evidence["summary"], result, notes)
+        print(f"RESULT={result}")
+        return exit_code
 
     ports_map = load_ports_map()
     detection = {}
@@ -409,11 +560,11 @@ def main() -> int:
         port = find_port_by_name(args.port, args.wait_port)
         if port is None:
             print(f"[error] port {args.port} not found after waiting {args.wait_port}s", file=sys.stderr)
-            return 1
+            return finalize(1, [f"Port {args.port} not found"])
         detection = detect_roles([port], args.prefer_cu, ports_map)
         if not detection and args.role == "auto":
             print("[error] failed to classify the explicit port", file=sys.stderr)
-            return 1
+            return finalize(1, ["Failed to classify explicit port"])
         if args.role in ("esp32", "esp8266_usb", "rp2040") and args.role not in detection:
             location = parse_location(getattr(port, "hwid", "")) or "unknown"
             detection[args.role] = {
@@ -429,21 +580,21 @@ def main() -> int:
                 filter_detectable_ports(baseline_ports), args.prefer_cu, ports_map
             )
             if not detection:
-                return exit_no_hw(
-                    args.wait_port, allow_no_hardware, "failed to classify baseline ports"
-                )
+                reason = "failed to classify baseline ports"
+                code = exit_no_hw(args.wait_port, allow_no_hardware, reason)
+                return finalize(code, [reason])
         else:
             baseline_devices = {p.device for p in baseline_ports}
             new_ports = wait_for_new_ports(baseline_devices, args.wait_port)
             if not new_ports:
-                return exit_no_hw(
-                    args.wait_port, allow_no_hardware, "no new serial port detected"
-                )
+                reason = "no new serial port detected"
+                code = exit_no_hw(args.wait_port, allow_no_hardware, reason)
+                return finalize(code, [reason])
             detection = detect_roles(filter_detectable_ports(new_ports), args.prefer_cu, ports_map)
             if not detection:
-                return exit_no_hw(
-                    args.wait_port, allow_no_hardware, "failed to classify detected ports"
-                )
+                reason = "failed to classify detected ports"
+                code = exit_no_hw(args.wait_port, allow_no_hardware, reason)
+                return finalize(code, [reason])
 
     if args.role == "auto":
         run_roles = [role for role in ROLE_PRIORITY if role in detection]
@@ -473,22 +624,36 @@ def main() -> int:
                 )
 
     if not targets:
-        return 1
+        return finalize(1, ["No targets detected"])
 
     overall_ok = True
+    wifi_regex = BASIC_WIFI_PATTERN
+    if args.wifi_debug_regex:
+        try:
+            wifi_regex = re.compile(args.wifi_debug_regex, re.IGNORECASE)
+        except re.error as exc:
+            print(f"[error] invalid wifi regex: {exc}", file=sys.stderr)
+            return finalize(1, ["Invalid wifi debug regex"])
     for entry in targets:
         role = entry["role"]
         device = entry["device"]
         location = entry["location"]
         baud = args.baud or (115200 if role in ("esp32", "esp8266_usb") else 19200)
         print(f"[detect] role={role} device={device} location={location}")
-        if role == "esp8266_usb":
-            ok = run_monitor_smoke(device, baud)
+        if args.wifi_debug:
+            ok = run_wifi_debug(device, baud, args.wifi_debug_seconds, wifi_regex)
+        elif role == "esp8266_usb":
+            try:
+                ready_timeout = float(os.environ.get("ZACUS_READY_TIMEOUT", "7.0"))
+            except ValueError:
+                ready_timeout = 7.0
+            ok = run_monitor_smoke(device, baud, ready_timeout)
         else:
             ok = run_smoke(device, baud, args.timeout)
         overall_ok = overall_ok and ok
 
-    return 0 if overall_ok else 1
+    mode_note = "wifi-debug" if args.wifi_debug else "serial-smoke"
+    return finalize(0 if overall_ok else 1, [f"Targets: {len(targets)}", f"Mode: {mode_note}"])
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 #include "wifi_service.h"
 
+#include <ArduinoJson.h>
 #include <WiFi.h>
 
 namespace {
@@ -33,6 +34,31 @@ const char* wifiModeLabel(wifi_mode_t mode) {
   }
 }
 
+const char* wifiDisconnectReasonLabel(uint8_t reason) {
+  switch (reason) {
+    case WIFI_REASON_UNSPECIFIED:
+      return "UNSPEC";
+    case WIFI_REASON_AUTH_EXPIRE:
+      return "AUTH_EXPIRE";
+    case WIFI_REASON_AUTH_FAIL:
+      return "AUTH_FAIL";
+    case WIFI_REASON_ASSOC_FAIL:
+      return "ASSOC_FAIL";
+    case WIFI_REASON_NO_AP_FOUND:
+      return "NO_AP";
+    case WIFI_REASON_BEACON_TIMEOUT:
+      return "BEACON_TIMEOUT";
+    case WIFI_REASON_HANDSHAKE_TIMEOUT:
+      return "HANDSHAKE_TIMEOUT";
+    case WIFI_REASON_CONNECTION_FAIL:
+      return "CONNECTION_FAIL";
+    case WIFI_REASON_ROAMING:
+      return "ROAMING";
+    default:
+      return "OTHER";
+  }
+}
+
 }  // namespace
 
 void WifiService::begin(const char* hostname) {
@@ -40,6 +66,12 @@ void WifiService::begin(const char* hostname) {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
+  if (!eventRegistered_) {
+    eventId_ = WiFi.onEvent([this](WiFiEvent_t event, WiFiEventInfo_t info) {
+      handleEvent(event, info);
+    });
+    eventRegistered_ = true;
+  }
   if (hostname != nullptr && hostname[0] != '\0') {
     WiFi.setHostname(hostname);
   }
@@ -54,10 +86,14 @@ void WifiService::update(uint32_t nowMs) {
       scanInFlight_ = true;
       scanRequested_ = false;
       lastScanStartMs_ = nowMs;
+      scanFailed_ = false;
+      scanJson_ = "";
       setEvent("SCAN_START");
     } else {
       setError("SCAN_FAIL");
       scanRequested_ = false;
+      scanFailed_ = true;
+      scanJson_ = "{\"status\":\"fail\",\"count\":0,\"results\":[]}";
       setEvent("SCAN_REJECT");
     }
   }
@@ -66,12 +102,29 @@ void WifiService::update(uint32_t nowMs) {
     const int n = WiFi.scanComplete();
     if (n >= 0) {
       snap_.scanCount = static_cast<uint16_t>(n);
+      const int maxList = 12;
+      const int total = (n > maxList) ? maxList : n;
+      StaticJsonDocument<2048> doc;
+      doc["status"] = "ready";
+      doc["count"] = n;
+      JsonArray arr = doc.createNestedArray("results");
+      for (int i = 0; i < total; ++i) {
+        JsonObject item = arr.createNestedObject();
+        item["ssid"] = WiFi.SSID(i);
+        item["rssi"] = WiFi.RSSI(i);
+        item["secure"] = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
+      }
+      String json;
+      serializeJson(doc, json);
+      scanJson_ = json;
       WiFi.scanDelete();
       scanInFlight_ = false;
       setEvent("SCAN_DONE");
     } else if (n == WIFI_SCAN_FAILED) {
       scanInFlight_ = false;
       setError("SCAN_FAILED");
+      scanFailed_ = true;
+      scanJson_ = "{\"status\":\"fail\",\"count\":0,\"results\":[]}";
       setEvent("SCAN_FAIL");
     }
   }
@@ -90,6 +143,8 @@ bool WifiService::requestScan(const char* reason) {
     return false;
   }
   scanRequested_ = true;
+  scanFailed_ = false;
+  scanJson_ = "";
   setEvent("SCAN_REQ");
   return true;
 }
@@ -142,6 +197,23 @@ bool WifiService::isApEnabled() const {
   return snap_.apEnabled;
 }
 
+WifiService::ScanStatus WifiService::scanStatus() const {
+  if (scanInFlight_ || scanRequested_) {
+    return ScanStatus::Scanning;
+  }
+  if (scanFailed_) {
+    return ScanStatus::Failed;
+  }
+  if (scanJson_.length() > 0U) {
+    return ScanStatus::Ready;
+  }
+  return ScanStatus::Idle;
+}
+
+const String& WifiService::scanJson() const {
+  return scanJson_;
+}
+
 void WifiService::setEvent(const char* event) {
   copyText(snap_.lastEvent, sizeof(snap_.lastEvent), event);
 }
@@ -166,5 +238,43 @@ void WifiService::updateSnapshot(uint32_t nowMs) {
     snprintf(snap_.ip, sizeof(snap_.ip), "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
   } else {
     copyText(snap_.ip, sizeof(snap_.ip), "0.0.0.0");
+  }
+}
+
+void WifiService::handleEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
+  switch (event) {
+#if defined(ARDUINO_EVENT_WIFI_STA_CONNECTED)
+    case ARDUINO_EVENT_WIFI_STA_CONNECTED:
+#else
+    case SYSTEM_EVENT_STA_CONNECTED:
+#endif
+      setEvent("STA_CONNECTED");
+      break;
+#if defined(ARDUINO_EVENT_WIFI_STA_GOT_IP)
+    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+#else
+    case SYSTEM_EVENT_STA_GOT_IP:
+#endif
+      setEvent("STA_GOT_IP");
+      break;
+#if defined(ARDUINO_EVENT_WIFI_STA_DISCONNECTED)
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED: {
+#else
+    case SYSTEM_EVENT_STA_DISCONNECTED: {
+#endif
+      const uint8_t reason = static_cast<uint8_t>(info.wifi_sta_disconnected.reason);
+      ++snap_.disconnectCount;
+      snap_.disconnectReason = reason;
+      snap_.lastDisconnectMs = millis();
+      copyText(snap_.disconnectLabel, sizeof(snap_.disconnectLabel), wifiDisconnectReasonLabel(reason));
+      setEvent("STA_DISCONNECT");
+      setError("STA_DISCONNECT");
+      Serial.printf("[WIFI] disconnect reason=%u label=%s\n",
+                    static_cast<unsigned int>(reason),
+                    snap_.disconnectLabel);
+      break;
+    }
+    default:
+      break;
   }
 }

@@ -86,14 +86,22 @@ run_prompt() {
     echo "Prompt file not found: $prompt_path" >&2
     exit 1
   fi
+  EVIDENCE_CMDLINE="$0 --run $prompt_path"
+  export EVIDENCE_CMDLINE
+  evidence_init "rc_live"
+  local last_message="$EVIDENCE_DIR/codex_last_message.md"
+  evidence_record_command "codex exec --sandbox workspace-write --output-last-message $last_message - < $prompt_path"
   echo
   echo "Running $(basename "$prompt_path")"
-  printf "Log (write-only): %s\n" "$LAST_MESSAGE_FILE"
+  printf "Log (write-only): %s\n" "$last_message"
   mkdir -p "$ARTIFACTS_DIR"
   (
     cd "$FW_ROOT"
-    codex exec --sandbox workspace-write --output-last-message "$LAST_MESSAGE_FILE" - < "$prompt_path"
+    codex exec --sandbox workspace-write --output-last-message "$last_message" - < "$prompt_path"
   )
+  if [[ -n "$LAST_MESSAGE_FILE" ]]; then
+    cp -f "$last_message" "$LAST_MESSAGE_FILE" 2>/dev/null || true
+  fi
 }
 
 case "${1:-}" in

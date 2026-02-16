@@ -5,8 +5,18 @@
 - Branch:
 - Date:
 - Owner:
+- Test/Script Coordinator:
 - Build baseline commit:
 - Hardware setup:
+- Evidence root (artifacts/<phase>/<timestamp>/):
+
+## Test/Script Coherence
+
+| Check | Result (OK/KO) | Evidence | Notes |
+| --- | --- | --- | --- |
+| Cockpit commands match runbook |  |  |  |
+| Test scripts align with docs |  |  |  |
+| Evidence paths valid |  |  |  |
 
 ## Build env status
 

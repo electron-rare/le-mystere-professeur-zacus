@@ -5,11 +5,14 @@
 class Mp3Player;
 class WifiService;
 class RadioService;
+class RadioRuntime;
 class StoryControllerV2;
 class StoryFsManager;
 class AsyncWebServer;
 class AsyncWebServerRequest;
+class AsyncWebServerResponse;
 class AsyncWebSocket;
+class DNSServer;
 
 class WebUiService {
  public:
@@ -33,6 +36,7 @@ class WebUiService {
              uint16_t port = 80U,
              const Config* cfg = nullptr);
   void setStoryContext(StoryControllerV2* story, StoryFsManager* fsManager);
+  void setRuntime(RadioRuntime* runtime);
   void update(uint32_t nowMs);
   Snapshot snapshot() const;
 
@@ -43,6 +47,7 @@ class WebUiService {
   void sendJsonPlayer(AsyncWebServerRequest* request);
   void sendJsonRadio(AsyncWebServerRequest* request);
   void sendJsonWifi(AsyncWebServerRequest* request);
+  void sendJsonRtos(AsyncWebServerRequest* request);
   void setRoute(const char* route);
   void setError(const char* error);
   void sendStoryList(AsyncWebServerRequest* request);
@@ -63,19 +68,24 @@ class WebUiService {
   void sendError(AsyncWebServerRequest* request, int code, const char* message, const char* details);
   void addCorsHeaders(AsyncWebServerResponse* response);
   void handleOptions(AsyncWebServerRequest* request);
+  void updateCaptivePortal(uint32_t nowMs);
 
   WifiService* wifi_ = nullptr;
   RadioService* radio_ = nullptr;
   Mp3Player* mp3_ = nullptr;
+  RadioRuntime* runtime_ = nullptr;
   AsyncWebServer* server_ = nullptr;
   AsyncWebSocket* ws_ = nullptr;
+  DNSServer* dns_ = nullptr;
   StoryControllerV2* story_ = nullptr;
   StoryFsManager* storyFs_ = nullptr;
   char selectedScenarioId_[32] = "";
   bool storySelected_ = false;
   uint32_t storyStartedAtMs_ = 0U;
   uint32_t lastStatusPingMs_ = 0U;
+  uint32_t lastCaptiveCheckMs_ = 0U;
   char lastStepId_[32] = "";
+  bool captiveActive_ = false;
   static constexpr size_t kAuditBufferSize = 50U;
   String auditBuffer_[kAuditBufferSize];
   size_t auditHead_ = 0U;

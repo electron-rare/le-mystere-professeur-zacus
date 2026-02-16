@@ -27,6 +27,7 @@ Bienvenue dans la documentation du firmware multi-MCU du projet **Le Mystère du
   - Métriques de santé
   - Problèmes identifiés
   - Port mapping hardware
+- **[RTOS Implementation Audit](RTOS_IMPLEMENTATION_AUDIT.md)** - Audit RTOS + actions
 
 ### 🎯 Sprints & Roadmap
 
@@ -47,6 +48,8 @@ Bienvenue dans la documentation du firmware multi-MCU du projet **Le Mystère du
 - **[HW NOW](HW_NOW.md)** - Status hardware rapide
 - **[RC Final Board](RC_FINAL_BOARD.md)** - Tableau de bord tests RC
 - **[RC Report Template](RC_FINAL_REPORT_TEMPLATE.md)** - Template rapports
+- **[RTOS + WiFi Health](RTOS_WIFI_HEALTH.md)** - Checks stabilite et recovery
+- **[Test & Script Coordinator](TEST_SCRIPT_COORDINATOR.md)** - Coherence tests/scripts et evidence
 
 ---
 
@@ -68,11 +71,13 @@ hardware/firmware/docs/
 │   ├── 07_ui_rp2040.md
 │   └── 08_sequences.md
 ├── STATE_ANALYSIS.md               # État des lieux détaillé
+├── RTOS_IMPLEMENTATION_AUDIT.md   # Audit RTOS + actions
 ├── SPRINT_RECOMMENDATIONS.md       # Roadmap & actions
 ├── QUICKSTART.md                   # Getting started dev
 ├── HW_NOW.md                       # Hardware status
 ├── RC_FINAL_BOARD.md               # Tests RC dashboard
 ├── RC_FINAL_REPORT_TEMPLATE.md    # Template rapports
+├── RTOS_WIFI_HEALTH.md             # Checks RTOS/WiFi
 └── protocols/
     ├── INDEX.md                    # Index protocoles
   ├── README.md                   # Regles d'evolution et validation

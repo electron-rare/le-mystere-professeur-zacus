@@ -36,7 +36,7 @@ bool equalsIgnoreCase(const char* lhs, const char* rhs) {
 }
 
 void printWifiStatus(Print& out, const WifiService::Snapshot& s, const char* source) {
-  out.printf("[WIFI_STATUS] %s connected=%u ap=%u scanning=%u mode=%s ssid=%s ip=%s rssi=%ld scan=%u err=%s evt=%s\n",
+  out.printf("[WIFI_STATUS] %s connected=%u ap=%u scanning=%u mode=%s ssid=%s ip=%s rssi=%ld scan=%u disc=%u disc_label=%s disc_count=%lu err=%s evt=%s\n",
              source,
              s.staConnected ? 1U : 0U,
              s.apEnabled ? 1U : 0U,
@@ -46,6 +46,9 @@ void printWifiStatus(Print& out, const WifiService::Snapshot& s, const char* sou
              s.ip,
              static_cast<long>(s.rssi),
              static_cast<unsigned int>(s.scanCount),
+             static_cast<unsigned int>(s.disconnectReason),
+             s.disconnectLabel,
+             static_cast<unsigned long>(s.disconnectCount),
              s.lastError,
              s.lastEvent);
 }

@@ -1,3 +1,16 @@
+  - id: wifi-debug
+    description: Monitor WiFi debug logs via ESP32 serial (live logs, scan/connect/errors)
+    entrypoint: tools/dev/cockpit.sh
+    args: ["wifi-debug"]
+    runbook_ref: docs/TEST_SCRIPT_COORDINATOR.md
+    evidence_outputs:
+      - artifacts/serial_smoke/<timestamp>/summary.md
+      - artifacts/serial_smoke/<timestamp>/meta.json
+      - artifacts/serial_smoke/<timestamp>/commands.txt
+      - artifacts/serial_smoke/<timestamp>/git.txt
+    notes: |
+      Lance le script serial_smoke.py en mode monitor-only sur le port ESP32 (baud 115200).
+      Affiche les logs WiFi, scan, connexion, erreurs, reboot, markers, etc. Evidence sauvegardée dans artifacts/serial_smoke/.
 commands:
   - id: rc
     description: Run RC live gate (build matrix + smoke)

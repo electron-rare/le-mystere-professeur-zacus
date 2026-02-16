@@ -3,10 +3,10 @@ set -euo pipefail
 
 script_name="$(basename "$0")"
 base_dir="$(cd "$(dirname "$0")/../.." && pwd)"
-timestamp="$(date -u +"%Y%m%d-%H%M")"
-artifact_root="$base_dir/artifacts/hw_now"
-artifact_dir="$artifact_root/$timestamp"
-log_file="$artifact_dir/hw_now.log"
+source "$base_dir/tools/dev/agent_utils.sh"
+timestamp=""
+artifact_dir=""
+log_file=""
 
 env_esp32="esp32dev"
 env_esp8266="esp8266_oled"
@@ -14,6 +14,8 @@ skip_build=0
 skip_upload=0
 baud=19200
 wait_port=20
+OUTDIR="${ZACUS_OUTDIR:-}"
+PHASE="hw_now"
 
 print_help() {
   cat <<EOF
@@ -26,6 +28,7 @@ Options:
   --skip-upload          Skip the upload step entirely (keeps detection + smoke steps)
   --baud <n>             Baud rate for serial smoke (default: $baud)
   --wait-port <sec>      Seconds to wait for serial ports (default: $wait_port)
+  --outdir <path>        Evidence output directory (default: artifacts/hw_now/<timestamp>)
   -h, --help             Show this help message
 
 Examples:
@@ -42,12 +45,39 @@ log() {
 
 run_and_log() {
   log "+ $*"
+  evidence_record_command "$*"
   if "$@" >>"$log_file" 2>&1; then
     log "[ok] $*"
   else
     log "[fail] $*"
     return 1
   fi
+}
+
+FINALIZED=0
+finalize() {
+  local rc="$1"
+  if [[ "$FINALIZED" == "1" ]]; then
+    return
+  fi
+  FINALIZED=1
+  trap - EXIT
+  local result="PASS"
+  if [[ "$rc" != "0" ]]; then
+    result="FAIL"
+  fi
+  if [[ -n "${EVIDENCE_SUMMARY:-}" && ! -f "$EVIDENCE_SUMMARY" ]]; then
+    local log_name
+    log_name="$(basename "${log_file:-hw_now.log}")"
+    cat > "$EVIDENCE_SUMMARY" <<EOF
+# HW now summary
+
+- Result: **${result}**
+- Log: ${log_name}
+EOF
+  fi
+  echo "RESULT=${result}"
+  exit "$rc"
 }
 
 list_serial_ports() {
@@ -197,6 +227,10 @@ parse_args() {
         wait_port="$2"
         shift 2
         ;;
+      --outdir)
+        OUTDIR="${2:-}"
+        shift 2
+        ;;
       -h|--help)
         print_help
         exit 0
@@ -212,7 +246,14 @@ parse_args() {
 
 main() {
   parse_args "$@"
+  EVIDENCE_CMDLINE="$0 $*"
+  export EVIDENCE_CMDLINE
+  evidence_init "$PHASE" "$OUTDIR"
+  timestamp="$EVIDENCE_TIMESTAMP"
+  artifact_dir="$EVIDENCE_DIR"
+  log_file="$artifact_dir/hw_now.log"
   mkdir -p "$artifact_dir"
+  trap 'finalize "$?"' EXIT
 
   log "Starting hardware now run at $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
   log "ESP32 env: $env_esp32, ESP8266 env: $env_esp8266"
@@ -317,6 +358,17 @@ PY
   else
     log "SKIP: AP fallback unreachable."
   fi
+
+  cat > "$EVIDENCE_SUMMARY" <<EOF
+# HW now summary
+
+- Result: **PASS**
+- ESP32 env: ${env_esp32}
+- ESP8266 env: ${env_esp8266}
+- ESP32 port: ${esp32_port}
+- ESP8266 port: ${esp8266_port}
+- Log: $(basename "$log_file")
+EOF
 
   log "Hardware now run finished. Logs: $log_file"
 }

@@ -46,6 +46,18 @@ Bootstrap local tools once:
 ./tools/dev/bootstrap_local.sh
 ```
 
+## Flash (cockpit)
+
+```sh
+./tools/dev/cockpit.sh flash
+```
+
+Options utiles:
+
+- `ZACUS_FLASH_ESP32_ENVS="esp32dev esp32_release"`
+- `ZACUS_FLASH_RP2040_ENVS="ui_rp2040_ili9488 ui_rp2040_ili9486"`
+- `ZACUS_PORT_ESP32=... ZACUS_PORT_ESP8266=... ZACUS_PORT_RP2040=...`
+
 ## Boucle dev rapide
 
 ```sh
@@ -78,6 +90,12 @@ USB console monitoring uses `115200`. ESP8266 internal UI link SoftwareSerial st
 ./hw_now.sh
 ```
 
+Cockpit shortcut:
+
+```sh
+./tools/dev/cockpit.sh rc
+```
+
 `run_matrix_and_smoke.sh` ensures PlatformIO caches land under `$HOME/.platformio` (via `PLATFORMIO_CORE_DIR`) rather than inside the repo.
 Before smoke it shows `⚠️ BRANCHE L’USB MAINTENANT ⚠️` three times, then waits for Enter while listing ports every 15s.
 Each run writes deterministic artifacts under `artifacts/rc_live/<timestamp>/` (`summary.json`, `summary.md`, `ports_resolve.json`, `ui_link.log`, per-step logs).
@@ -101,6 +119,7 @@ By default the smoke step exits 0 when no serial hardware is present; use `ZACUS
 - Quickstart flash: `docs/QUICKSTART.md`
 - RC board execution: `docs/RC_FINAL_BOARD.md`
 - Protocole: `protocol/ui_link_v2.md`
+- Cockpit command registry: `docs/_generated/COCKPIT_COMMANDS.md`
 
 ## Codex prompts
 

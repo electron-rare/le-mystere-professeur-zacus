@@ -16,6 +16,9 @@ Commandes utiles:
 - Upload: `pio run -e <env> -t upload --upload-port <PORT>`
 - Monitor: `pio device monitor -e <env> --port <PORT>`
 - Matrix locale: `./build_all.sh`
+- Upload via cockpit: `./tools/dev/cockpit.sh flash`
+- Override ports: `ZACUS_PORT_ESP32=... ZACUS_PORT_ESP8266=... ZACUS_PORT_RP2040=...`
+- Envs flash: `ZACUS_FLASH_ESP32_ENVS="esp32dev esp32_release"` etc.
 
 Rappels:
 - `src_dir = esp32_audio/src` (sources ESP32 par defaut)

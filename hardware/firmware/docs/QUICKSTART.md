@@ -7,6 +7,30 @@ pio run -e esp32dev -t upload --upload-port <PORT_ESP32>
 pio device monitor -e esp32dev --port <PORT_ESP32>
 ```
 
+## 1.5) Flash via cockpit (recommande)
+
+Commande unique (auto-ports + logs + artefacts):
+
+```sh
+./tools/dev/cockpit.sh flash
+```
+
+Variables utiles (optionnelles):
+
+- `ZACUS_FLASH_ESP32_ENVS="esp32dev esp32_release"`
+- `ZACUS_FLASH_ESP8266_ENV="esp8266_oled"`
+- `ZACUS_FLASH_RP2040_ENVS="ui_rp2040_ili9488 ui_rp2040_ili9486"`
+- `ZACUS_REQUIRE_RP2040=1`
+- `ZACUS_PORT_ESP32=/dev/cu.SLAB_USBtoUART`
+- `ZACUS_PORT_ESP8266=/dev/cu.SLAB_USBtoUART7`
+- `ZACUS_PORT_RP2040=/dev/cu.usbmodemXXXX`
+- `ZACUS_PORT_WAIT=5`
+
+Artefacts et logs:
+
+- `artifacts/rc_live/flash-<timestamp>/ports_resolve.json`
+- `logs/flash_<timestamp>.log`
+
 ## 2) Choisir une UI
 
 ### UI ESP8266 OLED
@@ -35,6 +59,13 @@ Attendu:
 - `connected=1`
 - compteur `pong` qui augmente
 
+## 3.5) Verification post-flash
+
+- Le flash se termine sans erreur et PIO affiche "Success".
+- Monitor ESP32 (115200) et verifier l'absence de `PANIC`/`REBOOT`.
+- Verifier HTTP: `curl http://<ESP_IP>:8080/api/story/list`.
+- Verifier UI link: `UI_LINK_STATUS connected=1`.
+
 ## 4) Boucle dev rapide (credit-friendly)
 
 ```sh
@@ -60,6 +91,12 @@ Baud separation a retenir:
 ./tools/dev/run_matrix_and_smoke.sh
 ```
 
+Cockpit equivalent:
+
+```sh
+./tools/dev/cockpit.sh rc
+```
+
 Le script force `PLATFORMIO_CORE_DIR=$HOME/.platformio` pour que les caches PlatformIO restent en dehors du repo.
 Avant le smoke, il affiche `⚠️ BRANCHE L’USB MAINTENANT ⚠️` 3 fois, puis attend Enter en listant les ports toutes les 15s.
 Chaque run dépose `summary.json`, `summary.md`, `ports_resolve.json` et `ui_link.log` dans `artifacts/rc_live/<timestamp>/`.
@@ -79,6 +116,17 @@ Variantes d'environnement :
 
 Le script affiche un résumé final (`Build/Port/Smoke/UI link`) et écrit le même verdict dans `artifacts/rc_live/<timestamp>/summary.json`.
 
+Standard evidence layout (all gates):
+
+- `artifacts/<phase>/<timestamp>/meta.json`
+- `artifacts/<phase>/<timestamp>/git.txt`
+- `artifacts/<phase>/<timestamp>/commands.txt`
+- `artifacts/<phase>/<timestamp>/summary.md`
+
+Override output:
+
+- `--outdir <path>` or `ZACUS_OUTDIR=<path>`
+
 ## 4.6) Local dev cockpit
 
 1. Bootstrap the workspace once:
@@ -90,6 +138,7 @@ Le script affiche un résumé final (`Build/Port/Smoke/UI link`) et écrit le m�
    - `List ports (15s, venv strict)` to list serial ports every 15s (fails clearly before `.venv` exists).
    - `Serial smoke (auto/skip)` to run `tools/dev/serial_smoke.py --role auto --baud 115200 --wait-port 3 --allow-no-hardware`.
    - `Matrix + smoke (one-shot)` to run `./tools/dev/run_matrix_and_smoke.sh`.
+3. Full cockpit registry lives in `docs/_generated/COCKPIT_COMMANDS.md`.
 3. Thanks to the VS Code cockpit, `.pio`, `.platformio`, and `.venv` are hidden from explorer/search via workspace settings.
 
 ## 4.7) Smoke sanity checks (doc-only)
@@ -109,6 +158,23 @@ Le script affiche un résumé final (`Build/Port/Smoke/UI link`) et écrit le m�
   - `docs/RC_FINAL_REPORT_TEMPLATE.md`
 - Optional issue/label seed:
   - `bash tools/dev/ci/rc_execution_seed.sh`
+
+## 4.9) RTOS + WiFi health
+
+Snapshot HTTP + RTOS:
+
+```sh
+ESP_URL=http://<ip-esp32>:8080 ./tools/dev/rtos_wifi_health.sh
+```
+
+Artefact genere:
+- `artifacts/rtos_wifi_health_<timestamp>.log`
+
+Commande serie:
+
+```text
+SYS_RTOS_STATUS
+```
 
 ## 5) Hot-swap manuel
 

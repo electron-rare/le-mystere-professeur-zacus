@@ -150,6 +150,22 @@ run_step_cmd() {
   return "$rc"
 }
 
+run_build_env() {
+  local env="$1"
+  local log_file="$ARTIFACT_DIR/build_${env}.log"
+  mkdir -p ".pio/build/${env}/src"
+  if run_step_cmd "build_${env}" "$log_file" pio run -e "$env"; then
+    return 0
+  fi
+  if grep -q "firmware.elf" "$log_file" 2>/dev/null; then
+    log_warn "build_${env} missing firmware.elf; retrying once"
+    if run_step_cmd "build_${env}_retry" "$log_file" pio run -e "$env"; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
 list_ports_verbose() {
   action_log "  [ports] available serial ports (best effort):"
   if ! python3 -m serial.tools.list_ports -v | tee -a "$RUN_LOG"; then
@@ -429,6 +445,7 @@ run_role_smoke() {
 
 run_ui_link_check() {
   local ui_log="$ARTIFACT_DIR/ui_link.log"
+  local wait_s="${ZACUS_UI_LINK_WAIT:-2}"
 
   if [[ -z "$PORT_ESP32" ]]; then
     UI_LINK_STATUS="SKIP"
@@ -437,6 +454,9 @@ run_ui_link_check() {
   fi
 
   UI_LINK_COMMAND="$PYTHON_BIN - <PORT_ESP32> UI_LINK_STATUS"
+  if [[ "$wait_s" =~ ^[0-9]+$ ]] && (( wait_s > 0 )); then
+    sleep "$wait_s"
+  fi
   printf '[step] ui-link check on %s\n' "$PORT_ESP32" | tee -a "$RUN_LOG" "$ui_log"
 
 set +e
@@ -732,7 +752,7 @@ else
     log_step "build matrix forced"
     BUILD_STATUS="OK"
     for env in "${ENVS[@]}"; do
-      if ! run_step_cmd "build_${env}" "$ARTIFACT_DIR/build_${env}.log" pio run -e "$env"; then
+      if ! run_build_env "$env"; then
         BUILD_STATUS="FAILED"
         set_failure 10
         break
@@ -746,7 +766,7 @@ else
     log_step "build matrix running"
     BUILD_STATUS="OK"
     for env in "${ENVS[@]}"; do
-      if ! run_step_cmd "build_${env}" "$ARTIFACT_DIR/build_${env}.log" pio run -e "$env"; then
+      if ! run_build_env "$env"; then
         BUILD_STATUS="FAILED"
         set_failure 10
         break
@@ -846,7 +866,9 @@ if [[ -n "$SMOKE_COMMAND_STRING" ]]; then
   log "Smoke cmd    : $SMOKE_COMMAND_STRING"
 fi
 
-artefact_gate "$ARTIFACT_DIR" "artifacts/rc_live/$(date +%Y%m%d-%H%M%S)_agent"
-logs_gate "$LOG_DIR" "artifacts/rc_live/$(date +%Y%m%d-%H%M%S)_logs"
+artefact_gate "$ARTIFACT_DIR" "artifacts/rc_live/${TIMESTAMP}_agent"
+logs_gate "$LOG_DIR" "artifacts/rc_live/${TIMESTAMP}_logs"
+
+prune_rc_live_runs "$ROOT/artifacts/rc_live" "${ZACUS_RC_KEEP_RUNS:-2}"
 
 exit "$EXIT_CODE"

@@ -2,12 +2,18 @@
 
 #include <ArduinoJson.h>
 #include <LittleFS.h>
+#include <DNSServer.h>
 #include <ESPAsyncWebServer.h>
+#include <esp_heap_caps.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <WiFi.h>
 #include <cctype>
 #include <cstring>
 
 #include "../../audio/mp3_player.h"
 #include "../../controllers/story/story_controller_v2.h"
+#include "../../runtime/radio_runtime.h"
 #include "../../story/fs/story_fs_manager.h"
 #include "../../story/generated/scenarios_gen.h"
 #include "../network/wifi_service.h"
@@ -41,6 +47,27 @@ class StringPrint : public Print {
   String buffer_;
 };
 
+struct RtosSnapshot {
+  uint32_t taskCount = 0U;
+  uint32_t heapFree = 0U;
+  uint32_t heapMin = 0U;
+  uint32_t heapSize = 0U;
+  uint32_t stackMinWords = 0U;
+  uint32_t stackMinBytes = 0U;
+};
+
+RtosSnapshot buildRtosSnapshot() {
+  RtosSnapshot snap;
+  snap.taskCount = static_cast<uint32_t>(uxTaskGetNumberOfTasks());
+  snap.heapFree = ESP.getFreeHeap();
+  snap.heapSize = ESP.getHeapSize();
+  snap.heapMin = heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);
+  const UBaseType_t stackWords = uxTaskGetStackHighWaterMark(nullptr);
+  snap.stackMinWords = static_cast<uint32_t>(stackWords);
+  snap.stackMinBytes = static_cast<uint32_t>(stackWords * sizeof(StackType_t));
+  return snap;
+}
+
 void copyText(char* out, size_t outLen, const char* text) {
   if (out == nullptr || outLen == 0U) {
     return;
@@ -68,7 +95,7 @@ const char kMobileHtml[] PROGMEM =
     ".status{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;font-size:.85rem}"
     ".pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:.75rem}"
     ".ok{background:rgba(34,197,94,.2);color:#89f7b1}.warn{background:rgba(245,158,11,.2);color:#ffd28a}"
-    "input{width:100%;padding:9px;border-radius:10px;border:1px solid var(--line);background:#0b121a;color:var(--text)}"
+    "input,select{width:100%;padding:9px;border-radius:10px;border:1px solid var(--line);background:#0b121a;color:var(--text)}"
     "@media (min-width:780px){.wrap{grid-template-columns:1fr 1fr}.card.wide{grid-column:1 / -1}}"
     "</style></head><body><div class='wrap'>"
     "<div class='card wide'><h1>U-SON Controle Mobile</h1><div id='headline'>Chargement...</div></div>"
@@ -85,16 +112,24 @@ const char kMobileHtml[] PROGMEM =
     "<div class='status'><div>Mode: <span id='wifi_mode'>-</span></div><div>IP: <span id='wifi_ip'>-</span></div>"
     "<div>SSID: <span id='wifi_ssid'>-</span></div><div>Signal: <span id='wifi_rssi'>-</span></div></div>"
     "<div style='margin-top:8px;display:grid;gap:8px'>"
+    "<div class='grid'><button onclick='wifiScan()'>Scanner</button><button onclick=\"post('/api/wifi/ap?mode=on')\">AP ON</button></div>"
+    "<select id='ssid_list' onchange='pickSsid()'><option value=''>Reseaux disponibles...</option></select>"
     "<input id='ssid' placeholder='SSID'><input id='pass' placeholder='Mot de passe'>"
-    "<div class='grid'><button onclick='wifiConnect()'>Connecter</button><button onclick=\"post('/api/wifi/ap?mode=on')\">AP ON</button></div>"
+    "<div class='grid'><button onclick='wifiConnect()'>Connecter</button><div></div></div>"
     "</div></div>"
     "<div class='card'><h2>Statut</h2><pre id='json' style='white-space:pre-wrap;font-size:.72rem;margin:0;max-height:220px;overflow:auto'></pre></div>"
     "</div>"
     "<script>"
     "async function post(u){try{await fetch(u,{method:'POST'});await refresh()}catch(e){}}"
     "async function act(cmd){await post('/api/player/action?cmd='+encodeURIComponent(cmd))}"
+    "function pickSsid(){const sel=document.getElementById('ssid_list');if(sel&&sel.value){document.getElementById('ssid').value=sel.value;}}"
     "async function wifiConnect(){const s=document.getElementById('ssid').value.trim();const p=document.getElementById('pass').value;"
     "if(!s)return;await post('/api/wifi/connect?ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p))}"
+    "async function wifiScan(){await post('/api/wifi/scan');for(let i=0;i<8;i++){try{const r=await fetch('/api/wifi/scan');const j=await r.json();"
+    "if(j.status==='ready'){updateWifiList(j.results||[]);return;}if(j.status==='fail'){return;} }catch(e){} await new Promise(r=>setTimeout(r,800));}}"
+    "function updateWifiList(list){const sel=document.getElementById('ssid_list');if(!sel)return;sel.innerHTML='';const empty=document.createElement('option');"
+    "empty.value='';empty.textContent='Reseaux disponibles...';sel.appendChild(empty);"
+    "list.forEach(n=>{const opt=document.createElement('option');opt.value=n.ssid;opt.textContent=n.ssid+' ('+n.rssi+' dBm)'+(n.secure?' *':'');sel.appendChild(opt);});}"
     "async function refresh(){try{const r=await fetch('/api/status');const j=await r.json();"
     "document.getElementById('headline').textContent=(j.player?.playing?'LECTURE':'PAUSE')+' | '+(j.player?.track||'-')+'/'+(j.player?.tracks||'-')+' | '+(j.radio?.state||'-');"
     "document.getElementById('wifi_mode').textContent=j.wifi?.mode||'-';document.getElementById('wifi_ip').textContent=j.wifi?.ip||'-';"
@@ -180,7 +215,12 @@ void WebUiService::setStoryContext(StoryControllerV2* story, StoryFsManager* fsM
   storyFs_ = fsManager;
 }
 
+void WebUiService::setRuntime(RadioRuntime* runtime) {
+  runtime_ = runtime;
+}
+
 void WebUiService::update(uint32_t nowMs) {
+  updateCaptivePortal(nowMs);
   if (ws_ != nullptr) {
     ws_->cleanupClients();
   }
@@ -257,6 +297,40 @@ void WebUiService::update(uint32_t nowMs) {
   }
 }
 
+void WebUiService::updateCaptivePortal(uint32_t nowMs) {
+  if (wifi_ == nullptr) {
+    return;
+  }
+  if (static_cast<int32_t>(nowMs - lastCaptiveCheckMs_) < 250) {
+    if (captiveActive_ && dns_ != nullptr) {
+      dns_->processNextRequest();
+    }
+    return;
+  }
+  lastCaptiveCheckMs_ = nowMs;
+
+  const bool apEnabled = wifi_->isApEnabled();
+  if (apEnabled && !captiveActive_) {
+    if (dns_ == nullptr) {
+      dns_ = new DNSServer();
+    }
+    if (dns_ != nullptr) {
+      dns_->start(53, "*", WiFi.softAPIP());
+      captiveActive_ = true;
+    }
+  } else if (!apEnabled && captiveActive_) {
+    if (dns_ != nullptr) {
+      dns_->stop();
+    }
+    captiveActive_ = false;
+  }
+
+  if (captiveActive_ && dns_ != nullptr) {
+    dns_->processNextRequest();
+  }
+}
+
+
 WebUiService::Snapshot WebUiService::snapshot() const {
   return snap_;
 }
@@ -277,6 +351,27 @@ void WebUiService::setupRoutes() {
     return;
   }
 
+  auto redirectToRoot = [this](AsyncWebServerRequest* request) {
+    if (request == nullptr) {
+      return;
+    }
+    if (!checkAuth(request)) {
+      return;
+    }
+    setRoute("/captive");
+    ++snap_.requestCount;
+    request->redirect("/");
+  };
+
+  server_->on("/generate_204", HTTP_GET, redirectToRoot);
+  server_->on("/gen_204", HTTP_GET, redirectToRoot);
+  server_->on("/hotspot-detect.html", HTTP_GET, redirectToRoot);
+  server_->on("/library/test/success.html", HTTP_GET, redirectToRoot);
+  server_->on("/ncsi.txt", HTTP_GET, redirectToRoot);
+  server_->on("/connecttest.txt", HTTP_GET, redirectToRoot);
+  server_->on("/redirect", HTTP_GET, redirectToRoot);
+  server_->on("/fwlink", HTTP_GET, redirectToRoot);
+
   server_->on("/", HTTP_GET, [this](AsyncWebServerRequest* request) {
     if (!checkAuth(request)) {
       return;
@@ -293,6 +388,15 @@ void WebUiService::setupRoutes() {
     setRoute("/api/status");
     ++snap_.requestCount;
     sendJsonStatus(request);
+  });
+
+  server_->on("/api/rtos", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    if (!checkAuth(request)) {
+      return;
+    }
+    setRoute("/api/rtos");
+    ++snap_.requestCount;
+    sendJsonRtos(request);
   });
 
   server_->on("/api/player", HTTP_GET, [this](AsyncWebServerRequest* request) {
@@ -422,6 +526,43 @@ void WebUiService::setupRoutes() {
     setRoute("/api/wifi");
     ++snap_.requestCount;
     sendJsonWifi(request);
+  });
+
+  server_->on("/api/wifi/scan", HTTP_POST, [this](AsyncWebServerRequest* request) {
+    if (!checkAuth(request)) {
+      return;
+    }
+    setRoute("/api/wifi/scan");
+    ++snap_.requestCount;
+    if (wifi_ == nullptr) {
+      request->send(503, "application/json", "{\"error\":\"wifi_unavailable\"}");
+      return;
+    }
+    const bool ok = wifi_->requestScan("web_wifi_scan");
+    request->send(ok ? 200 : 409, "application/json", ok ? "{\"ok\":true}" : "{\"error\":\"scan_busy\"}");
+  });
+
+  server_->on("/api/wifi/scan", HTTP_GET, [this](AsyncWebServerRequest* request) {
+    if (!checkAuth(request)) {
+      return;
+    }
+    setRoute("/api/wifi/scan");
+    ++snap_.requestCount;
+    if (wifi_ == nullptr) {
+      request->send(503, "application/json", "{\"error\":\"wifi_unavailable\"}");
+      return;
+    }
+    const WifiService::ScanStatus status = wifi_->scanStatus();
+    if (status == WifiService::ScanStatus::Scanning) {
+      request->send(200, "application/json", "{\"status\":\"scanning\",\"count\":0,\"results\":[]}");
+      return;
+    }
+    if (status == WifiService::ScanStatus::Ready || status == WifiService::ScanStatus::Failed) {
+      const String& payload = wifi_->scanJson();
+      request->send(200, "application/json", payload.length() > 0U ? payload : "{\"status\":\"idle\",\"count\":0,\"results\":[]}");
+      return;
+    }
+    request->send(200, "application/json", "{\"status\":\"idle\",\"count\":0,\"results\":[]}");
   });
 
   server_->on("/api/wifi/connect", HTTP_POST, [this](AsyncWebServerRequest* request) {
@@ -621,11 +762,17 @@ void WebUiService::setupRoutes() {
   });
 
   server_->onNotFound([this](AsyncWebServerRequest* request) {
-    if (request != nullptr && request->method() == HTTP_OPTIONS) {
+    if (request == nullptr) {
+      return;
+    }
+    if (!checkAuth(request)) {
+      return;
+    }
+    if (request->method() == HTTP_OPTIONS) {
       handleOptions(request);
       return;
     }
-    if (request != nullptr && request->method() == HTTP_POST) {
+    if (request->method() == HTTP_POST) {
       const String url = request->url();
       if (url.startsWith("/api/story/select/")) {
         setRoute("/api/story/select");
@@ -634,7 +781,13 @@ void WebUiService::setupRoutes() {
         return;
       }
     }
-    setRoute("404");
+    if (wifi_ != nullptr && wifi_->isApEnabled()) {
+      setRoute("/captive");
+      ++snap_.requestCount;
+      request->redirect("/");
+      return;
+    }
+    setRoute("/404");
     ++snap_.requestCount;
     sendError(request, 404, "Not found", "Route not found");
   });
@@ -646,6 +799,8 @@ void WebUiService::sendJsonStatus(AsyncWebServerRequest* request) {
   }
 
   String json = "{";
+  bool hasSection = false;
+
   if (wifi_ != nullptr) {
     const WifiService::Snapshot w = wifi_->snapshot();
     json += "\"wifi\":{";
@@ -655,10 +810,19 @@ void WebUiService::sendJsonStatus(AsyncWebServerRequest* request) {
     json += "\"mode\":\"" + String(w.mode) + "\",";
     json += "\"ssid\":\"" + String(w.ssid) + "\",";
     json += "\"ip\":\"" + String(w.ip) + "\",";
-    json += "\"rssi\":" + String(w.rssi) + "},";
+    json += "\"rssi\":" + String(w.rssi) + ",";
+    json += "\"disconnect_reason\":" + String(w.disconnectReason) + ",";
+    json += "\"disconnect_label\":\"" + String(w.disconnectLabel) + "\",";
+    json += "\"disconnect_count\":" + String(w.disconnectCount) + ",";
+    json += "\"last_disconnect_ms\":" + String(w.lastDisconnectMs) + "}";
+    hasSection = true;
   }
+
   if (radio_ != nullptr) {
     const RadioService::Snapshot r = radio_->snapshot();
+    if (hasSection) {
+      json += ",";
+    }
     json += "\"radio\":{";
     json += "\"active\":" + String(r.active ? "true" : "false") + ",";
     json += "\"id\":" + String(r.activeStationId) + ",";
@@ -667,9 +831,14 @@ void WebUiService::sendJsonStatus(AsyncWebServerRequest* request) {
     json += "\"title\":\"" + String(r.title) + "\",";
     json += "\"codec\":\"" + String(r.codec) + "\",";
     json += "\"bitrate\":" + String(r.bitrateKbps) + ",";
-    json += "\"buffer\":" + String(r.bufferPercent) + "},";
+    json += "\"buffer\":" + String(r.bufferPercent) + "}";
+    hasSection = true;
   }
+
   if (mp3_ != nullptr) {
+    if (hasSection) {
+      json += ",";
+    }
     json += "\"player\":{";
     json += "\"playing\":" + String(mp3_->isPlaying() ? "true" : "false") + ",";
     json += "\"paused\":" + String(mp3_->isPaused() ? "true" : "false") + ",";
@@ -678,14 +847,21 @@ void WebUiService::sendJsonStatus(AsyncWebServerRequest* request) {
     json += "\"volume\":" + String(mp3_->volumePercent()) + ",";
     json += "\"backend\":\"" + String(mp3_->activeBackendLabel()) + "\",";
     json += "\"scan\":\"" + String(mp3_->scanStateLabel()) + "\"}";
-  } else {
-    if (json.endsWith(",")) {
-      json.remove(json.length() - 1);
-    }
+    hasSection = true;
   }
-  if (json.endsWith(",")) {
-    json.remove(json.length() - 1);
+
+  const RtosSnapshot rtos = buildRtosSnapshot();
+  if (hasSection) {
+    json += ",";
   }
+  json += "\"rtos\":{";
+  json += "\"tasks\":" + String(rtos.taskCount) + ",";
+  json += "\"heap_free\":" + String(rtos.heapFree) + ",";
+  json += "\"heap_min\":" + String(rtos.heapMin) + ",";
+  json += "\"heap_size\":" + String(rtos.heapSize) + ",";
+  json += "\"stack_min_words\":" + String(rtos.stackMinWords) + ",";
+  json += "\"stack_min_bytes\":" + String(rtos.stackMinBytes) + "}";
+
   json += "}";
   request->send(200, "application/json", json);
 }
@@ -768,8 +944,48 @@ void WebUiService::sendJsonWifi(AsyncWebServerRequest* request) {
   json += "\"ip\":\"" + String(w.ip) + "\",";
   json += "\"rssi\":" + String(w.rssi) + ",";
   json += "\"scan_count\":" + String(w.scanCount) + ",";
+  json += "\"disconnect_reason\":" + String(w.disconnectReason) + ",";
+  json += "\"disconnect_label\":\"" + String(w.disconnectLabel) + "\",";
+  json += "\"disconnect_count\":" + String(w.disconnectCount) + ",";
+  json += "\"last_disconnect_ms\":" + String(w.lastDisconnectMs) + ",";
   json += "\"err\":\"" + String(w.lastError) + "\"}";
   request->send(200, "application/json", json);
+}
+
+void WebUiService::sendJsonRtos(AsyncWebServerRequest* request) {
+  if (request == nullptr) {
+    return;
+  }
+  const RtosSnapshot snap = buildRtosSnapshot();
+  StaticJsonDocument<768> doc;
+  doc["tasks"] = snap.taskCount;
+  doc["heap_free"] = snap.heapFree;
+  doc["heap_min"] = snap.heapMin;
+  doc["heap_size"] = snap.heapSize;
+  doc["stack_min_words"] = snap.stackMinWords;
+  doc["stack_min_bytes"] = snap.stackMinBytes;
+  if (runtime_ != nullptr) {
+    doc["runtime_enabled"] = runtime_->enabled();
+    RadioRuntime::TaskSnapshot tasks[6] = {};
+    const size_t count = runtime_->taskSnapshots(tasks, sizeof(tasks) / sizeof(tasks[0]));
+    JsonArray list = doc.createNestedArray("task_list");
+    for (size_t i = 0U; i < count; ++i) {
+      const RadioRuntime::TaskSnapshot& task = tasks[i];
+      if (task.name == nullptr) {
+        continue;
+      }
+      JsonObject entry = list.createNestedObject();
+      entry["name"] = task.name;
+      entry["core"] = task.core;
+      entry["stack_min_words"] = task.stackMinWords;
+      entry["stack_min_bytes"] = task.stackMinBytes;
+      entry["ticks"] = task.ticks;
+      entry["last_tick_ms"] = task.lastTickMs;
+    }
+  }
+  String json;
+  serializeJson(doc, json);
+  sendJson(request, 200, json);
 }
 
 void WebUiService::setRoute(const char* route) {

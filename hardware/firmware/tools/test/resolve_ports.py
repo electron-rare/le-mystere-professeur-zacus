@@ -225,8 +225,11 @@ def build_manual_assignments(args, snapshot):
     overrides = {}
     details = {}
     notes = []
-    for role, attr, env in (("esp32", "port_esp32", "ZACUS_PORT_ESP32"),
-                             ("esp8266", "port_esp8266", "ZACUS_PORT_ESP8266")):
+    for role, attr, env in (
+        ("esp32", "port_esp32", "ZACUS_PORT_ESP32"),
+        ("esp8266", "port_esp8266", "ZACUS_PORT_ESP8266"),
+        ("rp2040", "port_rp2040", "ZACUS_PORT_RP2040"),
+    ):
         port_value = getattr(args, attr)
         if not port_value:
             port_value = os.environ.get(env)
@@ -266,6 +269,8 @@ def resolve_ports(args):
         required_roles.add("esp32")
     if args.need_esp8266:
         required_roles.add("esp8266")
+    if args.need_rp2040:
+        required_roles.add("rp2040")
     if args.auto_ports and not required_roles:
         required_roles = {"esp32", "esp8266"}
 
@@ -301,13 +306,14 @@ def resolve_ports(args):
         status = "skip" if args.allow_no_hardware else "fail"
 
     details_payload = {}
-    for role in ("esp32", "esp8266"):
+    for role in ("esp32", "esp8266", "rp2040"):
         info = best_details.get(role, {"location": "", "reason": ""})
         details_payload[role] = {"location": info.get("location", ""), "reason": info.get("reason", "")}
 
     ports_payload = {
         "esp32": best_found.get("esp32", ""),
         "esp8266": best_found.get("esp8266", ""),
+        "rp2040": best_found.get("rp2040", ""),
     }
 
     if ports_payload["esp32"] and ports_payload["esp8266"]:
@@ -330,14 +336,16 @@ def resolve_ports(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Resolve Zacus ESP32/ESP8266 serial ports")
+    parser = argparse.ArgumentParser(description="Resolve Zacus ESP32/ESP8266/RP2040 serial ports")
     parser.add_argument("--wait-port", type=int, default=3, help="seconds to wait for ports")
     parser.add_argument("--auto-ports", action="store_true", help="scan automatically for ports")
     parser.add_argument("--need-esp32", action="store_true", help="require ESP32 port")
     parser.add_argument("--need-esp8266", action="store_true", help="require ESP8266 port")
+    parser.add_argument("--need-rp2040", action="store_true", help="require RP2040 port")
     parser.add_argument("--allow-no-hardware", action="store_true", help="return skip when hardware missing")
     parser.add_argument("--port-esp32", help="explicit ESP32 port")
     parser.add_argument("--port-esp8266", help="explicit ESP8266 port")
+    parser.add_argument("--port-rp2040", help="explicit RP2040 port")
     parser.add_argument("--ports-resolve-json", help="write JSON output to this path")
     args = parser.parse_args()
 

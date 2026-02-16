@@ -82,8 +82,8 @@ Voir `../docs/protocols/PROTOCOL.md` et `../docs/protocols/UI_SPEC.md`
 - Mini apps STORY V2: `src/story/apps/*`
 - Scenarios/ressources V2: `src/story/scenarios/*`, `src/story/resources/*`, `src/story/core/scenario_def.h`
 - Code STORY genere: `src/story/generated/*`
-- Specs STORY auteur: `story_specs/schema/*`, `story_specs/templates/*`, `story_specs/scenarios/*`
-- Prompts auteurs STORY: `story_specs/prompts/*`
+- Specs STORY auteur: `../docs/protocols/story_specs/schema/*`, `../docs/protocols/story_specs/templates/*`, `../docs/protocols/story_specs/scenarios/*`
+- Prompts auteurs STORY: `../docs/protocols/story_specs/prompts/*`
 - Generateur STORY: `tools/story_gen/story_gen.py`
 - Guide scenario STORY: `src/story/README.md`
 - Guide rapide auteur scenario V2: `GENERER_UN_SCENARIO_STORY_V2.md`
@@ -212,7 +212,7 @@ Workflow auteur STORY V2:
 - `pio run -e esp32dev` (profil dev, Story V2 ON)
 - `pio run -e esp32_release` (profil release, Story V2 OFF)
 
-Un nouveau scenario est ajoute via `story_specs/scenarios/*.yaml`, puis generation C++ dans `src/story/generated/*`.
+Un nouveau scenario est ajoute via `../docs/protocols/story_specs/scenarios/*.yaml`, puis generation C++ dans `src/story/generated/*`.
 
 Scenarios compilés actuels (selection runtime):
 

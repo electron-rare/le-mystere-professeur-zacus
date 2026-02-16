@@ -197,7 +197,6 @@ bool parseStatFrame(const UiLinkFrame& frame, TelemetryState* out, uint32_t nowM
     } else if (strcmp(modeField->value, "STORY") == 0) {
       out->mp3Mode = false;
       out->uSonFunctional = true;
-      out->appStage = kAppStageUSonFunctional;
     } else {
       out->mp3Mode = false;
     }

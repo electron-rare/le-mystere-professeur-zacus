@@ -893,12 +893,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     validate_p = sub.add_parser("validate", help="validate YAML scenarios")
-    validate_p.add_argument("--spec-dir", default="story_specs/scenarios")
+    validate_p.add_argument("--spec-dir", default="../docs/protocols/story_specs/scenarios")
     validate_p.add_argument("--strict", action="store_true", help="reject unknown fields")
     validate_p.set_defaults(func=cmd_validate)
 
     generate_p = sub.add_parser("generate", help="generate C++ from YAML scenarios")
-    generate_p.add_argument("--spec-dir", default="story_specs/scenarios")
+    generate_p.add_argument("--spec-dir", default="../docs/protocols/story_specs/scenarios")
     generate_p.add_argument("--out-dir", default="src/story/generated")
     generate_p.add_argument("--strict", action="store_true", help="validate in strict mode before generate")
     generate_p.set_defaults(func=cmd_generate)

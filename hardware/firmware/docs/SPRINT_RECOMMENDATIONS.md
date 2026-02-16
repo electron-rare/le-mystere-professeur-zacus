@@ -83,7 +83,7 @@ git push origin v0.9.0-beta
 
 ### #3 - Tests hardware end-to-end
 
-**Raison :** Valider story flow complet ETAPE1 → unlock → ETAPE2
+**Raison :** Valider story flow complet UNLOCK -> WIN -> WAIT_ETAPE2 -> ETAPE2 -> DONE
 
 **Scénarios à tester :**
 

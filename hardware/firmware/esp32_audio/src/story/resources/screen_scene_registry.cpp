@@ -6,8 +6,12 @@ namespace {
 
 constexpr ScreenSceneDef kScenes[] = {
     {"SCENE_LOCKED", 0U, 0U},
+  {"SCENE_BROKEN", 0U, 0U},
+    {"SCENE_INFO", 0U, 0U},
     {"SCENE_SEARCH", 1U, 1U},
-    {"SCENE_REWARD", 1U, 1U},
+  {"SCENE_LA_DETECT", 1U, 1U},
+    {"SCENE_REWARD", 1U, 2U},
+  {"SCENE_WIN", 1U, 2U},
     {"SCENE_READY", 2U, 2U},
 };
 

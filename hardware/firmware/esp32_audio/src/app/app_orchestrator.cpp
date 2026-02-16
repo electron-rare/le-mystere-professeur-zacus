@@ -3309,6 +3309,15 @@ void app_orchestrator::loop() {
       continue;
     }
 
+    if (!g_bootAudioProtocol.active && !g_keySelfTest.active && isStoryV2Enabled()) {
+      if (storyV2Controller().postSerialEvent("BTN_NEXT", nowMs, "ui_key")) {
+        nowMs = millis();
+        screenKey = static_cast<uint8_t>(inputEvent.code);
+        screenKeyUntilMs = nowMs + 1200;
+        continue;
+      }
+    }
+
     if (g_bootAudioProtocol.active) {
       bootProtocolController().onKey(static_cast<uint8_t>(inputEvent.code), nowMs);
     } else if (g_keySelfTest.active) {

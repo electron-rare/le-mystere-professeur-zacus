@@ -51,6 +51,8 @@ Any new `HELLO` from UI at runtime must force immediate `ACK` + `KEYFRAME` resyn
 
 Required fields:
 - `proto=2`
+
+Recommended fields:
 - `ui_type=OLED|TFT`
 - `ui_id=<stable-id>`
 - `fw=<firmware-version>`
@@ -123,8 +125,10 @@ These fields are shared by `STAT` and `KEYFRAME` (subset allowed in `STAT`, full
 - `vol` 0..100
 - `tune_off` -8..8
 - `tune_conf` 0..100
-- `ulock_listen` 0/1
+- `u_lock_listen` 0/1
 - `hold` 0..100
+- `startup` 0..1 (0=inactive, 1=boot_validation)
+- `app` 0..3 (0=ulock_wait, 1=ulock_listen, 2=uson, 3=mp3)
 - `ui_page`
 - `ui_cursor`, `ui_offset`, `ui_count`
 - `queue`

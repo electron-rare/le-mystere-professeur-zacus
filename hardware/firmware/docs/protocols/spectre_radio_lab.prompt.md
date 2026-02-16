@@ -1,2 +1,5 @@
 # Exemple de prompt STORY V2
-# (Déplacé depuis esp32_audio/story_specs/prompts/spectre_radio_lab.prompt.md)
+
+Ce prompt est desormais maintenu ici:
+
+- `docs/protocols/story_specs/prompts/spectre_radio_lab.prompt.md`

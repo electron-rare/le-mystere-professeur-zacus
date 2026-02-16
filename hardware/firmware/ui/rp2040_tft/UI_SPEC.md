@@ -1,5 +1,8 @@
 # UI Spec — 480x320 Touch
 
+Status: planned / design target. Current RP2040 firmware exposes a minimal link status view
+and BTN-only input via UI Link v2.
+
 ## Pages
 
 ## 1) `LECTURE`

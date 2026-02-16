@@ -32,10 +32,10 @@ help:
 build: build-esp32 build-screen
 
 story-validate:
-	python3 tools/story_gen/story_gen.py validate --strict --spec-dir story_specs/scenarios
+	python3 tools/story_gen/story_gen.py validate --strict --spec-dir ../docs/protocols/story_specs/scenarios
 
 story-gen: story-validate
-	python3 tools/story_gen/story_gen.py generate --strict --spec-dir story_specs/scenarios --out-dir src/story/generated
+	python3 tools/story_gen/story_gen.py generate --strict --spec-dir ../docs/protocols/story_specs/scenarios --out-dir src/story/generated
 
 qa-story-v2:
 	bash tools/qa/story_v2_ci.sh

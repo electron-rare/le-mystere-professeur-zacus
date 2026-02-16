@@ -5,6 +5,7 @@
 namespace {
 
 constexpr StoryAudioPackDef kAudioPacks[] = {
+    {"PACK_BOOT_RADIO", "BOOT_RADIO", AudioEffectId::kFmSweep, 8000U, 3000U, 0.22f, true},
     {"PACK_WIN", "WIN", AudioEffectId::kWin, 6000U, 1800U, 0.22f, true},
     {"PACK_ETAPE2", "ETAPE_2", AudioEffectId::kWin, 6000U, 1800U, 0.22f, true},
     {"PACK_SONAR_HINT", "SONAR", AudioEffectId::kSonar, 5000U, 2400U, 0.24f, true},

@@ -1,4 +1,9 @@
-# UART Protocol (JSON Lines)
+# UART Protocol (Deprecated)
+
+This document is legacy. The RP2040 firmware uses UI Link v2.
+See: `protocol/ui_link_v2.md`.
+
+---
 
 Transport: UART, UTF-8, 1 JSON object per line (`\n`).
 

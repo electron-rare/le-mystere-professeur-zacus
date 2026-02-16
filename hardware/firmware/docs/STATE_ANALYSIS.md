@@ -566,7 +566,7 @@ None detected.
    - Tag `v0.9.0-beta` après merge
 
 3. **[ ] Tests hardware complets pré-production**
-   - Scénario end-to-end ETAPE1 → unlock → ETAPE2
+   - Scenario end-to-end UNLOCK -> WIN -> WAIT_ETAPE2 -> ETAPE2 -> DONE
    - Test disconnection UI (câble débranché) → reconnection
    - Test SD corrupt / missing → fallback FX
    - Test long run (4h story session) → memory leaks?
@@ -700,7 +700,7 @@ pio run -t upload -e esp8266_oled --upload-port /dev/cu.SLAB_USBtoUART3
 **Docs :**
 - [Quickstart](QUICKSTART.md) : Getting started dev
 - [Architecture UML](ARCHITECTURE_UML.md) : Diagrammes classes/séquence
-- [Story Engine Protocol](protocols/PROTOCOL.md) : Format scénarios YAML
+- [Story Spec](protocols/story_specs/schema/story_spec_v1.yaml) : Format scenarios YAML (StorySpec)
 - [UI Link v2](../protocol/ui_link_v2.md) : Spéc protocole UART
 
 **Tools :**

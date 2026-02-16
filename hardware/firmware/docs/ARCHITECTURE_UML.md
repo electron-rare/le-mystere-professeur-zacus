@@ -4,6 +4,8 @@ Date: 15 février 2026
 Branche: `hardware/firmware`  
 Version: v1.0.0-draft
 
+NOTE: A more readable, split UML documentation lives in docs/uml/INDEX.md.
+
 ## Vue d'ensemble système
 
 Le firmware suit une **architecture multi-MCU** avec 3 firmwares indépendants communiquant via protocole UART :
@@ -248,70 +250,104 @@ Le firmware suit une **architecture multi-MCU** avec 3 firmwares indépendants c
 │  │ + postEvent(event): bool                                 │  │
 │  │ + jumpToStep(stepId, reason, nowMs): bool               │  │
 │  │ + snapshot(): StorySnapshot                              │  │
+│  │ + scenario(): const ScenarioDef*                         │  │
+│  │ + currentStep(): const StepDef*                          │  │
 │  │ + consumeStepChanged(): bool                             │  │
+│  │ + lastError(): const char*                               │  │
+│  │ + droppedEvents(): uint32_t                              │  │
 │  ├──────────────────────────────────────────────────────────┤ │
 │  │ - scenario_: const ScenarioDef*                          │  │
 │  │ - queue_: StoryEventQueue                                │  │
 │  │ - currentStepIndex_: uint8_t                             │  │
+│  │ - previousStepIndex_: uint8_t                            │  │
 │  │ - running_: bool                                         │  │
 │  │ - stepChanged_: bool                                     │  │
 │  │ - enteredAtMs_: uint32_t                                 │  │
+│  │ - lastError_[32]: char                                   │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │                        uses ↓                                  │
 │  ┌─────────────────────────────────────────────────────────┐  │
 │  │ ScenarioDef                                              │  │
 │  ├──────────────────────────────────────────────────────────┤ │
 │  │ + id: const char*                                        │  │
+│  │ + version: uint16_t                                      │  │
 │  │ + steps: StepDef[] (tableau de steps)                   │  │
 │  │ + stepCount: uint8_t                                     │  │
-│  │ + initialStep: const char*                               │  │
+│  │ + initialStepId: const char*                             │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │                        uses ↓                                  │
 │  ┌─────────────────────────────────────────────────────────┐  │
 │  │ StepDef                                                  │  │
 │  ├──────────────────────────────────────────────────────────┤ │
 │  │ + id: const char*                                        │  │
-│  │ + onEnter: StoryActionDef[] (actions à l'entrée)        │  │
-│  │ + onExit: StoryActionDef[] (actions à la sortie)        │  │
+│  │ + resources: ResourceBindings                            │  │
 │  │ + transitions: TransitionDef[] (event→next step)        │  │
-│  │ + implicitTransitions: ImplicitTransitionDef[]           │  │
-│  │   (timeout/condition→next)                               │  │
+│  │ + transitionCount: uint8_t                               │  │
+│  │ + mp3GateOpen: bool                                      │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │                        uses ↓                                  │
 │  ┌─────────────────────────────────────────────────────────┐  │
-│  │ StoryActionDef                                           │  │
+│  │ ResourceBindings                                         │  │
 │  ├──────────────────────────────────────────────────────────┤ │
-│  │ + type: ActionType (AUDIO_BASE/OVERLAY/SCREEN/FLAG...)  │  │
-│  │ + params: const char* (ex: "token=WIN, gain=0.8")       │  │
+│  │ + screenSceneId: const char*                             │  │
+│  │ + audioPackId: const char*                               │  │
+│  │ + actionIds: const char* const*                          │  │
+│  │ + actionCount: uint8_t                                   │  │
+│  │ + appIds: const char* const*                             │  │
+│  │ + appCount: uint8_t                                      │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                        uses ↓                                  │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │ TransitionDef                                             │  │
+│  ├──────────────────────────────────────────────────────────┤ │
+│  │ + id: const char*                                        │  │
+│  │ + trigger: StoryTransitionTrigger                        │  │
+│  │ + eventType: StoryEventType                              │  │
+│  │ + eventName: const char*                                 │  │
+│  │ + afterMs: uint32_t                                      │  │
+│  │ + targetStepId: const char*                              │  │
+│  │ + priority: uint8_t                                      │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────────┐  │
-│  │ StoryEventQueue                                          │  │
+│  │ StoryEvent                                                │  │
+│  ├──────────────────────────────────────────────────────────┤ │
+│  │ + type: StoryEventType                                   │  │
+│  │ + name: char[24]                                         │  │
+│  │ + value: int32_t                                         │  │
+│  │ + atMs: uint32_t                                         │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │ StoryEventQueue                                           │  │
 │  ├──────────────────────────────────────────────────────────┤ │
 │  │ + push(event): bool                                      │  │
-│  │ + pop(): StoryEvent                                      │  │
-│  │ + isEmpty(): bool                                        │  │
-│  │ - events_: StoryEvent[16] (ring buffer)                 │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                 │
-│  ┌─────────────────────────────────────────────────────────┐  │
-│  │ StoryAppHost                                             │  │
+│  │ + pop(outEvent): bool                                    │  │
+│  │ + size(): uint8_t                                        │  │
+│  │ + droppedCount(): uint32_t                               │  │
 │  ├──────────────────────────────────────────────────────────┤ │
-│  │ + registerApp(app): void                                 │  │
-│  │ + onStepChanged(stepId, nowMs): void                     │  │
-│  │ + update(nowMs): void                                    │  │
-│  ├──────────────────────────────────────────────────────────┤ │
-│  │ - apps_: StoryApp*[8]                                    │  │
-│  │ - activeApps_: bitset<8>                                 │  │
+│  │ - data_: StoryEvent[kCapacity=12]                        │  │
+│  │ - head_/tail_/size_: uint8_t                             │  │
+│  │ - dropped_: uint32_t                                     │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │                        uses ↓                                  │
 │  ┌─────────────────────────────────────────────────────────┐  │
-│  │ <<abstract>> StoryApp                                    │  │
+│  │ StoryAppHost                                              │  │
 │  ├──────────────────────────────────────────────────────────┤ │
-│  │ + onStepEnter(stepId, nowMs): void                       │  │
-│  │ + onStepExit(stepId, nowMs): void                        │  │
-│  │ + update(nowMs): void                                    │  │
-│  │ + shouldActivate(stepId): bool                           │  │
+│  │ + begin(context): bool                                   │  │
+│  │ + stopAll(reason): void                                  │  │
+│  │ + startStep(scenario, step, nowMs, source): bool         │  │
+│  │ + update(nowMs, sink): void                              │  │
+│  │ + handleEvent(event, sink): void                         │  │
+│  │ + activeScreenSceneId(): const char*                     │  │
+│  │ + validateScenario(scenario, validation): bool           │  │
+│  │ + lastError(): const char*                               │  │
+│  ├──────────────────────────────────────────────────────────┤ │
+│  │ - activeApps_[6]: StoryApp*                              │  │
+│  │ - laDetectorApp_: LaDetectorApp                          │  │
+│  │ - audioPackApp_: AudioPackApp                            │  │
+│  │ - screenSceneApp_: ScreenSceneApp                        │  │
+│  │ - mp3GateApp_: Mp3GateApp                                │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │                        ↑ extends                               │
 │  ┌──────────────┬──────────────┬──────────────┬──────────┐   │
@@ -322,10 +358,42 @@ Le firmware suit une **architecture multi-MCU** avec 3 firmwares indépendants c
 │  └──────────────┴──────────────┴──────────────┴──────────┘   │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────────┐  │
-│  │ ActionRegistry                                           │  │
+│  │ <<abstract>> StoryApp                                    │  │
 │  ├──────────────────────────────────────────────────────────┤ │
-│  │ + executeAction(action, nowMs, source): void             │  │
-│  │ - actionMap_: map<ActionType, callback>                  │  │
+│  │ + begin(context): bool                                   │  │
+│  │ + start(stepContext): void                               │  │
+│  │ + update(nowMs, sink): void                              │  │
+│  │ + stop(reason): void                                     │  │
+│  │ + handleEvent(event, sink): bool                         │  │
+│  │ + snapshot(): StoryAppSnapshot                           │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │ StoryAppContext                                          │  │
+│  ├──────────────────────────────────────────────────────────┤ │
+│  │ + audioService: AudioService*                            │  │
+│  │ + startRandomTokenBase(): bool                           │  │
+│  │ + startFallbackBaseFx(): bool                            │  │
+│  │ + applyAction(action, nowMs, source): void               │  │
+│  │ + laRuntime: LaDetectorRuntimeService*                   │  │
+│  │ + onUnlockRuntimeApplied(nowMs, source): void            │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │ StoryEventSink                                           │  │
+│  ├──────────────────────────────────────────────────────────┤ │
+│  │ + post(event): bool                                      │  │
+│  │ + emit(type, name, value, atMs): bool                    │  │
+│  │ - postFn: bool (*)(const StoryEvent&, void*)             │  │
+│  │ - user: void*                                            │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │ StoryActionDef                                           │  │
+│  ├──────────────────────────────────────────────────────────┤ │
+│  │ + id: const char*                                        │  │
+│  │ + type: StoryActionType (TRACE/QUEUE_SONAR/REFRESH_SD)   │  │
+│  │ + value: int32_t                                         │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │                                                                 │
 └───────────────────────────────────────────────────────────────┘
@@ -858,7 +926,7 @@ ESP32             ESP8266_OLED
 - Activation conditionnelle par step ID pattern matching
 
 ### 7. Runtime modes flexibles
-- **STORY_V2** : Mode quête (ETAPE1 → unlock → ETAPE2 → MP3 libre)
+- **STORY_V2** : Mode quete (UNLOCK -> WIN -> WAIT_ETAPE2 -> ETAPE2 -> DONE)
 - **MP3_PLAYER** : Lecteur SD pur (skip story)
 - **RADIO** : Streaming web (skip story + MP3)
 - Sélection boot via config.h flags

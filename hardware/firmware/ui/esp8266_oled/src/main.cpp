@@ -727,7 +727,7 @@ void renderULockDetectScreen() {
 }
 
 void renderULockScreen(uint32_t nowMs) {
-  if (!g_state.uLockListening) {
+  if (g_state.appStage != screen_core::kAppStageULockListening) {
     renderULockWaitingScreen(nowMs);
     return;
   }

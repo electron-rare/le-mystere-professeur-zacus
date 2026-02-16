@@ -28,6 +28,21 @@ Transport UART actif:
 - Action `APPLY`.
 - Actions: `UP`, `DOWN`, `APPLY`, `BACK`, `MODE`.
 
+## Story scenes (Story V2)
+
+Ces IDs sont utilises par le moteur Story V2 pour piloter l'UI. Ils sont mappes sur les pages ci-dessus.
+
+| Scene ID | Page UI | Usage Story |
+|---|---|---|
+| `SCENE_LOCKED` | `LECTURE` | Etat verrouille / attente |
+| `SCENE_BROKEN` | `LECTURE` | Variante boot / proto U-SON |
+| `SCENE_INFO` | `LECTURE` | Infos generiques |
+| `SCENE_SEARCH` | `LISTE` | Recherche / detection |
+| `SCENE_LA_DETECT` | `LISTE` | Attente LA / detection |
+| `SCENE_REWARD` | `REGLAGES` | Recompense |
+| `SCENE_WIN` | `REGLAGES` | Variante win |
+| `SCENE_READY` | `REGLAGES` | Etat pret / fin |
+
 ## Gestes et interactions
 - Swipe horizontal: `next/prev`.
 - Swipe vertical: `vol_delta`.

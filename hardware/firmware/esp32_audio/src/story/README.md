@@ -4,21 +4,21 @@
 
 Permettre d'ajouter/modifier un scenario STORY sans toucher au moteur C++:
 
-1. ecrire un fichier `story_specs/scenarios/*.yaml`
+1. ecrire un fichier `../docs/protocols/story_specs/scenarios/*.yaml`
 2. valider le spec
 3. generer le code C++
 4. compiler/flasher
 
 Le flux par defaut migre est:
 
-`UNLOCK -> WIN -> WAIT_ETAPE2 -> ETAPE2 -> DONE`
+`UNLOCK -> U_SON_PROTO -> WAIT_ETAPE2 -> ETAPE2 -> DONE`
 
 ## Source de verite
 
-- schema logique: `story_specs/schema/story_spec_v1.yaml`
-- template auteur: `story_specs/templates/scenario.template.yaml`
-- scenario migre PR1: `story_specs/scenarios/default_unlock_win_etape2.yaml`
-- scenario additionnel RC2: `story_specs/scenarios/spectre_radio_lab.yaml`
+- schema logique: `../docs/protocols/story_specs/schema/story_spec_v1.yaml`
+- template auteur: `../docs/protocols/story_specs/templates/scenario.template.yaml`
+- scenario migre PR1: `../docs/protocols/story_specs/scenarios/default_unlock_win_etape2.yaml`
+- scenario additionnel RC2: `../docs/protocols/story_specs/scenarios/spectre_radio_lab.yaml`
 
 Le runtime V2 charge uniquement le code genere:
 
@@ -120,9 +120,9 @@ Compat legacy conservee pendant PR1 via feature flag:
 
 ## Creation d'un nouveau scenario
 
-1. copier `story_specs/templates/scenario.template.yaml`
+1. copier `../docs/protocols/story_specs/templates/scenario.template.yaml`
 2. renseigner steps/transitions/apps
-3. optionnel: creer le prompt auteur associe dans `story_specs/prompts/*.prompt.md`
+3. optionnel: creer le prompt auteur associe dans `../docs/protocols/story_specs/prompts/*.prompt.md`
 4. `make story-validate`
 5. `make story-gen`
 6. `make qa-story-v2`

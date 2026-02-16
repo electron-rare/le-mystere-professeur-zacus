@@ -12,11 +12,12 @@ Bienvenue dans la documentation du firmware multi-MCU du projet **Le Mystère du
 
 ### 🏗️ Architecture
 
-- **[Architecture UML](ARCHITECTURE_UML.md)** - Diagrammes de classes, séquence, composants
+- **[UML Index](uml/INDEX.md)** - Documentation UML par blocs (plus lisible)
   - Vue d'ensemble multi-MCU (ESP32 + ESP8266 + RP2040)
-  - Couches Controllers / Services / Story Engine
-  - Protocole UI Link v2
-  - Subsystème audio dual-canal
+  - Story Engine V2, Controllers, Services, Audio
+  - UI Link v2 + UI ESP8266/RP2040
+  - Sequences (boot, story, reconnection)
+- **[UML Legacy (monolithique)](ARCHITECTURE_UML.md)** - Ancienne doc complete
 
 ### 📊 État des lieux
 
@@ -55,6 +56,17 @@ Bienvenue dans la documentation du firmware multi-MCU du projet **Le Mystère du
 hardware/firmware/docs/
 ├── INDEX.md                        # ← Ce fichier (navigation)
 ├── ARCHITECTURE_UML.md             # Architecture complète (diagrammes)
+├── uml/                             # UML decoupe par blocs
+│   ├── INDEX.md
+│   ├── 00_overview.md
+│   ├── 01_story_engine.md
+│   ├── 02_controllers.md
+│   ├── 03_services.md
+│   ├── 04_audio.md
+│   ├── 05_ui_link.md
+│   ├── 06_ui_esp8266.md
+│   ├── 07_ui_rp2040.md
+│   └── 08_sequences.md
 ├── STATE_ANALYSIS.md               # État des lieux détaillé
 ├── SPRINT_RECOMMENDATIONS.md       # Roadmap & actions
 ├── QUICKSTART.md                   # Getting started dev
@@ -63,9 +75,14 @@ hardware/firmware/docs/
 ├── RC_FINAL_REPORT_TEMPLATE.md    # Template rapports
 └── protocols/
     ├── INDEX.md                    # Index protocoles
-    ├── PROTOCOL.md                 # Story Engine V2
-    ├── GENERER_UN_SCENARIO_STORY_V2.md
-    └── scenario.template.yaml
+  ├── README.md                   # Regles d'evolution et validation
+  ├── GENERER_UN_SCENARIO_STORY_V2.md
+  └── story_specs/
+    ├── README.md               # Organisation des specs STORY
+    ├── schema/story_spec_v1.yaml
+    ├── templates/scenario.template.yaml
+    ├── prompts/
+    └── scenarios/
 ```
 
 ---
@@ -76,7 +93,7 @@ hardware/firmware/docs/
 
 1. **[README principal](../README.md)** - Comprendre le contexte projet
 2. **[Quickstart](QUICKSTART.md)** - Setup environnement, premier build
-3. **[Architecture UML](ARCHITECTURE_UML.md)** - Comprendre l'architecture
+3. **[UML Index](uml/INDEX.md)** - Comprendre l'architecture
 4. **[State Analysis](STATE_ANALYSIS.md)** - État actuel du firmware
 
 **Durée estimée :** 1-2h
@@ -84,7 +101,7 @@ hardware/firmware/docs/
 ### Pour un contributeur stories
 
 1. **[Architecture UML](ARCHITECTURE_UML.md)** - Section "Story Engine V2"
-2. **[Protocols: Story Engine](protocols/PROTOCOL.md)** - Format YAML détaillé
+2. **[Protocols: Story Engine](protocols/story_README.md)** - Format YAML détaillé
 3. **[Générer un scénario](protocols/GENERER_UN_SCENARIO_STORY_V2.md)**
 
 **Durée estimée :** 30 min
@@ -92,7 +109,7 @@ hardware/firmware/docs/
 ### Pour un review de code
 
 1. **[State Analysis](STATE_ANALYSIS.md)** - Section "État du code"
-2. **[Architecture UML](ARCHITECTURE_UML.md)** - Diagrammes classes
+2. **[UML Index](uml/INDEX.md)** - Diagrammes classes
 3. **[Sprint Recommendations](SPRINT_RECOMMENDATIONS.md)** - Checklist code review
 
 **Durée estimée :** 20 min
@@ -113,19 +130,19 @@ hardware/firmware/docs/
 
 | Sujet | Document | Section |
 |-------|----------|---------|
-| L'architecture globale | [Architecture UML](ARCHITECTURE_UML.md) | Vue d'ensemble système |
-| Les controllers | [Architecture UML](ARCHITECTURE_UML.md) | Couche Controllers |
-| Les services | [Architecture UML](ARCHITECTURE_UML.md) | Couche Services |
-| Le Story Engine | [Architecture UML](ARCHITECTURE_UML.md) | Story Engine V2 |
-| L'audio dual-canal | [Architecture UML](ARCHITECTURE_UML.md) | Audio Subsystem |
-| Le protocole UI Link | [Architecture UML](ARCHITECTURE_UML.md) | UI Link Protocol |
-| Les UI ESP8266/RP2040 | [Architecture UML](ARCHITECTURE_UML.md) | Architecture UI |
+| L'architecture globale | [UML Index](uml/INDEX.md) | Overview |
+| Les controllers | [UML Index](uml/INDEX.md) | Controllers |
+| Les services | [UML Index](uml/INDEX.md) | Services |
+| Le Story Engine | [UML Index](uml/INDEX.md) | Story Engine |
+| L'audio dual-canal | [UML Index](uml/INDEX.md) | Audio |
+| Le protocole UI Link | [UML Index](uml/INDEX.md) | UI Link |
+| Les UI ESP8266/RP2040 | [UML Index](uml/INDEX.md) | UI |
 | L'état actuel | [State Analysis](STATE_ANALYSIS.md) | Résumé exécutif |
 | Les builds | [State Analysis](STATE_ANALYSIS.md) | État des builds |
 | Les tests | [State Analysis](STATE_ANALYSIS.md) | État des tests |
 | Le hardware | [State Analysis](STATE_ANALYSIS.md) | Port mapping & Hardware |
 | Les prochaines actions | [Sprint Recommendations](SPRINT_RECOMMENDATIONS.md) | Sprint immédiat |
-| Les scénarios YAML | [Protocols: Story](protocols/PROTOCOL.md) | Format scénarios |
+| Les scénarios YAML | [Protocols: Story](protocols/story_README.md) | Format scénarios |
 
 ### Je veux faire...
 
@@ -135,8 +152,8 @@ hardware/firmware/docs/
 | Flasher les devices | [Quickstart](QUICKSTART.md) | Flash procedure |
 | Tester hardware | [State Analysis](STATE_ANALYSIS.md) | Smoke tests |
 | Créer un scénario | [Générer scénario](protocols/GENERER_UN_SCENARIO_STORY_V2.md) | - |
-| Ajouter un service | [Architecture UML](ARCHITECTURE_UML.md) | Évolutivité |
-| Ajouter une UI | [Architecture UML](ARCHITECTURE_UML.md) | Évolutivité |
+| Ajouter un service | [UML Index](uml/INDEX.md) | Services |
+| Ajouter une UI | [UML Index](uml/INDEX.md) | UI |
 | Review un PR | [Sprint Recommendations](SPRINT_RECOMMENDATIONS.md) | Code review checklist |
 | Planifier un sprint | [Sprint Recommendations](SPRINT_RECOMMENDATIONS.md) | Sprint court terme |
 

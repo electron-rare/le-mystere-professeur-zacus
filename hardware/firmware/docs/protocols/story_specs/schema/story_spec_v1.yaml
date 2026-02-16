@@ -1,0 +1,71 @@
+version: 1
+kind: StorySpec
+summary: >
+  Schema logique StorySpec V1. Ce fichier documente le contrat utilise
+  par tools/story_gen/story_gen.py pour valider puis generer le C++.
+
+required:
+  - id
+  - version
+  - initial_step
+  - app_bindings
+  - steps
+
+scenario_fields:
+  id: string
+  version: integer
+  initial_step: string
+  app_bindings:
+    type: list
+    item:
+      required: [id, app]
+      fields:
+        id: string
+        app: enum[LA_DETECTOR, AUDIO_PACK, SCREEN_SCENE, MP3_GATE]
+        config:
+          optional: true
+          when: app=LA_DETECTOR
+          fields:
+            hold_ms: integer (100..60000)
+            unlock_event: string (default=UNLOCK)
+            require_listening: bool (default=true)
+  steps:
+    type: list
+    item:
+      required:
+        - step_id
+        - screen_scene_id
+        - audio_pack_id
+        - apps
+        - transitions
+        - mp3_gate_open
+      fields:
+        step_id: string
+        screen_scene_id: string
+        audio_pack_id: string
+        actions: list[string] (optional)
+        apps: list[string] # IDs references dans app_bindings
+        mp3_gate_open: bool
+        transitions:
+          type: list
+          item:
+            required:
+              - trigger
+              - event_type
+              - event_name
+              - target_step_id
+              - after_ms
+              - priority
+            fields:
+              trigger: enum[on_event, after_ms, immediate]
+              event_type: enum[none, unlock, audio_done, timer, serial, action]
+              event_name: string
+              target_step_id: string
+              after_ms: integer
+              priority: integer (0..255)
+
+notes:
+  - Les IDs sont sensibles a la casse cote C++.
+  - Pour trigger=on_event, event_type doit etre different de none.
+  - Les transitions pointent uniquement vers des steps du meme scenario.
+  - app_bindings[].config est additif et supporte uniquement pour LA_DETECTOR.

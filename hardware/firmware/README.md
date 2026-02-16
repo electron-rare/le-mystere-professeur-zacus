@@ -107,3 +107,5 @@ By default the smoke step exits 0 when no serial hardware is present; use `ZACUS
 Prompt files live under `tools/dev/codex_prompts/*.prompt.md` and are designed to be consumed by the automation-friendly `codex exec` command.
 Run `./tools/dev/codex_prompt_menu.sh` to see a numbered menu, pick a prompt, and send it to `codex exec --sandbox workspace-write --output-last-message artifacts/rc_live/_codex_last_message.md`.
 You can also launch this helper directly from the firmware cockpit (`./tools/dev/cockpit.sh` option 6) so the existing workflow keeps a single entry point.
+
+Story authoring prompts live separately under `docs/protocols/story_specs/prompts/*.prompt.md`. They are not ops prompts, but can still be used with Codex tooling when needed.

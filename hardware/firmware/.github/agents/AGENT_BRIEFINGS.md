@@ -1,8 +1,8 @@
 # Agent Briefings (All Phases)
 
-Version: 1.0  
+Version: 1.1  
 Date: Feb 16, 2026  
-Status: Ready for launch (Phase 1 starts immediately; Phases 2-5 queued)
+Status: Phase 1 complete; Phases 2-5 queued
 
 ---
 
@@ -203,13 +203,25 @@ STORY_FORCE_STEP {step_id}
   → Jumps to step (bypasses transitions, for testing)
   → Logs: "STORY_FORCE_STEP unlock_event" → "STORY_FORCE_STEP_OK"
 
-STORY_TEST_ON
-  → Enables test mode (fast timings, verbose logging)
-  → Logs: "STORY_TEST_MODE: ON"
+STORY_V2_STATUS
+  → Prints Story V2 runtime snapshot
+  → Logs: "[STORY_V2] ..." + "STORY_V2_STATUS_OK"
 
-STORY_TEST_OFF
-  → Disables test mode
-  → Logs: "STORY_TEST_MODE: OFF"
+STORY_V2_ENABLE {STATUS|ON|OFF}
+  → Enables/disables Story V2 controller
+  → Logs: "STORY_V2_ENABLE ..." → "STORY_V2_OK"
+
+STORY_V2_TRACE {STATUS|ON|OFF}
+  → Toggles V2 trace logging
+  → Logs: "STORY_V2_TRACE ..." → "STORY_V2_OK"
+
+STORY_V2_TRACE_LEVEL {OFF|ERR|INFO|DEBUG}
+  → Sets V2 trace verbosity
+  → Logs: "STORY_V2_TRACE_LEVEL ..." → "STORY_V2_OK"
+
+STORY_V2_HEALTH
+  → Prints health summary snapshot
+  → Logs: "[STORY_V2] HEALTH ..." + "STORY_V2_OK"
 
 STORY_FS_LIST {resource_type}
   → Lists resources from /story/ (e.g., "scenarios", "apps", "screens")
@@ -225,7 +237,7 @@ STORY_FS_VALIDATE {resource_type} {resource_id}
 - Story engine: `esp32_audio/src/controllers/story/story_controller_v2.cpp`
 
 **Acceptance Criteria:**
-- ✅ All 7 commands parse correctly from serial input
+- ✅ All listed commands parse correctly from serial input
 - ✅ Commands execute and log results
 - ✅ Error messages are clear (e.g., "STORY_LOAD_SCENARIO DEFAULT: NOT_FOUND")
 - ✅ No blocking operations (all async or fast sync-only)
@@ -248,14 +260,11 @@ STORY_FS_VALIDATE {resource_type} {resource_id}
    ```
 
 2. **Unit tests: StoryFsManager** (C++, `esp32_audio/tests/test_story_fs_manager.cpp`)
-   ```
-   test_init_creates_cache() → init() succeeds
-   test_load_scenario_valid() → loads DEFAULT scenario
-   test_load_scenario_missing() → returns false for unknown id
-   test_get_step_cached() → cached data retrieved correctly
-   test_validate_checksum_ok() → checksum validates
-   test_validate_checksum_corrupted() → detects mismatch
-   ```
+  ```
+  test_init_creates_cache() → init() succeeds
+  test_load_scenario_missing() → returns false for unknown id
+  test_validate_checksum_corrupted() → detects mismatch
+  ```
 
 3. **Integration tests: 4 scenarios** (Serial test loop, `tools/dev/test_story_4scenarios.py`)
    ```
@@ -266,8 +275,9 @@ STORY_FS_VALIDATE {resource_type} {resource_id}
      - Run: STORY_LOAD_SCENARIO {id} → OK
      - Run: STORY_ARM → OK
      - Run: STORY_FORCE_STEP unlock_event → OK
+     - Run: STORY_V2_STATUS → OK
      - Verify step transitions (2 steps each, ~10 sec total per scenario)
-     - Log success to artifacts/test_story_4scenarios_{date}.log
+     - Log success to artifacts/rc_live/test_4scenarios_{date}.log
    ```
 
 **Test data:**
@@ -297,7 +307,7 @@ STORY_FS_VALIDATE {resource_type} {resource_id}
   - Compiles without warnings
   
 - ✅ **Serial commands** functional
-  - All 7 commands parse and execute
+  - All listed commands parse and execute
   - Logging clear and correct
   
 - ✅ **4/4 scenarios pass integration tests**
@@ -357,7 +367,7 @@ If you encounter blockers:
 
 **On completion, provide:**
 1. ✅ Commit hash for all Phase 1 work
-2. ✅ Test results artifact: `artifacts/test_4scenarios_{timestamp}.log`
+2. ✅ Test results artifact: `artifacts/rc_live/test_4scenarios_{timestamp}.log`
 3. ✅ Integration test summary (scenarios passing)
 4. ✅ Line count: story_gen.py (refined), StoryFsManager (.h + .cpp), tests
 
@@ -366,10 +376,10 @@ If you encounter blockers:
 **Phase 1 Complete**
 - ✅ story_gen.py: YAML → JSON conversion working
 - ✅ StoryFsManager: 4/4 scenarios load + arm + transition
-- ✅ Serial commands: all 7 implemented + tested
+- ✅ Serial commands: all listed commands implemented + tested
 - ✅ Integration tests: 4 scenarios passed
 - ✅ Code committed: [commit hash]
-- 📁 Artifacts: artifacts/test_4scenarios_[timestamp].log
+- 📁 Artifacts: artifacts/rc_live/test_4scenarios_[timestamp].log
 - 🎯 Next: Phase 2 unblocked (ESP HTTP API)
 ```
 
@@ -381,7 +391,7 @@ If you encounter blockers:
 
 ## 📌 Briefing: ESP_Agent
 
-**Your mission:** Implement 11 REST API endpoints + WebSocket integration for Story V2 on the ESP32 HTTP server. This phase depends on Phase 1 (StoryFsManager must be working).
+**Your mission:** Implement 12 REST API endpoints + WebSocket integration for Story V2 on the ESP32 HTTP server. This phase depends on Phase 1 (StoryFsManager must be working).
 
 **Prerequisites for this phase:**
 - ✅ Phase 1 complete: storyGen.py + StoryFsManager working
@@ -392,7 +402,7 @@ If you encounter blockers:
 
 ### 📋 Tasks
 
-#### Task 2.1: HTTP Server (Port 8080) — 11 REST Endpoints
+#### Task 2.1: HTTP Server (Port 8080) — 12 REST Endpoints
 
 **What:** Extend ESP32 HTTP server to expose Story V2 resource + control endpoints.
 
@@ -461,6 +471,12 @@ GET /api/story/fs-info
   → Returns /story/ filesystem info
   → Response: {"total_bytes": 1048576, "used_bytes": 512000, "free_bytes": 536576, "scenarios": 4}
   → Status: 200 OK
+
+POST /api/story/serial-command
+  → Runs a Story serial command and returns the response
+  → Body: {"command": "STORY_V2_STATUS"}
+  → Response: {"command": "...", "response": "...", "latency_ms": 45}
+  → Status: 200 OK | 400 Bad Request
 ```
 
 **Implementation notes:**
@@ -476,7 +492,7 @@ GET /api/story/fs-info
 - StoryFsManager: `esp32_audio/src/story/fs/story_fs_manager.h`
 
 **Acceptance Criteria:**
-- ✅ All 11 endpoints implemented and responding
+- ✅ All 12 endpoints implemented and responding
 - ✅ Correct HTTP status codes (200, 404, 409, etc.)
 - ✅ JSON responses valid and schema-compliant
 - ✅ Error messages clear and helpful
@@ -650,7 +666,7 @@ Access-Control-Max-Age: 3600
 
 #### Task 2.5: Testing — cURL + WebSocket Validation
 
-**What:** Write test suite to validate all 11 endpoints + WebSocket stability.
+**What:** Write test suite to validate all 12 endpoints + WebSocket stability.
 
 **Test suite: `esp32_audio/tests/test_story_http_api.sh`**
 
@@ -676,7 +692,7 @@ curl -s -X POST "$ESP_URL/api/story/start" -H "Content-Type: application/json" -
 echo "TEST 4: GET /api/story/status"
 curl -s "$ESP_URL/api/story/status" | jq . || echo "FAIL"
 
-# ... (continue for all 11 endpoints)
+# ... (continue for all 12 endpoints)
 
 # WebSocket test (using wscat)
 echo "TEST 12: WebSocket /api/story/stream (30 sec)"
@@ -684,7 +700,7 @@ timeout 30 wscat -c "ws://192.168.1.100:8080/api/story/stream" --execute 'ping' 
 ```
 
 **Acceptance Criteria:**
-- ✅ All 11 endpoints respond with 2xx or expected 4xx status
+- ✅ All 12 endpoints respond with 2xx or expected 4xx status
 - ✅ JSON responses parse without errors
 - ✅ WebSocket connection stable for 30 seconds
 - ✅ No dropped frames during stress test (100+ rapid requests)
@@ -694,7 +710,7 @@ timeout 30 wscat -c "ws://192.168.1.100:8080/api/story/stream" --execute 'ping' 
 
 ### 📋 Acceptance Criteria (Phase 2 Complete)
 
-- ✅ **11 REST endpoints** implemented and responding
+- ✅ **12 REST endpoints** implemented and responding
   - All respond with correct HTTP status codes
   - JSON responses valid and schema-compliant
   - Error messages clear
@@ -708,7 +724,7 @@ timeout 30 wscat -c "ws://192.168.1.100:8080/api/story/stream" --execute 'ping' 
   - Headers present on all endpoints
   - OPTIONS preflight handled
   
-- ✅ **cURL tests pass** (all 11 endpoints)
+- ✅ **cURL tests pass** (all 12 endpoints)
   - Test script: `esp32_audio/tests/test_story_http_api.sh`
   - Zero failures
   
@@ -745,13 +761,13 @@ If you encounter blockers, escalate to Coordination Hub:
 **On completion, provide:**
 1. ✅ Commit hash for Phase 2 work
 2. ✅ Test results: `esp32_audio/tests/test_story_http_api_{timestamp}.log`
-3. ✅ Endpoint count: confirm all 11 implemented
+3. ✅ Endpoint count: confirm all 12 implemented
 4. ✅ WebSocket stability log: 10 min stream with no drops
 
 **Report to Coordination Hub:**
 ```
 **Phase 2 Complete**
-- ✅ 11 REST endpoints implemented + tested
+- ✅ 12 REST endpoints implemented + tested
 - ✅ WebSocket stable (10+ min stream, no drops)
 - ✅ CORS enabled
 - ✅ cURL test suite passing
@@ -768,12 +784,15 @@ If you encounter blockers, escalate to Coordination Hub:
 
 ## 📌 Briefing: Frontend_Agent
 
-**Your mission:** Build a responsive React/Vue.js WebUI for Story V2 with 3 main components: Scenario Selector, Live Orchestrator, and Story Designer. This phase depends on Phase 2 (REST API + WebSocket endpoints must be stable).
+**Your mission:** Build a responsive React WebUI for Story V2 with 3 main components: Scenario Selector, Live Orchestrator, and Story Designer. This phase depends on Phase 2 (REST API + WebSocket endpoints must be stable).
 
 **Prerequisites for this phase:**
-- ✅ Phase 2 complete: 11 REST endpoints + WebSocket stable
+- ✅ Phase 2 complete: 12 REST endpoints + WebSocket stable
 - ✅ cURL tests passing
 - ✅ API server running on ESP at http://[ESP_IP]:8080
+
+**Implementation note:**
+- Use the existing Vite app under `fronted dev web UI/` (do not re-scaffold).
 
 ---
 
@@ -1195,7 +1214,7 @@ If you encounter blockers:
 **Your mission:** Build comprehensive test suite for Story V2 covering E2E scenarios, smoke tests, and 4-hour stress tests. Integrate with CI (GitHub Actions). This phase depends on Phases 2-3 (API + WebUI stable).
 
 **Prerequisites for this phase:**
-- ✅ Phase 2 complete: 11 REST endpoints + WebSocket stable
+- ✅ Phase 2 complete: 12 REST endpoints + WebSocket stable
 - ✅ Phase 3 complete: WebUI Selector/Orchestrator/Designer functional
 - ✅ Both layers integrated and ready for end-to-end testing
 
@@ -1858,7 +1877,7 @@ If you encounter blockers:
    }
    \`\`\`
    
-   ... (continue for all 11 endpoints)
+  ... (continue for all 12 endpoints)
    
    ## WebSocket
    
@@ -1893,7 +1912,7 @@ If you encounter blockers:
 **Acceptance Criteria:**
 - ✅ User Guide covers authoring, templates, common patterns
 - ✅ Installation Guide covers hardware + firmware + WebUI
-- ✅ API Reference complete (all 11 endpoints + WebSocket)
+- ✅ API Reference complete (all 12 endpoints + WebSocket)
 - ✅ Troubleshooting Guide covers ≥5 common issues
 - ✅ All docs are copy-paste ready (no placeholders)
 - ✅ Docs reviewed by team (spelling + clarity)
@@ -1927,7 +1946,7 @@ If you encounter blockers:
 - ✏️ YAML Story Designer (validate + deploy on-device)
 
 ### API
-- 🔌 REST API (11 endpoints)
+- 🔌 REST API (12 endpoints)
 - 📡 WebSocket real-time updates
 - 🔧 Serial command integration
 
@@ -2310,7 +2329,7 @@ Checksums:
 - ✅ **Documentation** complete
   - User Guide (authoring, templates, patterns)
   - Installation Guide (hardware + firmware + WebUI)
-  - API Reference (11 endpoints + WebSocket)
+  - API Reference (12 endpoints + WebSocket)
   - Troubleshooting Guide (≥5 issues)
   - All reviewed + approved by team
   
@@ -2401,7 +2420,7 @@ Story V2 is now live! 🎉
 | Phase | Agent | Duration | Key Deliverables | Status |
 |-------|-------|----------|------------------|--------|
 | 1 | Backend_Agent | 5 days (Feb 16-20) | story_gen.py + StoryFsManager | ⏳ START |
-| 2 | ESP_Agent | 2 weeks (Feb 21 - Mar 5) | 11 REST endpoints + WebSocket | ⏳ AFTER 1 |
+| 2 | ESP_Agent | 2 weeks (Feb 21 - Mar 5) | 12 REST endpoints + WebSocket | ⏳ AFTER 1 |
 | 3 | Frontend_Agent | 2 weeks (Feb 21 - Mar 9) | WebUI Selector/Orchestrator/Designer | ⏳ PARALLEL 2 |
 | 4 | QA_Agent | 2 weeks (Mar 5-19) | E2E + Smoke + Stress tests + CI | ⏳ AFTER 2-3 |
 | 5 | Release_Agent | 1 week (Mar 16-23) | Docs + RC build + GitHub release | ⏳ AFTER 4 |

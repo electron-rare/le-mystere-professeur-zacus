@@ -42,44 +42,27 @@ latest_artifact_dir() {
   return 1
 }
 
-log() {
-  printf '[zacus] %s\n' "$*"
-}
-
-die() {
-  printf '[zacus] ERROR: %s\n' "$*" >&2
-  exit 1
-}
-
-run_rc_gate() {
-  log "running RC live (strict, auto-wait)"
-  (cd "$REPO_ROOT" && ZACUS_REQUIRE_HW=1 "$RC_RUNNER")
-}
-
+# Choisit le prompt d'autofix en fonction du summary et du log
 choose_autofix_prompt() {
-  local summary_file="$1"
-  local esp8266_log="$2"
-  local port_status=""
-  local summary_file="$1"
-  local esp8266_log="$2"
+  local summary_file="${1:-}"
+  local esp8266_log="${2:-}"
   local port_status=""
   local ui_status=""
   if [[ -f "$summary_file" ]]; then
     read -r port_status ui_status < <(python3 - "$summary_file" <<'PY'
-  if run_rc_gate; then
-    log "RC live finished"
-    return 0
-  fi
-  log "RC live failed"
-  return 1
-}
-
-cmd_rc_autofix() {
+import json
+import sys
+try:
+    data = json.load(open(sys.argv[1]))
+except Exception:
+    data = {}
+print(data.get('port_status', ''))
+print(data.get('ui_link_status', ''))
+PY
     )
   fi
   local prompt="$PROMPT_DIR/auto_fix_generic.prompt.md"
   local reason="generic"
-  # Utilise tr pour la compatibilité Bash (équivalent à ^^)
   if [[ "$(echo "$port_status" | tr '[:lower:]' '[:upper:]')" == "FAILED" ]]; then
     prompt="$PROMPT_DIR/auto_fix_ports.prompt.md"
     reason="port_status"
@@ -91,6 +74,18 @@ cmd_rc_autofix() {
     reason="esp8266_panic"
   fi
   printf '%s\n%s\n' "$prompt" "$reason"
+}
+
+cmd_rc() {
+  if run_rc_gate; then
+    log "RC live finished"
+    return 0
+  fi
+  log "RC live failed"
+  return 1
+}
+
+cmd_rc_autofix() {
   if cmd_rc; then
     return 0
   fi
@@ -98,8 +93,8 @@ cmd_rc_autofix() {
   artifact=$(latest_artifact_dir) || die "no artifact directory available after RC"
   log "artifact path: $artifact"
   require_cmd codex
-  local prompt_info
-  IFS=$'\n' read -r -d '' prompt_file prompt_reason < <(choose_autofix_prompt "$artifact/summary.json" "$artifact/smoke_esp8266_usb.log" && printf '\0')
+  local prompt_file prompt_reason
+  IFS=$'\n' read -r prompt_file prompt_reason < <(choose_autofix_prompt "$artifact/summary.json" "$artifact/smoke_esp8266_usb.log")
   prompt_file="${prompt_file:-$PROMPT_DIR/auto_fix_generic.prompt.md}"
   prompt_reason="${prompt_reason:-generic}"
   if [[ ! -f "$prompt_file" ]]; then
@@ -113,6 +108,7 @@ prompt=$prompt_file
 reason=$prompt_reason
 codex_output=$codex_output
 LOGEOF
+  
   # Optional: auto-commit changes if ZACUS_GIT_AUTOCOMMIT=1
   if [[ "${ZACUS_GIT_AUTOCOMMIT:-0}" == "1" ]]; then
     log "auto-committing changes (ZACUS_GIT_AUTOCOMMIT=1)"
@@ -125,25 +121,9 @@ LOGEOF
       printf '%s\n' "git_autocommit=failed" >> "$artifact/rc_autofix.log"
     fi
   fi
+  
   log "rerunning RC live after fix"
   run_rc_gate
-}
-
-git_auto_commit() {
-  local msg="$1"
-  local artifact="$2"
-  
-  # Check for modified files
-  if ! git_cmd diff --quiet 2>/dev/null; then
-    log "detected changes; staging and committing"
-    git_add -A || return 1
-    git_commit -m "$msg" || return 1
-    printf '%s\n' "git_commit_msg=$msg" >> "$artifact/rc_autofix.log"
-    return 0
-  else
-    log "no changes detected; skipping commit"
-    return 0
-  fi
 }
 
 cmd_flash() {

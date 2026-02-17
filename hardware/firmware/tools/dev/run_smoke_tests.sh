@@ -37,7 +37,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-EVIDENCE_CMDLINE="$0 ${ORIG_ARGS[*]}"
+EVIDENCE_CMDLINE="$0 ${ORIG_ARGS[*]:-}"
 export EVIDENCE_CMDLINE
 evidence_init "$PHASE" "$OUTDIR"
 

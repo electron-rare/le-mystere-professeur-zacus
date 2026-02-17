@@ -19,8 +19,8 @@
 
 namespace {
 
-constexpr uint8_t kLinkRx = D6;    // ESP8266 RX <- ESP32 TX (GPIO22)
-constexpr uint8_t kLinkTx = D5;    // ESP8266 TX -> ESP32 RX (GPIO19)
+constexpr uint8_t kLinkRx = D4;    // ESP8266 RX <- ESP32 TX (GPIO23)
+constexpr uint8_t kLinkTx = D5;    // ESP8266 TX -> ESP32 RX (GPIO18)
 constexpr uint32_t kLinkBaud = 57600;  // 3x plus rapide, stable SoftwareSerial
 constexpr int kLinkRxBufferBytes = 128;
 constexpr int kLinkIsrBufferBytes = 512;
@@ -54,7 +54,7 @@ constexpr uint8_t kSpriteStar[8] = {0x18, 0x99, 0x5A, 0x3C, 0x3C, 0x5A, 0x99, 0x
 constexpr uint8_t kSpritePhone[8] = {0x60, 0x70, 0x38, 0x1C, 0x0E, 0x87, 0xC3, 0x66};
 constexpr uint8_t kSpriteSkull[8] = {0x3C, 0x7E, 0xA5, 0x81, 0xA5, 0xDB, 0x24, 0x18};
 
-SoftwareSerial g_link(kLinkRx, kLinkTx);  // RX, TX
+SoftwareSerial g_link(kLinkRx, kLinkTx);  // RX=D4 (GPIO2), TX=D5 (GPIO14)
 Adafruit_SSD1306 g_display(kScreenWidth, kScreenHeight, &Wire, kOledReset);
 
 struct I2cCandidate {
@@ -134,6 +134,7 @@ void drawCenteredText(const char* text, int16_t y, uint8_t textSize) {
   g_display.setTextSize(textSize);
   g_display.setCursor(x, y);
   g_display.print(text);
+  Serial.println(String("[UI_LINK] SCREEN: ") + String(text));
 }
 
 void drawSprite8(const uint8_t sprite[8], int16_t x, int16_t y, uint16_t color = SSD1306_WHITE) {
@@ -706,6 +707,7 @@ void renderMp3Screen() {
   if (g_state.errorCode != 0U) {
     char errLine[10];
     snprintf(errLine, sizeof(errLine), "E%u", static_cast<unsigned int>(g_state.errorCode));
+    Serial.println(String("[UI_LINK] ERROR: App error code=") + String(g_state.errorCode));
     g_display.setCursor(103, 0);
     g_display.setTextSize(1);
     g_display.print(errLine);
@@ -1064,10 +1066,8 @@ void handleIncoming() {
             if (screen_core::parseStatFrame(*frame, &parsed, nowMs)) {
               if (g_hasValidState &&
                   (parsed.uptimeMs + kPeerUptimeRollbackSlackMs) < g_state.uptimeMs) {
-                g_linkState.peerRebootUntilMs = millis() + kPeerRebootGraceMs;
-                Serial.printf("[SCREEN] Peer reboot detecte: uptime %lu -> %lu\n",
-                              static_cast<unsigned long>(g_state.uptimeMs),
-                              static_cast<unsigned long>(parsed.uptimeMs));
+                  g_linkState.peerRebootUntilMs = millis() + kPeerRebootGraceMs;
+                  Serial.println(String("[UI_LINK] DEBUG: Peer reboot detecte: uptime ") + String(g_state.uptimeMs) + " -> " + String(parsed.uptimeMs));
               }
               if (g_state.appStage != screen_core::kAppStageUSonFunctional &&
                   parsed.appStage == screen_core::kAppStageUSonFunctional) {
@@ -1170,12 +1170,12 @@ void initDisplay() {
     if (g_oledSdaPin == kLinkRx || g_oledSdaPin == kLinkTx ||
         g_oledSclPin == kLinkRx || g_oledSclPin == kLinkTx) {
       g_linkState.linkEnabled = false;
-      Serial.println("[SCREEN] LINK desactive (conflit de broches avec OLED).");
-      Serial.println("[SCREEN] Utiliser d'autres broches pour le lien ESP32.");
+      Serial.println("[UI_LINK] ERROR: LINK desactive (conflit de broches avec OLED).");
+      Serial.println("[UI_LINK] ERROR: Utiliser d'autres broches pour le lien ESP32.");
     }
   } else {
-    Serial.println("[SCREEN] OLED introuvable (0x3C/0x3D) sur GPIO12/14 ou GPIO4/5.");
-    Serial.println("[SCREEN] Verifier cablage + alim, puis retester.");
+    Serial.println("[UI_LINK] ERROR: OLED introuvable (0x3C/0x3D) sur GPIO12/14 ou GPIO4/5.");
+    Serial.println("[UI_LINK] ERROR: Verifier cablage + alim, puis retester.");
   }
 }
 

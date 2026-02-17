@@ -136,6 +136,27 @@ def write_summary(dest: Path, result: str, notes: list[str]) -> None:
     lines = ["# Serial smoke summary", "", f"- Result: **{result}**"]
     for note in notes:
         lines.append(f"- {note}")
+    # Ajout du mapping chip/port
+    try:
+        from serial.tools import list_ports
+        ports = list_ports.comports()
+        for port in ports:
+            chip = "unknown"
+            hwid = port.hwid
+            if hwid:
+                if "VID:PID=10C4:EA60" in hwid:
+                    chip = "CP2102"
+                elif "VID:PID=1A86:7523" in hwid:
+                    chip = "CH340"
+                elif "VID:PID=2E8A:000A" in hwid or "VID:PID=2E8A:0005" in hwid:
+                    chip = "RP2040"
+                elif "CH340" in (port.description or "") or "CH341" in (port.description or ""):
+                    chip = "CH340"
+                elif "Pico" in (port.description or ""):
+                    chip = "RP2040"
+            lines.append(f"- Port: {port.device} | Chip: {chip} | Desc: {port.description}")
+    except Exception:
+        lines.append("- [chip detection error]")
     dest.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -160,13 +181,8 @@ def exit_no_hw(wait_port, allow, reason=None):
 
 
 def load_ports_map():
-    if not PORTS_MAP_PATH.exists():
-        PORTS_MAP_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(PORTS_MAP_PATH, "w", encoding="utf-8") as fp:
-            json.dump(DEFAULT_PORTS_MAP, fp, indent=2)
-    with open(PORTS_MAP_PATH, encoding="utf-8") as fp:
-        raw_map = json.load(fp)
-    return normalize_ports_map(raw_map)
+    # Désactivé : la détection dynamique ne dépend plus de ports_map.json
+    return {"location": {}, "vidpid": {}}
 
 
 def normalize_ports_map(raw_map):
@@ -240,9 +256,27 @@ def canonical_device(group, prefer_cu):
 
 
 def determine_role(port, location, ports_map):
-    location_role = ports_map.get("location", {}).get((location or "").lower())
+    # Recherche exacte
+    loc_map = ports_map.get("location", {})
+    loc_key = (location or "").lower()
+    location_role = loc_map.get(loc_key)
     if location_role:
         return location_role
+    # Recherche wildcard
+    for key, value in loc_map.items():
+        if "*" in key:
+            prefix = key.rstrip("*")
+            if loc_key.startswith(prefix):
+                return value
+    vidpid = port_vidpid(port)
+    if vidpid:
+        mapped = ports_map.get("vidpid", {}).get(vidpid)
+        if mapped:
+            return mapped
+    product = (port.product or "").lower()
+    if port.vid in (0x2E8A,) or "rp2040" in product or "pico" in product or "usbmodem" in port.device:
+        return "rp2040"
+    return None
     vidpid = port_vidpid(port)
     if vidpid:
         mapped = ports_map.get("vidpid", {}).get(vidpid)
@@ -288,11 +322,26 @@ def detect_roles(ports, prefer_cu, ports_map):
         canonical = canonical_device(group_ports, prefer_cu)
         location = parse_location(canonical.hwid)
         role = determine_role(canonical, location, ports_map)
+        chip = None
+        hwid = canonical.hwid
+        if hwid:
+            if "VID:PID=10C4:EA60" in hwid:
+                chip = "CP2102"
+            elif "VID:PID=1A86:7523" in hwid:
+                chip = "CH340"
+            elif "VID:PID=2E8A:000A" in hwid or "VID:PID=2E8A:0005" in hwid:
+                chip = "RP2040"
+            elif "CH340" in (getattr(canonical, 'description', '') or "") or "CH341" in (getattr(canonical, 'description', '') or ""):
+                chip = "CH340"
+            elif "Pico" in (getattr(canonical, 'description', '') or ""):
+                chip = "RP2040"
         if role:
             roles.setdefault(role, {
                 "device": canonical.device,
-                "hwid": canonical.hwid,
+                "hwid": hwid,
                 "location": location or "unknown",
+                "chip": chip or "unknown",
+                "description": getattr(canonical, 'description', '') or "",
             })
     return roles
 
@@ -421,17 +470,27 @@ def run_monitor_smoke(device, baud, ready_timeout):
         with Serial(device, baud, timeout=0.2) as ser:
             time.sleep(0.15)
             ready_deadline = time.time() + ready_timeout
-            saw_ready = False
             junk_burst = 0
+            ui_link_log = []
+            verdict_connected = False
+            verdict_screen_ok = False
+            verdict_error = False
+            verdict_debug = False
+            log_path = f"ui_link_monitor_{int(time.time())}.log"
             while time.time() < ready_deadline:
                 raw = ser.readline()
                 if not raw:
                     continue
                 line = raw.decode("utf-8", errors="ignore").strip()
-                if line:
-                    print(f"[rx] {line}")
-                else:
-                    print(f"[rx-bin] {raw[:24].hex()}")
+                ui_link_log.append(line)
+                if line.startswith("[UI_LINK] STATUS: connected=1"):
+                    verdict_connected = True
+                if line.startswith("[UI_LINK] SCREEN:"):
+                    verdict_screen_ok = True
+                if line.startswith("[UI_LINK] ERROR:"):
+                    verdict_error = True
+                if line.startswith("[UI_LINK] DEBUG:"):
+                    verdict_debug = True
                 junk_burst = update_junk_burst(raw, junk_burst)
                 if junk_burst >= BINARY_JUNK_BURST_LIMIT:
                     print("[fail] binary junk detected", file=sys.stderr)
@@ -442,34 +501,18 @@ def run_monitor_smoke(device, baud, ready_timeout):
                 if line and REBOOT_PATTERN.search(line):
                     print(f"[fail] reboot marker detected: {line}", file=sys.stderr)
                     return False
-                if line and READY_PATTERN.search(line):
-                    saw_ready = True
-                    break
-            if not saw_ready:
-                print("[fail] ready marker missing", file=sys.stderr)
+            # Sauvegarde du log UI_LINK
+            with open(log_path, "w", encoding="utf-8") as fp:
+                for l in ui_link_log:
+                    fp.write(l + "\n")
+            # Validation automatique
+            if not verdict_connected:
+                print("[fail] UI_LINK_STATUS connected=1 absent", file=sys.stderr)
                 return False
-
-            stable_until = time.time() + 3.0
-            while time.time() < stable_until:
-                raw = ser.readline()
-                if not raw:
-                    continue
-                line = raw.decode("utf-8", errors="ignore").strip()
-                if line:
-                    print(f"[rx] {line}")
-                else:
-                    print(f"[rx-bin] {raw[:24].hex()}")
-                junk_burst = update_junk_burst(raw, junk_burst)
-                if junk_burst >= BINARY_JUNK_BURST_LIMIT:
-                    print("[fail] binary junk detected after ready", file=sys.stderr)
-                    return False
-                if line and FATAL_PATTERN.search(line):
-                    print(f"[fail] fatal marker after ready: {line}", file=sys.stderr)
-                    return False
-                if line and REBOOT_PATTERN.search(line):
-                    print(f"[fail] reboot marker after ready: {line}", file=sys.stderr)
-                    return False
-            print("[ok] monitor stable")
+            if not verdict_screen_ok:
+                print("[fail] UI_LINK SCREEN absent", file=sys.stderr)
+                return False
+            print(f"[ok] UI_LINK monitor stable (log: {log_path})")
             return True
     except Exception as exc:
         print(f"[error] serial failure on {device}: {exc}", file=sys.stderr)

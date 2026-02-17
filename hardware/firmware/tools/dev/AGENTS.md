@@ -1,4 +1,7 @@
+
 # Agent Contract (Tooling-Specific Rules)
+
+**Note : Le Test & Script Coordinator doit mettre à jour ce fichier à chaque évolution des scripts, conventions ou structure outillage, afin d’assurer la cohérence avec la documentation et le contrat global d’agent.**
 
 **📌 For global agent contract and expectations**, see [Firmware Agent Contract](../../AGENTS.md).
 
@@ -36,6 +39,10 @@ Les gates sont recommandees, mais obligatoires uniquement si demande explicite.
 
 ## Reporting
 Afficher la commande exacte de relance en cas d'echec.
+
+## TODO governance
+- `docs/AGENT_TODO.md` est la liste d'actions canonique : avant de lancer un script/outillage, vérifiez les items concernés, notez l'avancement ou les blocages (p. ex. “hardware requis”), et mentionnez les artefacts créés sans les committer.
+- Les logs/artéfacts générés via les scripts `tools/dev` doivent rester hors git ; décrivez leur présence (chemin, timestamp) dans le TODO ou le rapport final pour que les autres agents sachent quoi relancer.
 
 ## Stop Conditions
 Utiliser les conditions d'arret racine.

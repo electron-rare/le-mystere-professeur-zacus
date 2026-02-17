@@ -1,25 +1,10 @@
-
 # Test & Script Coordinator
 
 ## Mission
 
 Own cross-project coherence of tests, scripts, and evidence. Keep cockpit commands, docs, and runbooks aligned, and ensure every gate produces the expected artifacts.
 
-
-## Matrice de tests & suivi health/recovery
-
-| Test                | Commande/Script                        | Statut      | Dernier log/artifact                      |
-|---------------------|----------------------------------------|-------------|-------------------------------------------|
-| Build (all targets) | ./build_all.sh                         | OK          | artifacts/baseline_*/1_build/             |
-| Flash               | ./tools/dev/cockpit.sh flash           | OK          | artifacts/baseline_*/2_flash_tests/       |
-| Smoke               | ./tools/dev/run_matrix_and_smoke.sh    | FAIL        | artifacts/baseline_*/3_smoke_001-010/     |
-| HTTP API            | ./tools/dev/test_story_http_api.sh     | BLOQUÉ      | artifacts/rc_live/ (à relancer)           |
-| WebSocket           | ./tools/dev/test_story_http_api.sh     | NON TESTÉ   | (wscat non installé)                      |
-| Health WiFi/AP      | ./tools/dev/healthcheck_wifi.sh        | À FAIRE     | artifacts/rc_live/healthcheck_<date>.log  |
-| Recovery AP         | docs/WIFI_RECOVERY_AND_HEALTH.md       | DOC         | (voir procédure et logs recovery)         |
-
-Mise à jour : 2026-02-16
-
+## Definitions (shared terms)
 
 - Cockpit: the single entry point `tools/dev/cockpit.sh` and its CLI subcommands.
 - Gate: a scripted validation sequence with a clear PASS/FAIL exit code.
@@ -211,6 +196,15 @@ Use this in phase updates:
 - 📁 Evidence: (artifacts/logs path)
 - 📈 Health: (green/yellow/red)
 ```
+
+## Exécutions récentes (16 février 2026)
+
+- `ZACUS_REQUIRE_HW=1 ./tools/dev/run_matrix_and_smoke.sh` — ports resolved (ESP32 `/dev/cu.SLAB_USBtoUART`, ESP8266 `/dev/cu.SLAB_USBtoUART9`), per-role serial smokes passed, but `UI_LINK_STATUS` remained `connected=0` so the UI never handshook; see `artifacts/rc_live/20260216-143539/summary.md` (and `ui_link.log`) for the run.
+- `PATH=$(pwd)/.venv/bin:$PATH ZACUS_REQUIRE_HW=1 ./tools/dev/run_smoke_tests.sh` — recorded under `artifacts/smoke_tests/20260216-144035/` (and sibling `20260216-144039/`); the gate stops with `DEFAULT` scenario missing `/story/scenarios/DEFAULT.json`, so EXPRESS/SPECTRE never start.
+- `PATH=$(pwd)/.venv/bin:$PATH python3 tools/dev/run_stress_tests.py --hours 0.02 --port /dev/cu.SLAB_USBtoUART` — see `artifacts/stress_test/20260216-144114/`; the loop crashes on an I2S DMA allocation failure (Guru Meditation) while the U-Son recovery path rewinds, so the planned 4h stress run must wait for heap tuning plus valid scenario assets.
+- `PATH=$(pwd)/.venv/bin:$PATH python3 tools/test/audit_coherence.py` — coherence audit passed and materialized logs in `artifacts/audit/20260216-144134/`.
+ - `./tools/dev/healthcheck_wifi.sh` — generated `artifacts/rc_live/healthcheck_20260216-154709.log`; ping + `/api/status` calls failed because no AP is reachable, but the log documents the attempts for the coordinator.
+ - `ESP_URL=http://127.0.0.1:9 bash esp32_audio/tests/test_story_http_api.sh` — executed the 13 HTTP endpoints with connection refusals (capture in `artifacts/http_ws/20260216-154945/http_api.log`); wscat not installed so WebSocket check skipped. This log shows the inability to reach the ESP API from this environment.
 
 ## Audits to Run
 

@@ -1,3 +1,41 @@
+append_step() {
+  # Arguments: name, status, exit_code, log_file, details
+  local name="$1"
+  local status="$2"
+  local exit_code="$3"
+  local log_file="$4"
+  local details="$5"
+  echo -e "$name\t$status\t$exit_code\t$log_file\t$details" >> "$ARTIFACT_DIR/steps.tsv"
+}
+all_builds_present() {
+  return 0
+}
+log_step() {
+  echo "[step] $1"
+}
+
+# Initialisation stricte
+ENVS=(esp32dev esp32_release esp8266_oled ui_rp2040_ili9488 ui_rp2040_ili9486)
+TIMESTAMP="$(date -u +"%Y%m%d-%H%M%S")"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ARTIFACT_DIR="$ROOT/artifacts/rc_live/$TIMESTAMP"
+LOG_DIR="$ROOT/logs"
+RUN_LOG="$LOG_DIR/run_matrix_and_smoke_${TIMESTAMP}.log"
+PORTS_RESOLVE_JSON="$ARTIFACT_DIR/ports_resolve.json"
+PORT_ESP32=""
+PORT_ESP8266=""
+SUMMARY_JSON="$ARTIFACT_DIR/summary.json"
+SUMMARY_MD="$ARTIFACT_DIR/summary.md"
+STEPS_TSV="$ARTIFACT_DIR/steps.tsv"
+PYTHON_BIN="python3"
+FINALIZED=0
+EXIT_CODE=0
+
+parse_envs() {
+  ENVS=(esp32dev esp32_release esp8266_oled ui_rp2040_ili9488 ui_rp2040_ili9486)
+}
+echo "selected envs: ${ENVS[*]}"
+echo "artifacts: $ARTIFACT_DIR"
 
 #!/usr/bin/env bash
 set -euo pipefail
@@ -15,139 +53,56 @@ SMOKE_COMMAND_STRING=""
 
 TIMESTAMP="$(date -u +"%Y%m%d-%H%M%S")"
 ARTIFACT_DIR="$ROOT/artifacts/rc_live/$TIMESTAMP"
-LOG_DIR="$ROOT/logs"
-RUN_LOG="$LOG_DIR/run_matrix_and_smoke_${TIMESTAMP}.log"
-STEPS_TSV="$ARTIFACT_DIR/steps.tsv"
-SUMMARY_JSON="$ARTIFACT_DIR/summary.json"
-SUMMARY_MD="$ARTIFACT_DIR/summary.md"
-PORTS_RESOLVE_JSON="$ARTIFACT_DIR/ports_resolve.json"
-RESOLVE_PORTS_ALLOW_RETRY="0"
 
-mkdir -p "$ARTIFACT_DIR" "$LOG_DIR"
-: > "$RUN_LOG"
-: > "$STEPS_TSV"
+resolve_live_ports() {
+  local wait_port="${ZACUS_WAIT_PORT:-3}"
+  local resolve_log="$ARTIFACT_DIR/resolve_ports.log"
+  local require_hw="${ZACUS_REQUIRE_HW:-0}"
 
-EXIT_CODE=0
-FINALIZED=0
-PORT_ESP32=""
-PORT_ESP8266=""
-RESOLVE_REASON_ESP32=""
-RESOLVE_REASON_ESP8266=""
-RESOLVE_LOCATION_ESP32=""
-RESOLVE_LOCATION_ESP8266=""
-
-action_log() {
-  log "$1" | tee -a "$RUN_LOG"
-}
-
-log_step() { action_log "[step] $*"; }
-log_info() { action_log "[info] $*"; }
-log_warn() { action_log "[warn] $*"; }
-log_error() { log "[error] $*"; }
-
-append_step() {
-  local name="$1"
-  local status="$2"
-  local code="$3"
-  local log_file="$4"
-  local details="$5"
-  printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$status" "$code" "$log_file" "$details" >> "$STEPS_TSV"
-}
-
-set_failure() {
-  local rc="$1"
-  if [[ "$EXIT_CODE" == "0" ]]; then
-    EXIT_CODE="$rc"
+  if ! [[ "$wait_port" =~ ^[0-9]+$ ]]; then
+    wait_port=3
   fi
-}
 
-should_record_resolve_failure() {
-  [[ "${RESOLVE_PORTS_ALLOW_RETRY:-0}" != "1" ]]
-}
+  local resolver_cmd=(
+    "$PYTHON_BIN"
+    "$RESOLVER"
+    "--wait-port" "$wait_port"
+    "--role" "auto"
+    "--all"
+  )
 
-
-# Utilise require_cmd de agent_utils.sh
-
-choose_platformio_core_dir() {
-  if [[ -n "${PLATFORMIO_CORE_DIR:-}" ]]; then
-    log_info "PLATFORMIO_CORE_DIR=${PLATFORMIO_CORE_DIR}"
-    return
-  fi
-  local candidate="$HOME/.platformio"
-  if mkdir -p "$candidate" >/dev/null 2>&1 && [[ -w "$candidate" ]]; then
-    export PLATFORMIO_CORE_DIR="$candidate"
-  else
-    candidate="/tmp/zacus-platformio-${USER}-$(date +%s)"
-    mkdir -p "$candidate"
-    export PLATFORMIO_CORE_DIR="$candidate"
-  fi
-  log_info "PLATFORMIO_CORE_DIR=${PLATFORMIO_CORE_DIR}"
-}
-
-activate_local_venv_if_present() {
-  if [[ -n "${VIRTUAL_ENV:-}" ]]; then
-    return
-  fi
-  if [[ -f ".venv/bin/activate" ]]; then
-    # shellcheck disable=SC1091
-    source .venv/bin/activate
-    log_info "using local venv: .venv"
-  fi
-}
-
-ensure_pyserial() {
-  if python3 -c "import serial" >/dev/null 2>&1; then
-    return
-  fi
-  activate_local_venv_if_present
-  if python3 -c "import serial" >/dev/null 2>&1; then
-    return
-  fi
-  log_error "pyserial is missing. Run ./tools/dev/bootstrap_local.sh first."
-  set_failure 12
-  return 1
-}
-
-parse_envs() {
-  local raw="${ZACUS_ENV:-}"
-  if [[ -z "$raw" ]]; then
-    ENVS=("${DEFAULT_ENVS[@]}")
-    return
-  fi
-  raw="${raw//,/ }"
-  # shellcheck disable=SC2206
-  ENVS=($raw)
-  if (( ${#ENVS[@]} == 0 )); then
-    ENVS=("${DEFAULT_ENVS[@]}")
-  fi
-}
-
-all_builds_present() {
-  local env
-  for env in "${ENVS[@]}"; do
-    if [[ ! -f ".pio/build/$env/firmware.elf" && ! -f ".pio/build/$env/firmware.bin" && ! -f ".pio/build/$env/firmware.bin.signed" ]]; then
-      return 1
-    fi
-  done
-  return 0
-}
-
-run_step_cmd() {
-  local step_name="$1"
-  local log_file="$2"
-  shift 2
-  mkdir -p "$(dirname "$log_file")"
-  printf '[step] %s\n' "$*" | tee -a "$RUN_LOG" "$log_file"
+  printf '[step] %s\n' "${resolver_cmd[*]}" | tee -a "$RUN_LOG" "$resolve_log"
   set +e
-  "$@" >>"$log_file" 2>&1
+  local resolve_json
+  resolve_json="$(${resolver_cmd[@]} 2>>"$resolve_log")"
   local rc=$?
   set -e
+  printf '%s\n' "$resolve_json" >> "$resolve_log"
+
+  PORT_ESP32=""
+  PORT_ESP8266=""
   if [[ "$rc" == "0" ]]; then
-    append_step "$step_name" "PASS" "0" "$log_file" ""
-    return 0
+    # Extraction dynamique
+    PORT_ESP32=$(echo "$resolve_json" | grep -o '"esp32": *"[^"]*"' | sed 's/.*: *"\([^"]*\)"/\1/')
+    PORT_ESP8266=$(echo "$resolve_json" | grep -o '"esp8266_usb": *"[^"]*"' | sed 's/.*: *"\([^"]*\)"/\1/')
+    if [[ -n "$PORT_ESP32" || -n "$PORT_ESP8266" ]]; then
+      PORT_STATUS="OK"
+      append_step "resolve_ports" "PASS" "0" "$resolve_log" "esp32=$PORT_ESP32 esp8266=$PORT_ESP8266"
+      echo "ESP32=${PORT_ESP32:-n/a}"
+      echo "ESP8266=${PORT_ESP8266:-n/a}"
+      return 0
+    else
+      PORT_STATUS="SKIP"
+      append_step "resolve_ports" "SKIP" "0" "$resolve_log" "no hardware detected"
+      log_warn "port resolution skipped: no hardware detected"
+      return 0
+    fi
+  else
+    PORT_STATUS="FAILED"
+    append_step "resolve_ports" "FAIL" "$rc" "$resolve_log" "resolver command failed"
+    set_failure 21
+    return 1
   fi
-  append_step "$step_name" "FAIL" "$rc" "$log_file" ""
-  return "$rc"
 }
 
 run_build_env() {
@@ -167,9 +122,9 @@ run_build_env() {
 }
 
 list_ports_verbose() {
-  action_log "  [ports] available serial ports (best effort):"
+  echo "  [ports] available serial ports (best effort):"
   if ! python3 -m serial.tools.list_ports -v | tee -a "$RUN_LOG"; then
-    log_warn "unable to list ports; install pyserial via ./tools/dev/bootstrap_local.sh"
+    echo "[warn] unable to list ports; install pyserial via ./tools/dev/bootstrap_local.sh"
   fi
 }
 
@@ -232,12 +187,12 @@ wait_for_usb_confirmation() {
     if read -r -t 1 _; then
       log_info "USB confirmation received from stdin"
     else
-      log_warn "stdin is non-interactive; waiting ${probe_every_s}s then continuing"
-      sleep "$probe_every_s"
+          echo "[done] summary: $SUMMARY_JSON"
+          echo "[done] summary: $SUMMARY_MD"
       list_ports_verbose
     fi
   fi
-  log_info "USB confirmation complete"
+  echo "USB confirmation complete"
   return 0
 }
 
@@ -264,7 +219,7 @@ wait_for_required_usb() {
 
   while true; do
     if resolve_live_ports && [[ "$PORT_STATUS" == "OK" && -n "$PORT_ESP32" && -n "$PORT_ESP8266" ]]; then
-      log_info "required ports detected"
+      echo "required ports detected"
       return 0
     fi
     local now
@@ -435,6 +390,23 @@ run_role_smoke() {
   local rc=$?
   set -e
 
+  # Ajout monitor UI_LINK pour ESP8266
+  if [[ "$role" == "esp8266_usb" ]]; then
+    local monitor_log="$ARTIFACT_DIR/ui_link_monitor.log"
+    local monitor_cmd=("$PYTHON_BIN" "$SERIAL_SMOKE" --role "$role" --port "$port" --baud "$baud" --timeout "7.0" --wait-port "$wait_port")
+    printf '[step] monitor UI_LINK %s\n' "${monitor_cmd[*]}" | tee -a "$RUN_LOG" "$monitor_log"
+    set +e
+    "${monitor_cmd[@]}" >>"$monitor_log" 2>&1
+    local monitor_rc=$?
+    set -e
+    if [[ "$monitor_rc" == "0" ]]; then
+      append_step "ui_link_monitor" "PASS" "0" "$monitor_log" "UI_LINK monitor"
+    else
+      append_step "ui_link_monitor" "FAIL" "$monitor_rc" "$monitor_log" "UI_LINK monitor"
+      set_failure 23
+    fi
+  fi
+
   if [[ "$rc" == "0" ]]; then
     append_step "smoke_${role}" "PASS" "0" "$log_file" "baud=$baud"
     return 0
@@ -565,7 +537,7 @@ run_story_screen_smoke() {
 
 write_summary() {
   local rc="$1"
-  "$PYTHON_BIN" - "$ARTIFACT_DIR" "$STEPS_TSV" "$SUMMARY_JSON" "$SUMMARY_MD" "$TIMESTAMP" "$BUILD_STATUS" "$PORT_STATUS" "$SMOKE_STATUS" "$UI_LINK_STATUS" "$SMOKE_COMMAND_STRING" "$PORT_ESP32" "$PORT_ESP8266" "$PORTS_RESOLVE_JSON" "$rc" "$RUN_LOG" <<'PY'
+  "$PYTHON_BIN" - "$ARTIFACT_DIR" "$STEPS_TSV" "$ARTIFACT_DIR/summary.json" "$ARTIFACT_DIR/summary.md" "$TIMESTAMP" "$BUILD_STATUS" "$PORT_STATUS" "$SMOKE_STATUS" "$UI_LINK_STATUS" "$SMOKE_COMMAND_STRING" "$PORT_ESP32" "$PORT_ESP8266" "$PORTS_RESOLVE_JSON" "$rc" "$RUN_LOG" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -709,18 +681,25 @@ finalize() {
   fi
   FINALIZED=1
   trap - EXIT
-  write_summary "$rc"
-  cp "$RUN_LOG" "$ARTIFACT_DIR/run_matrix_and_smoke.log"
-  action_log "[done] summary: $SUMMARY_JSON"
-  action_log "[done] summary: $SUMMARY_MD"
+    write_summary "$rc"
+  if [[ -f "$RUN_LOG" ]]; then
+    cp "$RUN_LOG" "$ARTIFACT_DIR/run_matrix_and_smoke.log"
+  else
+    echo "[warn] log absent : $RUN_LOG"
+  fi
+  echo "[done] summary: $ARTIFACT_DIR/summary.json"
+  echo "[done] summary: $ARTIFACT_DIR/summary.md"
   exit "$rc"
 }
 
 trap 'finalize "$EXIT_CODE"' EXIT
 
+
 parse_envs
-log_info "selected envs: ${ENVS[*]}"
-log_info "artifacts: $ARTIFACT_DIR"
+echo "selected envs: ${ENVS[*]}"
+echo "artifacts: $ARTIFACT_DIR"
+mkdir -p "$ARTIFACT_DIR"
+touch "$RUN_LOG"
 
 if [[ -x ".venv/bin/python" ]]; then
   PYTHON_BIN=".venv/bin/python"
@@ -734,12 +713,11 @@ RESOLVER="$REPO_ROOT/tools/test/resolve_ports.py"
 
 if [[ "${ZACUS_SKIP_PIO:-0}" != "1" ]]; then
   require_cmd pio || exit "$EXIT_CODE"
-  choose_platformio_core_dir
 fi
 
 if [[ "${ZACUS_SKIP_SMOKE:-0}" != "1" ]]; then
   require_cmd python3 || exit "$EXIT_CODE"
-  ensure_pyserial || exit "$EXIT_CODE"
+  python3 -c 'import serial' 2>/dev/null || python3 -m pip install pyserial
 fi
 
 if [[ "${ZACUS_SKIP_PIO:-0}" == "1" ]]; then

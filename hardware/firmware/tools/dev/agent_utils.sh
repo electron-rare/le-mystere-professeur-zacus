@@ -73,8 +73,10 @@ flash_all() {
   if [[ ! -x "$python_exec" ]]; then
     python_exec="python3"
   fi
-  # Correction : exécute le script Python dans un sous-shell et capture la sortie
-  ports_out=$("$python_exec" - "$ports_json" <<'PY'
+  # Correction : utilise un script Python temporaire pour éviter le bug de heredoc
+  local tmp_py
+  tmp_py=$(mktemp)
+  cat > "$tmp_py" <<'PY'
 import json, sys
 try:
     data = json.load(open(sys.argv[1]))
@@ -84,7 +86,8 @@ ports = data.get("ports", {})
 values = [ports.get("esp32", ""), ports.get("esp8266", ""), ports.get("rp2040", "")]
 print(" ".join(values))
 PY
-  )
+  ports_out=$("$python_exec" "$tmp_py" "$ports_json")
+  rm -f "$tmp_py"
   read -r port_esp32 port_esp8266 port_rp2040 <<< "$ports_out"
 
   if [[ -z "$port_esp32" || -z "$port_esp8266" ]]; then

@@ -1,8 +1,12 @@
+
 # Firmware Agent Contract
 
 Purpose: enforce reproducible PlatformIO builds and strict smoke validation.
 
+
 Scope: all files under `hardware/firmware/**`
+
+**Note : Le Test & Script Coordinator est responsable de la mise à jour de ce contrat d’agent (et des fichiers associés) à chaque évolution des scripts, des politiques de test, ou de la structure. Toute modification doit être répercutée ici et dans la documentation pour garantir la cohérence, la traçabilité et la reproductibilité.**
 
 ---
 
@@ -70,3 +74,47 @@ Logs/artifacts:
 - Toute modification de structure doit être répercutée dans la documentation et l'onboarding.
 - Les grosses reviews sont autorisees (rapport detaille + recommandations).
 - Les gates build/smoke sont recommandees, mais non obligatoires sauf demande explicite.
+- Consult et mettez à jour `docs/AGENT_TODO.md` avant toute opération importante : c’est le tracker canonique des tâches d’agent, mentionnez-y les étapes réalisées, les artefacts produits et toute impasse matérielle pour guider les agents suivants.
+- Les logs et artefacts (`logs/`, `artifacts/`, etc.) ne doivent pas être committés ; notez leur existence (chemins, horodatages) dans `docs/AGENT_TODO.md` ou dans le rapport final au lieu de les versionner.
+
+---
+
+## 🔒 Verrous et exigences critiques (2026)
+
+- **Cleanup commit & gestion artefacts** :
+	- Toute action git (add, commit, stash, push) doit passer par `cockpit.sh git <action>` qui appelle `git_cmd` dans `agent_utils.sh` pour loguer l’évidence.
+	- Les artefacts et logs doivent être produits dans `hardware/firmware/logs/` et `hardware/firmware/artifacts/`.
+	- Les artefacts/logs ne sont jamais versionnés : seule l’évidence (chemin, timestamp, verdict) est tracée dans la doc.
+
+- **UI link verdict** :
+	- Le verdict de connexion UI (`UI_LINK_STATUS connected==1`) doit être strictement vérifié dans tous les scripts de test/smoke.
+	- Toute évolution du protocole UI link doit être documentée et testée (voir `UI_LINK_DEBUG_REPORT.md`).
+
+- **Scénario par défaut LittleFS** :
+	- Un scénario Story par défaut doit toujours être présent sur LittleFS (auto-création si absent, fallback robuste).
+	- Les scripts de flash/test doivent vérifier la présence et la validité du scénario par défaut.
+
+- **Stress test I2S (panic)** :
+	- Les scripts de stress test doivent détecter tout panic I2S et produire un log d’évidence.
+	- Toute occurrence de panic/reboot doit entraîner un FAIL strict dans les gates.
+
+- **WebSocket health** :
+	- Les scripts doivent vérifier la santé des WebSockets (watchdog, auto-recover si possible).
+	- Toute perte de WebSocket doit être loguée et entraîner un verdict FAIL si non récupérée.
+
+---
+
+## Centralisation, robustesse, traçabilité
+
+- Toute évolution de structure, de workflow, ou de protocole doit être documentée et synchronisée avec la doc d’onboarding.
+- Les scripts doivent être compatibles bash strict (`set -euo pipefail`, variables initialisées, etc.).
+- Les ports série doivent être résolus dynamiquement (pas de chemins hardcodés).
+- Les scripts de test doivent être robustes, autonomes, et produire des logs d’évidence.
+- Toute évolution doit être traçable, testée, et documentée.
+
+---
+
+## Rappel
+
+**Ce contrat doit être mis à jour à chaque évolution des scripts, des politiques de test, ou de la structure.**
+Tout agent doit s’y référer avant toute opération majeure.

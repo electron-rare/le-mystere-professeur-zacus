@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Arduino.h>
+
 
 #include "../core/telemetry_state.h"
 

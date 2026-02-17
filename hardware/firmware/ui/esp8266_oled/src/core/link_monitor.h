@@ -27,4 +27,6 @@ bool isLinkAlive(const TelemetryState& state,
                  uint32_t downConfirmMs);
 bool isPeerRebootGraceActive(const LinkMonitorState& link, uint32_t nowMs);
 
+void logLinkVerdict(const TelemetryState& state, const LinkMonitorState& link, uint32_t nowMs);
+
 }  // namespace screen_core

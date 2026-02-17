@@ -19,6 +19,7 @@ S'applique aux scripts et helpers dans `hardware/firmware/tools/dev/**`.
 - Garder la resolution des ports et timeouts locales et configurables via flags/env.
 - Ecrire les logs dans `hardware/firmware/logs/` avec des noms horodates.
 - Garder une sortie CLI courte et grep-friendly (`[step]`, `[ok]`, `[fail]`).
+- Documenter et maintenir `tools/dev/plan_runner.sh` pour permettre d’exécuter automatiquement les sections `## Plan d’action` des briefs.
 - Les changements structurels d'outillage sont autorises, mais doivent etre reflites dans la doc/onboarding.
 
 ## Interdit

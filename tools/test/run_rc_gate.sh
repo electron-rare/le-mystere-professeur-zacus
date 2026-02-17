@@ -12,6 +12,8 @@ INCLUDE_CONSOLE=0
 AUTO_PORTS=1
 WAIT_PORT=3
 PREFER_CU=0
+OUTDIR="${ZACUS_OUTDIR:-}"
+PHASE="rc_gate"
 
 if [[ "$(uname -s)" == "Darwin" ]]; then
   PREFER_CU=1
@@ -37,6 +39,7 @@ Options:
   --skip-build               Skip sprint 5 build gate command
   --include-console          Run sprint 5 console sanity command (interactive)
   --dry-run                  Print commands without executing
+  --outdir <path>            Evidence output directory (default: artifacts/rc_gate/<timestamp>)
   -h, --help                 Show this help
 USAGE
 }
@@ -91,6 +94,10 @@ while [[ $# -gt 0 ]]; do
       DRY_RUN=1
       shift
       ;;
+    --outdir)
+      OUTDIR="${2:-}"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -118,6 +125,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 FW="$REPO_ROOT/hardware/firmware"
 RESOLVER="$REPO_ROOT/tools/test/resolve_ports.py"
+source "$FW/tools/dev/agent_utils.sh"
 if [[ -x "$FW/.venv/bin/python" ]]; then
   PYTHON="$FW/.venv/bin/python"
   export PATH="$FW/.venv/bin:$PATH"
@@ -128,13 +136,49 @@ export PLATFORMIO_CORE_DIR="${PLATFORMIO_CORE_DIR:-$HOME/.platformio}"
 export PIP_DISABLE_PIP_VERSION_CHECK=1
 cd "$REPO_ROOT"
 
+EVIDENCE_CMDLINE="$0 $*"
+export EVIDENCE_CMDLINE
+evidence_init "$PHASE" "$OUTDIR"
+RUN_LOG="$EVIDENCE_DIR/run_rc_gate.log"
+STEP_INDEX=0
+FINALIZED=0
+
+finalize() {
+  local rc="$1"
+  if [[ "$FINALIZED" == "1" ]]; then
+    return
+  fi
+  FINALIZED=1
+  trap - EXIT
+  local result="PASS"
+  if [[ "$rc" != "0" ]]; then
+    result="FAIL"
+  fi
+  cat > "$EVIDENCE_SUMMARY" <<EOF
+# RC gate summary
+
+- Result: **${result}**
+- Sprint: ${SPRINT}
+- ESP32 port: ${PORT_ESP32:-n/a}
+- ESP8266 port: ${PORT_ESP8266:-n/a}
+- Log: $(basename "$RUN_LOG")
+EOF
+  echo "RESULT=${result}"
+  exit "$rc"
+}
+
+trap 'finalize "$?"' EXIT
+
 run_cmd() {
   if [[ "$DRY_RUN" == "1" ]]; then
     echo "[dry-run] $*"
     return 0
   fi
-  echo "[step] $*"
-  "$@"
+  STEP_INDEX=$((STEP_INDEX + 1))
+  local step_log="$EVIDENCE_DIR/step_${STEP_INDEX}.log"
+  echo "[step] $*" | tee -a "$RUN_LOG" "$step_log"
+  evidence_record_command "$*"
+  "$@" >>"$step_log" 2>&1
 }
 
 run_cmd_shell() {
@@ -143,8 +187,11 @@ run_cmd_shell() {
     echo "[dry-run] bash -lc $expr"
     return 0
   fi
-  echo "[step] bash -lc $expr"
-  bash -lc "$expr"
+  STEP_INDEX=$((STEP_INDEX + 1))
+  local step_log="$EVIDENCE_DIR/step_${STEP_INDEX}.log"
+  echo "[step] bash -lc $expr" | tee -a "$RUN_LOG" "$step_log"
+  evidence_record_command "bash -lc $expr"
+  bash -lc "$expr" >>"$step_log" 2>&1
 }
 
 resolve_ports() {
@@ -164,12 +211,11 @@ resolve_ports() {
     "--port-esp32" "$PORT_ESP32"
     "--port-esp8266" "$PORT_ESP8266"
     "--wait-port" "$WAIT_PORT"
+    "--ports-resolve-json" "$EVIDENCE_DIR/ports_resolve.json"
   )
 
   if [[ "$AUTO_PORTS" == "1" ]]; then
     args+=("--auto-ports")
-  else
-    args+=("--no-auto-ports")
   fi
   if [[ "$PREFER_CU" == "1" ]]; then
     args+=("--prefer-cu")
@@ -188,7 +234,8 @@ resolve_ports() {
   fi
 
   local resolve_json
-  if ! resolve_json="$("$PYTHON" "${args[@]}")"; then
+  evidence_record_command "$PYTHON ${args[*]}"
+  if ! resolve_json="$($PYTHON "${args[@]}")"; then
     echo "[fail] port resolution failed" >&2
     return 2
   fi

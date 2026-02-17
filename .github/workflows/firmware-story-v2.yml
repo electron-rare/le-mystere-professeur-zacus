@@ -1,3 +1,5 @@
+
+---
 name: firmware-story-v2
 
 on:
@@ -29,7 +31,7 @@ on:
 
 concurrency:
   group: firmware-story-v2-${{ github.ref }}
-  cancel-in-progress: true
+   cancel-in-progress: true
 
 jobs:
   story-toolchain:
@@ -86,7 +88,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        env: [esp32dev, esp32_release, esp8266_oled]
+         env: [esp32dev,esp32_release,esp8266_oled]
     defaults:
       run:
         working-directory: hardware/firmware
@@ -132,7 +134,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        env: [ui_rp2040_ili9488, ui_rp2040_ili9486]
+         env: [ui_rp2040_ili9488,ui_rp2040_ili9486]
     defaults:
       run:
         working-directory: hardware/firmware

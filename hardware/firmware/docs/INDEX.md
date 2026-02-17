@@ -80,6 +80,7 @@ hardware/firmware/docs/
 ├── RC_FINAL_BOARD.md               # Tests RC dashboard
 ├── RC_FINAL_REPORT_TEMPLATE.md    # Template rapports
 ├── RTOS_WIFI_HEALTH.md             # Checks RTOS/WiFi
+├── WIFI_WEBUI_SPEC.md              # Spécifications WiFi & WebUI (AP vs station, endpoints, tests)
 └── protocols/
     ├── INDEX.md                    # Index protocoles
   ├── README.md                   # Regles d'evolution et validation

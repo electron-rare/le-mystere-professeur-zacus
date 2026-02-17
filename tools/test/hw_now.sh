@@ -15,6 +15,8 @@ SKIP_UPLOAD=0
 DRY_RUN=0
 SMOKE_BAUD_OVERRIDE=""
 COUNTDOWN_SEC=20
+OUTDIR="${ZACUS_OUTDIR:-}"
+PHASE="hw_now"
 
 if [[ "$(uname -s)" == "Darwin" ]]; then
   PREFER_CU=1
@@ -26,6 +28,7 @@ FW="$REPO_ROOT/hardware/firmware"
 RESOLVER="$REPO_ROOT/tools/test/resolve_ports.py"
 GATE_SCRIPT="$REPO_ROOT/tools/test/run_rc_gate.sh"
 SMOKE_SCRIPT="$FW/tools/dev/serial_smoke.py"
+source "$FW/tools/dev/agent_utils.sh"
 
 if [[ ! -f "$FW/platformio.ini" ]]; then
   echo "[fail] firmware workspace not found: $FW" >&2
@@ -47,6 +50,36 @@ fi
 export PLATFORMIO_CORE_DIR="${PLATFORMIO_CORE_DIR:-$HOME/.platformio}"
 export PIP_DISABLE_PIP_VERSION_CHECK=1
 
+EVIDENCE_CMDLINE="$0 $*"
+export EVIDENCE_CMDLINE
+evidence_init "$PHASE" "$OUTDIR"
+
+FINALIZED=0
+finalize() {
+  local rc="$1"
+  if [[ "$FINALIZED" == "1" ]]; then
+    return
+  fi
+  FINALIZED=1
+  trap - EXIT
+  local result="PASS"
+  if [[ "$rc" != "0" ]]; then
+    result="FAIL"
+  fi
+  if [[ ! -f "$EVIDENCE_SUMMARY" ]]; then
+    cat > "$EVIDENCE_SUMMARY" <<EOF
+# HW now summary
+
+- Result: **${result}**
+- Log: $(basename "$run_log")
+EOF
+  fi
+  echo "RESULT=${result}"
+  exit "$rc"
+}
+
+trap 'finalize "$?"' EXIT
+
 usage() {
   cat <<'EOF'
 Usage: bash tools/test/hw_now.sh [options]
@@ -65,6 +98,7 @@ Options:
   --skip-upload            Skip upload phase
   --smoke-baud <n>         Force single smoke baud (no fallback)
   --dry-run                Print intended commands without execution
+  --outdir <path>          Evidence output directory (default: artifacts/hw_now/<timestamp>)
   -h, --help               Show this help
 EOF
 }
@@ -83,6 +117,7 @@ while [[ $# -gt 0 ]]; do
     --skip-upload) SKIP_UPLOAD=1; shift ;;
     --smoke-baud) SMOKE_BAUD_OVERRIDE="${2:-}"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
+    --outdir) OUTDIR="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "[fail] unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -104,12 +139,11 @@ if [[ -n "$SMOKE_BAUD_OVERRIDE" ]] && ! [[ "$SMOKE_BAUD_OVERRIDE" =~ ^[0-9]+$ ]]
   exit 2
 fi
 
-timestamp="$(date -u +"%Y%m%d-%H%M%S")"
-artifact_dir="$FW/artifacts/rc_live/$timestamp"
-log_dir="$FW/logs"
-run_log="$log_dir/hw_now_${timestamp}.log"
+timestamp="$EVIDENCE_TIMESTAMP"
+artifact_dir="$EVIDENCE_DIR"
+run_log="$artifact_dir/hw_now.log"
 steps_tsv="$artifact_dir/steps.tsv"
-mkdir -p "$artifact_dir" "$log_dir"
+mkdir -p "$artifact_dir"
 : > "$steps_tsv"
 
 action_log() {
@@ -137,6 +171,7 @@ run_step() {
     return 0
   fi
   printf '[step] %s\n' "$*" | tee -a "$log_file" "$run_log"
+  evidence_record_command "$*"
   if "$@" >>"$log_file" 2>&1; then
     append_step "$step_name" "PASS" "0" "$log_file" ""
     return 0
@@ -184,6 +219,7 @@ resolve_ports() {
   fi
 
   local resolve_json
+  evidence_record_command "$PYTHON ${resolver_args[*]}"
   if ! resolve_json="$("$PYTHON" "${resolver_args[@]}")"; then
     echo "[fail] port resolution failed" | tee -a "$run_log" >&2
     return 2
@@ -253,6 +289,7 @@ run_smoke_with_policy() {
       return 0
     fi
     printf '[step] smoke role=%s port=%s baud=%s\n' "$role" "$port" "$b" | tee -a "$log_file" "$run_log"
+    evidence_record_command "$PYTHON $SMOKE_SCRIPT --role $role --port $port --baud $b --wait-port $WAIT_PORT"
     if "$PYTHON" "$SMOKE_SCRIPT" --role "$role" --port "$port" --baud "$b" --wait-port "$WAIT_PORT" >>"$log_file" 2>&1; then
       append_step "smoke_${role}" "PASS" "0" "$log_file" "baud=$b"
       echo "$b" > "$artifact_dir/smoke_${role}_baud.txt"
@@ -272,6 +309,7 @@ check_ui_link_status() {
     append_step "ui_link" "SKIP" "0" "$log_file" "dry-run"
     return 0
   fi
+  evidence_record_command "$PYTHON - $PORT_ESP32 UI_LINK_STATUS"
   if "$PYTHON" - "$PORT_ESP32" >"$log_file" 2>&1 <<'PY'
 import re
 import sys
@@ -437,7 +475,7 @@ summary = {
 (artifact_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
 rows = [
-    "# RC live summary",
+  "# HW now summary",
     "",
     f"- Result: **{overall}**",
     f"- ESP32 port: `{port_esp32}` (location `{resolve_data.get('details', {}).get('esp32', {}).get('location', '')}`)",
@@ -453,3 +491,21 @@ for s in steps:
 PY
 
 action_log "[done] summary: $artifact_dir/summary.md"
+
+overall="$($PYTHON" - "$artifact_dir/summary.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = json.loads(path.read_text(encoding="utf-8"))
+print(data.get("result", "PASS"))
+PY
+)"
+
+exit_code=0
+if [[ "$overall" == "FAIL" ]]; then
+  exit_code=1
+fi
+
+exit "$exit_code"

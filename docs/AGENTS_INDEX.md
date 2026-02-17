@@ -9,6 +9,14 @@
 - Printables: [`printables/AGENTS.md`](../printables/AGENTS.md)
 - Repo meta/CI: [`.github/AGENTS.md`](../.github/AGENTS.md)
 
+# Exécution planifiée
+- Utiliser `tools/dev/plan_runner.sh --agent <name>` pour dérouler automatiquement la section `## Plan d’action` (ajoute `--dry-run` ou `--plan-only` pour prévisualiser).
+- Depuis Copilot/VS Code, exécuter `hardware/firmware/tools/dev/codex_prompts/trigger_firmware_core_plan.prompt.md` pour lancer `tools/dev/plan_runner.sh --agent firmware_core`.
+
+# Briefings personnalisés
+- `.github/agents/AGENT_BRIEFINGS.md` – récit complet des politiques de git/agents + liste des fiches métier.
+- `.github/agents/COPILOT_INDEX.md` – table d’aide rapide pour sélectionner le bon agent Copilot dans l’interface.
+
 ## Entry Commands
 - Firmware build matrix: `cd hardware/firmware && ./build_all.sh`
 - Firmware smoke (local hardware): `bash hardware/firmware/tools/test/hw_now.sh`

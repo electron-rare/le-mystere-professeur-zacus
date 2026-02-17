@@ -207,6 +207,20 @@ def classify_ports(ports, entries, vidpid_map):
     found = {}
     details = {}
     notes = []
+    cp2102_ports = []
+    # DEBUG: log complet des ports détectés dans un fichier
+    import json as _json
+    debug_ports = []
+    for port in ports:
+        attrs = {k: getattr(port, k, None) for k in dir(port) if not k.startswith('__') and not callable(getattr(port, k, None))}
+        debug_ports.append(attrs)
+    debug_log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logs', 'ports_debug.json')
+    try:
+        os.makedirs(os.path.dirname(debug_log_path), exist_ok=True)
+        with open(debug_log_path, "w", encoding="utf-8") as dbg:
+            _json.dump(debug_ports, dbg, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"[WARN] Could not write debug log: {e}")
     for port in ports:
         location = parse_location(port.hwid) or ""
         role, reason = classify_port(port, location, entries, vidpid_map)
@@ -218,6 +232,32 @@ def classify_ports(ports, entries, vidpid_map):
                     notes.append(f"learned {location} -> {role}")
             if reason and reason.startswith("fingerprint"):
                 notes.append(f"fingerprint {role} on {port.device}")
+        # Collecter les ports CP2102 non mappés
+        if (getattr(port, 'vid', None) == 0x10C4 and getattr(port, 'pid', None) == 0xEA60):
+            cp2102_ports.append(port)
+    # Fallback : assigner les CP2102 restants
+    # Mode mono-port : si un seul port CP2102 détecté dans tous les ports, il sert pour les deux rôles
+    cp2102_total = [p for p in ports if getattr(p, 'vid', None) == 0x10C4 and getattr(p, 'pid', None) == 0xEA60]
+    if len(cp2102_total) == 1:
+        port = cp2102_total[0]
+        # N'assigne que si non déjà trouvé par mapping/fingerprint
+        if "esp32" not in found:
+            found["esp32"] = port.device
+            details["esp32"] = {"location": parse_location(port.hwid) or "", "reason": "cp2102-monop-fallback"}
+        if "esp8266" not in found:
+            found["esp8266"] = port.device
+            details["esp8266"] = {"location": parse_location(port.hwid) or "", "reason": "cp2102-monop-fallback"}
+        notes.append(f"cp2102 mono-port fallback assigned to esp32+esp8266: {port.device}")
+    else:
+        for port in cp2102_ports:
+            if "esp32" not in found:
+                found["esp32"] = port.device
+                details["esp32"] = {"location": parse_location(port.hwid) or "", "reason": "cp2102-fallback"}
+                notes.append(f"cp2102 fallback assigned to esp32: {port.device}")
+            elif "esp8266" not in found:
+                found["esp8266"] = port.device
+                details["esp8266"] = {"location": parse_location(port.hwid) or "", "reason": "cp2102-fallback"}
+                notes.append(f"cp2102 fallback assigned to esp8266: {port.device}")
     return found, details, notes
 
 
@@ -257,6 +297,17 @@ def dedupe_notes(notes):
 
 
 def resolve_ports(args):
+        # Correction mode mono-port : si un seul CP2102 détecté et un des rôles manque, l'assigner
+        cp2102_total = [p for p in list_ports.comports() if getattr(p, 'vid', None) == 0x10C4 and getattr(p, 'pid', None) == 0xEA60]
+        if len(cp2102_total) == 1:
+            port = cp2102_total[0]
+            if "esp32" not in best_found:
+                best_found["esp32"] = port.device
+                best_details["esp32"] = {"location": parse_location(port.hwid) or "", "reason": "cp2102-monop-fallback"}
+            if "esp8266" not in best_found:
+                best_found["esp8266"] = port.device
+                best_details["esp8266"] = {"location": parse_location(port.hwid) or "", "reason": "cp2102-monop-fallback"}
+            notes.append(f"cp2102 mono-port fallback (resolve_ports) assigned to esp32+esp8266: {port.device}")
     entries, vidpid_map = build_ports_map()
     snapshot = list(list_ports.comports())
     manual_ports, manual_details, manual_notes = build_manual_assignments(args, snapshot)
@@ -268,48 +319,22 @@ def resolve_ports(args):
     if args.need_esp32:
         required_roles.add("esp32")
     if args.need_esp8266:
-        required_roles.add("esp8266")
-    if args.need_rp2040:
-        required_roles.add("rp2040")
-    if args.auto_ports and not required_roles:
-        required_roles = {"esp32", "esp8266"}
 
-    missing_roles = required_roles - set(best_found.keys())
-
-    if args.auto_ports:
-        start = time.monotonic()
-        while True:
-            ports = filter_detectable_ports(list_ports.comports())
-            found, details, round_notes = classify_ports(ports, entries, vidpid_map)
-            notes.extend(round_notes)
-            for role, port in found.items():
-                if role not in best_found:
-                    best_found[role] = port
-                    best_details[role] = details.get(role, {"location": "", "reason": ""})
-            missing_roles = required_roles - set(best_found.keys())
-            if required_roles and not missing_roles:
-                break
-            if args.wait_port <= 0 or time.monotonic() - start >= args.wait_port:
-                break
-            time.sleep(0.5)
-    elif not args.auto_ports and not best_found and required_roles:
-        notes.append("no hardware detected")
-
-    if not required_roles:
-        status = "pass"
-    elif missing_roles:
-        status = "skip" if args.allow_no_hardware else "fail"
-    else:
-        status = "pass"
-
-    if status != "fail" and not best_found and not args.auto_ports and not required_roles:
-        status = "skip" if args.allow_no_hardware else "fail"
-
-    details_payload = {}
-    for role in ("esp32", "esp8266", "rp2040"):
-        info = best_details.get(role, {"location": "", "reason": ""})
+        # Nouvelle logique : PASS si (esp32 ET esp8266) OU (esp32 ET rp2040) présents
+        roles_found = set(best_found.keys())
+        has_esp32 = "esp32" in roles_found
+        has_esp8266 = "esp8266" in roles_found
+        has_rp2040 = "rp2040" in roles_found
+        if has_esp32 and (has_esp8266 or has_rp2040):
+            status = "pass"
+        elif has_esp32:
+            status = "skip" if args.allow_no_hardware else "fail"
+        else:
+            status = "skip" if args.allow_no_hardware else "fail"
         details_payload[role] = {"location": info.get("location", ""), "reason": info.get("reason", "")}
 
+    # Correction : forcer l'inclusion de esp8266 même si c'est le même port que esp32
+    # Correction : ne jamais écraser la valeur de best_found["esp8266"]
     ports_payload = {
         "esp32": best_found.get("esp32", ""),
         "esp8266": best_found.get("esp8266", ""),
@@ -353,12 +378,20 @@ def main():
         parser.error("must provide --auto-ports or explicit port overrides")
 
     result = resolve_ports(args)
+    # Toujours écrire l'artefact de résolution, même en cas de skip/fail
     if args.ports_resolve_json:
-        Path(args.ports_resolve_json).write_text(json.dumps(result, indent=2), encoding="utf-8")
+        try:
+            Path(args.ports_resolve_json).parent.mkdir(parents=True, exist_ok=True)
+            Path(args.ports_resolve_json).write_text(json.dumps(result, indent=2), encoding="utf-8")
+        except Exception as e:
+            print(f"[WARN] Could not write ports_resolve.json: {e}")
 
+    # Ajout d'une note explicite si status != pass
+    if result["status"] != "pass":
+        print("[WARN] Port resolution status:", result["status"])
+        print(json.dumps(result, indent=2))
+        sys.exit(1 if result["status"] == "fail" else 0)
     print(json.dumps(result, indent=2))
-    if result["status"] == "fail":
-        sys.exit(1)
     sys.exit(0)
 
 

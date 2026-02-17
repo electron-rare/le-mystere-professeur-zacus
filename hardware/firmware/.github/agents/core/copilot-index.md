@@ -45,13 +45,9 @@ All cards should follow `.github/agents/core/conventions-pm-ai-agents.md` and `.
 | File | Purpose |
 |---|---|
 | `reports/firmware-health-baseline.md` | Baseline evidence report and observed health metrics. |
-| `archive/firmware-embedded-expert.md` | Long-horizon mission charter (historical reference). |
-| `archive/firmware-embedded-expert-summary.md` | Condensed status snapshot (historical reference). |
-| `archive/codex-script-expert.md` | Prompt and RC-live charter (historical reference). |
-| `archive/phase-1-backend.md` | Archived phase playbook. |
-| `archive/phase-3-frontend-webui.md` | Archived phase playbook. |
-| `archive/phase-4-qa.md` | Archived phase playbook. |
-| `archive/phase-5-release.md` | Archived phase playbook. |
+
+Historical archive playbooks were purged from the active tree.
+Use `git log -- .github/agents/archive/` if legacy context is needed.
 
 ## Selection Workflow
 

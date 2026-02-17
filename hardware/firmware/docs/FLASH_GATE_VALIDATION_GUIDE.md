@@ -426,4 +426,4 @@ echo "=== Validation Complete ==="
 - [tools/dev/ports_map.json](../../tools/dev/ports_map.json) — VIDPID + LOCATION mappings
 - [.local/ports_map.learned.json](.local/ports_map.learned.json) — Learned cache (auto-created)
 - [FIRMWARE_EMBEDDED_EXPERT.md](#phase-1-objectives) — Phase 1 acceptance criteria
-- [firmware-embedded-expert.md](../../.github/agents/archive/firmware-embedded-expert.md) — Full Firmware Expert contract
+- [firmware-core.md](../../.github/agents/domains/firmware-core.md) — Canonical Firmware contract

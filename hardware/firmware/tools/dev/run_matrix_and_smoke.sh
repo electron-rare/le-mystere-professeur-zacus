@@ -14,6 +14,10 @@ log_step() {
   echo "[step] $1"
 }
 
+log_warn() {
+  log "[WARN] $1"
+}
+
 # Initialisation stricte
 ENVS=(esp32dev esp32_release esp8266_oled ui_rp2040_ili9488 ui_rp2040_ili9486)
 TIMESTAMP="$(date -u +"%Y%m%d-%H%M%S")"
@@ -50,6 +54,7 @@ PORT_STATUS="SKIPPED"
 SMOKE_STATUS="SKIPPED"
 UI_LINK_STATUS="SKIPPED"
 SMOKE_COMMAND_STRING=""
+SERIAL_MODULE_AVAILABLE="1"
 
 TIMESTAMP="$(date -u +"%Y%m%d-%H%M%S")"
 ARTIFACT_DIR="$ROOT/artifacts/rc_live/$TIMESTAMP"
@@ -717,7 +722,10 @@ fi
 
 if [[ "${ZACUS_SKIP_SMOKE:-0}" != "1" ]]; then
   require_cmd python3 || exit "$EXIT_CODE"
-  python3 -c 'import serial' 2>/dev/null || python3 -m pip install pyserial
+  if ! python3 -c 'import serial' 2>/dev/null; then
+    log_warn "pyserial missing; smoke/port gates will be skipped"
+    SERIAL_MODULE_AVAILABLE="0"
+  fi
 fi
 
 if [[ "${ZACUS_SKIP_PIO:-0}" == "1" ]]; then
@@ -763,6 +771,16 @@ if [[ "${ZACUS_SKIP_SMOKE:-0}" == "1" ]]; then
   append_step "ui_link" "SKIP" "0" "$ARTIFACT_DIR/ui_link.log" "ZACUS_SKIP_SMOKE=1"
   append_step "story_screen" "SKIP" "0" "$ARTIFACT_DIR/story_screen_smoke.log" "ZACUS_SKIP_SMOKE=1"
   log_step "serial smoke skipped"
+elif [[ "$SERIAL_MODULE_AVAILABLE" != "1" ]]; then
+  SMOKE_STATUS="SKIPPED"
+  UI_LINK_STATUS="SKIPPED"
+  PORT_STATUS="SKIPPED"
+  append_step "resolve_ports" "SKIP" "0" "$ARTIFACT_DIR/resolve_ports.log" "pyserial missing"
+  append_step "smoke_esp32" "SKIP" "0" "$ARTIFACT_DIR/smoke_esp32.log" "pyserial missing"
+  append_step "smoke_esp8266_usb" "SKIP" "0" "$ARTIFACT_DIR/smoke_esp8266_usb.log" "pyserial missing"
+  append_step "ui_link" "SKIP" "0" "$ARTIFACT_DIR/ui_link.log" "pyserial missing"
+  append_step "story_screen" "SKIP" "0" "$ARTIFACT_DIR/story_screen_smoke.log" "pyserial missing"
+  log_warn "serial tooling unavailable"
 else
     port_loop_success=1
   if [[ "${ZACUS_REQUIRE_HW:-0}" == "1" ]]; then

@@ -1,3 +1,4 @@
+commands:
   - id: wifi-debug
     description: Monitor WiFi debug logs via ESP32 serial (live logs, scan/connect/errors)
     entrypoint: tools/dev/cockpit.sh
@@ -11,7 +12,6 @@
     notes: |
       Lance le script serial_smoke.py en mode monitor-only sur le port ESP32 (baud 115200).
       Affiche les logs WiFi, scan, connexion, erreurs, reboot, markers, etc. Evidence sauvegardée dans artifacts/serial_smoke/.
-commands:
   - id: rc
     description: Run RC live gate (build matrix + smoke)
     entrypoint: tools/dev/cockpit.sh
@@ -84,6 +84,15 @@ commands:
     args: ["codex-check"]
     runbook_ref: docs/TEST_SCRIPT_COORDINATOR.md
     evidence_outputs: []
+
+  - id: plan
+    description: Execute an agent plan by running its `## Plan d’action` commands
+    entrypoint: tools/dev/cockpit.sh
+    args: ["plan", "<agent>", "[--dry-run]", "[--plan-only]"]
+    runbook_ref: docs/AGENTS_INDEX.md#exécution-planifiée
+    evidence_outputs: []
+    notes: |
+      Choisit un agent dans `.github/agents/` puis lance `tools/dev/plan_runner.sh --agent <name>` pour exécuter la section `## Plan d’action`.
   - id: drivers
     description: Run driver audit for a specific platform
     entrypoint: tools/dev/cockpit.sh

@@ -1,46 +1,3 @@
-append_step() {
-  # Arguments: name, status, exit_code, log_file, details
-  local name="$1"
-  local status="$2"
-  local exit_code="$3"
-  local log_file="$4"
-  local details="$5"
-  echo -e "$name\t$status\t$exit_code\t$log_file\t$details" >> "$ARTIFACT_DIR/steps.tsv"
-}
-all_builds_present() {
-  return 0
-}
-log_step() {
-  echo "[step] $1"
-}
-
-log_warn() {
-  log "[WARN] $1"
-}
-
-# Initialisation stricte
-ENVS=(esp32dev esp32_release esp8266_oled ui_rp2040_ili9488 ui_rp2040_ili9486)
-TIMESTAMP="$(date -u +"%Y%m%d-%H%M%S")"
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-ARTIFACT_DIR="$ROOT/artifacts/rc_live/$TIMESTAMP"
-LOG_DIR="$ROOT/logs"
-RUN_LOG="$LOG_DIR/run_matrix_and_smoke_${TIMESTAMP}.log"
-PORTS_RESOLVE_JSON="$ARTIFACT_DIR/ports_resolve.json"
-PORT_ESP32=""
-PORT_ESP8266=""
-SUMMARY_JSON="$ARTIFACT_DIR/summary.json"
-SUMMARY_MD="$ARTIFACT_DIR/summary.md"
-STEPS_TSV="$ARTIFACT_DIR/steps.tsv"
-PYTHON_BIN="python3"
-FINALIZED=0
-EXIT_CODE=0
-
-parse_envs() {
-  ENVS=(esp32dev esp32_release esp8266_oled ui_rp2040_ili9488 ui_rp2040_ili9486)
-}
-echo "selected envs: ${ENVS[*]}"
-echo "artifacts: $ARTIFACT_DIR"
-
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname "$0")/agent_utils.sh"
@@ -58,56 +15,146 @@ SERIAL_MODULE_AVAILABLE="1"
 
 TIMESTAMP="$(date -u +"%Y%m%d-%H%M%S")"
 ARTIFACT_DIR="$ROOT/artifacts/rc_live/$TIMESTAMP"
+LOG_DIR="$ROOT/logs"
+RUN_LOG="$LOG_DIR/run_matrix_and_smoke_${TIMESTAMP}.log"
+STEPS_TSV="$ARTIFACT_DIR/steps.tsv"
+SUMMARY_JSON="$ARTIFACT_DIR/summary.json"
+SUMMARY_MD="$ARTIFACT_DIR/summary.md"
+PORTS_RESOLVE_JSON="$ARTIFACT_DIR/ports_resolve.json"
+RESOLVE_PORTS_ALLOW_RETRY="0"
 
-resolve_live_ports() {
-  local wait_port="${ZACUS_WAIT_PORT:-3}"
-  local resolve_log="$ARTIFACT_DIR/resolve_ports.log"
-  local require_hw="${ZACUS_REQUIRE_HW:-0}"
+mkdir -p "$ARTIFACT_DIR" "$LOG_DIR"
+: > "$RUN_LOG"
+: > "$STEPS_TSV"
 
-  if ! [[ "$wait_port" =~ ^[0-9]+$ ]]; then
-    wait_port=3
+EXIT_CODE=0
+FINALIZED=0
+PORT_ESP32=""
+PORT_ESP8266=""
+RESOLVE_REASON_ESP32=""
+RESOLVE_REASON_ESP8266=""
+RESOLVE_LOCATION_ESP32=""
+RESOLVE_LOCATION_ESP8266=""
+PYTHON_BIN="python3"
+ENVS=("${DEFAULT_ENVS[@]}")
+
+action_log() {
+  local msg="$1"
+  echo "$msg" | tee -a "$RUN_LOG"
+}
+
+log_step() {
+  action_log "[step] $*"
+}
+
+log_info() {
+  action_log "[info] $*"
+}
+
+log_warn() {
+  action_log "[warn] $*"
+}
+
+log_error() {
+  action_log "[error] $*"
+}
+
+append_step() {
+  local name="$1"
+  local status="$2"
+  local code="$3"
+  local log_file="$4"
+  local details="$5"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$status" "$code" "$log_file" "$details" >> "$STEPS_TSV"
+}
+
+set_failure() {
+  local rc="$1"
+  if [[ "$EXIT_CODE" == "0" ]]; then
+    EXIT_CODE="$rc"
   fi
+}
 
-  local resolver_cmd=(
-    "$PYTHON_BIN"
-    "$RESOLVER"
-    "--wait-port" "$wait_port"
-    "--role" "auto"
-    "--all"
-  )
+should_record_resolve_failure() {
+  [[ "${RESOLVE_PORTS_ALLOW_RETRY:-0}" != "1" ]]
+}
 
-  printf '[step] %s\n' "${resolver_cmd[*]}" | tee -a "$RUN_LOG" "$resolve_log"
-  set +e
-  local resolve_json
-  resolve_json="$(${resolver_cmd[@]} 2>>"$resolve_log")"
-  local rc=$?
-  set -e
-  printf '%s\n' "$resolve_json" >> "$resolve_log"
-
-  PORT_ESP32=""
-  PORT_ESP8266=""
-  if [[ "$rc" == "0" ]]; then
-    # Extraction dynamique
-    PORT_ESP32=$(echo "$resolve_json" | grep -o '"esp32": *"[^"]*"' | sed 's/.*: *"\([^"]*\)"/\1/')
-    PORT_ESP8266=$(echo "$resolve_json" | grep -o '"esp8266_usb": *"[^"]*"' | sed 's/.*: *"\([^"]*\)"/\1/')
-    if [[ -n "$PORT_ESP32" || -n "$PORT_ESP8266" ]]; then
-      PORT_STATUS="OK"
-      append_step "resolve_ports" "PASS" "0" "$resolve_log" "esp32=$PORT_ESP32 esp8266=$PORT_ESP8266"
-      echo "ESP32=${PORT_ESP32:-n/a}"
-      echo "ESP8266=${PORT_ESP8266:-n/a}"
-      return 0
-    else
-      PORT_STATUS="SKIP"
-      append_step "resolve_ports" "SKIP" "0" "$resolve_log" "no hardware detected"
-      log_warn "port resolution skipped: no hardware detected"
-      return 0
-    fi
-  else
-    PORT_STATUS="FAILED"
-    append_step "resolve_ports" "FAIL" "$rc" "$resolve_log" "resolver command failed"
-    set_failure 21
+require_cmd() {
+  local cmd="$1"
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    log_error "missing command: $cmd"
+    set_failure 127
     return 1
   fi
+}
+
+choose_platformio_core_dir() {
+  if [[ -n "${PLATFORMIO_CORE_DIR:-}" ]]; then
+    log_info "PLATFORMIO_CORE_DIR=${PLATFORMIO_CORE_DIR}"
+    return
+  fi
+  local candidate="$HOME/.platformio"
+  if mkdir -p "$candidate" >/dev/null 2>&1 && [[ -w "$candidate" ]]; then
+    export PLATFORMIO_CORE_DIR="$candidate"
+  else
+    candidate="/tmp/zacus-platformio-${USER}-$(date +%s)"
+    mkdir -p "$candidate"
+    export PLATFORMIO_CORE_DIR="$candidate"
+  fi
+  log_info "PLATFORMIO_CORE_DIR=${PLATFORMIO_CORE_DIR}"
+}
+
+activate_local_venv_if_present() {
+  if [[ -n "${VIRTUAL_ENV:-}" ]]; then
+    return
+  fi
+  if [[ -f ".venv/bin/activate" ]]; then
+    # shellcheck disable=SC1091
+    source .venv/bin/activate
+    log_info "using local venv: .venv"
+  fi
+}
+
+parse_envs() {
+  local raw="${ZACUS_ENV:-}"
+  if [[ -z "$raw" ]]; then
+    ENVS=("${DEFAULT_ENVS[@]}")
+    return
+  fi
+  raw="${raw//,/ }"
+  # shellcheck disable=SC2206
+  ENVS=($raw)
+  if (( ${#ENVS[@]} == 0 )); then
+    ENVS=("${DEFAULT_ENVS[@]}")
+  fi
+}
+
+all_builds_present() {
+  local env
+  for env in "${ENVS[@]}"; do
+    if [[ ! -f ".pio/build/$env/firmware.elf" && ! -f ".pio/build/$env/firmware.bin" && ! -f ".pio/build/$env/firmware.bin.signed" ]]; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+run_step_cmd() {
+  local step_name="$1"
+  local log_file="$2"
+  shift 2
+  mkdir -p "$(dirname "$log_file")"
+  printf '[step] %s\n' "$*" | tee -a "$RUN_LOG" "$log_file"
+  set +e
+  "$@" >>"$log_file" 2>&1
+  local rc=$?
+  set -e
+  if [[ "$rc" == "0" ]]; then
+    append_step "$step_name" "PASS" "0" "$log_file" ""
+    return 0
+  fi
+  append_step "$step_name" "FAIL" "$rc" "$log_file" ""
+  return "$rc"
 }
 
 run_build_env() {
@@ -170,34 +217,36 @@ wait_for_usb_confirmation() {
 
   if [[ "${ZACUS_NO_COUNTDOWN:-0}" == "1" ]]; then
     log_info "USB wait gate skipped (ZACUS_NO_COUNTDOWN=1)"
-    return 0
-  fi
-
-  print_usb_alert
-  emit_usb_warning "$warning"
-  list_ports_verbose
-
-  if [[ -t 0 ]]; then
-    log_info "press Enter once USB is connected (ports are listed every ${probe_every_s}s)"
-    while true; do
-      if read -r -t "$probe_every_s" -p "Press Enter to continue: " _; then
-        echo | tee -a "$RUN_LOG"
-        break
-      fi
-      echo | tee -a "$RUN_LOG"
-      emit_usb_warning "$warning"
-      list_ports_verbose
-    done
   else
-    if read -r -t 1 _; then
-      log_info "USB confirmation received from stdin"
+    print_usb_alert
+    emit_usb_warning "$warning"
+    list_ports_verbose
+
+    if [[ -t 0 ]]; then
+      log_info "press Enter once USB is connected (ports are listed every ${probe_every_s}s)"
+      while true; do
+        if read -r -t "$probe_every_s" -p "Press Enter to continue: " _; then
+          echo | tee -a "$RUN_LOG"
+          break
+        fi
+        echo | tee -a "$RUN_LOG"
+        emit_usb_warning "$warning"
+        list_ports_verbose
+      done
     else
-          echo "[done] summary: $SUMMARY_JSON"
-          echo "[done] summary: $SUMMARY_MD"
-      list_ports_verbose
+      if read -r -t 1 _; then
+        log_info "USB confirmation received from stdin"
+      else
+        log_warn "stdin is non-interactive; waiting ${probe_every_s}s then continuing"
+        sleep "$probe_every_s"
+        list_ports_verbose
+      fi
     fi
   fi
-  echo "USB confirmation complete"
+  if ! resolve_live_ports; then
+    return 1
+  fi
+  log_info "USB confirmation complete"
   return 0
 }
 
@@ -324,7 +373,7 @@ print("RESOLVE_NOTES=" + shlex.quote(" | ".join(v.get("notes", []))))
     local location_guard=0
     local location_notes=()
     if [[ "$(uname -s)" == "Darwin" ]]; then
-      local accept_reason='^(location-map:|fingerprint:|usb-hint)'
+      local accept_reason='^(location-map:|learned-map:|fingerprint|usb-hint|manual-override)'
       if [[ -z "${ZACUS_PORT_ESP32:-}" && ! "$RESOLVE_REASON_ESP32" =~ $accept_reason ]]; then
         location_guard=1
         location_notes+=("esp32 reason=${RESOLVE_REASON_ESP32:-unknown} (need location-map/fingerprint)")
@@ -686,14 +735,14 @@ finalize() {
   fi
   FINALIZED=1
   trap - EXIT
-    write_summary "$rc"
+  write_summary "$rc"
   if [[ -f "$RUN_LOG" ]]; then
     cp "$RUN_LOG" "$ARTIFACT_DIR/run_matrix_and_smoke.log"
   else
-    echo "[warn] log absent : $RUN_LOG"
+    log_warn "log absent: $RUN_LOG"
   fi
-  echo "[done] summary: $ARTIFACT_DIR/summary.json"
-  echo "[done] summary: $ARTIFACT_DIR/summary.md"
+  action_log "[done] summary: $ARTIFACT_DIR/summary.json"
+  action_log "[done] summary: $ARTIFACT_DIR/summary.md"
   exit "$rc"
 }
 
@@ -701,10 +750,8 @@ trap 'finalize "$EXIT_CODE"' EXIT
 
 
 parse_envs
-echo "selected envs: ${ENVS[*]}"
-echo "artifacts: $ARTIFACT_DIR"
-mkdir -p "$ARTIFACT_DIR"
-touch "$RUN_LOG"
+log_info "selected envs: ${ENVS[*]}"
+log_info "artifacts: $ARTIFACT_DIR"
 
 if [[ -x ".venv/bin/python" ]]; then
   PYTHON_BIN=".venv/bin/python"
@@ -718,10 +765,12 @@ RESOLVER="$REPO_ROOT/tools/test/resolve_ports.py"
 
 if [[ "${ZACUS_SKIP_PIO:-0}" != "1" ]]; then
   require_cmd pio || exit "$EXIT_CODE"
+  choose_platformio_core_dir
 fi
 
 if [[ "${ZACUS_SKIP_SMOKE:-0}" != "1" ]]; then
   require_cmd python3 || exit "$EXIT_CODE"
+  activate_local_venv_if_present
   if ! python3 -c 'import serial' 2>/dev/null; then
     log_warn "pyserial missing; smoke/port gates will be skipped"
     SERIAL_MODULE_AVAILABLE="0"
@@ -846,6 +895,7 @@ else
     append_step "smoke_esp32" "SKIP" "0" "$ARTIFACT_DIR/smoke_esp32.log" "port resolution $PORT_STATUS"
     append_step "smoke_esp8266_usb" "SKIP" "0" "$ARTIFACT_DIR/smoke_esp8266_usb.log" "port resolution $PORT_STATUS"
     append_step "ui_link" "SKIP" "0" "$ARTIFACT_DIR/ui_link.log" "port resolution $PORT_STATUS"
+    append_step "story_screen" "SKIP" "0" "$ARTIFACT_DIR/story_screen_smoke.log" "port resolution $PORT_STATUS"
     if [[ "$PORT_STATUS" == "FAILED" ]]; then
       set_failure 21
     fi

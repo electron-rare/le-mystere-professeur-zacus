@@ -1011,13 +1011,15 @@ bool sendLinkFrame(const char* type, const UiLinkField* fields, uint8_t fieldCou
 }
 
 void sendHelloFrame() {
-  static const char kHelloLine[] = "HELLO,proto=2,ui_type=OLED\n";
   if (!g_linkState.linkEnabled) {
     return;
   }
-  const size_t lineLen = sizeof(kHelloLine) - 1U;
-  g_link.write(reinterpret_cast<const uint8_t*>(kHelloLine), lineLen);
-  if (lineLen > 0U) {
+  UiLinkField fields[2] = {};
+  snprintf(fields[0].key, sizeof(fields[0].key), "proto");
+  snprintf(fields[0].value, sizeof(fields[0].value), "2");
+  snprintf(fields[1].key, sizeof(fields[1].key), "ui_type");
+  snprintf(fields[1].value, sizeof(fields[1].value), "OLED");
+  if (sendLinkFrame("HELLO", fields, 2U)) {
     g_lastHelloMs = millis();
   }
 }
@@ -1026,11 +1028,10 @@ void sendPongFrame(uint32_t nowMs) {
   if (!g_linkState.linkEnabled) {
     return;
   }
-  char line[32] = {};
-  const int written = snprintf(line, sizeof(line), "PONG,ms=%lu\n", static_cast<unsigned long>(nowMs));
-  if (written > 0) {
-    g_link.write(reinterpret_cast<const uint8_t*>(line), static_cast<size_t>(written));
-  }
+  UiLinkField fields[1] = {};
+  snprintf(fields[0].key, sizeof(fields[0].key), "ms");
+  snprintf(fields[0].value, sizeof(fields[0].value), "%lu", static_cast<unsigned long>(nowMs));
+  (void)sendLinkFrame("PONG", fields, 1U);
 }
 
 void handleIncoming() {

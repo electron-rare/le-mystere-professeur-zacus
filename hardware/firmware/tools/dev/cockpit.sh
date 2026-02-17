@@ -2,9 +2,6 @@
 
 set -euo pipefail
 
-# DEBUG: Affichage de début de script
-echo "[DEBUG] Lancement du cockpit Zacus..." >&2
-sleep 0.1
 export LC_ALL=C
 export LANG=C
 
@@ -128,6 +125,7 @@ show_menu() {
     "Watch serial ports"
     "Monitor WiFi debug (serial ESP32)"
     "Run codex prompt menu"
+    "Execute agent plan (plan_runner)"
     "Audit full (build + rc + drivers/tests)"
     "Generate sync report"
     "Cleanup logs/artefacts"
@@ -147,13 +145,14 @@ show_menu() {
       6) ports_watch ;;
       7) monitor_wifi_debug_serial ;;
       8) run_codex_prompts ;;
-      9) run_audit_all ;;
-      10) run_sync_report ;;
-      11) run_cleanup ;;
-      12) run_codex_check ;;
-      13) afficher_logs_menu ;;
-      14) afficher_aide ;;
-      15|0) exit 0 ;;
+      9) run_agent_plan ;;
+      10) run_audit_all ;;
+      11) run_sync_report ;;
+      12) run_cleanup ;;
+      13) run_codex_check ;;
+      14) afficher_logs_menu ;;
+      15) afficher_aide ;;
+      16|0) exit 0 ;;
     esac
   done
 }
@@ -190,6 +189,26 @@ afficher_aide() {
 
 run_codex_prompts() {
   "$FW_ROOT/tools/dev/codex_prompt_menu.sh"
+}
+
+run_agent_plan() {
+  local agents=()
+  local agent_file
+  while IFS= read -r -d '' agent_file; do
+    agents+=("$(basename "$agent_file" .md)")
+  done < <(find "$REPO_ROOT/.github/agents" -maxdepth 1 -type f -name '*.md' -print0 | sort -z)
+
+  if [[ ${#agents[@]} -eq 0 ]]; then
+    echo "[AGENT][FAIL] Aucun agent disponible sous .github/agents/." >&2
+    return 1
+  fi
+
+  local idx=$(menu_select "Plan runner – sélectionnez un agent" "${agents[@]}")
+  if [[ -z "$idx" || "$idx" -le 0 ]]; then
+    return 0
+  fi
+  local selected="${agents[$((idx-1))]}"
+  "$FW_ROOT/tools/dev/plan_runner.sh" --agent "$selected"
 }
 
 run_git() {
@@ -331,11 +350,21 @@ if [[ -n "$command" ]]; then
     flash)
       flash_all; exit $? ;;
     rc)
-      ZACUS_REQUIRE_HW=1 run_rc_live; exit $? ;;
+      run_rc_live; exit $? ;;
     rc-autofix)
       "$FW_ROOT/tools/dev/zacus.sh" rc-autofix; exit $? ;;
     ports)
       ports_watch; exit $? ;;
+    plan)
+      shift || true
+      if [[ $# -lt 1 ]]; then
+        echo "Usage: cockpit.sh plan <agent> [--dry-run|--plan-only]" >&2
+        exit 1
+      fi
+      plan_agent="$1"
+      shift
+      "$FW_ROOT/tools/dev/plan_runner.sh" --agent "$plan_agent" "$@"
+      exit $? ;;
 
     git)
       shift || true

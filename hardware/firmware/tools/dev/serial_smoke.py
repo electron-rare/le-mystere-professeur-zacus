@@ -181,8 +181,15 @@ def exit_no_hw(wait_port, allow, reason=None):
 
 
 def load_ports_map():
-    # Désactivé : la détection dynamique ne dépend plus de ports_map.json
-    return {"location": {}, "vidpid": {}}
+    raw_map = DEFAULT_PORTS_MAP
+    try:
+        if PORTS_MAP_PATH.exists():
+            loaded = json.loads(PORTS_MAP_PATH.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                raw_map = loaded
+    except Exception:
+        raw_map = DEFAULT_PORTS_MAP
+    return normalize_ports_map(raw_map)
 
 
 def normalize_ports_map(raw_map):
@@ -268,15 +275,6 @@ def determine_role(port, location, ports_map):
             prefix = key.rstrip("*")
             if loc_key.startswith(prefix):
                 return value
-    vidpid = port_vidpid(port)
-    if vidpid:
-        mapped = ports_map.get("vidpid", {}).get(vidpid)
-        if mapped:
-            return mapped
-    product = (port.product or "").lower()
-    if port.vid in (0x2E8A,) or "rp2040" in product or "pico" in product or "usbmodem" in port.device:
-        return "rp2040"
-    return None
     vidpid = port_vidpid(port)
     if vidpid:
         mapped = ports_map.get("vidpid", {}).get(vidpid)

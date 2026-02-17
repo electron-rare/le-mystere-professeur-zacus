@@ -1,5 +1,8 @@
 # Custom Agent – Alignment Complete
 
+## Conventions
+- Follow `.github/agents/core/conventions-pm-ai-agents.md` for structure, risk loop, and reporting.
+
 ## Scope
 Final alignment tasks that ensure every agent contract, runbook, and onboarding doc stays in sync before a major phase or hand-off.
 
@@ -17,7 +20,7 @@ Final alignment tasks that ensure every agent contract, runbook, and onboarding 
 - `docs/AGENT_TODO.md`
 - `docs/TEST_SCRIPT_COORDINATOR.md`
 - `docs/AGENTS_INDEX.md`
-- `.github/agents/*.md`
+- `.github/agents/**`
 
 ## Plan d’action
 1. Revoir les TODO/runbooks centrés sur les gates.
@@ -27,4 +30,3 @@ Final alignment tasks that ensure every agent contract, runbook, and onboarding 
    - run: rg -n 'AGENT' docs/AGENT_TODO.md
 3. Capturer les artefacts/étapes dans les rapports.
    - run: cat GIT_WRITE_OPS_FINAL_REPORT.md
-

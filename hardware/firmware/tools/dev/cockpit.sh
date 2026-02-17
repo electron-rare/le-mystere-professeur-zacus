@@ -10,6 +10,7 @@ export LANG=C
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR/../.." rev-parse --show-toplevel)"
 FW_ROOT="$REPO_ROOT/hardware/firmware"
+AGENTS_ROOT="$FW_ROOT/.github/agents"
 ARTIFACTS_ROOT="$FW_ROOT/artifacts/rc_live"
 PROMPT_DIR="$FW_ROOT/tools/dev/codex_prompts"
 RC_PROMPT="$PROMPT_DIR/rc_live_fail.prompt.md"
@@ -193,13 +194,14 @@ run_codex_prompts() {
 
 run_agent_plan() {
   local agents=()
-  local agent_file
+  local agent_file rel
   while IFS= read -r -d '' agent_file; do
-    agents+=("$(basename "$agent_file" .md)")
-  done < <(find "$REPO_ROOT/.github/agents" -maxdepth 1 -type f -name '*.md' -print0 | sort -z)
+    rel="${agent_file#$AGENTS_ROOT/}"
+    agents+=("${rel%.md}")
+  done < <(find "$AGENTS_ROOT" -type f -name '*.md' ! -path "$AGENTS_ROOT/archive/*" -print0 | sort -z)
 
   if [[ ${#agents[@]} -eq 0 ]]; then
-    echo "[AGENT][FAIL] Aucun agent disponible sous .github/agents/." >&2
+    echo "[AGENT][FAIL] Aucun agent actif disponible sous $AGENTS_ROOT." >&2
     return 1
   fi
 

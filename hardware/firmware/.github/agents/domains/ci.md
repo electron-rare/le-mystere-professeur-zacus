@@ -1,5 +1,8 @@
 # Custom Agent – CI & Meta
 
+## Conventions
+- Follow `.github/agents/core/conventions-pm-ai-agents.md` for structure, risk loop, and reporting.
+
 ## Scope
 `.github/**` workflows and template files.
 

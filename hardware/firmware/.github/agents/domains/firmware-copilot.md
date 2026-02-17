@@ -1,5 +1,8 @@
 # Custom Agent – Firmware Copilot
 
+## Conventions
+- Follow `.github/agents/core/conventions-pm-ai-agents.md` for structure, risk loop, and reporting.
+
 ## Scope
 Copilot-focused firmware duties described in `hardware/firmware/AGENTS_FIRMWARE.md`.
 

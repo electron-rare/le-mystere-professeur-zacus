@@ -1,5 +1,8 @@
 # Custom Agent – Firmware Docs
 
+## Conventions
+- Follow `.github/agents/core/conventions-pm-ai-agents.md` for structure, risk loop, and reporting.
+
 ## Scope
 Firmware-facing documentation, onboarding guides, and generated command indexes.
 

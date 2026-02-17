@@ -1,5 +1,8 @@
 # Custom Agent – Firmware Tooling
 
+## Conventions
+- Follow `.github/agents/core/conventions-pm-ai-agents.md` for structure, risk loop, and reporting.
+
 ## Scope
 `hardware/firmware/tools/dev/**` automation helpers.
 

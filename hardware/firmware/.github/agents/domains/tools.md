@@ -1,5 +1,8 @@
 # Custom Agent – Tools
 
+## Conventions
+- Follow `.github/agents/core/conventions-pm-ai-agents.md` for structure, risk loop, and reporting.
+
 ## Scope
 `tools/**` and helper docs describing repository tooling.
 

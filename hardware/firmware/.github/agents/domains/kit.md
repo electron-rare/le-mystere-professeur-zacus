@@ -1,5 +1,8 @@
 # Custom Agent – Kit maître du jeu
 
+## Conventions
+- Follow `.github/agents/core/conventions-pm-ai-agents.md` for structure, risk loop, and reporting.
+
 ## Scope
 `kit-maitre-du-jeu/stations/**`, `kit-maitre-du-jeu/export/**`, and textual instructions linked from game/printables sources.
 

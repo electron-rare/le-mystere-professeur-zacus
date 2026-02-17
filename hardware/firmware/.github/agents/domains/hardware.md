@@ -1,5 +1,8 @@
 # Custom Agent – Hardware
 
+## Conventions
+- Follow `.github/agents/core/conventions-pm-ai-agents.md` for structure, risk loop, and reporting.
+
 ## Scope
 `hardware/bom`, `hardware/enclosure`, `hardware/wiring`, and coordination with the firmware stack (firmware obeys its own AGENT).
 

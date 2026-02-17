@@ -14,6 +14,21 @@
 - ✅ 4 scenarios deployed and validated
 - ✅ Serial commands functional
 
+### Conventions
+- Follow `.github/agents/core/conventions-pm-ai-agents.md` for structure, risk handling, and reporting.
+- Implement workflow-first behavior: deterministic HTTP/WS flow before adding optional autonomous paths.
+- Keep endpoint behavior measurable (status code contract + payload schema + evidence log).
+
+### Inputs
+- Story V2 backend readiness (Phase 1 artifacts and deployed scenarios).
+- Existing HTTP server and story engine code under `esp32_audio/src/`.
+- Test/runbook requirements from `docs/TEST_SCRIPT_COORDINATOR.md`.
+
+### Outputs
+- 11 endpoint implementation with documented status-code semantics.
+- WebSocket evidence logs proving stability under sustained stream.
+- Updated test scripts/docs and explicit handoff report.
+
 ---
 
 ### ✅ Required Deliverables (Agent Management)
@@ -403,3 +418,11 @@ If you encounter blockers, escalate to Coordination Hub:
 - 📁 Artifacts: esp32_audio/tests/test_story_http_api_{timestamp}.log
 - 🎯 Next: Phase 3 unblocked (Frontend WebUI)
 ```
+
+## Plan d’action
+1. Lancer la base de validation firmware.
+   - run: bash hardware/firmware/tools/dev/run_matrix_and_smoke.sh
+2. Exécuter la suite HTTP Story V2.
+   - run: bash hardware/firmware/esp32_audio/tests/test_story_http_api.sh
+3. Capturer et vérifier les artefacts de test.
+   - run: rg -n "PASS|FAIL|WebSocket|api/story" hardware/firmware/artifacts hardware/firmware/logs

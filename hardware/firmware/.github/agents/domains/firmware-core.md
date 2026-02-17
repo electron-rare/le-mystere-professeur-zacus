@@ -1,5 +1,8 @@
 # Custom Agent – Firmware Core
 
+## Conventions
+- Follow `.github/agents/core/conventions-pm-ai-agents.md` for structure, risk loop, and reporting.
+
 ## Scope
 All files under `hardware/firmware/**`.
 

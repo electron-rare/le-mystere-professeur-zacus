@@ -1,5 +1,8 @@
 # Custom Agent – Phase Launch Plan
 
+## Conventions
+- Follow `.github/agents/core/conventions-pm-ai-agents.md` for structure, risk loop, and reporting.
+
 ## Scope
 Execution plan for gating, artifacts, and reporting required to open a new phase (feature milestone, release candidate, etc.).
 

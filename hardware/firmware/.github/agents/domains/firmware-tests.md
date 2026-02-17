@@ -1,5 +1,8 @@
 # Custom Agent – Firmware Tests
 
+## Conventions
+- Follow `.github/agents/core/conventions-pm-ai-agents.md` for structure, risk loop, and reporting.
+
 ## Scope
 `tools/dev/`, `tools/test/`, `esp32_audio/tests/`, and firmware artifact/log directories.
 

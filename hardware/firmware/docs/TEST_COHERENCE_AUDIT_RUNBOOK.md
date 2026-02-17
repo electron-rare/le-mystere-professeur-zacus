@@ -307,7 +307,7 @@ fi
 - Null pointer dereference (check FW source for bounds)
 - WiFi disconnect handler crash (check WiFi event loop)
 
-See [FIRMWARE_HEALTH_BASELINE.md](./FIRMWARE_HEALTH_BASELINE.md#panic-markers-found) for root cause analysis template.
+See [firmware-health-baseline.md](../.github/agents/reports/firmware-health-baseline.md#panic-markers-found) for root cause analysis template.
 
 ---
 
@@ -444,7 +444,7 @@ ZACUS_GIT_ALLOW_WRITE=1 ./tools/dev/cockpit.sh git commit -m "Phase 1: Baseline 
 
 ## Key References
 
-- [FIRMWARE_HEALTH_BASELINE.md](./FIRMWARE_HEALTH_BASELINE.md) — Phase 1 baseline interpretation guide
+- [firmware-health-baseline.md](../.github/agents/reports/firmware-health-baseline.md) — Phase 1 baseline interpretation guide
 - [TEST_SCRIPT_COORDINATOR.md](./TEST_SCRIPT_COORDINATOR.md) — Gate definitions and evidence standards
 - `tools/test/audit_coherence.py` — Automated validation script
 - `tools/dev/cockpit_commands.yaml` — Command registry (source of truth)

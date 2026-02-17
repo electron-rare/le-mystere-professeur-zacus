@@ -43,16 +43,25 @@ def _parse_simple_yaml(text: str) -> Dict[str, Any]:
 
     for raw_line in text.splitlines():
         line = raw_line.rstrip()
-        if not line.strip() or line.strip().startswith("#"):
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip(" "))
+        if not stripped or stripped.startswith("#"):
             continue
-        if line.startswith("commands:"):
+        if stripped == "commands:":
             continue
-        if line.lstrip().startswith("- "):
+        # Nested list items (e.g. evidence_outputs) must be handled before
+        # top-level command detection.
+        if list_key and stripped.startswith("- ") and indent >= 4 and current is not None:
+            current[list_key].append(_parse_scalar(stripped[2:]))
+            continue
+
+        # Top-level command entries are indented by two spaces.
+        if stripped.startswith("- ") and indent == 2:
             if current is not None:
                 data["commands"].append(current)
             current = {}
             list_key = None
-            content = line.lstrip()[2:].strip()
+            content = stripped[2:].strip()
             # Only parse key:value pairs; skip list items without colons
             if content and ":" in content:
                 key, value = content.split(":", 1)
@@ -62,15 +71,10 @@ def _parse_simple_yaml(text: str) -> Dict[str, Any]:
         if current is None:
             continue
 
-        stripped = line.strip()
         if stripped.endswith(":") and ":" not in stripped[:-1]:
             key = stripped[:-1].strip()
             current[key] = []
             list_key = key
-            continue
-
-        if list_key and stripped.startswith("- "):
-            current[list_key].append(_parse_scalar(stripped[2:]))
             continue
 
         if ":" in stripped:

@@ -252,4 +252,4 @@ See [.github/workflows/rc-autofix-cicd.yml](../../.github/workflows/rc-autofix-c
 
 - RC Final Board: [RC_FINAL_BOARD.md](RC_FINAL_BOARD.md)
 - Test Coordinator: [TEST_SCRIPT_COORDINATOR.md](TEST_SCRIPT_COORDINATOR.md)
-- Agent Briefing: [.github/agents/AGENT_BRIEFINGS.md](../.github/agents/AGENT_BRIEFINGS.md)
+- Agent Briefing: [.github/agents/core/agent-briefings.md](../.github/agents/core/agent-briefings.md)

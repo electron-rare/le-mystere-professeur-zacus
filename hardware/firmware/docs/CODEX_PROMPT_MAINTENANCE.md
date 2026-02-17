@@ -335,5 +335,5 @@ Before committing a new/modified prompt:
 - Prompt Inventory: [docs/RC_LIVE_CODEX_STATUS.md](RC_LIVE_CODEX_STATUS.md)
 - RC Final Board: [docs/RC_FINAL_BOARD.md](RC_FINAL_BOARD.md)
 - Evidence System: [docs/TEST_SCRIPT_COORDINATOR.md](TEST_SCRIPT_COORDINATOR.md)
-- Agent Briefing: [.github/agents/AGENT_BRIEFINGS.md](../.github/agents/AGENT_BRIEFINGS.md)
+- Agent Briefing: [.github/agents/core/agent-briefings.md](../.github/agents/core/agent-briefings.md)
 

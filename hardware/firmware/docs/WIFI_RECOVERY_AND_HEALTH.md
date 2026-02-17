@@ -49,8 +49,8 @@ Fournir une procédure claire pour diagnostiquer, rétablir et valider la visibi
 ## 4. Liens utiles
 - [QUICKSTART.md](QUICKSTART.md)
 - [RTOS_WIFI_HEALTH.md](RTOS_WIFI_HEALTH.md)
-- [FIRMWARE_HEALTH_BASELINE.md](FIRMWARE_HEALTH_BASELINE.md)
-- [AGENT_BRIEFINGS.md](../.github/agents/AGENT_BRIEFINGS.md)
+- [firmware-health-baseline.md](../.github/agents/reports/firmware-health-baseline.md)
+- [AGENT_BRIEFINGS.md](../.github/agents/core/agent-briefings.md)
 
 ---
 

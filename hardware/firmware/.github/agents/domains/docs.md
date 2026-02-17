@@ -1,5 +1,8 @@
 # Custom Agent – Docs
 
+## Conventions
+- Follow `.github/agents/core/conventions-pm-ai-agents.md` for structure, risk loop, and reporting.
+
 ## Scope
 `docs/**` plus onboarding or briefing files referenced by documentation workflows.
 

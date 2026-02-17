@@ -1,14 +1,14 @@
 ```
-Objectif : exécuter le plan `firmware_core` (build PlatformIO + smoke + WiFi/RTOS health + artefacts) depuis Copilot/VS Code.
+Objectif : exécuter le plan `domains/firmware-core` (build PlatformIO + smoke + WiFi/RTOS health + artefacts) depuis Copilot/VS Code.
 
 Contexte :
-- Le plan est défini dans `.github/agents/firmware_core.md` sous “Plan d’action”.
+- Le plan est défini dans `.github/agents/domains/firmware-core.md` sous “Plan d’action”.
 - Les artefacts et logs doivent être consigné dans `docs/AGENT_TODO.md`, `hardware/firmware/logs/` et `hardware/firmware/artifacts/`.
 
 Commande :
 ```
 cd "$(git rev-parse --show-toplevel)"
-tools/dev/plan_runner.sh --agent firmware_core
+tools/dev/plan_runner.sh --agent domains/firmware-core
 ```
 
 Options utiles :

@@ -1,5 +1,8 @@
 # Custom Agent – Game Content
 
+## Conventions
+- Follow `.github/agents/core/conventions-pm-ai-agents.md` for structure, risk loop, and reporting.
+
 ## Scope
 `game/scenarios/**`, `game/prompts/**`, and derived documents regenerated from YAML sources.
 

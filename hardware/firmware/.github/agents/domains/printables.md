@@ -1,5 +1,8 @@
 # Custom Agent – Printables
 
+## Conventions
+- Follow `.github/agents/core/conventions-pm-ai-agents.md` for structure, risk loop, and reporting.
+
 ## Scope
 `printables/manifests/**` and `printables/src/**`.
 

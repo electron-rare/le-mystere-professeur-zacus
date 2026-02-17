@@ -8,6 +8,21 @@
 - ✅ Firmware builds on esp32dev
 - ✅ Serial console access
 
+### Conventions
+- Follow `.github/agents/core/conventions-pm-ai-agents.md` for risk loop, reporting, and evidence policy.
+- Keep one measurable objective per execution cycle (stability, reconnect, or telemetry), not mixed goals.
+- Treat missing telemetry as a fail signal (`unknown` is not a pass verdict).
+
+### Inputs
+- Latest `story-V2` firmware branch state.
+- Last smoke/health artifacts under `artifacts/` and `logs/`.
+- Current runbook constraints from `docs/TEST_SCRIPT_COORDINATOR.md`.
+
+### Outputs
+- Updated scripts/docs implementing RTOS/WiFi requirements.
+- Artifact bundle proving reconnect and RTOS health outcomes.
+- Clear pass/fail report with blockers and next action.
+
 ---
 
 ### ✅ Required Deliverables (Agent Management)
@@ -130,3 +145,11 @@
 - 📁 Artifacts: artifacts/rtos_wifi_health_[timestamp].log
 - 🎯 Next: Phase 2/3 validation unblocked
 ```
+
+## Plan d’action
+1. Valider la stabilité firmware + smoke.
+   - run: bash hardware/firmware/tools/dev/run_matrix_and_smoke.sh
+2. Capturer la télémétrie RTOS/WiFi.
+   - run: bash hardware/firmware/tools/dev/rtos_wifi_health.sh
+3. Vérifier les marqueurs critiques dans les logs.
+   - run: rg -n "UI_LINK_STATUS|PANIC|REBOOT" hardware/firmware/artifacts hardware/firmware/logs

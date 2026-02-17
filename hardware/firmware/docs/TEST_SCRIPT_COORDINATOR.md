@@ -25,7 +25,7 @@ Update flow:
 
 ## Git Operations Policy
 
-See the agent briefing in [.github/agents/AGENT_BRIEFINGS.md](../.github/agents/AGENT_BRIEFINGS.md) to avoid duplicating agent rules in docs.
+See the agent briefing in [.github/agents/core/agent-briefings.md](../.github/agents/core/agent-briefings.md) to avoid duplicating agent rules in docs.
 
 ### Quick Reference
 
@@ -36,7 +36,7 @@ See the agent briefing in [.github/agents/AGENT_BRIEFINGS.md](../.github/agents/
   - `./tools/dev/cockpit.sh git stash [action]`
   - `./tools/dev/cockpit.sh git push [remote] [branch]`
 - **Evidence**: All git commands logged to `commands.txt` via `git_cmd()`
-- **For details**: See `.github/agents/AGENT_BRIEFINGS.md` (full rules, examples, safeguards)
+- **For details**: See `.github/agents/core/agent-briefings.md` (full rules, examples, safeguards)
 
 
 ## Baseline Generation (Phase 1)
@@ -82,7 +82,7 @@ baseline_YYYYMMDD_###/
 
 ### Interpretation
 
-See [FIRMWARE_HEALTH_BASELINE.md](./FIRMWARE_HEALTH_BASELINE.md) for:
+See [firmware-health-baseline.md](../.github/agents/reports/firmware-health-baseline.md) for:
 
 - Success criteria (pass/fail counts)
 - Panic incident analysis

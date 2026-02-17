@@ -152,6 +152,6 @@ log ""
 log "Baseline artifacts: $BASELINE_DIR"
 log "Full log: $LOG_FILE"
 log ""
-log "Next step: Fill out docs/FIRMWARE_HEALTH_BASELINE.md with results"
+log "Next step: Fill out .github/agents/reports/firmware-health-baseline.md with results"
 
 success "Baseline generation successful!"

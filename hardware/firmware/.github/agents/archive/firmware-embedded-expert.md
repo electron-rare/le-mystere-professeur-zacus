@@ -186,7 +186,7 @@ Example status update:
 
 ### Reference during work:
 
-- [.github/agents/AGENT_BRIEFINGS.md](.github/agents/AGENT_BRIEFINGS.md) — Phase roadmap
+- [agent-briefings.md](../core/agent-briefings.md) — Phase roadmap
 - [docs/RC_FINAL_BOARD.md](docs/RC_FINAL_BOARD.md) — RC execution gates
 - [docs/RC_FINAL_REPORT_TEMPLATE.md](docs/RC_FINAL_REPORT_TEMPLATE.md) — Evidence format
 - [docs/TEST_SCRIPT_COORDINATOR.md](docs/TEST_SCRIPT_COORDINATOR.md) — Test coherence guardrails

@@ -1,5 +1,8 @@
 # Custom Agent – Global
 
+## Conventions
+- Follow `.github/agents/core/conventions-pm-ai-agents.md` for structure, risk loop, and reporting.
+
 ## Scope
 Entire repository; project manager + tech lead + QA gatekeeper as per `AGENTS.md`.
 

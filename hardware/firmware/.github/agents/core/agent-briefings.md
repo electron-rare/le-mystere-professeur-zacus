@@ -2,6 +2,11 @@
 
 Agent rules, patterns, and implementation requirements to avoid duplication across docs.
 
+Base standard for structure and reporting is documented in:
+- `.github/agents/core/conventions-pm-ai-agents.md`
+- `.github/agents/core/plan-template.md`
+- `.github/agents/core/copilot-index.md`
+
 ---
 
 ## Git Write Operations via Cockpit
@@ -237,36 +242,37 @@ python3 tools/test/audit_coherence.py
 
 ---
 ## Custom Agent Files
-- `.github/agents/PLAN_TEMPLATE.md` – modèle/guide pour les plans d’action dans chaque briefing.
+- `.github/agents/core/plan-template.md` – modèle/guide pour les plans d’action dans chaque briefing.
 
-- `.github/agents/global.md` – repo-wide governance, checkpoints, and gate list.
-- `.github/agents/hardware.md` – enclosure/BOM/wiring plus firmware integration expectations.
-- `.github/agents/audio.md` – audio manifest ownership and validation workflow.
-- `.github/agents/game.md` – scenario/story content guardrails.
-- `.github/agents/printables.md` – printable manifests and export discipline.
-- `.github/agents/tools.md` – CLI/tooling helper instructions.
-- `.github/agents/docs.md` – documentation updates and link checks.
-- `.github/agents/kit.md` – GM kit station/export consistency.
-- `.github/agents/ci.md` – workflow/template maintenance.
-- `.github/agents/firmware_core.md` – firmware tree policies and AGENT_TODO reporting.
-- `.github/agents/firmware_tooling.md` – firmware tooling helper scripts.
-- `.github/agents/firmware_copilot.md` – Copilot-specific firmware duties around UI Link/LittleFS/I2S/artifacts.
-- `.github/agents/firmware_tests.md` – smoke/stress gate runners and artifact metadata.
-- `.github/agents/firmware_docs.md` – firmware-facing docs and command indexes.
-- `.github/agents/ALIGNMENT_COMPLETE.md` – final alignment sweep for AGENT contracts and onboarding before a phase hand-off.
-- `.github/agents/PHASE_LAUNCH_PLAN.md` – launch-phase checklist for gates, artifacts, and reporting.
+- `.github/agents/domains/global.md` – repo-wide governance, checkpoints, and gate list.
+- `.github/agents/domains/hardware.md` – enclosure/BOM/wiring plus firmware integration expectations.
+- `.github/agents/domains/audio.md` – audio manifest ownership and validation workflow.
+- `.github/agents/domains/game.md` – scenario/story content guardrails.
+- `.github/agents/domains/printables.md` – printable manifests and export discipline.
+- `.github/agents/domains/tools.md` – CLI/tooling helper instructions.
+- `.github/agents/domains/docs.md` – documentation updates and link checks.
+- `.github/agents/domains/kit.md` – GM kit station/export consistency.
+- `.github/agents/domains/ci.md` – workflow/template maintenance.
+- `.github/agents/domains/firmware-core.md` – firmware tree policies and AGENT_TODO reporting.
+- `.github/agents/domains/firmware-tooling.md` – firmware tooling helper scripts.
+- `.github/agents/domains/firmware-copilot.md` – Copilot-specific firmware duties around UI Link/LittleFS/I2S/artifacts.
+- `.github/agents/domains/firmware-tests.md` – smoke/stress gate runners and artifact metadata.
+- `.github/agents/domains/firmware-docs.md` – firmware-facing docs and command indexes.
+- `.github/agents/core/alignment-complete.md` – final alignment sweep for AGENT contracts and onboarding before a phase hand-off.
+- `.github/agents/core/phase-launch-plan.md` – launch-phase checklist for gates, artifacts, and reporting.
 
 ## Assumptions
-- Les interfaces Copilot/GUI cherchent directement les briefs sous `.github/agents/` (aucun sous-répertoire requis).
-- En cas de conflit entre une fiche et un contrat AGENT, la hiérarchie root → sous-projet → briefing spécifique sert de guide et doit être documentée dans la fiche ou `AGENT_BRIEFINGS.md`.
+- Les briefs actifs sont organisés par sous-dossiers (`core/`, `domains/`, `phases/`, `reports/`), avec `archive/` exclu des runs standards.
+- En cas de conflit entre une fiche et un contrat AGENT, la hiérarchie root → sous-projet → briefing spécifique sert de guide et doit être documentée dans la fiche ou `agent-briefings.md`.
 
 
 ## Plan execution helper
-- Read the relevant `.github/agents/<agent>.md` file, then run `bash hardware/firmware/tools/dev/plan_runner.sh --agent <name>` to execute the `- run:` commands automatically (use `--dry-run` or `--plan-only` to preview).
-- Launch `hardware/firmware/tools/dev/codex_prompts/trigger_firmware_core_plan.prompt.md` via Copilot/VS Code to trigger `bash hardware/firmware/tools/dev/plan_runner.sh --agent firmware_core` sans quitter l’interface.
+- Read the relevant agent brief, then run `bash hardware/firmware/tools/dev/plan_runner.sh --agent <name>` to execute the `- run:` commands automatically (use `--dry-run` or `--plan-only` to preview).
+- Canonical IDs now follow relative paths such as `domains/firmware-core` or `phases/phase-2b-firmware-rtos`; legacy aliases like `firmware_core` stay accepted.
+- Launch `hardware/firmware/tools/dev/codex_prompts/trigger_firmware_core_plan.prompt.md` via Copilot/VS Code to trigger `bash hardware/firmware/tools/dev/plan_runner.sh --agent domains/firmware-core` without leaving the IDE.
 
 ## See Also
 
-- [docs/TEST_SCRIPT_COORDINATOR.md](../docs/TEST_SCRIPT_COORDINATOR.md) - Main coordinator doc
-- [docs/_generated/COCKPIT_COMMANDS.md](../docs/_generated/COCKPIT_COMMANDS.md) - Auto-generated command reference
-- [.github/agents/COPILOT_INDEX.md](COPILOT_INDEX.md) - Quick index of the available custom agent files
+- [docs/TEST_SCRIPT_COORDINATOR.md](../../../docs/TEST_SCRIPT_COORDINATOR.md) - Main coordinator doc
+- [docs/_generated/COCKPIT_COMMANDS.md](../../../docs/_generated/COCKPIT_COMMANDS.md) - Auto-generated command reference
+- [.github/agents/core/copilot-index.md](copilot-index.md) - Quick index of the available custom agent files

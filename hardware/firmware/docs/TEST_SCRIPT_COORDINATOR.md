@@ -197,6 +197,14 @@ Use this in phase updates:
 - 📈 Health: (green/yellow/red)
 ```
 
+## Exécutions récentes (17 février 2026)
+
+- `bash hardware/firmware/tools/dev/plan_runner.sh --agent firmware_tooling --plan-only` puis `bash hardware/firmware/tools/dev/plan_runner.sh --agent firmware_tooling` — PASS; les trois commandes `--help` sont validées sans déclencher de run matrix involontaire.
+- `ZACUS_REQUIRE_HW=1 bash hardware/firmware/tools/dev/plan_runner.sh --agent firmware_tests` — FAIL sur la première gate (`run_matrix_and_smoke`), voir `artifacts/rc_live/20260217-153129/summary.md` (`UI_LINK_STATUS connected=0`, smoke ESP8266 monitor KO).
+- `ZACUS_REQUIRE_HW=1 PATH=$(pwd)/hardware/firmware/.venv/bin:$PATH bash hardware/firmware/tools/dev/run_smoke_tests.sh` — FAIL (résolution port stricte), evidence `artifacts/smoke_tests/20260217-153214/summary.md`.
+- `PATH=$(pwd)/hardware/firmware/.venv/bin:$PATH python3 hardware/firmware/tools/dev/run_stress_tests.py --hours 0.5` — FAIL, scénario `DEFAULT` non terminé et (sur run précédent) panic I2S observé; evidence `artifacts/stress_test/20260217-153220/summary.md` + `artifacts/stress_test/20260217-153037/stress_test.log`.
+- `PATH=$(pwd)/hardware/firmware/.venv/bin:$PATH python3 hardware/firmware/tools/test/audit_coherence.py` — PASS après correction des `runbook_ref` cockpit (`plan`, `baseline`) et régénération `docs/_generated/COCKPIT_COMMANDS.md`; evidence `artifacts/audit/20260217-153246/summary.md`.
+
 ## Exécutions récentes (16 février 2026)
 
 - `ZACUS_REQUIRE_HW=1 ./tools/dev/run_matrix_and_smoke.sh` — ports resolved (ESP32 `/dev/cu.SLAB_USBtoUART`, ESP8266 `/dev/cu.SLAB_USBtoUART9`), per-role serial smokes passed, but `UI_LINK_STATUS` remained `connected=0` so the UI never handshook; see `artifacts/rc_live/20260216-143539/summary.md` (and `ui_link.log`) for the run.
@@ -216,7 +224,7 @@ Use this in phase updates:
 
 Canonical command:
 
-- `python3 tools/test/audit_coherence.py`
+- `python3 hardware/firmware/tools/test/audit_coherence.py`
 
 Evidence output:
 

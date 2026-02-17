@@ -262,8 +262,8 @@ python3 tools/test/audit_coherence.py
 
 
 ## Plan execution helper
-- Read the relevant `.github/agents/<agent>.md` file, then run `tools/dev/plan_runner.sh --agent <name>` to execute the `- run:` commands automatically (use `--dry-run` or `--plan-only` to preview).
-- Launch `hardware/firmware/tools/dev/codex_prompts/trigger_firmware_core_plan.prompt.md` via Copilot/VS Code to trigger `tools/dev/plan_runner.sh --agent firmware_core` sans quitter l’interface.
+- Read the relevant `.github/agents/<agent>.md` file, then run `bash hardware/firmware/tools/dev/plan_runner.sh --agent <name>` to execute the `- run:` commands automatically (use `--dry-run` or `--plan-only` to preview).
+- Launch `hardware/firmware/tools/dev/codex_prompts/trigger_firmware_core_plan.prompt.md` via Copilot/VS Code to trigger `bash hardware/firmware/tools/dev/plan_runner.sh --agent firmware_core` sans quitter l’interface.
 
 ## See Also
 

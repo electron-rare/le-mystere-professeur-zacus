@@ -5,6 +5,43 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 REPO_ROOT="$(cd "$ROOT/../.." && pwd)"
 cd "$ROOT"
 
+usage() {
+  cat <<'USAGE'
+Usage: ./tools/dev/run_matrix_and_smoke.sh [--help]
+
+Runs the firmware build matrix, serial smoke checks, UI link gate, and summary export.
+Configure behavior with environment variables.
+
+Key environment variables:
+  ZACUS_REQUIRE_HW=1        Require ESP32 + ESP8266 ports (strict mode)
+  ZACUS_SKIP_PIO=1          Skip PlatformIO builds
+  ZACUS_SKIP_SMOKE=1        Skip serial smoke + UI link checks
+  ZACUS_ENV="<envs>"        Limit build envs (space or comma separated)
+  ZACUS_FORCE_BUILD=1       Force rebuild even if artifacts exist
+  ZACUS_SKIP_IF_BUILT=0     Disable cached build short-circuit
+  ZACUS_WAIT_PORT=<seconds> Port resolver wait window (default: 3)
+  ZACUS_TIMEOUT=<seconds>   serial_smoke per-command timeout
+  ZACUS_UI_LINK_WAIT=<sec>  Delay before UI_LINK_STATUS poll
+  ZACUS_SKIP_SCREEN_CHECK=1 Skip story screen smoke check
+  ZACUS_NO_COUNTDOWN=1      Skip USB countdown prompts
+  ZACUS_WAIT_MAX_SECS=<n>   Max USB wait in strict hardware mode (0 = no max)
+USAGE
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "[error] unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
 DEFAULT_ENVS=(esp32dev esp32_release esp8266_oled ui_rp2040_ili9488 ui_rp2040_ili9486)
 BUILD_STATUS="SKIPPED"
 PORT_STATUS="SKIPPED"

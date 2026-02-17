@@ -89,10 +89,10 @@ commands:
     description: Execute an agent plan by running its `## Plan d’action` commands
     entrypoint: tools/dev/cockpit.sh
     args: ["plan", "<agent>", "[--dry-run]", "[--plan-only]"]
-    runbook_ref: docs/AGENTS_INDEX.md#exécution-planifiée
+    runbook_ref: .github/agents/AGENT_BRIEFINGS.md#plan-execution-helper
     evidence_outputs: []
     notes: |
-      Choisit un agent dans `.github/agents/` puis lance `tools/dev/plan_runner.sh --agent <name>` pour exécuter la section `## Plan d’action`.
+      Choisit un agent dans `.github/agents/` puis lance `bash hardware/firmware/tools/dev/plan_runner.sh --agent <name>` pour exécuter la section `## Plan d’action`.
   - id: drivers
     description: Run driver audit for a specific platform
     entrypoint: tools/dev/cockpit.sh
@@ -149,7 +149,7 @@ commands:
     description: Generate Phase 1 firmware health baseline (3 builds, 5 flash tests, 10 smoke runs)
     entrypoint: tools/dev/generate_baseline.sh
     args: []
-    runbook_ref: docs/FIRMWARE_HEALTH_BASELINE.md
+    runbook_ref: .github/agents/FIRMWARE_HEALTH_BASELINE.md
     evidence_outputs:
       - artifacts/baseline_YYYYMMDD_###/1_build/build_*.log
       - artifacts/baseline_YYYYMMDD_###/2_flash_tests/flash_*.log
@@ -162,7 +162,7 @@ commands:
       Ensures firmware reproducibility: 3 builds × 5 flash gates × 10 smoke runs.
       Captures all evidence in artifacts/baseline_YYYYMMDD_###/
       Requires working ESP32 hardware and network connectivity.
-      See docs/FIRMWARE_HEALTH_BASELINE.md for interpretation guide.
+      See .github/agents/FIRMWARE_HEALTH_BASELINE.md for interpretation guide.
 
   - id: flash
     description: Flash firmware (auto port resolution with ESP32/ESP8266/RP2040 support)

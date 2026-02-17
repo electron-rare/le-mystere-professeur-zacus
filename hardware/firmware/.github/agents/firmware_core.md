@@ -16,7 +16,7 @@ All files under `hardware/firmware/**`.
 - `hardware/firmware/docs/AGENT_TODO.md`
 
 ## Prompt Copilot
-- Voir `hardware/firmware/tools/dev/codex_prompts/trigger_firmware_core_plan.prompt.md` (exécute `tools/dev/plan_runner.sh --agent firmware_core` depuis la racine). Le prompt apparaît aussi dans `tools/dev/codex_prompt_menu.sh` sous le nom `trigger_firmware_core_plan.prompt.md`.
+- Voir `hardware/firmware/tools/dev/codex_prompts/trigger_firmware_core_plan.prompt.md` (exécute `bash hardware/firmware/tools/dev/plan_runner.sh --agent firmware_core` depuis la racine). Le prompt apparaît aussi dans `tools/dev/codex_prompt_menu.sh` sous le nom `trigger_firmware_core_plan.prompt.md`.
 
 ## Plan d’action
 1. Construire la matrice Firmware.

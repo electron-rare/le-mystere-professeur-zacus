@@ -13,9 +13,8 @@
 
 ## Plan d’action
 1. Exécuter les gates smoke/stress.
-   - run: bash hardware/firmware/tools/dev/run_matrix_and_smoke.sh
-   - run: bash hardware/firmware/tools/dev/run_smoke_tests.sh
-   - run: python3 hardware/firmware/tools/dev/run_stress_tests.py --allow-no-hardware
+   - run: PATH=$(pwd)/hardware/firmware/.venv/bin:$PATH bash hardware/firmware/tools/dev/run_matrix_and_smoke.sh
+   - run: PATH=$(pwd)/hardware/firmware/.venv/bin:$PATH bash hardware/firmware/tools/dev/run_smoke_tests.sh
+   - run: PATH=$(pwd)/hardware/firmware/.venv/bin:$PATH python3 hardware/firmware/tools/dev/run_stress_tests.py --hours 0.5
 2. Compléter l’audit de cohérence et documenter.
-   - run: python3 tools/test/audit_coherence.py
-
+   - run: PATH=$(pwd)/hardware/firmware/.venv/bin:$PATH python3 hardware/firmware/tools/test/audit_coherence.py

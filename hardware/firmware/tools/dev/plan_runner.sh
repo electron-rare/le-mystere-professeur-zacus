@@ -9,6 +9,7 @@ usage() {
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FW_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 REPO_ROOT="$(cd "$FW_ROOT/../.." && pwd)"
+cd "$REPO_ROOT"
 
 agent=""
 dry_run=false

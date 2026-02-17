@@ -15,7 +15,7 @@ Generated from tools/dev/cockpit_commands.yaml. Do not edit manually.
 | report | Generate sync report | tools/dev/cockpit.sh | report | docs/TEST_SCRIPT_COORDINATOR.md | logs/audit_sync_report.md |
 | cleanup | Archive old logs and artifacts | tools/dev/cockpit.sh | cleanup | docs/TEST_SCRIPT_COORDINATOR.md | logs/archive/<timestamp>/<br>artifacts/archive/<timestamp>/ |
 | codex-check | Check codex CLI + prompts inventory | tools/dev/cockpit.sh | codex-check | docs/TEST_SCRIPT_COORDINATOR.md |  |
-| plan | Execute an agent plan by running its `## Plan d’action` commands | tools/dev/cockpit.sh | plan<br><agent><br>[--dry-run]<br>[--plan-only] | docs/AGENTS_INDEX.md#exécution-planifiée |  |
+| plan | Execute an agent plan by running its `## Plan d’action` commands | tools/dev/cockpit.sh | plan<br><agent><br>[--dry-run]<br>[--plan-only] | .github/agents/AGENT_BRIEFINGS.md#plan-execution-helper |  |
 | drivers | Run driver audit for a specific platform | tools/dev/cockpit.sh | drivers<br><platform> | docs/TEST_SCRIPT_COORDINATOR.md |  |
 | test | Run tests audit for a specific platform | tools/dev/cockpit.sh | test<br><platform> | docs/TEST_SCRIPT_COORDINATOR.md |  |
 | git | Run git commands via cockpit (status, diff, log, branch, show, add, commit, stash, push) | tools/dev/cockpit.sh | git<br><action><br>[args...] | docs/TEST_SCRIPT_COORDINATOR.md#git-operations-policy |  |
@@ -23,6 +23,6 @@ Generated from tools/dev/cockpit_commands.yaml. Do not edit manually.
 | git-commit | Commit staged changes (requires ZACUS_GIT_ALLOW_WRITE=1) | tools/dev/cockpit.sh | git<br>commit<br>-m<br><message> | docs/TEST_SCRIPT_COORDINATOR.md#git-operations-policy |  |
 | git-stash | Stash working tree changes (requires ZACUS_GIT_ALLOW_WRITE=1) | tools/dev/cockpit.sh | git<br>stash<br>[save|pop|list] | docs/TEST_SCRIPT_COORDINATOR.md#git-operations-policy |  |
 | git-push | Push commits to remote (requires ZACUS_GIT_ALLOW_WRITE=1) | tools/dev/cockpit.sh | git<br>push<br>[remote]<br>[branch] | docs/TEST_SCRIPT_COORDINATOR.md#git-operations-policy |  |
-| baseline | Generate Phase 1 firmware health baseline (3 builds, 5 flash tests, 10 smoke runs) | tools/dev/generate_baseline.sh |  | docs/FIRMWARE_HEALTH_BASELINE.md | artifacts/baseline_YYYYMMDD_###/1_build/build_*.log<br>artifacts/baseline_YYYYMMDD_###/2_flash_tests/flash_*.log<br>artifacts/baseline_YYYYMMDD_###/3_smoke_001-010/smoke_**/<br>artifacts/baseline_YYYYMMDD_###/4_healthcheck/health_snapshot_*.txt<br>logs/generate_baseline_YYYYMMDD-HHMMSS.log |
+| baseline | Generate Phase 1 firmware health baseline (3 builds, 5 flash tests, 10 smoke runs) | tools/dev/generate_baseline.sh |  | .github/agents/FIRMWARE_HEALTH_BASELINE.md | artifacts/baseline_YYYYMMDD_###/1_build/build_*.log<br>artifacts/baseline_YYYYMMDD_###/2_flash_tests/flash_*.log<br>artifacts/baseline_YYYYMMDD_###/3_smoke_001-010/smoke_**/<br>artifacts/baseline_YYYYMMDD_###/4_healthcheck/health_snapshot_*.txt<br>logs/generate_baseline_YYYYMMDD-HHMMSS.log |
 | flash | Flash firmware (auto port resolution with ESP32/ESP8266/RP2040 support) | tools/dev/cockpit.sh | flash | docs/FLASH_GATE_VALIDATION_GUIDE.md | artifacts/rc_live/flash-<timestamp>/ports_resolve.json<br>logs/flash_<timestamp>.log |
 | help | Print cockpit help | tools/dev/cockpit.sh | help | docs/QUICKSTART.md |  |

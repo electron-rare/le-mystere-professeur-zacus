@@ -1,3 +1,24 @@
+## [2026-02-17] Copilot sequence checkpoint (firmware_tooling -> firmware_tests)
+
+- Safety checkpoint executed before edits via cockpit wrappers: branch `story-V2`, `git status`, `git diff --stat`, `git branch`.
+- Checkpoint files saved: `/tmp/zacus_checkpoint/20260217-162509_wip.patch` and `/tmp/zacus_checkpoint/20260217-162509_status.txt`.
+- Tracked artifact scan (`.pio`, `.platformio`, `logs`, `dist`, `build`, `node_modules`, `.venv`) returned no tracked paths; no untrack action required.
+- Kickoff runtime status: UI Link still failing in prior smoke evidence, default LittleFS scenario still missing in prior QA notes, I2S panic already known in stress path.
+
+## [2026-02-17] Copilot sequence execution + alignment fixes
+
+- Plan/runner alignment applied: root `tools/dev/plan_runner.sh` now delegates to `hardware/firmware/tools/dev/plan_runner.sh`; firmware runner now executes from repo root before resolving `.github/agents/<agent>.md`.
+- `run_matrix_and_smoke.sh` now supports `--help`/`-h` without side effects and returns explicit non-zero on unknown args (`--bad-arg` -> rc=2).
+- Agent briefs synchronized in root + firmware copies (`firmware_tooling.md`, `firmware_tests.md`) with repo-root commands and venv-aware PATH (`PATH=$(pwd)/hardware/firmware/.venv/bin:$PATH`).
+- `firmware_tooling` sequence: PASS (`bash hardware/firmware/tools/dev/plan_runner.sh --agent firmware_tooling`).
+- `firmware_tests` strict sequence (`ZACUS_REQUIRE_HW=1`): blocked at step 1 because `run_matrix_and_smoke` reports UI link failure; evidence `artifacts/rc_live/20260217-153129/summary.md` (`UI_LINK_STATUS connected=0`).
+- Remaining test gates executed manually after the blocked step:
+  - `run_smoke_tests.sh` strict: FAIL (port resolution), evidence `artifacts/smoke_tests/20260217-153214/summary.md`.
+  - `run_stress_tests.py --hours 0.5`: FAIL, scenario does not complete (`DEFAULT`), evidence `artifacts/stress_test/20260217-153220/summary.md`; earlier run also captured I2S panic evidence `artifacts/stress_test/20260217-153037/stress_test.log`.
+  - `audit_coherence.py`: initially FAIL on missing runbook refs, then PASS after `cockpit_commands.yaml` runbook fixes + regenerated commands doc; evidence `artifacts/audit/20260217-153246/summary.md` (latest PASS).
+- RP2040 docs/config audit: no env naming drift detected (`ui_rp2040_ili9488`, `ui_rp2040_ili9486`) across `platformio.ini`, `build_all.sh`, `run_matrix_and_smoke.sh`, `docs/QUICKSTART.md`, and `docs/TEST_SCRIPT_COORDINATOR.md`.
+- Runtime status after this pass: UI Link = FAIL (`connected=0`), LittleFS default scenario = missing (`/story/scenarios/DEFAULT.json`), I2S panic = intermittent (observed in stress evidence above).
+
 ## [2026-02-17] Audit kickoff checkpoint (Codex)
 
 - Safety checkpoint run from `hardware/firmware`: branch `story-V2`, working tree dirty (pre-existing changes), `git diff --stat` captured before edits.
@@ -45,3 +66,5 @@
 ## 5. Reporting & evidence
 - [ ] When publishing smoke/baseline runs, include the required artifacts (`meta.json`, `commands.txt`, `summary.md`, per-step logs) under `artifacts/…` as demanded by `docs/TEST_SCRIPT_COORDINATOR.md:160-199`.
 - [ ] Document any pipeline/test regressions in `docs/RC_AUTOFIX_CICD.md` or similar briefing docs and flag them for the Test & Script Coordinator.
+2026-02-17T15:29:13Z plan_runner --agent firmware_tooling - executed 3 commands
+2026-02-17T15:31:19Z plan_runner --agent firmware_tooling - executed 3 commands

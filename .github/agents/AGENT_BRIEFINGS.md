@@ -262,7 +262,7 @@ python3 tools/test/audit_coherence.py
 
 
 ## Plan execution helper
-- Read the relevant `.github/agents/<agent>.md` file, then run `tools/dev/plan_runner.sh --agent <name>` to execute the `- run:` commands automatically (use `--dry-run` or `--plan-only` to preview).
+- Read the relevant `.github/agents/<agent>.md` file, then run `bash hardware/firmware/tools/dev/plan_runner.sh --agent <name>` to execute the `- run:` commands automatically (use `--dry-run` or `--plan-only` to preview).
 
 ## See Also
 

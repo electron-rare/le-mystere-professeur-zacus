@@ -1,5 +1,6 @@
 #include "story_controller_v2.h"
 
+#include <cctype>
 #include <cstring>
 
 #include "../../story/generated/scenarios_gen.h"
@@ -25,6 +26,39 @@ bool sameText(const char* lhs, const char* rhs) {
     return false;
   }
   return strcmp(lhs, rhs) == 0;
+}
+
+bool sameTextIgnoreCase(const char* lhs, const char* rhs) {
+  if (lhs == nullptr || rhs == nullptr) {
+    return false;
+  }
+  while (*lhs != '\0' && *rhs != '\0') {
+    if (toupper(static_cast<unsigned char>(*lhs)) != toupper(static_cast<unsigned char>(*rhs))) {
+      return false;
+    }
+    ++lhs;
+    ++rhs;
+  }
+  return (*lhs == '\0' && *rhs == '\0');
+}
+
+const char* normalizeScenarioIdToken(const char* scenarioId) {
+  if (scenarioId == nullptr || scenarioId[0] == '\0') {
+    return scenarioId;
+  }
+  if (sameTextIgnoreCase(scenarioId, "DEFAULT")) {
+    return "DEFAULT";
+  }
+  if (sameTextIgnoreCase(scenarioId, "EXPRESS")) {
+    return "EXAMPLE_UNLOCK_EXPRESS";
+  }
+  if (sameTextIgnoreCase(scenarioId, "EXPRESS_DONE")) {
+    return "EXEMPLE_UNLOCK_EXPRESS_DONE";
+  }
+  if (sameTextIgnoreCase(scenarioId, "SPECTRE")) {
+    return "SPECTRE_RADIO_LAB";
+  }
+  return scenarioId;
 }
 
 bool sameEventSignature(const StoryEvent& lhs, const StoryEvent& rhs) {
@@ -58,10 +92,15 @@ bool StoryControllerV2::begin(uint32_t nowMs) {
 }
 
 bool StoryControllerV2::setScenario(const char* scenarioId, uint32_t nowMs, const char* source) {
-  const char* id = (scenarioId != nullptr && scenarioId[0] != '\0') ? scenarioId : options_.defaultScenarioId;
+  const char* requestedId =
+      (scenarioId != nullptr && scenarioId[0] != '\0') ? scenarioId : options_.defaultScenarioId;
+  const char* id = normalizeScenarioIdToken(requestedId);
   const ScenarioDef* scenario = generatedScenarioById(id);
   if (scenario == nullptr) {
-    Serial.printf("[STORY_V2] scenario not found id=%s (%s)\n", id, source);
+    Serial.printf("[STORY_V2] scenario not found id=%s normalized=%s (%s)\n",
+                  requestedId,
+                  id != nullptr ? id : "-",
+                  source);
     return false;
   }
 

@@ -1,3 +1,25 @@
+## [2026-02-17] D4/D5 handshake + strict firmware_tests rerun (Codex)
+
+- Safety checkpoint re-run via cockpit wrappers: `git status`, `git diff --stat`, `git branch`.
+- Checkpoint files saved: `/tmp/zacus_checkpoint/20260217-173556_wip.patch` and `/tmp/zacus_checkpoint/20260217-173556_status.txt`.
+- Tracked artifact scan (`.pio`, `.platformio`, `logs`, `dist`, `build`, `node_modules`, `.venv`) returned no tracked paths.
+- Build gate rerun: `./build_all.sh` PASS (5/5 envs) after firmware updates.
+- Reflash completed: `pio run -e esp32dev -t upload --upload-port /dev/cu.SLAB_USBtoUART9` and `pio run -e esp8266_oled -t upload --upload-port /dev/cu.SLAB_USBtoUART`.
+- `firmware_tooling` rerun PASS (`plan-only` + full run); all `--help` paths stay non-destructive.
+- `firmware_tests` strict rerun (`ZACUS_REQUIRE_HW=1`) still FAIL at gate 1: `artifacts/rc_live/20260217-164154/summary.md` (`UI_LINK_STATUS connected=0`, esp8266 monitor FAIL).
+- Strict smoke rerun uses repo-root resolver (`tools/test/resolve_ports.py`) and strict ESP32+ESP8266 mapping; gate FAIL remains UI link only (`artifacts/smoke_tests/20260217-164237/smoke_tests.log`), while `STORY_LOAD_SCENARIO DEFAULT` now succeeds through fallback (`STORY_LOAD_SCENARIO_FALLBACK V2 DEFAULT` + `STORY_LOAD_SCENARIO_OK`).
+- `audit_coherence.py` rerun PASS (`artifacts/audit/20260217-164243/summary.md`).
+- Content validators rerun PASS from repo root: scenario validate/export + audio manifest + printables manifest.
+- Stress rerun completed PASS (`python3 tools/dev/run_stress_tests.py --hours 0.5`): `artifacts/stress_test/20260217-164248/summary.md` (`87` iterations, success rate `100.0%`, no panic/reboot markers in log).
+- Runtime status after reruns: UI Link = FAIL (`connected=0`), LittleFS default scenario = mitigated by V2 fallback in serial path, I2S stability = PASS over 30 min stress run (no panic/reboot markers).
+
+## [2026-02-17] Fix handshake/UI smoke strict kickoff (Codex)
+
+- Safety checkpoint executed via cockpit wrappers: branch `story-V2`, `git status`, `git diff --stat`, `git branch`.
+- Checkpoint files saved: `/tmp/zacus_checkpoint/20260217-155753_wip.patch` and `/tmp/zacus_checkpoint/20260217-155753_status.txt`.
+- Tracked artifact scan (`.pio`, `.platformio`, `logs`, `dist`, `build`, `node_modules`, `.venv`) returned no tracked paths; no untrack action required.
+- Runtime status at kickoff: UI Link = FAIL (`connected=0`), LittleFS default scenario = missing (`/story/scenarios/DEFAULT.json`), I2S stability = FAIL/intermittent panic in stress recovery path.
+
 ## [2026-02-17] Copilot sequence checkpoint (firmware_tooling -> firmware_tests)
 
 - Safety checkpoint executed before edits via cockpit wrappers: branch `story-V2`, `git status`, `git diff --stat`, `git branch`.
@@ -68,3 +90,5 @@
 - [ ] Document any pipeline/test regressions in `docs/RC_AUTOFIX_CICD.md` or similar briefing docs and flag them for the Test & Script Coordinator.
 2026-02-17T15:29:13Z plan_runner --agent firmware_tooling - executed 3 commands
 2026-02-17T15:31:19Z plan_runner --agent firmware_tooling - executed 3 commands
+2026-02-17T16:07:09Z plan_runner --agent firmware_tooling - executed 3 commands
+2026-02-17T16:41:44Z plan_runner --agent firmware_tooling - executed 3 commands

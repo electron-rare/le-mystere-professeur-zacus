@@ -53,12 +53,14 @@ constexpr uint32_t kFxWinDurationMs = 1800U;
 constexpr uint32_t kFxMorseDurationMs = 3200U;
 constexpr uint32_t kFxSonarDurationMs = 2600U;
 constexpr uint32_t kFxFmDurationMs = 2600U;
+constexpr uint32_t kBootRadioRestartBackoffMs = 1200U;
 constexpr uint16_t kResolveTokenScanEntryCap = 320U;
 constexpr uint32_t kResolveTokenScanBudgetMs = 35U;
 
 struct BootRadioScanState {
   bool restoreMicCapture = false;
   uint32_t lastLogMs = 0;
+  uint32_t lastStopMs = 0;
 };
 
 BootRadioScanState g_bootRadioScan;
@@ -92,6 +94,7 @@ struct StoryAudioCaptureGuardState {
   bool restoreMicCapture = false;
 };
 StoryAudioCaptureGuardState g_storyAudioCaptureGuard;
+bool g_storyAudioSkipFallbackOnce = false;
 PlayerUiModel g_playerUi;
 
 LoopBudgetConfig makeLoopBudgetConfig() {
@@ -133,6 +136,7 @@ void continueAfterBootProtocol(const char* source);
 void startBootAudioLoopCycle(uint32_t nowMs, const char* source);
 void startBootAudioValidationProtocol(uint32_t nowMs);
 void updateBootAudioValidationProtocol(uint32_t nowMs);
+void finishBootAudioValidationProtocol(const char* reason, bool validated);
 void startMicCalibration(uint32_t nowMs, const char* reason);
 bool processCodecDebugCommand(const char* cmd);
 void printCodecDebugHelp();
@@ -222,7 +226,11 @@ bool startStoryRandomTokenBaseHook(const char* token,
   prepareStoryAudioCaptureGuard(source);
   const bool started = startRandomTokenFxAsync(token, source, allowSdFallback, maxDurationMs);
   if (!started) {
-    releaseStoryAudioCaptureGuard("story_audio_start_failed");
+    // Keep capture paused for an immediate fallback attempt in the same step.
+    Serial.printf("[STORY_AUDIO] token start failed (%s)\n", source != nullptr ? source : "-");
+    g_storyAudioSkipFallbackOnce = true;
+  } else {
+    g_storyAudioSkipFallbackOnce = false;
   }
   return started;
 }
@@ -233,6 +241,12 @@ bool startStoryFallbackBaseFxHook(AudioEffectId effect,
                                   const char* source) {
   cancelULockSearchSonarCue("story_audio_fallback");
   prepareStoryAudioCaptureGuard(source);
+  if (g_storyAudioSkipFallbackOnce) {
+    g_storyAudioSkipFallbackOnce = false;
+    Serial.printf("[STORY_AUDIO] fallback skipped (%s)\n", source != nullptr ? source : "-");
+    releaseStoryAudioCaptureGuard("story_audio_fallback_skipped");
+    return false;
+  }
   const bool started = audioService().startBaseFx(effect, gain, durationMs, source);
   if (!started) {
     releaseStoryAudioCaptureGuard("story_audio_fallback_failed");
@@ -728,11 +742,23 @@ void stopBootRadioScan(const char* source) {
 
   g_bootRadioScan.restoreMicCapture = false;
   g_bootRadioScan.lastLogMs = 0;
+  g_bootRadioScan.lastStopMs = millis();
   Serial.printf("[AUDIO] %s radio scan stop.\n", source);
 }
 
 bool startBootRadioScan(const char* source) {
   stopBootRadioScan("boot_radio_restart");
+  const uint32_t nowMs = millis();
+  if (g_bootRadioScan.lastStopMs != 0U) {
+    const uint32_t sinceStopMs = nowMs - g_bootRadioScan.lastStopMs;
+    if (sinceStopMs < kBootRadioRestartBackoffMs) {
+      const uint32_t waitLeftMs = kBootRadioRestartBackoffMs - sinceStopMs;
+      Serial.printf("[AUDIO] %s radio scan throttled wait=%lu ms\n",
+                    source,
+                    static_cast<unsigned long>(waitLeftMs));
+      return false;
+    }
+  }
 
   const uint32_t sampleRate =
       (config::kBootI2sNoiseSampleRateHz > 0U) ? static_cast<uint32_t>(config::kBootI2sNoiseSampleRateHz)
@@ -1188,6 +1214,9 @@ void resetStoryTimeline(const char* source) {
 }
 
 void armStoryTimelineAfterUnlock(uint32_t nowMs) {
+  if (g_bootAudioProtocol.active) {
+    finishBootAudioValidationProtocol("story_arm", true);
+  }
   if (isStoryV2Enabled()) {
     storyV2Controller().onUnlock(nowMs, "unlock");
     return;
@@ -1354,6 +1383,14 @@ void continueAfterBootProtocol(const char* source) {
 }
 
 void requestULockSearchSonarCue(const char* source) {
+  if (isStoryV2Enabled()) {
+    const auto snap = storyV2Controller().snapshot(true, millis());
+    if (snap.testMode) {
+      Serial.printf("[AUDIO_FX] Sonar cue skipped in test mode (%s)\n",
+                    source != nullptr ? source : "-");
+      return;
+    }
+  }
   if (g_uLockSearchAudioCue.active) {
     return;
   }
@@ -1382,6 +1419,16 @@ void cancelULockSearchSonarCue(const char* source) {
 }
 
 void serviceULockSearchSonarCue(uint32_t nowMs) {
+  if (isStoryV2Enabled()) {
+    const auto snap = storyV2Controller().snapshot(true, nowMs);
+    if (snap.testMode) {
+      if (g_uLockSearchAudioCue.pending || g_uLockSearchAudioCue.active) {
+        cancelULockSearchSonarCue("ulock_search_test_mode");
+      }
+      return;
+    }
+  }
+
   if (g_uLockSearchAudioCue.active) {
     if (g_bootAudioProtocol.active || g_mode != RuntimeMode::kSignal || g_uSonFunctional || !g_uLockListening ||
         static_cast<int32_t>(nowMs - g_uLockSearchAudioCue.untilMs) >= 0) {

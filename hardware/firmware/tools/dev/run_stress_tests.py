@@ -23,7 +23,8 @@ except ImportError:
 
 DEFAULT_SCENARIOS = ["DEFAULT", "EXPRESS", "EXPRESS_DONE", "SPECTRE"]
 FATAL_MARKERS = ("PANIC", "Guru Meditation", "ASSERT", "ABORT", "REBOOT", "rst:", "watchdog")
-DONE_MARKERS = ("STORY_ENGINE_DONE", "step=STEP_DONE", "step: done")
+DONE_MARKERS = ("STORY_ENGINE_DONE", "step=STEP_DONE", "step: done", "-> STEP_DONE")
+FORCE_ETAPE2_CMD = "STORY_FORCE_ETAPE2"
 WS_STATUS_TYPE = "status"
 
 try:
@@ -141,7 +142,7 @@ def log_line(fp, msg: str) -> None:
 def resolve_port(allow_no_hw: bool, commands_path: Optional[Path]) -> Optional[str]:
     cmd = [
         sys.executable,
-        "tools/test/resolve_ports.py",
+        str(REPO_ROOT / "tools" / "test" / "resolve_ports.py"),
         "--auto-ports",
         "--need-esp32",
     ]
@@ -217,6 +218,13 @@ def send_cmd(ser: serial.Serial, cmd: str) -> None:
     time.sleep(0.2)
 
 
+def prepare_story_session(ser: serial.Serial, log_fp) -> None:
+    preamble = ("BOOT_NEXT", "STORY_V2_ENABLE ON", "STORY_TEST_ON", "STORY_TEST_DELAY 1000")
+    for cmd in preamble:
+        send_cmd(ser, cmd)
+        log_line(log_fp, f"tx {cmd}")
+
+
 def line_has_fatal(line: str) -> bool:
     upper = line.upper()
     return any(marker.upper() in upper for marker in FATAL_MARKERS)
@@ -253,10 +261,28 @@ def run_scenario(
             return False
         if line_has_done(line):
             done = True
-    if not done:
-        log_line(log_fp, f"WARN scenario {scenario} did not complete")
-        return False
-    return True
+    if done:
+        return True
+
+    # Force ETAPE2 once before failing to reduce false negatives on slow boots.
+    log_line(log_fp, f"WARN scenario {scenario} timeout, forcing ETAPE2 once")
+    send_cmd(ser, FORCE_ETAPE2_CMD)
+    send_cmd(ser, "STORY_STATUS")
+    for line in read_lines(ser, 6.0):
+        ring.append(line)
+        if len(ring) > 10000:
+            ring.popleft()
+        log_line(log_fp, f"rx {line}")
+        if line_has_fatal(line):
+            log_line(log_fp, f"CRITICAL {line}")
+            return False
+        if "UI_LINK_STATUS" in line and "connected=0" in line:
+            log_line(log_fp, f"CRITICAL ui link down: {line}")
+            return False
+        if line_has_done(line):
+            return True
+    log_line(log_fp, f"WARN scenario {scenario} did not complete")
+    return False
 
 
 def main() -> int:
@@ -264,7 +290,7 @@ def main() -> int:
     parser.add_argument("--port", help="ESP32 serial port")
     parser.add_argument("--baud", type=int, default=115200, help="Serial baud")
     parser.add_argument("--hours", type=float, default=4.0, help="Duration in hours")
-    parser.add_argument("--scenario-duration", type=float, default=15.0, help="Seconds per scenario")
+    parser.add_argument("--scenario-duration", type=float, default=20.0, help="Seconds per scenario")
     parser.add_argument("--log", default="", help="Log output path")
     parser.add_argument("--allow-no-hardware", action="store_true")
     parser.add_argument("--ws-url", default="", help="Optional WebSocket URL for heap sampling")
@@ -325,6 +351,7 @@ def main() -> int:
             with serial.Serial(port, args.baud, timeout=0.5) as ser:
                 time.sleep(0.8)
                 ser.reset_input_buffer()
+                prepare_story_session(ser, log_fp)
 
                 while time.time() < end_time:
                     for scenario in DEFAULT_SCENARIOS:

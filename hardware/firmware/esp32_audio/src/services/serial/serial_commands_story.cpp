@@ -358,11 +358,16 @@ bool serialProcessStoryCommand(const SerialCommand& cmd,
       return true;
     }
     out.printf("STORY_LOAD_SCENARIO %s\n", args);
-    if (!ctx.fsManager->loadScenario(args)) {
-      out.printf("STORY_LOAD_SCENARIO %s: NOT_FOUND\n", args);
+    if (ctx.fsManager->loadScenario(args)) {
+      out.println("STORY_LOAD_SCENARIO_OK");
       return true;
     }
-    out.println("STORY_LOAD_SCENARIO_OK");
+    if (useV2 && ctx.v2 != nullptr && ctx.v2->setScenario(args, nowMs, "serial_story_load_fallback")) {
+      out.printf("STORY_LOAD_SCENARIO_FALLBACK V2 %s\n", args);
+      out.println("STORY_LOAD_SCENARIO_OK");
+      return true;
+    }
+    out.printf("STORY_LOAD_SCENARIO %s: NOT_FOUND\n", args);
     return true;
   }
 

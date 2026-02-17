@@ -65,9 +65,10 @@ UiLink::UiLink(HardwareSerial& serial,
       timeoutMs_(timeoutMs) {}
 
 void UiLink::begin() {
-  // Configure Serial2 with proper RX/TX pins
+  // Set RX buffer before begin() to avoid runtime resize errors on ESP32.
+  serial_.setRxBufferSize(512);
+  // Configure Serial2 with proper RX/TX pins.
   serial_.begin(baud_, SERIAL_8N1, rxPin_, txPin_);
-  serial_.setRxBufferSize(512);  // Larger RX buffer for clean startup
   
   // Wait for pin stabilization and any boot garbage from peer
   delay(100);

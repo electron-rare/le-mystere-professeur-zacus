@@ -19,8 +19,8 @@
 
 namespace {
 
-constexpr uint8_t kLinkRx = D4;    // ESP8266 RX <- ESP32 TX (GPIO23)
-constexpr uint8_t kLinkTx = D5;    // ESP8266 TX -> ESP32 RX (GPIO18)
+constexpr uint8_t kLinkRx = D4;    // ESP8266 RX <- ESP32 TX (GPIO22)
+constexpr uint8_t kLinkTx = D5;    // ESP8266 TX -> ESP32 RX (GPIO19)
 constexpr uint32_t kLinkBaud = 57600;  // 3x plus rapide, stable SoftwareSerial
 constexpr int kLinkRxBufferBytes = 128;
 constexpr int kLinkIsrBufferBytes = 512;
@@ -1244,6 +1244,7 @@ void loop() {
   if ((nowMs - g_lastDiagMs) >= kDiagPeriodMs) {
     const uint32_t lastTickMs = latestLinkTickMs();
     const uint32_t ageMs = safeAgeMs(nowMs, lastTickMs);
+    screen_core::logLinkVerdict(g_state, g_linkState, nowMs);
     Serial.printf("[SCREEN] oled=%s link=%s ack=%u phys=%s valid=%u age_ms=%lu losses=%lu parse_err=%lu crc_err=%lu rx_ovf=%lu seq_gap=%lu seq_rb=%lu sda=%u scl=%u addr=0x%02X\n",
                   g_displayReady ? "OK" : "KO",
                   g_linkState.linkEnabled ? (linkAlive ? "OK" : "DOWN") : "OFF",

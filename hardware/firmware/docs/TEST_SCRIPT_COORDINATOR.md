@@ -199,6 +199,12 @@ Use this in phase updates:
 
 ## Exécutions récentes (17 février 2026)
 
+- Prérequis strict UI link (câblage canonique OLED): ESP32 `GPIO22 (TX)` -> ESP8266 `D4 (RX)`, ESP8266 `D5 (TX)` -> ESP32 `GPIO19 (RX)`, GND commun.
+- `./build_all.sh` — PASS (5/5 envs) après correctifs firmware/scripts (esp32dev, esp32_release, esp8266_oled, ui_rp2040_ili9488, ui_rp2040_ili9486).
+- `ZACUS_REQUIRE_HW=1 bash hardware/firmware/tools/dev/plan_runner.sh --agent firmware_tests` — FAIL à la première gate (`run_matrix_and_smoke`), evidence `artifacts/rc_live/20260217-164154/summary.md` (`UI_LINK_STATUS connected=0`, monitor ESP8266 KO).
+- `PATH=$(pwd)/hardware/firmware/.venv/bin:$PATH ZACUS_REQUIRE_HW=1 bash hardware/firmware/tools/dev/run_smoke_tests.sh` — FAIL UI link, mais résolution de ports stricte alignée matrix OK + fallback scénario confirmé (`STORY_LOAD_SCENARIO_FALLBACK V2 DEFAULT`), evidence `artifacts/smoke_tests/20260217-164237/smoke_tests.log`.
+- `PATH=$(pwd)/hardware/firmware/.venv/bin:$PATH python3 hardware/firmware/tools/dev/run_stress_tests.py --hours 0.5` — PASS (30 min strict), `87` itérations, taux de succès `100%`, aucune signature panic/reboot; evidence `artifacts/stress_test/20260217-164248/summary.md` + `artifacts/stress_test/20260217-164248/stress_test.log`.
+- `PATH=$(pwd)/hardware/firmware/.venv/bin:$PATH python3 hardware/firmware/tools/test/audit_coherence.py` — PASS, evidence `artifacts/audit/20260217-164243/summary.md`.
 - `bash hardware/firmware/tools/dev/plan_runner.sh --agent firmware_tooling --plan-only` puis `bash hardware/firmware/tools/dev/plan_runner.sh --agent firmware_tooling` — PASS; les trois commandes `--help` sont validées sans déclencher de run matrix involontaire.
 - `ZACUS_REQUIRE_HW=1 bash hardware/firmware/tools/dev/plan_runner.sh --agent firmware_tests` — FAIL sur la première gate (`run_matrix_and_smoke`), voir `artifacts/rc_live/20260217-153129/summary.md` (`UI_LINK_STATUS connected=0`, smoke ESP8266 monitor KO).
 - `ZACUS_REQUIRE_HW=1 PATH=$(pwd)/hardware/firmware/.venv/bin:$PATH bash hardware/firmware/tools/dev/run_smoke_tests.sh` — FAIL (résolution port stricte), evidence `artifacts/smoke_tests/20260217-153214/summary.md`.

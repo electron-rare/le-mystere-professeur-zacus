@@ -75,7 +75,7 @@ void logLinkVerdict(const TelemetryState& state, const LinkMonitorState& link, u
     Serial.println("[UI_LINK] STATUS: peer reboot grace active");
   }
   if (!connected && link.peerRebootUntilMs == 0U) {
-    Serial.println("[UI_LINK] ERROR: PANIC or link lost");
+    Serial.println("[UI_LINK] WARN: link lost");
   }
 
   // Ajout d'exemples pour screen/app screen, debug, erreur

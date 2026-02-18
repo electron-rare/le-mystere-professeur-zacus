@@ -7,6 +7,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIRMWARE_ROOT="${SCRIPT_DIR}/../.."
 cd "$FIRMWARE_ROOT"
+source tools/dev/layout_paths.sh
+
+ESP32_SRC_ROOT="$(fw_esp32_src_root)"
+UI_OLED_SRC_ROOT="$(fw_ui_oled_src)"
+UI_TFT_SRC_ROOT="$(fw_ui_tft_src)"
+UI_TFT_INCLUDE_FILE="$(cd "$UI_TFT_SRC_ROOT/.." && pwd)/include/ui_config.h"
+UI_OLED_MAIN_FILE="$UI_OLED_SRC_ROOT/main.cpp"
+ESP32_CONFIG_FILE="$ESP32_SRC_ROOT/config.h"
 
 echo "=========================================="
 echo "Baudrate 57600 Validation Script"
@@ -37,7 +45,7 @@ function check_warn() {
 }
 
 echo "1. Checking ESP32 config..."
-if grep -q "constexpr uint32_t kUiUartBaud = 57600" esp32_audio/src/config.h; then
+if grep -q "constexpr uint32_t kUiUartBaud = 57600" "$ESP32_CONFIG_FILE"; then
   check_pass "ESP32 kUiUartBaud = 57600"
 else
   check_fail "ESP32 kUiUartBaud != 57600"
@@ -45,7 +53,7 @@ fi
 
 echo ""
 echo "2. Checking ESP8266 OLED config..."
-if grep -q "constexpr uint32_t kLinkBaud = 57600" ui/esp8266_oled/src/main.cpp; then
+if grep -q "constexpr uint32_t kLinkBaud = 57600" "$UI_OLED_MAIN_FILE"; then
   check_pass "ESP8266 OLED kLinkBaud = 57600"
 else
   check_fail "ESP8266 OLED kLinkBaud != 57600"
@@ -53,7 +61,7 @@ fi
 
 echo ""
 echo "3. Checking RP2040 TFT config..."
-if grep -q "constexpr uint32_t kSerialBaud = 57600U" ui/rp2040_tft/include/ui_config.h; then
+if grep -q "constexpr uint32_t kSerialBaud = 57600U" "$UI_TFT_INCLUDE_FILE"; then
   check_pass "RP2040 TFT kSerialBaud default = 57600"
 else
   check_fail "RP2040 TFT kSerialBaud default != 57600"
@@ -67,13 +75,13 @@ fi
 
 echo ""
 echo "4. Checking ESP32 pins (GPIO22/19)..."
-if grep -q "constexpr uint8_t kUiUartTxPin = 22" esp32_audio/src/config.h; then
+if grep -q "constexpr uint8_t kUiUartTxPin = 22" "$ESP32_CONFIG_FILE"; then
   check_pass "ESP32 TX pin = GPIO22"
 else
   check_fail "ESP32 TX pin != GPIO22"
 fi
 
-if grep -q "constexpr uint8_t kUiUartRxPin = 19" esp32_audio/src/config.h; then
+if grep -q "constexpr uint8_t kUiUartRxPin = 19" "$ESP32_CONFIG_FILE"; then
   check_pass "ESP32 RX pin = GPIO19"
 else
   check_fail "ESP32 RX pin != GPIO19"
@@ -106,8 +114,8 @@ fi
 
 echo ""
 echo "8. Checking GPIO18/GPIO23 old pins removed..."
-OLD_PIN_TX=$(grep -r "GPIO18" --include="*.cpp" --include="*.h" esp32_audio/ ui/ 2>/dev/null | wc -l | xargs)
-OLD_PIN_RX=$(grep -r "GPIO23" --include="*.cpp" --include="*.h" esp32_audio/ ui/ 2>/dev/null | wc -l | xargs)
+OLD_PIN_TX=$(grep -r "GPIO18" --include="*.cpp" --include="*.h" "$ESP32_SRC_ROOT" "$UI_OLED_SRC_ROOT" "$UI_TFT_SRC_ROOT" 2>/dev/null | wc -l | xargs)
+OLD_PIN_RX=$(grep -r "GPIO23" --include="*.cpp" --include="*.h" "$ESP32_SRC_ROOT" "$UI_OLED_SRC_ROOT" "$UI_TFT_SRC_ROOT" 2>/dev/null | wc -l | xargs)
 if [[ "$OLD_PIN_TX" -eq 0 && "$OLD_PIN_RX" -eq 0 ]]; then
   check_pass "No leftover GPIO18/23 in firmware"
 else

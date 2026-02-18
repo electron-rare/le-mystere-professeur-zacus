@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zacus-story-gen-ai"
+version = "0.1.0"
+description = "Zacus Story generation library (Yamale + Jinja2)"
+requires-python = ">=3.9"
+dependencies = [
+  "PyYAML>=6.0",
+  "yamale>=5.2.1",
+  "Jinja2>=3.1.0",
+]
+
+[project.scripts]
+story-gen = "zacus_story_gen_ai.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+zacus_story_gen_ai = ["templates/*.j2", "schemas/*.yamale"]

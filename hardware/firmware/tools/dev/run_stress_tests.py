@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run Story V2 stress loop over serial for a fixed duration."""
+"""Run Story V3 stress loop over serial for a fixed duration."""
 
 from __future__ import annotations
 
@@ -23,7 +23,13 @@ except ImportError:
 
 DEFAULT_SCENARIOS = ["DEFAULT", "EXPRESS", "EXPRESS_DONE", "SPECTRE"]
 FATAL_MARKERS = ("PANIC", "Guru Meditation", "ASSERT", "ABORT", "REBOOT", "rst:", "watchdog")
-DONE_MARKERS = ("STORY_ENGINE_DONE", "step=STEP_DONE", "step: done", "-> STEP_DONE")
+DONE_MARKERS = (
+    "STORY_ENGINE_DONE",
+    "step=STEP_DONE",
+    "step: done",
+    "-> STEP_DONE",
+    '"step":"STEP_DONE"',
+)
 FORCE_ETAPE2_CMD = "STORY_FORCE_ETAPE2"
 WS_STATUS_TYPE = "status"
 
@@ -218,8 +224,15 @@ def send_cmd(ser: serial.Serial, cmd: str) -> None:
     time.sleep(0.2)
 
 
+def send_json_cmd(ser: serial.Serial, cmd: str, data: Optional[dict[str, object]] = None) -> None:
+    payload = {"cmd": cmd}
+    if data:
+        payload["data"] = data
+    send_cmd(ser, json.dumps(payload, separators=(",", ":")))
+
+
 def prepare_story_session(ser: serial.Serial, log_fp) -> None:
-    preamble = ("BOOT_NEXT", "STORY_V2_ENABLE ON", "STORY_TEST_ON", "STORY_TEST_DELAY 1000")
+    preamble = ("BOOT_NEXT", "STORY_TEST_ON", "STORY_TEST_DELAY 1000")
     for cmd in preamble:
         send_cmd(ser, cmd)
         log_line(log_fp, f"tx {cmd}")
@@ -243,9 +256,9 @@ def run_scenario(
     duration_s: float,
 ) -> bool:
     log_line(log_fp, f"Scenario {scenario}: load + arm")
-    send_cmd(ser, f"STORY_LOAD_SCENARIO {scenario}")
+    send_json_cmd(ser, "story.load", {"scenario": scenario})
     send_cmd(ser, "STORY_ARM")
-    send_cmd(ser, "STORY_STATUS")
+    send_json_cmd(ser, "story.status")
 
     done = False
     for line in read_lines(ser, duration_s):
@@ -267,7 +280,7 @@ def run_scenario(
     # Force ETAPE2 once before failing to reduce false negatives on slow boots.
     log_line(log_fp, f"WARN scenario {scenario} timeout, forcing ETAPE2 once")
     send_cmd(ser, FORCE_ETAPE2_CMD)
-    send_cmd(ser, "STORY_STATUS")
+    send_json_cmd(ser, "story.status")
     for line in read_lines(ser, 6.0):
         ring.append(line)
         if len(ring) > 10000:
@@ -286,7 +299,7 @@ def run_scenario(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Story V2 4h stress test")
+    parser = argparse.ArgumentParser(description="Story V3 4h stress test")
     parser.add_argument("--port", help="ESP32 serial port")
     parser.add_argument("--baud", type=int, default=115200, help="Serial baud")
     parser.add_argument("--hours", type=float, default=4.0, help="Duration in hours")

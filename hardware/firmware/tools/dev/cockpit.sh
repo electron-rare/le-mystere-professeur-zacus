@@ -1,4 +1,29 @@
+# --- Détection automatique du hardware connecté ---
+detect_hardware_env() {
+  # Utilise pyserial pour détecter le port et l'ID USB
+  local PYTHON_EXEC="$FW_ROOT/.venv/bin/python3"
+  local port_info
+  if [[ -x "$PYTHON_EXEC" ]]; then
+    port_info=$($PYTHON_EXEC -m serial.tools.list_ports -v 2>/dev/null | grep -E 'Freenove|CP2102|ESP32|ESP8266|RP2040' || true)
+  else
+    port_info=$(python3 -m serial.tools.list_ports -v 2>/dev/null | grep -E 'Freenove|CP2102|ESP32|ESP8266|RP2040' || true)
+  fi
+  # Détection simple par nom
+  if echo "$port_info" | grep -q 'Freenove'; then
+    echo 'freenove_esp32s3'
+  elif echo "$port_info" | grep -q 'ESP32'; then
+    echo 'esp32dev'
+  elif echo "$port_info" | grep -q 'ESP8266'; then
+    echo 'esp8266_oled'
+  elif echo "$port_info" | grep -q 'RP2040'; then
+    echo 'ui_rp2040_ili9488'
+  else
+    echo 'esp32dev'  # fallback
+  fi
+}
+
 #!/usr/bin/env bash
+    # Tableau options déplacé dans show_menu()
 
 set -euo pipefail
 
@@ -17,8 +42,36 @@ RC_PROMPT="$PROMPT_DIR/rc_live_fail.prompt.md"
 
 
 
+
 # Utilitaire de menu factorisé (centralisé dans agent_utils.sh)
 source "$(dirname "$0")/agent_utils.sh"
+
+# --- Flash auto ciblé (détection hardware + build + flash + log) ---
+run_flash_auto() {
+  local env
+  env=$(detect_hardware_env)
+  echo "[AGENT][INFO] Hardware détecté : $env"
+  echo "[AGENT][INFO] Build ciblé ($env) en cours..."
+  if ! "$FW_ROOT/build_all.sh" "$env"; then
+    echo "[AGENT][FAIL] Build échoué pour $env"
+    return 1
+  fi
+  echo "[AGENT][INFO] Flash ($env) en cours..."
+  if ! "$FW_ROOT/tools/dev/flash_gate.sh" "$env"; then
+    echo "[AGENT][FAIL] Flash échoué pour $env"
+    return 1
+  fi
+  local artifacts
+  artifacts="$(latest_artifacts)"
+  if [[ -n "$artifacts" && -f "$artifacts/commands.txt" ]]; then
+    echo "flash_auto $env" >> "$artifacts/commands.txt"
+  fi
+  echo "[AGENT][INFO] Flash auto terminé pour $env"
+  if [[ -n "$artifacts" && -f "$artifacts/summary.md" ]]; then
+    echo -e "\n\033[1;32m[Rapport santé] Exporté : $artifacts/summary.md\033[0m"
+    tail -20 "$artifacts/summary.md"
+  fi
+}
 
 
 
@@ -27,19 +80,33 @@ run_bootstrap() {
 }
 
 run_build_all() {
-  "$FW_ROOT/build_all.sh"
-}
-
-run_sync_report() {
-  generate_sync_report "$FW_ROOT/logs/audit_sync_report.md"
-}
-
-run_cleanup() {
-  cleanup_audit_files
-}
-
-run_codex_check() {
-  codex_cli_audit
+  local env
+  env=$(detect_hardware_env)
+  echo "[AGENT][INFO] Hardware détecté : $env"
+      local idx
+      idx=$(menu_select "Zacus Firmware Cockpit" "${options[@]}")
+      if [[ "$idx" == "" || "$idx" -le 0 ]]; then
+        exit 0
+      fi
+      case $idx in
+        1) ZACUS_REQUIRE_HW=0 run_rc_live ;;
+        2) ZACUS_REQUIRE_HW=1 run_rc_live ;;
+        3) "$FW_ROOT/tools/dev/cockpit.sh" rc-autofix ;;
+        4) run_build_all ;;
+        5) run_bootstrap ;;
+        6) ports_watch ;;
+        7) monitor_wifi_debug_serial ;;
+        8) run_codex_prompts ;;
+        9) run_agent_plan ;;
+        10) run_audit_all ;;
+        11) run_sync_report ;;
+        12) run_cleanup ;;
+        13) run_codex_check ;;
+        14) afficher_logs_menu ;;
+        15) afficher_aide ;;
+        16) run_flash_auto ;;
+        *) exit 0 ;;
+      esac
 }
 
 run_audit_all() {
@@ -51,7 +118,7 @@ run_audit_all() {
   fi
   analyse_artefacts_logs
   local platform
-  for platform in esp32dev esp32_release esp8266_oled ui_rp2040_ili9488 ui_rp2040_ili9486; do
+  for platform in esp32dev esp32_release freenove_esp32s3 esp8266_oled ui_rp2040_ili9488 ui_rp2040_ili9486; do
     drivers_audit "$platform"
     tests_audit "$platform"
   done
@@ -142,6 +209,8 @@ show_menu() {
       2) ZACUS_REQUIRE_HW=1 run_rc_live ;;
       3) "$FW_ROOT/tools/dev/cockpit.sh" rc-autofix ;;
       4) run_build_all ;;
+      15) run_flash_auto ;;
+      16|0) exit 0 ;;
       5) run_bootstrap ;;
       6) ports_watch ;;
       7) monitor_wifi_debug_serial ;;

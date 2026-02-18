@@ -99,8 +99,10 @@ Cockpit equivalent:
 
 Le script force `PLATFORMIO_CORE_DIR=$HOME/.platformio` pour que les caches PlatformIO restent en dehors du repo.
 Avant le smoke, il affiche `⚠️ BRANCHE L’USB MAINTENANT ⚠️` 3 fois, puis attend Enter en listant les ports toutes les 15s.
-Chaque run dépose `summary.json`, `summary.md`, `ports_resolve.json` et `ui_link.log` dans `artifacts/rc_live/<timestamp>/`.
+Chaque run dépose `summary.json`, `summary.md`, `ports_resolve.json` et `ui_link.log` dans `artifacts/rc_live/<env_label>_<timestamp>/`.
+Le log global est `logs/rc_live/<env_label>_<timestamp>.log`.
 Le verdict UI link est strict: `UI_LINK_STATUS connected=1` attendu sur l'ESP32.
+Pour `ZACUS_ENV="freenove_esp32s3"` (board combinée), les checks ESP8266/UI-link/story-screen sont marqués `SKIP` avec `not needed for combined board`.
 
 Par défaut, la séquence smoke tolère l’absence de matériel et termine avec un code 0 quand rien n’est détecté.
 
@@ -112,9 +114,31 @@ Variantes d'environnement :
 - `ZACUS_SKIP_PIO=1 ./tools/dev/run_matrix_and_smoke.sh` — saute l’étape PlatformIO et ne lance que la smoke (utile quand les downloads sont impossibles).
 - `ZACUS_SKIP_SMOKE=1 ./tools/dev/run_matrix_and_smoke.sh` — ne lance que la build matrix.
 - `ZACUS_ENV="esp32dev esp8266_oled" ./tools/dev/run_matrix_and_smoke.sh` — cible un sous-ensemble d’environnements.
+- `ZACUS_ENV="freenove_esp32s3" ./tools/dev/run_matrix_and_smoke.sh` — workflow Freenove mono-carte.
 - `ZACUS_FORCE_BUILD=1 ./tools/dev/run_matrix_and_smoke.sh` — force la rebuild même si les artefacts existent déjà.
 
-Le script affiche un résumé final (`Build/Port/Smoke/UI link`) et écrit le même verdict dans `artifacts/rc_live/<timestamp>/summary.json`.
+Le script affiche un résumé final (`Build/Port/Smoke/UI link`) et écrit le même verdict dans `artifacts/rc_live/<env_label>_<timestamp>/summary.json`.
+
+## 4.10) Story generation + protocol V3
+
+Génération (host-side):
+
+```sh
+./tools/dev/story-gen validate
+./tools/dev/story-gen generate-cpp
+./tools/dev/story-gen generate-bundle
+```
+
+Protocole série Story V3 (JSON-lines):
+
+```text
+{"cmd":"story.status"}
+{"cmd":"story.list"}
+{"cmd":"story.load","data":{"scenario":"DEFAULT"}}
+{"cmd":"story.validate"}
+```
+
+Référence protocole: `docs/protocols/story_v3_serial.md`.
 
 Standard evidence layout (all gates):
 
@@ -168,7 +192,6 @@ ESP_URL=http://<ip-esp32>:8080 ./tools/dev/rtos_wifi_health.sh
 ```
 
 Artefact genere:
-- `artifacts/rtos_wifi_health_<timestamp>.log`
 
 Commande serie:
 
@@ -182,3 +205,14 @@ SYS_RTOS_STATUS
 2. Debrancher OLED.
 3. Brancher TFT sans reboot ESP32.
 4. Verifier resync UI (< 2s) et commandes BTN.
+
+---
+### Audio sur ESP32-S3 (Freenove)
+
+- Attention : l’ESP32-S3 ne possède pas de DAC intégré.
+- Toute sortie audio doit passer par l’I2S (voir mapping GPIO 25/26/27).
+- Connecter un DAC externe compatible I2S (ex : PCM5102, ES9023).
+- Adapter la fonction `i2sWriteSample` : utiliser l’API Espressif I2S pour écrire les samples.
+- Voir la documentation Espressif pour l’initialisation et l’écriture I2S.
+- Tester l’audio avec un signal simple (ex : sinus, square) et vérifier la sortie sur le DAC.
+- En cas d’erreur ou d’absence de DAC, loguer l’évidence et désactiver l’audio.

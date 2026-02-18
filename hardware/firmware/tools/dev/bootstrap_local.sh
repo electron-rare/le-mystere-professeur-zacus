@@ -11,11 +11,14 @@ fi
 source .venv/bin/activate
 
 python3 -m pip install -U pip
-python3 -m pip install -U pyserial
+python3 -m pip install -U pyserial PyYAML yamale Jinja2
+python3 -m pip install -e lib/zacus_story_gen_ai
 
 cat <<'EOF'
 
-[OK] venv ready + pyserial installed.
+[OK] venv ready.
+- serial tooling: pyserial
+- story generation tooling: PyYAML + yamale + Jinja2 + zacus_story_gen_ai
 
 Optional (recommended once) to warm PlatformIO caches:
   export PLATFORMIO_CORE_DIR="$HOME/.platformio"

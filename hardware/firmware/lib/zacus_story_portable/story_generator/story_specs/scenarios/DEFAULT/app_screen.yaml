@@ -1,0 +1,4 @@
+id: APP_SCREEN
+config:
+  type: SCREEN_SCENE
+  description: Ecran principal du scénario par défaut

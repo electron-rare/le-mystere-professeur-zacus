@@ -31,5 +31,6 @@
       "matchCommandLine": true
     },
     "gh": true
-  }
+  },
+  "maven.view": "flat"
 }

@@ -1,0 +1,35 @@
+id: str()
+version: int(min=1)
+initial_step: str()
+estimated_duration_s: int(required=False, min=0)
+app_bindings: list(include('app_binding'), min=1)
+steps: list(include('step'), min=1)
+
+---
+app_binding:
+  id: str()
+  app: enum('LA_DETECTOR', 'AUDIO_PACK', 'SCREEN_SCENE', 'MP3_GATE')
+  config: include('la_config', required=False)
+
+la_config:
+  hold_ms: int(required=False, min=100)
+  unlock_event: str(required=False)
+  require_listening: bool(required=False)
+
+step:
+  step_id: str()
+  screen_scene_id: str()
+  audio_pack_id: str(required=False)
+  actions: list(str(), required=False)
+  apps: list(str(), min=1)
+  mp3_gate_open: bool()
+  transitions: list(include('transition'))
+
+transition:
+  id: str(required=False)
+  trigger: enum('on_event', 'after_ms', 'immediate')
+  event_type: enum('none', 'unlock', 'audio_done', 'timer', 'serial', 'action')
+  event_name: str()
+  target_step_id: str()
+  after_ms: int(min=0)
+  priority: int(min=0)

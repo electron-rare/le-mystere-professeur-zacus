@@ -1,3 +1,140 @@
+### Procédure smoke test Freenove
+
+1. Vérifier la configuration du port série (résolution dynamique via cockpit.sh ports).
+2. Flasher la cible Freenove avec cockpit.sh flash (ou build_all.sh).
+3. Lancer le smoke test avec tools/dev/run_matrix_and_smoke.sh.
+4. Vérifier le verdict UI_LINK_STATUS connected==1 (fail strict si absent).
+5. Vérifier l’absence de panic/reboot dans les logs.
+6. Vérifier la santé des WebSockets (logs, auto-recover).
+7. Consigner les logs et artefacts produits (logs/rc_live/freenove_esp32s3_YYYYMMDD.log, artifacts/rc_live/freenove_esp32s3_YYYYMMDD.html).
+8. Documenter toute anomalie ou fail dans AGENT_TODO.md.
+
+## TODO Freenove ESP32-S3 (contrat agent)
+
+### [2026-02-17] Log détaillé des étapes réalisées – Freenove ESP32-S3
+
+- Audit mapping hardware exécuté (artifacts/audit/firmware_20260217/validate_mapping_report.txt)
+- Suppression des macros UART TX/RX pour UI Freenove all-in-one (platformio.ini, ui_freenove_config.h)
+- Documentation détaillée des périphériques I2C, LED, Buzzer, DHT11, MPU6050 dans RC_FINAL_BOARD.md
+- Synchronisation des macros techniques SPI/Serial/Driver dans ui_freenove_config.h (SPI_FREQUENCY, UI_LCD_SPI_HOST, etc.)
+- Ajout d’une section multiplexage dans RC_FINAL_BOARD.md (partage BL/BTN3, CS TFT/BTN4)
+- Ajout d’un commentaire explicite multiplexage dans ui_freenove_config.h
+- Evidence synchronisée : tous les artefacts et logs sont tracés (artifacts/audit/firmware_20260217, logs/rc_live/freenove_esp32s3_YYYYMMDD.log)
+- Traçabilité complète : chaque étape, correction, mapping, doc et evidence sont référencés dans AGENT_TODO.md
+
+### [2026-02-17] Rapport d’audit mapping hardware Freenove ESP32-S3
+
+**Correspondances parfaites** :
+  - TFT SPI : SCK=18, MOSI=23, MISO=19, CS=5, DC=16, RESET=17, BL=4
+  - Touch SPI : CS=21, IRQ=22
+  - Boutons : 2, 3, 4, 5
+  - Audio I2S : WS=25, BCK=26, DOUT=27
+  - LCD : WIDTH=480, HEIGHT=320, ROTATION=1
+
+**Écarts ou incohérences** :
+  - UART : platformio.ini (TX=43, RX=44), ui_freenove_config.h (TX=1, RX=3), RC_FINAL_BOARD.md (non documenté)
+  - I2C, LED, Buzzer, DHT11, MPU6050 : présents dans ui_freenove_config.h, absents ou non alignés ailleurs
+  - SPI Host, Serial Baud, Driver : macros techniques non synchronisées
+  - Multiplexage : BL/Bouton3 et CS TFT/Bouton4 partagent la broche, à clarifier
+
+**Recommandations** :
+  - Aligner UART TX/RX sur une valeur unique et documenter
+  - Documenter I2C, LED, Buzzer, DHT11, MPU6050 dans RC_FINAL_BOARD.md
+  - Synchroniser macros techniques dans ui_freenove_config.h et platformio.ini
+  - Ajouter une note sur le multiplexage dans RC_FINAL_BOARD.md et ui_freenove_config.h
+  - Reporter toute évolution dans AGENT_TODO.md
+
+**Evidence** :
+  - Rapport complet : artifacts/audit/firmware_20260217/validate_mapping_report.txt
+  [2026-02-17] Synthèse technique – Détection dynamique des ports USB
+    - Tous les ports USB série sont scannés dynamiquement (glob /dev/cu.*).
+    - Attribution des rôles (esp32, esp8266, rp2040) selon mapping, fingerprint, VID:PID, fallback CP2102.
+    - Esp32-S3 : peut apparaître en SLAB_USBtoUART (CP2102) ou usbmodem (mode bootloader, DFU, flash initial).
+    - RP2040 : typiquement usbmodem.
+    - Si un seul CP2102 détecté, fallback mono-port (esp32+esp8266 sur le même port).
+    - Si plusieurs ports, mapping par location, fingerprint, ou VID:PID.
+    - Aucun port n’est hardcodé : la détection s’adapte à chaque run (reset, flash, bootloader).
+    - Les scripts cockpit.sh, resolve_ports.py, run_matrix_and_smoke.sh exploitent cette logique.
+    - Traçabilité : logs/ports_debug.json, logs/ports_resolve.json, artifacts/rc_live/...
+    - Documentation onboarding mise à jour pour refléter la procédure.
+    - Recommandation : toujours utiliser la détection dynamique, ne jamais forcer un port sauf cas extrême (override manuel).
+
+  [2026-02-17] Validation RC Live Freenove ESP32-S3
+    - Port USB corrigé : /dev/cu.SLAB_USBtoUART
+    - Flash ciblé relancé : pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.SLAB_USBtoUART
+    - Evidence synchronisée : summary.md, ui_link.log, logs/rc_live/20260217-211606
+    - Résultat : UI link FAIL (connected=1 mais status unavailable)
+    - Artefacts : artifacts/rc_live/20260217-211606/summary.md, ui_link.log
+    - Log détaillé ajouté dans AGENT_TODO.md
+
+- [ ] Vérifier et compléter le mapping hardware dans platformio.ini ([env:freenove_esp32s3])
+  - Pins, UART, SPI, I2C, etc. : vérifier cohérence avec la doc.
+  - Exemple : GPIO22=I2S_WS, GPIO23=I2S_DATA, UART1=TX/RX.
+- [ ] Aligner ui_freenove_config.h avec platformio.ini et la documentation RC_FINAL_BOARD.md
+  - Vérifier que chaque pin, bus, périphérique est documenté et codé.
+  - Ajouter commentaires explicites pour chaque mapping.
+- [ ] Mettre à jour docs/RC_FINAL_BOARD.md
+  - Décrire le mapping complet, schéma, photo, table des pins.
+  - Ajouter procédure de flash/test spécifique Freenove.
+  - Mentionner les différences avec ESP32Dev.
+- [ ] Adapter build_all.sh, cockpit.sh, run_matrix_and_smoke.sh, etc.
+  - Ajouter/valider la cible freenove_esp32s3 dans les scripts.
+  - Vérifier que le build, flash, smoke, logs fonctionnent sur Freenove.
+  - Exemple : ./build_all.sh doit inclure freenove_esp32s3.
+- [ ] Vérifier la production de logs et artefacts lors des tests sur Freenove
+  - Chemin : logs/rc_live/freenove_esp32s3_YYYYMMDD.log
+  - Artefacts : artifacts/rc_live/freenove_esp32s3_YYYYMMDD.html
+  - Référencer leur existence (chemin, timestamp, verdict) dans docs/AGENT_TODO.md.
+- [ ] Mettre à jour l’onboarding (docs/QUICKSTART.md, docs/AGENTS_COPILOT_PLAYBOOK.md)
+  - Ajouter section « Flash Freenove », « Test Freenove ».
+  - Préciser les ports série, baud, procédure de résolution dynamique.
+- [ ] Vérifier que les gates smoke et stress test sont compatibles et valident strictement la cible Freenove
+  - Fail sur panic/reboot, verdict UI_LINK_STATUS connected==1.
+  - Tester WebSocket health, stress I2S, scénario LittleFS.
+- [ ] Documenter toute évolution ou correction dans docs/AGENT_TODO.md
+  - Détailler les étapes réalisées, artefacts produits, impasses matérielles.
+  - Exemple : « Test flash Freenove OK, logs produits dans logs/rc_live/freenove_esp32s3_20260217.log ».
+## [2026-02-17] ESP32 pin remap test kickoff (Codex)
+
+- Safety checkpoint re-run via cockpit wrappers: `git status`, `git diff --stat`, `git branch`.
+- Checkpoint files saved: `/tmp/zacus_checkpoint/20260217-185336_wip.patch` and `/tmp/zacus_checkpoint/20260217-185336_status.txt`.
+- Tracked artifact scan (`.pio`, `.platformio`, `logs`, `dist`, `build`, `node_modules`, `.venv`) returned no tracked paths.
+- Runtime status at kickoff: UI Link handshake still FAIL (`connected=0`) on latest cross-monitor evidence (`artifacts/ui_link_diag/20260217-174822/`), LittleFS fallback status unchanged, I2S stress status unchanged (last 30 min PASS).
+
+## [2026-02-17] ESP32 UI pin remap execution (Codex)
+
+- Applied ESP32 UI UART remap in firmware config: `TX=GPIO23`, `RX=GPIO18` (OLED side stays `D4/D5`).
+- Rebuilt and reflashed ESP32 (`pio run -e esp32dev`, then `pio run -e esp32dev -t upload --upload-port /dev/cu.SLAB_USBtoUART9`).
+- Cross-monitor rerun: `python3 tools/dev/capture_ui_link_boot_diag.py --seconds 22`.
+- Evidence: `artifacts/ui_link_diag/20260217-175606/`.
+- Result moved from FAIL to WARN: ESP32 now receives HELLO frames (`esp32 tx/rx=48/20`, `UI_LINK_STATUS connected=1` seen), but ESP8266 still receives nothing from ESP32 (`esp8266 tx/rx=19/0`), so handshake remains incomplete.
+
+## [2026-02-17] UI link diagnostic patch kickoff (Codex)
+
+- Safety checkpoint re-run via cockpit wrappers: `git status`, `git diff --stat`, `git branch`.
+- Checkpoint files saved: `/tmp/zacus_checkpoint/20260217-181730_wip.patch` and `/tmp/zacus_checkpoint/20260217-181730_status.txt`.
+- Tracked artifact scan (`.pio`, `.platformio`, `logs`, `dist`, `build`, `node_modules`, `.venv`) returned no tracked paths.
+- Runtime status at kickoff: UI Link strict gate still FAIL (`connected=0`), LittleFS scenario load now mitigated by V2 fallback, I2S stress status currently PASS on last 30 min run.
+
+## [2026-02-17] Cross-monitor boot capture (Codex)
+
+- Built and flashed diagnostics on both boards: `pio run -e esp32dev -e esp8266_oled`, then upload on `/dev/cu.SLAB_USBtoUART9` (ESP32) and `/dev/cu.SLAB_USBtoUART` (ESP8266).
+- Captured synchronized boot monitors with `python3 tools/dev/capture_ui_link_boot_diag.py --seconds 22`.
+- Evidence: `artifacts/ui_link_diag/20260217-173005/` (`esp32.log`, `esp8266.log`, `merged.log`, `summary.md`, `ports_resolve.json`, `meta.json`).
+- Verdict remains FAIL: no discriminant RX observed on either side (`ESP32 tx/rx=48/0`, `ESP8266 tx/rx=19/0`, no `connected=1`), indicating traffic still not seen on D4/D5 at runtime.
+
+## [2026-02-17] Cross-monitor rerun after pin inversion (Codex)
+
+- Re-ran `python3 tools/dev/capture_ui_link_boot_diag.py --seconds 22` after manual pin inversion test.
+- Evidence: `artifacts/ui_link_diag/20260217-174330/`.
+- Verdict unchanged: FAIL with `ESP32 tx/rx=48/0`, `ESP8266 tx/rx=19/0`, no `connected=1`.
+
+## [2026-02-17] Cross-monitor rerun after inverted wiring confirmation (Codex)
+
+- Re-ran `python3 tools/dev/capture_ui_link_boot_diag.py --seconds 22` after updated wiring check.
+- Evidence: `artifacts/ui_link_diag/20260217-174822/`.
+- Verdict unchanged: FAIL with `ESP32 tx/rx=48/0`, `ESP8266 tx/rx=19/0`, no `connected=1`.
+
 ## [2026-02-17] D4/D5 handshake + strict firmware_tests rerun (Codex)
 
 - Safety checkpoint re-run via cockpit wrappers: `git status`, `git diff --stat`, `git branch`.
@@ -29,9 +166,9 @@
 
 ## [2026-02-17] Copilot sequence execution + alignment fixes
 
-- Plan/runner alignment applied: root `tools/dev/plan_runner.sh` now delegates to `hardware/firmware/tools/dev/plan_runner.sh`; firmware runner now executes from repo root before resolving `.github/agents/<agent>.md`.
+- Plan/runner alignment applied: root `tools/dev/plan_runner.sh` now delegates to `hardware/firmware/tools/dev/plan_runner.sh`; firmware runner now executes from repo root and resolves active agent IDs recursively under `.github/agents/` (excluding `archive/`).
 - `run_matrix_and_smoke.sh` now supports `--help`/`-h` without side effects and returns explicit non-zero on unknown args (`--bad-arg` -> rc=2).
-- Agent briefs synchronized in root + firmware copies (`firmware_tooling.md`, `firmware_tests.md`) with repo-root commands and venv-aware PATH (`PATH=$(pwd)/hardware/firmware/.venv/bin:$PATH`).
+- Agent briefs synchronized in root + firmware copies (`domains/firmware-tooling.md`, `domains/firmware-tests.md`) with repo-root commands and venv-aware PATH (`PATH=$(pwd)/hardware/firmware/.venv/bin:$PATH`).
 - `firmware_tooling` sequence: PASS (`bash hardware/firmware/tools/dev/plan_runner.sh --agent firmware_tooling`).
 - `firmware_tests` strict sequence (`ZACUS_REQUIRE_HW=1`): blocked at step 1 because `run_matrix_and_smoke` reports UI link failure; evidence `artifacts/rc_live/20260217-153129/summary.md` (`UI_LINK_STATUS connected=0`).
 - Remaining test gates executed manually after the blocked step:
@@ -88,7 +225,30 @@
 ## 5. Reporting & evidence
 - [ ] When publishing smoke/baseline runs, include the required artifacts (`meta.json`, `commands.txt`, `summary.md`, per-step logs) under `artifacts/…` as demanded by `docs/TEST_SCRIPT_COORDINATOR.md:160-199`.
 - [ ] Document any pipeline/test regressions in `docs/RC_AUTOFIX_CICD.md` or similar briefing docs and flag them for the Test & Script Coordinator.
-2026-02-17T15:29:13Z plan_runner --agent firmware_tooling - executed 3 commands
-2026-02-17T15:31:19Z plan_runner --agent firmware_tooling - executed 3 commands
-2026-02-17T16:07:09Z plan_runner --agent firmware_tooling - executed 3 commands
-2026-02-17T16:41:44Z plan_runner --agent firmware_tooling - executed 3 commands
+
+## Traçabilité build/smoke 17/02/2026
+
+- Succès : esp32dev, esp32_release, esp8266_oled
+- Échec : ui_rp2040_ili9488, ui_rp2040_ili9486
+- Evidence : logs et artefacts dans hardware/firmware/artifacts/build, logs/
+- Actions tentées : correction du filtre build_src_filter, création de placeholder, relance build/smoke
+- Problème persistant : échec RP2040 (sources/configuration à investiguer)
+- Prochaine étape : escalade à un agent expert RP2040 ou hand-off
+
+## [2026-02-18] Story portable + V3 serial migration
+
+- [x] Added host-side story generation library `lib/zacus_story_gen_ai` (Yamale + Jinja2) with CLI:
+  - `story-gen validate`
+  - `story-gen generate-cpp`
+  - `story-gen generate-bundle`
+  - `story-gen all`
+- [x] Replaced legacy generator entrypoint `hardware/libs/story/tools/story_gen/story_gen.py` with compatibility wrapper delegating to `zacus_story_gen_ai`.
+- [x] Migrated portable runtime internals to tinyfsm-style state handling in `lib/zacus_story_portable/src/story_portable_runtime.cpp` while keeping `StoryPortableRuntime` facade.
+- [x] Introduced Story serial V3 JSON-lines handlers (`story.status`, `story.list`, `story.load`, `story.step`, `story.validate`, `story.event`) and removed `STORY_V2_*` routing from canonical command list.
+- [x] Updated run matrix/log naming to include environment label:
+  - log: `logs/rc_live/<env_label>_<ts>.log`
+  - artifacts: `artifacts/rc_live/<env_label>_<ts>/summary.md`
+- [x] `run_matrix_and_smoke.sh` now supports single-board mode (`ZACUS_ENV="freenove_esp32s3"`): ESP8266/UI-link/story-screen checks are emitted as `SKIP` with detail `not needed for combined board`.
+- [x] `tools/test/resolve_ports.py` now honors `--need-esp32` and `--need-esp8266` explicitly via required roles, while still emitting both `esp32` and `esp8266` fields in JSON output.
+[20260218-020041] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260218-020041, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260218-020041/summary.md
+[20260218-021042] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260218-021042, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260218-021042/summary.md

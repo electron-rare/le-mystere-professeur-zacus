@@ -17,6 +17,8 @@ Ce dossier est la référence unique des interfaces partagées firmware.
 | `STORY_V2_PIPELINE.md` | Guide | Pipeline YAML -> gen -> runtime -> apps -> screen |
 | `STORY_V2_WEBUI.md` | Guide | API HTTP/WebSocket Story V2 (WebUI) |
 | `RELEASE_STORY_V2.md` | Guide | Release Story V2 (gates, rollback, checks) |
+| `story_v3_serial.md` | Source of truth | Protocole série Story V3 JSON-lines (`story.*`) |
+| `story_portable_contract.md` | Source of truth | Contrat runtime portable (LittleFS + fallback généré) |
 | `story_specs/README.md` | Guide | Organisation des specs STORY |
 | `README.md` | Guide | Règles d'évolution et validation |
 

@@ -1,0 +1,4 @@
+id: APP_AUDIO
+config:
+  type: AUDIO_PACK
+  description: Gestion des sons et packs audio

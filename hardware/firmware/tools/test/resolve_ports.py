@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Resolve Zacus serial ports with glob mapping, fingerprint fallback, and a learned cache."""
+"""Resolve Zacus serial ports with location map + explicit required roles."""
+
+from __future__ import annotations
+
 import argparse
 import fnmatch
 import json
@@ -10,7 +13,6 @@ import time
 from pathlib import Path
 
 try:
-    from serial import Serial, SerialException
     from serial.tools import list_ports
 except ImportError:
     print("pyserial is missing; run ./tools/dev/bootstrap_local.sh", file=sys.stderr)
@@ -18,37 +20,17 @@ except ImportError:
 
 FIRMWARE_ROOT = Path(__file__).resolve().parents[2]
 PORTS_MAP_PATH = FIRMWARE_ROOT / "tools" / "dev" / "ports_map.json"
-LEARNED_MAP_PATH = FIRMWARE_ROOT / ".local" / "ports_map.learned.json"
 DEFAULT_PORTS_MAP = {
     "location": {
         "20-6.1.1": "esp32",
         "20-6.1.2": "esp8266_usb",
         "20-6.2*": "esp8266_usb",
         "20-6.1*": "esp32",
-        "20-6.4.1": "esp8266_usb",
-        "20-6.4.2": "esp32",
     },
     "vidpid": {
         "2e8a:0005": "rp2040",
         "2e8a:000a": "rp2040",
     },
-}
-
-FINGERPRINT_SCANS = [
-    {"baud": 115200, "duration": 2.0},
-    {"baud": 19200, "duration": 2.0},
-]
-FINGERPRINT_PATTERNS = {
-    "esp32": [
-        re.compile(r"UI_LINK_STATUS", re.IGNORECASE),
-        re.compile(r"\[SYS", re.IGNORECASE),
-        re.compile(r"UI_LINK", re.IGNORECASE),
-    ],
-    "esp8266": [
-        re.compile(r"\[SCREEN\]", re.IGNORECASE),
-        re.compile(r"HELLO,proto=\d+,ui_type=OLED", re.IGNORECASE),
-        re.compile(r"OLED", re.IGNORECASE),
-    ],
 }
 
 
@@ -59,310 +41,238 @@ def normalize_role(role: str) -> str:
     return value
 
 
-def parse_location(hwid: str):
+def parse_location(hwid: str) -> str:
     if not hwid:
-        return None
+        return ""
     match = re.search(r"LOCATION=([\w\-.]+)", hwid)
-    if match:
-        return match.group(1)
-    return None
+    if not match:
+        return ""
+    return match.group(1)
 
 
-def port_vidpid(port):
+def port_vidpid(port) -> str:
     if port.vid is None or port.pid is None:
-        return None
+        return ""
     return f"{port.vid:04x}:{port.pid:04x}"
 
 
-def port_preference(port):
-    name = port.device or ""
-    if name.startswith("/dev/cu.SLAB"):
+def port_preference(device: str, prefer_cu: bool) -> int:
+    if device.startswith("/dev/cu.SLAB"):
         return 0
-    if name.startswith("/dev/cu.usbserial"):
+    if device.startswith("/dev/cu.usbserial"):
         return 1
-    if name.startswith("/dev/cu.usbmodem"):
+    if device.startswith("/dev/cu.usbmodem"):
         return 2
-    if name.startswith("/dev/cu."):
+    if prefer_cu and device.startswith("/dev/cu."):
         return 3
+    if device.startswith("/dev/tty."):
+        return 5
     return 4
 
 
-def filter_detectable_ports(ports):
-    by_location = {}
-    for port in ports:
-        location = parse_location(port.hwid) or port.device
-        existing = by_location.get(location)
-        if existing is None or port_preference(port) < port_preference(existing):
-            by_location[location] = port
-    return list(by_location.values())
-
-
-def fingerprint_port(device):
-    for scan in FINGERPRINT_SCANS:
-        try:
-            with Serial(device, scan["baud"], timeout=0.4) as ser:
-                start = time.monotonic()
-                while time.monotonic() - start < scan["duration"]:
-                    raw = ser.readline()
-                    if not raw:
-                        continue
-                    line = raw.decode("utf-8", errors="ignore").strip()
-                    if not line:
-                        continue
-                    for role, patterns in FINGERPRINT_PATTERNS.items():
-                        for pattern in patterns:
-                            if pattern.search(line):
-                                reason = f"fingerprint:{role}@{scan['baud']}:{pattern.pattern}"
-                                return role, reason
-        except (SerialException, OSError):
+def dedupe_ports(raw_ports, prefer_cu: bool):
+    by_key = {}
+    for port in raw_ports:
+        key = parse_location(port.hwid) or port.device
+        existing = by_key.get(key)
+        if existing is None:
+            by_key[key] = port
             continue
-    return None, None
+        if port_preference(port.device, prefer_cu) < port_preference(existing.device, prefer_cu):
+            by_key[key] = port
+    return list(by_key.values())
 
 
-def load_json(path):
+def load_ports_map() -> tuple[list[tuple[str, str]], dict[str, str]]:
+    raw = DEFAULT_PORTS_MAP
     try:
-        with open(path, encoding="utf-8") as fh:
-            return json.load(fh)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+        if PORTS_MAP_PATH.exists():
+            loaded = json.loads(PORTS_MAP_PATH.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                raw = loaded
+    except Exception:
+        raw = DEFAULT_PORTS_MAP
 
-
-def build_ports_map():
-    raw_map = load_json(PORTS_MAP_PATH)
-    if not isinstance(raw_map, dict):
-        raw_map = DEFAULT_PORTS_MAP
-    location_entries = []
-    for key, value in raw_map.get("location", {}).items():
-        pattern = str(key)
-        if isinstance(value, str):
-            role = normalize_role(value)
-        elif isinstance(value, dict) and isinstance(value.get("role"), str):
-            role = normalize_role(value["role"])
-        else:
+    location_map: list[tuple[str, str]] = []
+    for pattern, role in (raw.get("location") or {}).items():
+        if isinstance(role, dict):
+            role = role.get("role", "")
+        if not isinstance(role, str):
             continue
-        location_entries.append({"pattern": pattern, "role": role, "source": "map"})
+        location_map.append((str(pattern), normalize_role(role)))
+    location_map.sort(key=lambda item: (-len(item[0]), item[0]))
 
-    learned = load_json(LEARNED_MAP_PATH).get("location", {})
-    if isinstance(learned, dict):
-        for key, value in learned.items():
-            pattern = str(key)
-            role = normalize_role(value)
-            location_entries.append({"pattern": pattern, "role": role, "source": "learned"})
+    vidpid_map: dict[str, str] = {}
+    for vidpid, role in (raw.get("vidpid") or {}).items():
+        if isinstance(role, dict):
+            role = role.get("role", "")
+        if not isinstance(role, str):
+            continue
+        vidpid_map[str(vidpid).lower()] = normalize_role(role)
 
-    location_entries.sort(key=lambda entry: (-len(entry["pattern"]), entry["pattern"]))
-
-    vidpid_map = {}
-    for key, value in raw_map.get("vidpid", {}).items():
-        vidpid = str(key).lower()
-        if isinstance(value, str):
-            vidpid_map[vidpid] = normalize_role(value)
-        elif isinstance(value, dict) and isinstance(value.get("role"), str):
-            vidpid_map[vidpid] = normalize_role(value["role"])
-    return location_entries, vidpid_map
+    return location_map, vidpid_map
 
 
-def learn_location(location: str, role: str):
-    if not location:
-        return False
-    cache = load_json(LEARNED_MAP_PATH)
-    if not isinstance(cache, dict):
-        cache = {}
-    entries = cache.get("location")
-    if not isinstance(entries, dict):
-        entries = {}
-    if entries.get(location) == role:
-        return False
-    entries[location] = role
-    cache["location"] = entries
-    LEARNED_MAP_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(LEARNED_MAP_PATH, "w", encoding="utf-8") as fh:
-        json.dump(cache, fh, indent=2)
-    return True
+def classify_port(port, location_map, vidpid_map) -> tuple[str, str]:
+    location = parse_location(port.hwid).lower()
+    for pattern, role in location_map:
+        if fnmatch.fnmatch(location, pattern.lower()):
+            return role, f"location-map:{pattern}"
+
+    vidpid = port_vidpid(port).lower()
+    if vidpid and vidpid in vidpid_map:
+        return vidpid_map[vidpid], f"vidpid:{vidpid}"
+
+    desc = (getattr(port, "description", "") or "").lower()
+    if "rp2040" in desc or "pico" in desc:
+        return "rp2040", "description:rp2040"
+
+    return "", ""
 
 
-def match_location_entry(entries, location):
-    if not location:
-        return None
-    normalized = location.lower()
-    for entry in entries:
-        if fnmatch.fnmatch(normalized, entry["pattern"].lower()):
-            return entry
-    return None
-
-
-def classify_port(port, location, entries, vidpid_map):
-    entry = match_location_entry(entries, location)
-    if entry:
-        fp_role, fp_reason = fingerprint_port(port.device)
-        if fp_role and fp_role != entry["role"]:
-            return fp_role, f"fingerprint-override:{entry['pattern']}:{fp_reason}"
-        return entry["role"], f"location-map:{entry['pattern']}"
-    vidpid = port_vidpid(port)
-    if vidpid and vidpid.lower() in vidpid_map:
-        return vidpid_map[vidpid.lower()], f"vidpid:{vidpid}"
-    return fingerprint_port(port.device)
-
-
-def classify_ports(ports, entries, vidpid_map):
-    found = {}
-    details = {}
-    notes = []
-    cp2102_ports = []
-    # DEBUG: log complet des ports détectés dans un fichier
-    import json as _json
-    debug_ports = []
-    for port in ports:
-        attrs = {k: getattr(port, k, None) for k in dir(port) if not k.startswith('__') and not callable(getattr(port, k, None))}
-        debug_ports.append(attrs)
-    debug_log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logs', 'ports_debug.json')
-    try:
-        os.makedirs(os.path.dirname(debug_log_path), exist_ok=True)
-        with open(debug_log_path, "w", encoding="utf-8") as dbg:
-            _json.dump(debug_ports, dbg, indent=2, ensure_ascii=False)
-    except Exception as e:
-        print(f"[WARN] Could not write debug log: {e}")
-    for port in ports:
-        location = parse_location(port.hwid) or ""
-        role, reason = classify_port(port, location, entries, vidpid_map)
-        if role and role not in found:
-            found[role] = port.device
-            details[role] = {"location": location, "reason": reason}
-            if reason and reason.startswith("fingerprint") and location:
-                if learn_location(location, role):
-                    notes.append(f"learned {location} -> {role}")
-            if reason and reason.startswith("fingerprint"):
-                notes.append(f"fingerprint {role} on {port.device}")
-        # Collecter les ports CP2102 non mappés
-        if (getattr(port, 'vid', None) == 0x10C4 and getattr(port, 'pid', None) == 0xEA60):
-            cp2102_ports.append(port)
-    # Fallback : assigner les CP2102 restants
-    # Mode mono-port : si un seul port CP2102 détecté dans tous les ports, il sert pour les deux rôles
-    cp2102_total = [p for p in ports if getattr(p, 'vid', None) == 0x10C4 and getattr(p, 'pid', None) == 0xEA60]
-    if len(cp2102_total) == 1:
-        port = cp2102_total[0]
-        # N'assigne que si non déjà trouvé par mapping/fingerprint
-        if "esp32" not in found:
-            found["esp32"] = port.device
-            details["esp32"] = {"location": parse_location(port.hwid) or "", "reason": "cp2102-monop-fallback"}
-        if "esp8266" not in found:
-            found["esp8266"] = port.device
-            details["esp8266"] = {"location": parse_location(port.hwid) or "", "reason": "cp2102-monop-fallback"}
-        notes.append(f"cp2102 mono-port fallback assigned to esp32+esp8266: {port.device}")
-    else:
-        for port in cp2102_ports:
-            if "esp32" not in found:
-                found["esp32"] = port.device
-                details["esp32"] = {"location": parse_location(port.hwid) or "", "reason": "cp2102-fallback"}
-                notes.append(f"cp2102 fallback assigned to esp32: {port.device}")
-            elif "esp8266" not in found:
-                found["esp8266"] = port.device
-                details["esp8266"] = {"location": parse_location(port.hwid) or "", "reason": "cp2102-fallback"}
-                notes.append(f"cp2102 fallback assigned to esp8266: {port.device}")
-    return found, details, notes
-
-
-def build_manual_assignments(args, snapshot):
-    overrides = {}
-    details = {}
-    notes = []
-    for role, attr, env in (
-        ("esp32", "port_esp32", "ZACUS_PORT_ESP32"),
-        ("esp8266", "port_esp8266", "ZACUS_PORT_ESP8266"),
-        ("rp2040", "port_rp2040", "ZACUS_PORT_RP2040"),
-    ):
-        port_value = getattr(args, attr)
-        if not port_value:
-            port_value = os.environ.get(env)
+def build_manual_overrides(args, snapshot) -> tuple[dict[str, str], dict[str, dict[str, str]], list[str]]:
+    overrides: dict[str, str] = {}
+    details: dict[str, dict[str, str]] = {}
+    notes: list[str] = []
+    fields = (
+        ("esp32", args.port_esp32 or os.environ.get("ZACUS_PORT_ESP32", "")),
+        ("esp8266", args.port_esp8266 or os.environ.get("ZACUS_PORT_ESP8266", "")),
+        ("rp2040", args.port_rp2040 or os.environ.get("ZACUS_PORT_RP2040", "")),
+    )
+    for role, port_value in fields:
         if not port_value:
             continue
         overrides[role] = port_value
         location = ""
         for port in snapshot:
             if port.device == port_value:
-                location = parse_location(port.hwid) or ""
+                location = parse_location(port.hwid)
                 break
         details[role] = {"location": location, "reason": "manual-override"}
         notes.append(f"manual override {role} -> {port_value}")
     return overrides, details, notes
 
 
-def dedupe_notes(notes):
-    seen = set()
-    out = []
-    for note in notes:
-        if note and note not in seen:
-            seen.add(note)
-            out.append(note)
-    return out
+def classify_snapshot(snapshot, prefer_cu: bool):
+    location_map, vidpid_map = load_ports_map()
+    ports = dedupe_ports(snapshot, prefer_cu)
+
+    found: dict[str, str] = {}
+    details: dict[str, dict[str, str]] = {}
+    notes: list[str] = []
+
+    for port in ports:
+        role, reason = classify_port(port, location_map, vidpid_map)
+        role = normalize_role(role)
+        if not role:
+            continue
+        if role in found:
+            continue
+        found[role] = port.device
+        details[role] = {
+            "location": parse_location(port.hwid),
+            "reason": reason,
+        }
+
+    # Fallback CP2102 attribution when map is missing.
+    cp2102 = [port for port in ports if (port.vid, port.pid) == (0x10C4, 0xEA60)]
+    cp2102.sort(key=lambda port: port_preference(port.device, prefer_cu))
+    for port in cp2102:
+        if "esp32" not in found:
+            found["esp32"] = port.device
+            details["esp32"] = {
+                "location": parse_location(port.hwid),
+                "reason": "cp2102-fallback",
+            }
+            notes.append(f"cp2102 fallback assigned to esp32: {port.device}")
+            continue
+        if "esp8266" not in found:
+            found["esp8266"] = port.device
+            details["esp8266"] = {
+                "location": parse_location(port.hwid),
+                "reason": "cp2102-fallback",
+            }
+            notes.append(f"cp2102 fallback assigned to esp8266: {port.device}")
+
+    return found, details, notes
+
+
+def required_roles(args) -> set[str]:
+    roles: set[str] = set()
+    if args.need_esp32:
+        roles.add("esp32")
+    if args.need_esp8266:
+        roles.add("esp8266")
+    if args.need_rp2040:
+        roles.add("rp2040")
+    return roles
 
 
 def resolve_ports(args):
-        # Correction mode mono-port : si un seul CP2102 détecté et un des rôles manque, l'assigner
-        cp2102_total = [p for p in list_ports.comports() if getattr(p, 'vid', None) == 0x10C4 and getattr(p, 'pid', None) == 0xEA60]
-        if len(cp2102_total) == 1:
-            port = cp2102_total[0]
-            if "esp32" not in best_found:
-                best_found["esp32"] = port.device
-                best_details["esp32"] = {"location": parse_location(port.hwid) or "", "reason": "cp2102-monop-fallback"}
-            if "esp8266" not in best_found:
-                best_found["esp8266"] = port.device
-                best_details["esp8266"] = {"location": parse_location(port.hwid) or "", "reason": "cp2102-monop-fallback"}
-            notes.append(f"cp2102 mono-port fallback (resolve_ports) assigned to esp32+esp8266: {port.device}")
-    entries, vidpid_map = build_ports_map()
-    snapshot = list(list_ports.comports())
-    manual_ports, manual_details, manual_notes = build_manual_assignments(args, snapshot)
-    best_found = manual_ports.copy()
-    best_details = manual_details.copy()
-    notes = manual_notes.copy()
+    required = required_roles(args)
+    deadline = time.monotonic() + max(0, int(args.wait_port))
 
-    required_roles = set()
-    if args.need_esp32:
-        required_roles.add("esp32")
-    if args.need_esp8266:
+    best_found: dict[str, str] = {}
+    best_details: dict[str, dict[str, str]] = {}
+    notes: list[str] = []
 
-        # Nouvelle logique : PASS si (esp32 ET esp8266) OU (esp32 ET rp2040) présents
-        roles_found = set(best_found.keys())
-        has_esp32 = "esp32" in roles_found
-        has_esp8266 = "esp8266" in roles_found
-        has_rp2040 = "rp2040" in roles_found
-        if has_esp32 and (has_esp8266 or has_rp2040):
-            status = "pass"
-        elif has_esp32:
-            status = "skip" if args.allow_no_hardware else "fail"
-        else:
-            status = "skip" if args.allow_no_hardware else "fail"
-        details_payload[role] = {"location": info.get("location", ""), "reason": info.get("reason", "")}
+    while True:
+        snapshot = list(list_ports.comports())
+        found, details, classify_notes = classify_snapshot(snapshot, args.prefer_cu)
+        manual, manual_details, manual_notes = build_manual_overrides(args, snapshot)
 
-    # Correction : forcer l'inclusion de esp8266 même si c'est le même port que esp32
-    # Correction : ne jamais écraser la valeur de best_found["esp8266"]
+        found.update(manual)
+        details.update(manual_details)
+        notes = classify_notes + manual_notes
+
+        best_found = found
+        best_details = details
+
+        missing = [role for role in required if not found.get(role)]
+        if not missing:
+            break
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.4)
+
+    missing = [role for role in required if not best_found.get(role)]
+    if not missing:
+        status = "pass"
+    elif args.allow_no_hardware:
+        status = "skip"
+        notes.append("missing required hardware: " + ",".join(sorted(missing)))
+    else:
+        status = "fail"
+        notes.append("missing required hardware: " + ",".join(sorted(missing)))
+
     ports_payload = {
         "esp32": best_found.get("esp32", ""),
         "esp8266": best_found.get("esp8266", ""),
         "rp2040": best_found.get("rp2040", ""),
     }
+    details_payload = {
+        "esp32": best_details.get("esp32", {"location": "", "reason": ""}),
+        "esp8266": best_details.get("esp8266", {"location": "", "reason": ""}),
+        "rp2040": best_details.get("rp2040", {"location": "", "reason": ""}),
+    }
 
-    if ports_payload["esp32"] and ports_payload["esp8266"]:
-        fp_esp32, fp_reason32 = fingerprint_port(ports_payload["esp32"])
-        fp_esp8266, fp_reason8266 = fingerprint_port(ports_payload["esp8266"])
-        if fp_esp32 == "esp8266" and fp_esp8266 == "esp32":
-            ports_payload["esp32"], ports_payload["esp8266"] = ports_payload["esp8266"], ports_payload["esp32"]
-            details_payload["esp32"]["reason"] = f"fingerprint-swap:{fp_reason32}"
-            details_payload["esp8266"]["reason"] = f"fingerprint-swap:{fp_reason8266}"
-            notes.append("fingerprint swap applied")
-
-    result = {
+    return {
         "status": status,
         "ports": ports_payload,
-        "reasons": {role: details_payload[role]["reason"] for role in ("esp32", "esp8266")},
+        "reasons": {
+            "esp32": details_payload["esp32"]["reason"],
+            "esp8266": details_payload["esp8266"]["reason"],
+            "rp2040": details_payload["rp2040"]["reason"],
+        },
         "details": details_payload,
-        "notes": dedupe_notes(notes),
+        "required_roles": sorted(required),
+        "notes": sorted(set(notes)),
     }
-    return result
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description="Resolve Zacus ESP32/ESP8266/RP2040 serial ports")
-    parser.add_argument("--wait-port", type=int, default=3, help="seconds to wait for ports")
+    parser.add_argument("--wait-port", type=int, default=3, help="seconds to wait for required ports")
     parser.add_argument("--auto-ports", action="store_true", help="scan automatically for ports")
     parser.add_argument("--need-esp32", action="store_true", help="require ESP32 port")
     parser.add_argument("--need-esp8266", action="store_true", help="require ESP8266 port")
@@ -372,28 +282,31 @@ def main():
     parser.add_argument("--port-esp8266", help="explicit ESP8266 port")
     parser.add_argument("--port-rp2040", help="explicit RP2040 port")
     parser.add_argument("--ports-resolve-json", help="write JSON output to this path")
+    parser.add_argument("--prefer-cu", action="store_true", help="prefer /dev/cu.* aliases over tty")
     args = parser.parse_args()
 
-    if not args.auto_ports and not args.port_esp32 and not args.port_esp8266 and not os.environ.get("ZACUS_PORT_ESP32") and not os.environ.get("ZACUS_PORT_ESP8266"):
+    explicit_any = bool(
+        args.port_esp32
+        or args.port_esp8266
+        or args.port_rp2040
+        or os.environ.get("ZACUS_PORT_ESP32")
+        or os.environ.get("ZACUS_PORT_ESP8266")
+        or os.environ.get("ZACUS_PORT_RP2040")
+    )
+    if not args.auto_ports and not explicit_any:
         parser.error("must provide --auto-ports or explicit port overrides")
 
     result = resolve_ports(args)
-    # Toujours écrire l'artefact de résolution, même en cas de skip/fail
-    if args.ports_resolve_json:
-        try:
-            Path(args.ports_resolve_json).parent.mkdir(parents=True, exist_ok=True)
-            Path(args.ports_resolve_json).write_text(json.dumps(result, indent=2), encoding="utf-8")
-        except Exception as e:
-            print(f"[WARN] Could not write ports_resolve.json: {e}")
+    encoded = json.dumps(result, indent=2, ensure_ascii=False)
+    print(encoded)
 
-    # Ajout d'une note explicite si status != pass
-    if result["status"] != "pass":
-        print("[WARN] Port resolution status:", result["status"])
-        print(json.dumps(result, indent=2))
-        sys.exit(1 if result["status"] == "fail" else 0)
-    print(json.dumps(result, indent=2))
-    sys.exit(0)
+    if args.ports_resolve_json:
+        out = Path(args.ports_resolve_json)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(encoded + "\n", encoding="utf-8")
+
+    return 1 if result["status"] == "fail" else 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

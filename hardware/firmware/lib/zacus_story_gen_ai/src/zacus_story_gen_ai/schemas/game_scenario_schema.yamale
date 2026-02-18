@@ -1,0 +1,49 @@
+id: str()
+version: int(min=1)
+title: str()
+theme: str()
+players: include('players')
+ages: str()
+duration_minutes: include('duration')
+canon: include('canon')
+stations: list(include('station'), min=1)
+puzzles: list(include('puzzle'), min=1)
+solution: include('solution')
+solution_unique: bool()
+finale_statement: str(required=False)
+notes: str(required=False)
+
+---
+players:
+  min: int(min=1)
+  max: int(min=1)
+
+duration:
+  min: int(min=1)
+  max: int(min=1)
+
+canon:
+  introduction: str(required=False)
+  timeline: list(include('timeline_entry'), min=1)
+  stakes: str(required=False)
+
+timeline_entry:
+  label: str()
+  note: str()
+
+station:
+  name: str()
+  focus: str()
+  clue: str()
+
+puzzle:
+  id: str()
+  type: str()
+  clue: str()
+  effect: str()
+
+solution:
+  culprit: str()
+  motive: str()
+  method: str()
+  proof: list(str(), min=1)

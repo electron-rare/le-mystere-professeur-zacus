@@ -1,0 +1,4 @@
+id: APP_GATE
+config:
+  type: MP3_GATE
+  description: Contrôle du passage/fin de scénario

@@ -17,6 +17,18 @@ require_cmd() {
   fi
 }
 
+first_existing_path() {
+  local path
+  for path in "$@"; do
+    if [[ -e "$path" ]]; then
+      printf '%s' "$path"
+      return 0
+    fi
+  done
+  printf '%s' "$1"
+  return 1
+}
+
 resolve_ports_for_flash() {
   local fw_root
   fw_root=$(get_fw_root)
@@ -84,11 +96,11 @@ except Exception:
     data = {}
 ports = data.get("ports", {})
 values = [ports.get("esp32", ""), ports.get("esp8266", ""), ports.get("rp2040", "")]
-print(" ".join(values))
+print("\t".join(values))
 PY
   ports_out=$("$python_exec" "$tmp_py" "$ports_json")
   rm -f "$tmp_py"
-  read -r port_esp32 port_esp8266 port_rp2040 <<< "$ports_out"
+  IFS=$'\t' read -r port_esp32 port_esp8266 port_rp2040 <<< "$ports_out"
 
   if [[ -z "$port_esp32" || -z "$port_esp8266" ]]; then
     fail "port resolution failed (esp32=$port_esp32 esp8266=$port_esp8266)"
@@ -103,18 +115,18 @@ PY
 
   log "[step] flash esp32 ($esp32_envs)"
   for env in $esp32_envs; do
-    log "[step] pio run -e $env -t upload --upload-port $port_esp32"
+    log "[step] pio run -e $env -t upload --upload-port \"$port_esp32\""
     (cd "$fw_root" && pio run -e "$env" -t upload --upload-port "$port_esp32") 2>&1 | tee -a "$log_file"
   done
 
   log "[step] flash esp8266 ($esp8266_env)"
-  log "[step] pio run -e $esp8266_env -t upload --upload-port $port_esp8266"
+  log "[step] pio run -e $esp8266_env -t upload --upload-port \"$port_esp8266\""
   (cd "$fw_root" && pio run -e "$esp8266_env" -t upload --upload-port "$port_esp8266") 2>&1 | tee -a "$log_file"
 
   if [[ -n "$port_rp2040" ]]; then
     log "[step] flash rp2040 ($rp2040_envs)"
     for env in $rp2040_envs; do
-      log "[step] pio run -e $env -t upload --upload-port $port_rp2040"
+      log "[step] pio run -e $env -t upload --upload-port \"$port_rp2040\""
       (cd "$fw_root" && pio run -e "$env" -t upload --upload-port "$port_rp2040") 2>&1 | tee -a "$log_file"
     done
   elif [[ "$require_rp2040" == "1" ]]; then
@@ -497,9 +509,13 @@ drivers_audit() {
       local drivers_ok=1
       local fw_root
       fw_root=$(get_fw_root)
+      local esp32_src
+      esp32_src=$(first_existing_path \
+        "$fw_root/hardware/firmware/esp32_audio/src" \
+        "$fw_root/esp32_audio/src")
       local req_files=(
-        "$fw_root/esp32_audio/src/services/ui_serial/ui_serial.cpp"
-        "$fw_root/esp32_audio/src/services/serial/serial_router.cpp"
+        "$esp32_src/services/ui_serial/ui_serial.cpp"
+        "$esp32_src/services/serial/serial_router.cpp"
         "$fw_root/protocol/ui_link_v2.h"
       )
       local f
@@ -517,10 +533,14 @@ drivers_audit() {
       local drivers_ok=1
       local fw_root
       fw_root=$(get_fw_root)
+      local ui_oled_src
+      ui_oled_src=$(first_existing_path \
+        "$fw_root/hardware/firmware/ui/esp8266_oled/src" \
+        "$fw_root/ui/esp8266_oled/src")
       local req_files=(
-        "$fw_root/ui/esp8266_oled/src/gfx/u8g2_display_backend.cpp"
-        "$fw_root/ui/esp8266_oled/src/core/stat_parser.cpp"
-        "$fw_root/ui/esp8266_oled/src/core/text_parser.cpp"
+        "$ui_oled_src/gfx/u8g2_display_backend.cpp"
+        "$ui_oled_src/core/stat_parser.cpp"
+        "$ui_oled_src/core/text_parser.cpp"
       )
       local f
       for f in "${req_files[@]}"; do
@@ -537,10 +557,14 @@ drivers_audit() {
       local drivers_ok=1
       local fw_root
       fw_root=$(get_fw_root)
+      local ui_tft_src
+      ui_tft_src=$(first_existing_path \
+        "$fw_root/hardware/firmware/ui/rp2040_tft/src" \
+        "$fw_root/ui/rp2040_tft/src")
       local req_files=(
-        "$fw_root/ui/rp2040_tft/src/lvgl_port.cpp"
-        "$fw_root/ui/rp2040_tft/src/ui_renderer.cpp"
-        "$fw_root/ui/rp2040_tft/src/uart_link.cpp"
+        "$ui_tft_src/lvgl_port.cpp"
+        "$ui_tft_src/ui_renderer.cpp"
+        "$ui_tft_src/uart_link.cpp"
       )
       local f
       for f in "${req_files[@]}"; do
@@ -566,8 +590,16 @@ tests_audit() {
     esp32dev|esp32_release)
       local fw_root
       fw_root=$(get_fw_root)
-      local smoke_script="$fw_root/esp32_audio/tools/qa/story_v2_ci.sh"
-      local rc_script="$fw_root/esp32_audio/tools/qa/live_story_v2_smoke.sh"
+      local smoke_script
+      smoke_script=$(first_existing_path \
+        "$fw_root/hardware/libs/story/tools/qa/story_v2_ci.sh" \
+        "$fw_root/hardware/firmware/esp32_audio/tools/qa/story_v2_ci.sh" \
+        "$fw_root/esp32_audio/tools/qa/story_v2_ci.sh")
+      local rc_script
+      rc_script=$(first_existing_path \
+        "$fw_root/hardware/libs/story/tools/qa/live_story_v2_smoke.sh" \
+        "$fw_root/hardware/firmware/esp32_audio/tools/qa/live_story_v2_smoke.sh" \
+        "$fw_root/esp32_audio/tools/qa/live_story_v2_smoke.sh")
       local rtos_script="$fw_root/tools/dev/rtos_wifi_health.sh"
       local ok=1
       if [[ ! -f "$smoke_script" ]]; then
@@ -607,8 +639,12 @@ tests_audit() {
     ui_rp2040_ili9488|ui_rp2040_ili9486)
       local fw_root
       fw_root=$(get_fw_root)
-      local runbook="$fw_root/ui/rp2040_tft/README.md"
-      local spec="$fw_root/ui/rp2040_tft/UI_SPEC.md"
+      local ui_tft_root
+      ui_tft_root=$(first_existing_path \
+        "$fw_root/hardware/firmware/ui/rp2040_tft" \
+        "$fw_root/ui/rp2040_tft")
+      local runbook="$ui_tft_root/README.md"
+      local spec="$ui_tft_root/UI_SPEC.md"
       local ok=1
       if [[ ! -f "$runbook" ]]; then
         log "[WARN] missing runbook: $runbook"

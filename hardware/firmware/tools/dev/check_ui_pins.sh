@@ -5,9 +5,11 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
+source tools/dev/layout_paths.sh
 
-CONFIG_FILE="esp32_audio/src/config.h"
-RUNTIME_FILE="esp32_audio/src/runtime/runtime_state.cpp"
+ESP32_SRC_ROOT="$(fw_esp32_src_root)"
+CONFIG_FILE="$ESP32_SRC_ROOT/config.h"
+RUNTIME_FILE="$ESP32_SRC_ROOT/runtime/runtime_state.cpp"
 
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "❌ Config file not found: $CONFIG_FILE"

@@ -180,6 +180,7 @@ log "Running smoke on ESP32=$port_esp32 (reason=$reason_esp32) with ESP8266=$por
 evidence_record_command "python3 - <inline> esp32=$port_esp32 esp8266=$port_esp8266 baud=$BAUD scenarios=$SCENARIOS duration_s=$SCENARIO_DURATION_S"
 set +e
 python3 - "$port_esp32" "$port_esp8266" "$BAUD" "$LOG_PATH" "$SCENARIOS" "$SCENARIO_DURATION_S" <<'PY'
+import json
 import re
 import sys
 import time
@@ -200,9 +201,9 @@ scenario_duration_s = float(sys.argv[6])
 
 fatal_re = re.compile(r"(PANIC|Guru Meditation|ASSERT|ABORT|REBOOT|rst:|watchdog)", re.IGNORECASE)
 ui_down_re = re.compile(r"UI_LINK_STATUS.*connected=0", re.IGNORECASE)
-load_ok_re = re.compile(r"STORY_LOAD_SCENARIO_OK", re.IGNORECASE)
-arm_ok_re = re.compile(r"STORY_ARM_OK|armed=1|\[STORY_V2\]\s+STATUS.*run=1", re.IGNORECASE)
-done_re = re.compile(r"STORY_ENGINE_DONE|step=STEP_DONE|step: done|\bdone\b", re.IGNORECASE)
+load_ok_re = re.compile(r'"ok"\s*:\s*true.*"code"\s*:\s*"ok".*"detail"\s*:\s*"[^"]+"', re.IGNORECASE)
+arm_ok_re = re.compile(r'"running"\s*:\s*true', re.IGNORECASE)
+done_re = re.compile(r'STORY_ENGINE_DONE|step=STEP_DONE|step: done|-> STEP_DONE|"step"\s*:\s*"STEP_DONE"', re.IGNORECASE)
 
 
 def ts(msg: str) -> str:
@@ -249,6 +250,13 @@ def send_cmd(ser, cmd: str):
     time.sleep(0.2)
 
 
+def send_json_cmd(ser, cmd: str, data=None):
+    payload = {"cmd": cmd}
+    if data:
+        payload["data"] = data
+    send_cmd(ser, json.dumps(payload, separators=(",", ":")))
+
+
 def check_ui_link(ser) -> bool:
     send_cmd(ser, "UI_LINK_STATUS")
     ok, info = scan_for(ser, [re.compile(r"UI_LINK_STATUS.*connected=1", re.IGNORECASE)], 2.0)
@@ -261,14 +269,14 @@ def check_ui_link(ser) -> bool:
 
 def run_scenario(ser, scenario: str) -> bool:
     log(f"=== Scenario {scenario} ===")
-    send_cmd(ser, f"STORY_LOAD_SCENARIO {scenario}")
+    send_json_cmd(ser, "story.load", {"scenario": scenario})
     ok, info = scan_for(ser, [load_ok_re], 2.5)
     if not ok:
         log(f"FAIL load {scenario}: {info}")
         return False
 
     send_cmd(ser, "STORY_ARM")
-    send_cmd(ser, "STORY_STATUS")
+    send_json_cmd(ser, "story.status")
     ok, info = scan_for(ser, [arm_ok_re], 2.5)
     if not ok:
         log(f"FAIL arm {scenario}: {info}")
@@ -281,6 +289,7 @@ def run_scenario(ser, scenario: str) -> bool:
     if not ok and info == "timeout":
         log(f"WARN completion timeout for {scenario}, forcing ETAPE2 once")
         send_cmd(ser, "STORY_FORCE_ETAPE2")
+        send_json_cmd(ser, "story.status")
         ok, info = scan_for(ser, [done_re], min(6.0, scenario_duration_s))
     if not ok:
         log(f"FAIL completion {scenario}: {info}")
@@ -296,7 +305,6 @@ try:
         ser.reset_input_buffer()
         log(f"Using ESP32={port_esp32} ESP8266={port_esp8266}")
         send_cmd(ser, "BOOT_NEXT")
-        send_cmd(ser, "STORY_V2_ENABLE ON")
         send_cmd(ser, "STORY_TEST_ON")
         send_cmd(ser, "STORY_TEST_DELAY 1000")
         failures = 0

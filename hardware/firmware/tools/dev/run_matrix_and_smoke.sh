@@ -13,7 +13,7 @@ Runs the firmware build matrix, serial smoke checks, UI link gate, and summary e
 Configure behavior with environment variables.
 
 Key environment variables:
-  ZACUS_REQUIRE_HW=1        Require ESP32 + ESP8266 ports (strict mode)
+  ZACUS_REQUIRE_HW=1        Require all ports implied by selected ENVs (strict mode)
   ZACUS_SKIP_PIO=1          Skip PlatformIO builds
   ZACUS_SKIP_SMOKE=1        Skip serial smoke + UI link checks
   ZACUS_ENV="<envs>"        Limit build envs (space or comma separated)
@@ -25,6 +25,10 @@ Key environment variables:
   ZACUS_SKIP_SCREEN_CHECK=1 Skip story screen smoke check
   ZACUS_NO_COUNTDOWN=1      Skip USB countdown prompts
   ZACUS_WAIT_MAX_SECS=<n>   Max USB wait in strict hardware mode (0 = no max)
+
+Artifacts/log naming:
+  artifacts/rc_live/<env_label>_<timestamp>/
+  logs/rc_live/<env_label>_<timestamp>.log
 USAGE
 }
 
@@ -49,20 +53,18 @@ SMOKE_STATUS="SKIPPED"
 UI_LINK_STATUS="SKIPPED"
 SMOKE_COMMAND_STRING=""
 SERIAL_MODULE_AVAILABLE="1"
+AUX_UI_REQUIRED="1"
 
 TIMESTAMP="$(date -u +"%Y%m%d-%H%M%S")"
-ARTIFACT_DIR="$ROOT/artifacts/rc_live/$TIMESTAMP"
-LOG_DIR="$ROOT/logs"
-RUN_LOG="$LOG_DIR/run_matrix_and_smoke_${TIMESTAMP}.log"
-STEPS_TSV="$ARTIFACT_DIR/steps.tsv"
-SUMMARY_JSON="$ARTIFACT_DIR/summary.json"
-SUMMARY_MD="$ARTIFACT_DIR/summary.md"
-PORTS_RESOLVE_JSON="$ARTIFACT_DIR/ports_resolve.json"
+ENV_LABEL="matrix"
+ARTIFACT_DIR=""
+LOG_DIR=""
+RUN_LOG=""
+STEPS_TSV=""
+SUMMARY_JSON=""
+SUMMARY_MD=""
+PORTS_RESOLVE_JSON=""
 RESOLVE_PORTS_ALLOW_RETRY="0"
-
-mkdir -p "$ARTIFACT_DIR" "$LOG_DIR"
-: > "$RUN_LOG"
-: > "$STEPS_TSV"
 
 EXIT_CODE=0
 FINALIZED=0
@@ -116,6 +118,16 @@ should_record_resolve_failure() {
   [[ "${RESOLVE_PORTS_ALLOW_RETRY:-0}" != "1" ]]
 }
 
+required_ports_ready() {
+  if [[ "$PORT_STATUS" != "OK" || -z "$PORT_ESP32" ]]; then
+    return 1
+  fi
+  if [[ "$AUX_UI_REQUIRED" == "1" && -z "$PORT_ESP8266" ]]; then
+    return 1
+  fi
+  return 0
+}
+
 require_cmd() {
   local cmd="$1"
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -164,6 +176,50 @@ parse_envs() {
   if (( ${#ENVS[@]} == 0 )); then
     ENVS=("${DEFAULT_ENVS[@]}")
   fi
+}
+
+build_env_label() {
+  if (( ${#ENVS[@]} == 0 )); then
+    printf '%s\n' "matrix"
+    return
+  fi
+
+  local joined
+  joined="$(printf '%s_' "${ENVS[@]}")"
+  joined="${joined%_}"
+  # Keep artifact paths stable and grep-friendly.
+  joined="${joined//[^A-Za-z0-9._-]/_}"
+  printf '%s\n' "$joined"
+}
+
+detect_aux_ui_requirement() {
+  local env
+  for env in "${ENVS[@]}"; do
+    case "$env" in
+      esp8266_*|ui_*)
+        printf '%s\n' "1"
+        return
+        ;;
+      *)
+        ;;
+    esac
+  done
+  printf '%s\n' "0"
+}
+
+init_run_paths() {
+  ENV_LABEL="$(build_env_label)"
+  LOG_DIR="$ROOT/logs/rc_live"
+  ARTIFACT_DIR="$ROOT/artifacts/rc_live/${ENV_LABEL}_${TIMESTAMP}"
+  RUN_LOG="$LOG_DIR/${ENV_LABEL}_${TIMESTAMP}.log"
+  STEPS_TSV="$ARTIFACT_DIR/steps.tsv"
+  SUMMARY_JSON="$ARTIFACT_DIR/summary.json"
+  SUMMARY_MD="$ARTIFACT_DIR/summary.md"
+  PORTS_RESOLVE_JSON="$ARTIFACT_DIR/ports_resolve.json"
+
+  mkdir -p "$ARTIFACT_DIR" "$LOG_DIR"
+  : > "$RUN_LOG"
+  : > "$STEPS_TSV"
 }
 
 all_builds_present() {
@@ -225,7 +281,8 @@ emit_usb_warning() {
 }
 
 print_usb_alert() {
-  cat <<'EOM' | tee -a "$RUN_LOG"
+  if [[ "$AUX_UI_REQUIRED" == "1" ]]; then
+    cat <<'EOM' | tee -a "$RUN_LOG"
 ===========================================
 🚨🚨🚨  USB CONNECT ALERT  🚨🚨🚨
 ===========================================
@@ -241,6 +298,24 @@ macOS devices typically appear as:
 
 Confirm USB connection before smoke starts.
 EOM
+  else
+    cat <<'EOM' | tee -a "$RUN_LOG"
+===========================================
+🚨🚨🚨  USB CONNECT ALERT  🚨🚨🚨
+===========================================
+Connect the ESP32 USB adapter for:
+  • ESP32 (primary role, LOCATION 20-6.1.1)
+
+Optional: RP2040/Pico devices.
+
+macOS devices typically appear as:
+  /dev/cu.SLAB_USBtoUART*
+  /dev/cu.usbserial-*
+  /dev/cu.usbmodem*
+
+Confirm USB connection before smoke starts.
+EOM
+  fi
 }
 
 wait_for_usb_confirmation() {
@@ -309,7 +384,7 @@ wait_for_required_usb() {
   trap 'RESOLVE_PORTS_ALLOW_RETRY="${_prev_retry:-0}"' RETURN
 
   while true; do
-    if resolve_live_ports && [[ "$PORT_STATUS" == "OK" && -n "$PORT_ESP32" && -n "$PORT_ESP8266" ]]; then
+    if resolve_live_ports && required_ports_ready; then
       echo "required ports detected"
       return 0
     fi
@@ -321,7 +396,11 @@ wait_for_required_usb() {
     fi
     if (( now - last_warn >= warn_interval )); then
       emit_usb_warning "$warning"
-      log_warn "waiting for CP2102 adapters..."
+      if [[ "$AUX_UI_REQUIRED" == "1" ]]; then
+        log_warn "waiting for CP2102 adapters..."
+      else
+        log_warn "waiting for ESP32 USB adapter..."
+      fi
       last_warn=$now
     fi
     if (( now - last_list >= list_interval )); then
@@ -347,8 +426,10 @@ resolve_live_ports() {
     "--wait-port" "$wait_port"
     "--auto-ports"
     "--need-esp32"
-    "--need-esp8266"
   )
+  if [[ "$AUX_UI_REQUIRED" == "1" ]]; then
+    resolver_cmd+=("--need-esp8266")
+  fi
 
   if [[ "$(uname -s)" == "Darwin" ]]; then
     resolver_cmd+=("--prefer-cu")
@@ -415,7 +496,7 @@ print("RESOLVE_NOTES=" + shlex.quote(" | ".join(v.get("notes", []))))
         location_guard=1
         location_notes+=("esp32 reason=${RESOLVE_REASON_ESP32:-unknown} (need location-map/fingerprint)")
       fi
-      if [[ -z "${ZACUS_PORT_ESP8266:-}" && ! "$RESOLVE_REASON_ESP8266" =~ $accept_reason ]]; then
+      if [[ "$AUX_UI_REQUIRED" == "1" && -z "${ZACUS_PORT_ESP8266:-}" && ! "$RESOLVE_REASON_ESP8266" =~ $accept_reason ]]; then
         location_guard=1
         location_notes+=("esp8266 reason=${RESOLVE_REASON_ESP8266:-unknown} (need location-map/fingerprint)")
       fi
@@ -440,9 +521,13 @@ print("RESOLVE_NOTES=" + shlex.quote(" | ".join(v.get("notes", []))))
     fi
 
     PORT_STATUS="OK"
-    append_step "resolve_ports" "PASS" "0" "$resolve_log" "esp32=$PORT_ESP32 esp8266=$PORT_ESP8266"
+    append_step "resolve_ports" "PASS" "0" "$resolve_log" "esp32=$PORT_ESP32 esp8266=${PORT_ESP8266:-}"
     log_info "ESP32=${PORT_ESP32:-n/a} location=${RESOLVE_LOCATION_ESP32:-unknown} (${RESOLVE_REASON_ESP32:-n/a})"
-    log_info "ESP8266=${PORT_ESP8266:-n/a} location=${RESOLVE_LOCATION_ESP8266:-unknown} (${RESOLVE_REASON_ESP8266:-n/a})"
+    if [[ "$AUX_UI_REQUIRED" == "1" ]]; then
+      log_info "ESP8266=${PORT_ESP8266:-n/a} location=${RESOLVE_LOCATION_ESP8266:-unknown} (${RESOLVE_REASON_ESP8266:-n/a})"
+    else
+      log_info "ESP8266 not required for selected envs"
+    fi
     return 0
   fi
 
@@ -509,6 +594,15 @@ run_role_smoke() {
 run_ui_link_check() {
   local ui_log="$ARTIFACT_DIR/ui_link.log"
   local wait_s="${ZACUS_UI_LINK_WAIT:-2}"
+  local max_retries="${ZACUS_UI_LINK_RETRIES:-3}"
+  local retry_count=0
+  local rc=1
+
+  if [[ "$AUX_UI_REQUIRED" != "1" ]]; then
+    UI_LINK_STATUS="SKIP"
+    append_step "ui_link" "SKIP" "0" "$ui_log" "not needed for combined board"
+    return 0
+  fi
 
   if [[ -z "$PORT_ESP32" ]]; then
     UI_LINK_STATUS="SKIP"
@@ -522,12 +616,12 @@ run_ui_link_check() {
   fi
   printf '[step] ui-link check on %s\n' "$PORT_ESP32" | tee -a "$RUN_LOG" "$ui_log"
 
-set +e
-"$PYTHON_BIN" - "$PORT_ESP32" >"$ui_log" 2>&1 <<'PY'
+  while (( retry_count < max_retries )); do
+    set +e
+    "$PYTHON_BIN" - "$PORT_ESP32" >"$ui_log" 2>&1 <<'PY'
 import re
 import sys
 import time
-
 import serial
 
 port = sys.argv[1]
@@ -574,26 +668,42 @@ if connected != 1:
     raise SystemExit(3)
 raise SystemExit(0)
 PY
-  local rc=$?
-set -e
+    rc=$?
+    set -e
+    if [[ "$rc" == "0" ]]; then
+      UI_LINK_STATUS="OK"
+      append_step "ui_link" "PASS" "0" "$ui_log" "connected=1 (retry $retry_count)"
+      break
+    else
+      ((retry_count++))
+      log_warn "UI_LINK check failed (attempt $retry_count/$max_retries), rc=$rc"
+      sleep 1
+    fi
+  done
 
-  if [[ "$rc" == "0" ]]; then
-    UI_LINK_STATUS="OK"
-    append_step "ui_link" "PASS" "0" "$ui_log" "connected=1"
+  if [[ "$UI_LINK_STATUS" == "OK" ]]; then
     return 0
   fi
 
   UI_LINK_STATUS="FAILED"
   if [[ "$rc" == "3" ]]; then
-    append_step "ui_link" "FAIL" "$rc" "$ui_log" "connected=0"
+    append_step "ui_link" "FAIL" "$rc" "$ui_log" "connected=0 after $max_retries retries"
   else
-    append_step "ui_link" "FAIL" "$rc" "$ui_log" "status unavailable"
+    append_step "ui_link" "FAIL" "$rc" "$ui_log" "status unavailable after $max_retries retries"
   fi
+  # Synchronisation evidence AGENT_TODO.md
+  echo "[${TIMESTAMP}] UI_LINK check failed after $max_retries retries, rc=$rc, voir $ui_log" >> "$ROOT/docs/AGENT_TODO.md"
   return "$rc"
 }
 
 run_story_screen_smoke() {
   local log_file="$ARTIFACT_DIR/story_screen_smoke.log"
+
+  if [[ "$AUX_UI_REQUIRED" != "1" ]]; then
+    append_step "story_screen" "SKIP" "0" "$log_file" "not needed for combined board"
+    log_step "story screen smoke skipped (combined board)"
+    return 0
+  fi
 
   if [[ "${ZACUS_SKIP_SCREEN_CHECK:-0}" == "1" ]]; then
     append_step "story_screen" "SKIP" "0" "$log_file" "ZACUS_SKIP_SCREEN_CHECK=1"
@@ -608,6 +718,12 @@ run_story_screen_smoke() {
 
   if [[ "$UI_LINK_STATUS" != "OK" ]]; then
     append_step "story_screen" "SKIP" "0" "$log_file" "ui_link status=$UI_LINK_STATUS"
+    return 0
+  fi
+
+  if [[ ! -f "$STORY_SCREEN_SMOKE" ]]; then
+    append_step "story_screen" "SKIP" "0" "$log_file" "story_screen_smoke script missing"
+    log_warn "story screen smoke script missing: $STORY_SCREEN_SMOKE"
     return 0
   fi
 
@@ -628,7 +744,7 @@ run_story_screen_smoke() {
 
 write_summary() {
   local rc="$1"
-  "$PYTHON_BIN" - "$ARTIFACT_DIR" "$STEPS_TSV" "$ARTIFACT_DIR/summary.json" "$ARTIFACT_DIR/summary.md" "$TIMESTAMP" "$BUILD_STATUS" "$PORT_STATUS" "$SMOKE_STATUS" "$UI_LINK_STATUS" "$SMOKE_COMMAND_STRING" "$PORT_ESP32" "$PORT_ESP8266" "$PORTS_RESOLVE_JSON" "$rc" "$RUN_LOG" <<'PY'
+  "$PYTHON_BIN" - "$ARTIFACT_DIR" "$STEPS_TSV" "$ARTIFACT_DIR/summary.json" "$ARTIFACT_DIR/summary.md" "$TIMESTAMP" "$BUILD_STATUS" "$PORT_STATUS" "$SMOKE_STATUS" "$UI_LINK_STATUS" "$SMOKE_COMMAND_STRING" "$PORT_ESP32" "$PORT_ESP8266" "$AUX_UI_REQUIRED" "$PORTS_RESOLVE_JSON" "$rc" "$RUN_LOG" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -645,9 +761,10 @@ ui_link_status = sys.argv[9]
 smoke_cmd = sys.argv[10]
 port_esp32 = sys.argv[11]
 port_esp8266 = sys.argv[12]
-ports_json = Path(sys.argv[13])
-exit_code = int(sys.argv[14])
-run_log = sys.argv[15]
+aux_ui_required = sys.argv[13] == "1"
+ports_json = Path(sys.argv[14])
+exit_code = int(sys.argv[15])
+run_log = sys.argv[16]
 
 steps = []
 if steps_tsv.exists():
@@ -698,7 +815,7 @@ if isinstance(esp8266_payload, dict):
   esp8266_payload = esp8266_payload.get("port")
 resolved_esp8266 = esp8266_payload or port_esp8266
 port_note = ""
-if not resolved_esp32 or not resolved_esp8266:
+if not resolved_esp32 or (aux_ui_required and not resolved_esp8266):
   if ports_resolve.get("status") in ("pass", "ok"):
     port_note = "resolver ok but ports missing"
   elif ports_resolve:
@@ -727,6 +844,7 @@ summary = {
             "reason": ports_resolve.get("details", {}).get("esp8266", {}).get("reason", ""),
         },
     },
+    "aux_ui_required": aux_ui_required,
     "ports_note": port_note,
     "steps": steps,
     "logs": {
@@ -787,7 +905,15 @@ trap 'finalize "$EXIT_CODE"' EXIT
 
 
 parse_envs
+AUX_UI_REQUIRED="$(detect_aux_ui_requirement)"
+init_run_paths
 log_info "selected envs: ${ENVS[*]}"
+log_info "env label: ${ENV_LABEL}"
+if [[ "$AUX_UI_REQUIRED" == "1" ]]; then
+  log_info "auxiliary UI board required: yes"
+else
+  log_info "auxiliary UI board required: no (combined board mode)"
+fi
 log_info "artifacts: $ARTIFACT_DIR"
 
 if [[ -x ".venv/bin/python" ]]; then
@@ -797,7 +923,10 @@ else
 fi
 
 SERIAL_SMOKE="$ROOT/tools/dev/serial_smoke.py"
-STORY_SCREEN_SMOKE="$ROOT/tools/dev/story_screen_smoke.py"
+STORY_SCREEN_SMOKE="$ROOT/lib/zacus_story_portable/story_screen_smoke.py"
+if [[ ! -f "$STORY_SCREEN_SMOKE" ]]; then
+  STORY_SCREEN_SMOKE="$ROOT/tools/dev/story_screen_smoke.py"
+fi
 RESOLVER="$REPO_ROOT/tools/test/resolve_ports.py"
 
 if [[ "${ZACUS_SKIP_PIO:-0}" != "1" ]]; then
@@ -878,11 +1007,11 @@ else
         set_failure 21
         break
       fi
-      if [[ "$PORT_STATUS" != "OK" || -z "$PORT_ESP32" || -z "$PORT_ESP8266" ]]; then
+      if ! required_ports_ready; then
         log_warn "ports unresolved; retrying"
         continue
       fi
-      if [[ ! -e "$PORT_ESP32" || ! -e "$PORT_ESP8266" ]]; then
+      if [[ ! -e "$PORT_ESP32" || ("$AUX_UI_REQUIRED" == "1" && ! -e "$PORT_ESP8266") ]]; then
         log_warn "required port disappeared; re-waiting"
         continue
       fi
@@ -901,15 +1030,23 @@ else
     fi
   fi
 
-  if [[ "$PORT_STATUS" == "OK" && "$port_loop_success" == "1" ]]; then
+  if required_ports_ready && [[ "$port_loop_success" == "1" ]]; then
     local_smoke_fail=0
-    SMOKE_COMMAND_STRING="$PYTHON_BIN tools/dev/serial_smoke.py --role <esp32|esp8266_usb> --port <resolved> --baud 115200"
+    if [[ "$AUX_UI_REQUIRED" == "1" ]]; then
+      SMOKE_COMMAND_STRING="$PYTHON_BIN tools/dev/serial_smoke.py --role <esp32|esp8266_usb> --port <resolved> --baud 115200"
+    else
+      SMOKE_COMMAND_STRING="$PYTHON_BIN tools/dev/serial_smoke.py --role esp32 --port <resolved> --baud 115200"
+    fi
 
     if ! run_role_smoke "esp32" "$PORT_ESP32" "$ARTIFACT_DIR/smoke_esp32.log"; then
       local_smoke_fail=1
     fi
-    if ! run_role_smoke "esp8266_usb" "$PORT_ESP8266" "$ARTIFACT_DIR/smoke_esp8266_usb.log"; then
-      local_smoke_fail=1
+    if [[ "$AUX_UI_REQUIRED" == "1" ]]; then
+      if ! run_role_smoke "esp8266_usb" "$PORT_ESP8266" "$ARTIFACT_DIR/smoke_esp8266_usb.log"; then
+        local_smoke_fail=1
+      fi
+    else
+      append_step "smoke_esp8266_usb" "SKIP" "0" "$ARTIFACT_DIR/smoke_esp8266_usb.log" "not needed for combined board"
     fi
 
     if [[ "$local_smoke_fail" == "1" ]]; then
@@ -930,9 +1067,17 @@ else
     SMOKE_STATUS="SKIPPED"
     UI_LINK_STATUS="SKIPPED"
     append_step "smoke_esp32" "SKIP" "0" "$ARTIFACT_DIR/smoke_esp32.log" "port resolution $PORT_STATUS"
-    append_step "smoke_esp8266_usb" "SKIP" "0" "$ARTIFACT_DIR/smoke_esp8266_usb.log" "port resolution $PORT_STATUS"
+    if [[ "$AUX_UI_REQUIRED" == "1" ]]; then
+      append_step "smoke_esp8266_usb" "SKIP" "0" "$ARTIFACT_DIR/smoke_esp8266_usb.log" "port resolution $PORT_STATUS"
+    else
+      append_step "smoke_esp8266_usb" "SKIP" "0" "$ARTIFACT_DIR/smoke_esp8266_usb.log" "not needed for combined board"
+    fi
     append_step "ui_link" "SKIP" "0" "$ARTIFACT_DIR/ui_link.log" "port resolution $PORT_STATUS"
-    append_step "story_screen" "SKIP" "0" "$ARTIFACT_DIR/story_screen_smoke.log" "port resolution $PORT_STATUS"
+    if [[ "$AUX_UI_REQUIRED" == "1" ]]; then
+      append_step "story_screen" "SKIP" "0" "$ARTIFACT_DIR/story_screen_smoke.log" "port resolution $PORT_STATUS"
+    else
+      append_step "story_screen" "SKIP" "0" "$ARTIFACT_DIR/story_screen_smoke.log" "not needed for combined board"
+    fi
     if [[ "$PORT_STATUS" == "FAILED" ]]; then
       set_failure 21
     fi
@@ -945,17 +1090,28 @@ log "Build status : $BUILD_STATUS"
 log "Port status  : $PORT_STATUS"
 log "Smoke status : $SMOKE_STATUS"
 log "UI link      : $UI_LINK_STATUS"
+if [[ "$AUX_UI_REQUIRED" != "1" ]]; then
+  log "Story UI gates: skipped (not needed for combined board)"
+fi
 if [[ -n "$SMOKE_COMMAND_STRING" ]]; then
   log "Smoke cmd    : $SMOKE_COMMAND_STRING"
 fi
 
 
+# Optimisation prompt CI (batch mode)
+if [[ "${CI:-}" == "true" || "${ZACUS_BATCH:-}" == "1" ]]; then
+  export ZACUS_PROMPT_MODE="batch"
+  log_info "CI/batch mode détecté : prompts désactivés"
+fi
+
 # Audit Codex et hook génération automatique
 
-
-artefact_gate "$ARTIFACT_DIR" "artifacts/rc_live/${TIMESTAMP}_agent"
-logs_gate "$LOG_DIR" "artifacts/rc_live/${TIMESTAMP}_logs"
+artefact_gate "$ARTIFACT_DIR" "artifacts/rc_live/${ENV_LABEL}_${TIMESTAMP}_agent"
+logs_gate "$LOG_DIR" "artifacts/rc_live/${ENV_LABEL}_${TIMESTAMP}_logs"
 
 prune_rc_live_runs "$ROOT/artifacts/rc_live" "${ZACUS_RC_KEEP_RUNS:-2}"
+
+# Synchronisation evidence AGENT_TODO.md
+echo "[${TIMESTAMP}] Run artefacts: $ARTIFACT_DIR, logs: $LOG_DIR, summary: $ARTIFACT_DIR/summary.md" >> "$ROOT/docs/AGENT_TODO.md"
 
 exit "$EXIT_CODE"

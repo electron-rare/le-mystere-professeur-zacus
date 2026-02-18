@@ -1,3 +1,48 @@
+## Mapping Hardware Freenove ESP32-S3 Media Kit
+
+| Fonction         | Pin (ESP32-S3) | Définition macro         | Remarque/Conflit |
+|------------------|----------------|-------------------------|------------------|
+| LCD Width        | 480            | FREENOVE_LCD_WIDTH      |                  |
+| LCD Height       | 320            | FREENOVE_LCD_HEIGHT     |                  |
+| TFT SCK          | 2/18           | FREENOVE_TFT_SCK        | Différence board |
+| TFT MOSI         | 3/23           | FREENOVE_TFT_MOSI       |                  |
+| TFT MISO         | 4/19           | FREENOVE_TFT_MISO       | Optionnel        |
+| TFT CS           | 5              | FREENOVE_TFT_CS         | Partagé BTN_4    |
+| TFT DC           | 6/16           | FREENOVE_TFT_DC         |                  |
+| TFT RST          | 7/17           | FREENOVE_TFT_RST        |                  |
+| TFT BL           | 4              | FREENOVE_TFT_BL         | Partagé BTN_3    |
+| Touch CS         | 9/21           | FREENOVE_TOUCH_CS       |                  |
+| Touch IRQ        | 15/22          | FREENOVE_TOUCH_IRQ      |                  |
+| UART TX          | 43/0/1         | FREENOVE_UART_TX        | Adapter board    |
+| UART RX          | 44/3           | FREENOVE_UART_RX        | Adapter board    |
+| I2S WS           | 25             | FREENOVE_I2S_WS         | ESP32 only       |
+| I2S BCK          | 26             | FREENOVE_I2S_BCK        | ESP32 only       |
+| I2S DOUT         | 27             | FREENOVE_I2S_DOUT       | ESP32 only       |
+| LED              | 13             | FREENOVE_LED            | Si dispo         |
+| Buzzer           | 12             | FREENOVE_BUZZER         | Si dispo         |
+| DHT11            | 14             | FREENOVE_DHT11          | Si dispo         |
+| I2C SDA          | 8              | FREENOVE_I2C_SDA        | Si utilisé       |
+| I2C SCL          | 9              | FREENOVE_I2C_SCL        | Si utilisé       |
+| MPU6050 Addr     | 0x68           | FREENOVE_MPU6050_ADDR   | Si utilisé       |
+
+### Librairies recommandées
+- [TFT_eSPI](https://github.com/Bodmer/TFT_eSPI) (écran TFT)
+- [XPT2046_Touchscreen](https://github.com/PaulStoffregen/XPT2046_Touchscreen) (tactile)
+- [LVGL](https://github.com/lvgl/lvgl) (UI avancée)
+- [ESP8266Audio](https://github.com/earlephilhower/ESP8266Audio) (audio)
+- [Mozzi](https://github.com/sensorium/Mozzi) (synthèse audio)
+- [ArduinoJson](https://github.com/bblanchon/ArduinoJson) (JSON)
+
+## Procédure de validation hardware Freenove
+
+1. Vérifier le câblage selon le schéma officiel Freenove.
+2. Tester l’écran TFT avec la librairie TFT_eSPI.
+3. Tester le tactile avec XPT2046_Touchscreen.
+4. Tester l’audio (I2S) avec ESP8266Audio ou Mozzi.
+5. Vérifier les boutons, LED, buzzer, capteurs (DHT11, MPU6050).
+6. Utiliser les scripts de smoke test et gates PlatformIO.
+7. Utiliser `tools/dev/cockpit.sh` pour build, flash, test, logs.
+8. Documenter toute incohérence ou conflit de pin dans AGENT_TODO.md.
 # RC Execution Board - hardware/firmware
 
 This file is the source of truth for the RC execution cycle focused on

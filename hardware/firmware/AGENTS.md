@@ -27,6 +27,11 @@ Toute modification structurelle doit etre repercutee dans la documentation et l'
 - Onboarding et vérification d'environnement : `tools/dev/onboard.sh`, `tools/dev/check_env.sh`.
 - Les anciens fichiers `menu_utils.sh` et `menu_strings.sh` sont supprimés (fusion dans agent_utils.sh).
 
+### [2026] Ajout cible Freenove ESP32-S3
+- Un environnement PlatformIO dédié à la carte Freenove ESP32-S3 (`[env:freenove_esp32s3]`) doit être maintenu dans `platformio.ini`.
+- Le mapping hardware (pins, UART, SPI, etc.) doit être strictement aligné entre `platformio.ini`, `ui_freenove_config.h` et la documentation (`RC_FINAL_BOARD.md`).
+- Toute évolution de la cible ou du mapping doit être répercutée dans la doc et les scripts de build/test.
+
 
 Bootstrap + workspace:
 

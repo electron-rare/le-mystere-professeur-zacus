@@ -1,4 +1,22 @@
+# Optimisation automatique hardware
+Depuis février 2026, le cockpit détecte automatiquement le hardware connecté (port série, ID USB) et ne build/flash que l’environnement PlatformIO correspondant.
+
+Pour builder ou flasher :
+- Menu cockpit : "Build all firmware" ou "Flash auto (hardware détecté)"
+- Ligne de commande : ./tools/dev/cockpit.sh flash (auto) ou ./tools/dev/cockpit.sh build (auto)
+
+La détection est basée sur pyserial et l’ID USB (Freenove, ESP32, ESP8266, RP2040). Le log affiche le hardware détecté et l’environnement PlatformIO ciblé.
+
+Pour forcer un build/flash spécifique : ./tools/dev/cockpit.sh flash <env>
+
 # Hardware Firmware
+
+> **[Mise à jour 2026]**
+>
+> **Tous les assets LittleFS (scénarios, écrans, scènes, audio, actions, etc.) sont désormais centralisés dans le dossier `data/` à la racine de `hardware/firmware/`.**
+>
+> Ce dossier unique sert de source pour le flash LittleFS sur ESP32, ESP8266 et RP2040. Les anciens dossiers `data/` dans les sous-projets doivent être migrés/supprimés (voir encart migration ci-dessous).
+
 
 Workspace PlatformIO unique pour 3 firmwares:
 
@@ -6,19 +24,49 @@ Workspace PlatformIO unique pour 3 firmwares:
 - `ui/esp8266_oled/`: UI OLED legere
 - `ui/rp2040_tft/`: UI TFT tactile (LVGL)
 - `protocol/`: contrat UART partage (`ui_link_v2.md`, `ui_link_v2.h`)
+### 🟦 Freenove Media Kit (RP2040)
+
+Un environnement PlatformIO dédié est disponible pour le boîtier Freenove Media Kit :
+
+- **Build** : `pio run -e ui_rp2040_freenove`
+- **Flash** : `pio run -e ui_rp2040_freenove -t upload --upload-port <PORT>`
+- **Monitor** : `pio device monitor -e ui_rp2040_freenove --port <PORT>`
+
+Le mapping hardware (pins, écran, boutons) est défini dans `ui/rp2040_tft/include/ui_freenove_config.h`.
+
+**Schéma de branchement** : voir `hardware/wiring/wiring.md` (section Freenove)
+
+**Remarque** : adaptez les defines dans `ui_freenove_config.h` selon votre version du Media Kit (écran, boutons, etc.).
 
 
 ## 📚 Documentation
 
-**Nouvelle documentation complète disponible :**
-
-- **[Index Documentation](docs/INDEX.md)** - Point d'entrée navigation complète
-- **[Architecture UML](docs/ARCHITECTURE_UML.md)** - Diagrammes classes, séquence, composants
 - **[État des lieux](docs/STATE_ANALYSIS.md)** - Analyse complète du firmware
 - **[Recommandations Sprint](docs/SPRINT_RECOMMENDATIONS.md)** - Actions prioritaires
 - **[Recovery WiFi/AP & Health](docs/WIFI_RECOVERY_AND_HEALTH.md)** - Procédure recovery AP, healthcheck, troubleshooting
 
 Pour débuter : [docs/QUICKSTART.md](docs/QUICKSTART.md)
+
+
+## Structure des assets LittleFS (cross-plateforme)
+
+```
+hardware/firmware/data/
+	story/
+		scenarios/
+			DEFAULT.json
+		apps/
+		screens/
+		audio/
+		actions/
+	audio/
+	radio/
+	net/
+```
+
+**Scripts de génération et de flash : toujours pointer vers ce dossier.**
+
+---
 
 ## Build
 
@@ -48,11 +96,29 @@ Bootstrap local tools once:
 ./tools/dev/bootstrap_local.sh
 ```
 
+## Story portable (generation + runtime)
+
+- Generation library: `lib/zacus_story_gen_ai/` (Yamale + Jinja2).
+- Runtime library: `lib/zacus_story_portable/` (tinyfsm-style internals).
+- Story serial protocol: JSON-lines V3 (`story.*`), see `docs/protocols/story_v3_serial.md`.
+- Canonical migration doc: `docs/STORY_PORTABILITY_MIGRATION.md`.
+
+CLI:
+
+```sh
+./tools/dev/story-gen validate
+./tools/dev/story-gen generate-cpp
+./tools/dev/story-gen generate-bundle
+./tools/dev/story-gen all
+```
+
+
 ## Flash (cockpit)
 
 ```sh
 ./tools/dev/cockpit.sh flash
 ```
+
 
 Options utiles:
 
@@ -60,7 +126,17 @@ Options utiles:
 - `ZACUS_FLASH_RP2040_ENVS="ui_rp2040_ili9488 ui_rp2040_ili9486"`
 - `ZACUS_PORT_ESP32=... ZACUS_PORT_ESP8266=... ZACUS_PORT_RP2040=...`
 
-## Boucle dev rapide
+
+---
+
+## Migration LittleFS (2026)
+
+- Déplacer tous les fichiers de scénario, écrans, scènes, audio, etc. dans `hardware/firmware/data/`.
+- Adapter les scripts de génération et de flash pour pointer vers ce dossier.
+- Supprimer les anciens dossiers `data/` dispersés dans les sous-projets (`ui/rp2040_tft/data/`, `esp32_audio/data/`, etc.).
+- Mettre à jour tous les guides et onboarding pour refléter cette structure unique.
+
+---
 
 ```sh
 make fast-esp32 ESP32_PORT=<PORT_ESP32>
@@ -100,8 +176,9 @@ Cockpit shortcut:
 
 `run_matrix_and_smoke.sh` ensures PlatformIO caches land under `$HOME/.platformio` (via `PLATFORMIO_CORE_DIR`) rather than inside the repo.
 Before smoke it shows `⚠️ BRANCHE L’USB MAINTENANT ⚠️` three times, then waits for Enter while listing ports every 15s.
-Each run writes deterministic artifacts under `artifacts/rc_live/<timestamp>/` (`summary.json`, `summary.md`, `ports_resolve.json`, `ui_link.log`, per-step logs).
+Each run writes deterministic artifacts under `artifacts/rc_live/<env_label>_<timestamp>/` and logs under `logs/rc_live/<env_label>_<timestamp>.log` (`summary.json`, `summary.md`, `ports_resolve.json`, `ui_link.log`, per-step logs).
 The runner resolves macOS CP2102 by LOCATION (`20-6.1.1` ESP32, `20-6.1.2` ESP8266 USB), then enforces a dedicated `UI_LINK_STATUS connected=1` gate on ESP32.
+When `ZACUS_ENV="freenove_esp32s3"` (single-board), ESP8266/UI-link/story-screen gates are marked `SKIP` with `not needed for combined board`.
 
 Environment overrides:
 
@@ -110,6 +187,7 @@ Environment overrides:
 - `ZACUS_NO_COUNTDOWN=1 ./tools/dev/run_matrix_and_smoke.sh` (skip the USB wait gate).
 - `ZACUS_SKIP_SMOKE=1 ./tools/dev/run_matrix_and_smoke.sh` (build only, no serial smoke step).
 - `ZACUS_ENV="esp32dev esp8266_oled" ./tools/dev/run_matrix_and_smoke.sh` (custom env subset).
+- `ZACUS_ENV="freenove_esp32s3" ./tools/dev/run_matrix_and_smoke.sh` (single-board Freenove path).
 - `ZACUS_FORCE_BUILD=1 ./tools/dev/run_matrix_and_smoke.sh` (force rebuild even when artifacts exist).
 
 By default the smoke step exits 0 when no serial hardware is present; use `ZACUS_REQUIRE_HW=1` to enforce detection.

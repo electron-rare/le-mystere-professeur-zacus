@@ -9,6 +9,82 @@
 7. Consigner les logs et artefacts produits (logs/rc_live/freenove_esp32s3_YYYYMMDD.log, artifacts/rc_live/freenove_esp32s3_YYYYMMDD.html).
 8. Documenter toute anomalie ou fail dans AGENT_TODO.md.
 
+## [2026-02-20] GH binôme Freenove AP local + alignement ESP-NOW RTC (Codex)
+
+- Branche de travail: `feat/freenove-ap-local-espnow-rtc-sync`
+- Coordination GitHub:
+  - issue firmware: https://github.com/electron-rare/le-mystere-professeur-zacus/issues/91
+  - issue RTC (binôme, branche `audit/telephony-webserver`): https://github.com/electron-rare/RTC_BL_PHONE/issues/6
+  - PR firmware: https://github.com/electron-rare/le-mystere-professeur-zacus/pull/92
+- Runtime Freenove mis à jour:
+  - AP fallback piloté par cible locale (`Les cils`) + retry périodique (`local_retry_ms`)
+  - règle appliquée: AP actif si aucun WiFi connu n'est connecté (fallback), AP coupé quand la STA est reconnectée à `Les cils`
+  - indicateurs réseau série ajoutés: `local_target`, `local_match`
+  - commande série ajoutée: `ESPNOW_STATUS_JSON` (format RTC: ready/peer_count/tx_ok/tx_fail/rx_count/last_rx_mac/peers)
+  - bootstrap peers ESP-NOW au boot via `APP_ESPNOW.config.peers`
+  - WebUI embarquée (`http://<ip>/`) avec endpoints:
+    - `GET /api/status`
+    - `POST /api/wifi/connect`, `POST /api/wifi/disconnect`
+    - `POST /api/espnow/send`
+    - `POST /api/scenario/unlock`, `POST /api/scenario/next`
+    - endpoints alignés RTC:
+      - `GET /api/network/wifi`
+      - `GET /api/network/espnow`
+      - `GET/POST/DELETE /api/network/espnow/peer`
+      - `POST /api/network/espnow/send`
+      - `POST /api/network/wifi/connect`, `POST /api/network/wifi/disconnect`
+      - `POST /api/control` (dispatch d'actions)
+  - correction WebUI:
+    - `WIFI_DISCONNECT` est maintenant différé (~250 ms) pour laisser la réponse HTTP sortir avant la coupure STA
+  - Data story apps mises à jour:
+    - `data/story/apps/APP_WIFI.json`: `local_ssid`, `local_password`, `ap_policy=if_no_known_wifi`, `local_retry_ms`
+    - `data/story/apps/APP_ESPNOW.json`: `peers` + contrat payload enrichi
+- Validations exécutées (PIO only):
+  - `pio run -e freenove_esp32s3_full_with_ui` PASS
+  - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` PASS
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` PASS
+  - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` PASS
+  - monitor série (`pio device monitor --port /dev/cu.usbmodem5AB90753301 --baud 115200`):
+    - boot config: `local=Les cils ... ap_policy=0 retry_ms=15000`
+    - `NET_STATUS ... local_target=Les cils local_match=1 ... fallback_ap=0` (local connecté)
+    - `ESPNOW_STATUS_JSON` OK
+    - `WIFI_DISCONNECT` => `fallback_ap=1` puis retry local
+    - après reconnect WiFi: `ESPNOW_SEND broadcast ping` => recovery auto ESP-NOW + `ACK ... ok=1`
+  - WebUI:
+    - `GET /api/status` OK (`network/local_match`, `espnow`, `story`, `audio`)
+    - `POST /api/scenario/unlock` et `POST /api/scenario/next` OK (transitions observées)
+    - `POST /api/wifi/connect` OK
+    - `POST /api/network/wifi/disconnect` => réponse HTTP `200` reçue avant coupure STA (plus de timeout systématique)
+    - `POST /api/network/espnow/send` (payload JSON) OK
+    - `POST /api/control` (`SC_EVENT unlock`, `WIFI_DISCONNECT`) OK
+- Note d'incohérence traitée:
+  - si AP fallback et cible locale partagent le même SSID (`Les cils`), le retry local coupe brièvement l'AP fallback pour éviter l'auto-association.
+
+## [2026-02-20] Freenove WiFi/AP fallback local + ESP-NOW bridge/story + UI FX (Codex)
+
+- Exigence appliquée: l'AP ne sert qu'en fallback si la carte n'est pas sur le WiFi local (`Les cils`).
+- Runtime modifié:
+  - boot auto-connect vers `Les cils`/`mascarade`
+  - AP fallback auto uniquement en absence de connexion STA (et stop auto quand STA connecté)
+  - commandes série enrichies: `WIFI_CONNECT`, `WIFI_DISCONNECT`, `ESPNOW_PEER_ADD/DEL/LIST`, `ESPNOW_SEND <mac|broadcast>`
+  - bridge ESP-NOW -> events scénario durci (texte + JSON `cmd/raw/event/event_type/event_name`)
+- Story/UI:
+  - intégration `APP_WIFI` + `APP_ESPNOW` dans les scénarios/story specs YAML
+  - génération C++ story régénérée (`spec_hash=1834bcdab734`)
+  - écran Freenove en mode effect-first (symboles/effets, titres cachés par défaut, vitesses d'effet pilotables par payload JSON)
+- Vérifications exécutées:
+  - `./tools/dev/story-gen validate` PASS
+  - `./tools/dev/story-gen generate-cpp` PASS
+  - `pio run -e freenove_esp32s3_full_with_ui` PASS
+  - `pio run -e esp32dev -e esp32_release -e esp8266_oled -e ui_rp2040_ili9488 -e ui_rp2040_ili9486` PASS
+  - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` PASS
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` PASS
+  - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` PASS
+  - contenu repo root via `.venv/bin/python`: validate/export scenario + audio manifest + printables manifest PASS
+- Evidence série (115200):
+  - boot: `[NET] wifi connect requested ssid=Les cils` + `[NET] boot wifi target=Les cils started=1`
+  - statut validé: `NET_STATUS state=connected mode=STA ... sta_ssid=Les cils ... ap=0 fallback_ap=0`
+
 ## [2026-02-20] Freenove audio + écran + chaîne scénario/écran (Codex)
 
 - Checkpoint sécurité exécuté: branche `main`, `git diff --stat` capturé, patch/status sauvegardés:
@@ -26,6 +102,53 @@
   - `AUDIO_PROFILE 0/1/2` PASS (switch runtime pinout I2S)
   - `UNLOCK` -> transition `STEP_U_SON_PROTO`, audio pack `PACK_BOOT_RADIO`, puis `audio_done` -> transition `STEP_WAIT_ETAPE2` PASS.
 - Incohérence restante observée au boot: warning HAL SPI `spiAttachMISO(): HSPI Does not have default pins on ESP32S3!` (non bloquant en exécution actuelle).
+
+## [2026-02-20] Freenove story step2 hardware + YAML GitHub + stack WiFi/AP + ESP-NOW (Codex)
+
+- Checkpoint sécurité exécuté: branche `main`, `git diff --stat` capturé, patch/status sauvegardés:
+  - `/tmp/zacus_checkpoint/20260220_211024_wip.patch`
+  - `/tmp/zacus_checkpoint/20260220_211024_status.txt`
+- Scan artefacts trackés (`.pio`, `.platformio`, `logs`, `dist`, `build`, `node_modules`, `.venv`): aucun chemin tracké.
+- Story specs YAML mis à jour (source of truth):
+  - `docs/protocols/story_specs/scenarios/default_unlock_win_etape2.yaml` enrichi avec transitions hardware pour l’étape 2:
+    - `serial:BTN_NEXT`
+    - `unlock:UNLOCK`
+    - `action:ACTION_FORCE_ETAPE2`
+  - génération revalidée:
+    - `./tools/dev/story-gen validate` PASS
+    - `./tools/dev/story-gen generate-cpp` PASS
+    - `./tools/dev/story-gen generate-bundle` PASS
+  - fichiers générés synchronisés (`hardware/libs/story/src/generated/*`), spec hash: `6edd9141d750`.
+- GitHub pipeline Story restauré:
+  - `.github/workflows/firmware-story-v2.yml` remplacé par un workflow fonctionnel (validate + generate-cpp + generate-bundle + check diff + artifact bundle).
+- Runtime Freenove enrichi:
+  - stack réseau ajoutée (`network_manager.{h,cpp}`) avec:
+    - WiFi STA + AP management
+    - ESP-NOW init/send/receive counters
+    - bridge ESP-NOW payload -> événement scénario (`SERIAL:<event>`, `TIMER:<event>`, `ACTION:<event>`, `UNLOCK`, `AUDIO_DONE`)
+  - commandes série ajoutées:
+    - `NET_STATUS`, `WIFI_STATUS`, `WIFI_TEST`, `WIFI_STA`, `WIFI_AP_ON`, `WIFI_AP_OFF`
+    - `ESPNOW_ON`, `ESPNOW_OFF`, `ESPNOW_STATUS`, `ESPNOW_SEND`
+    - `SC_LIST`, `SC_LOAD`, `SC_REVALIDATE_ALL`, `SC_EVENT_RAW`
+  - credentials test appliqués:
+    - SSID test/AP par défaut: `Les cils`
+    - mot de passe: `mascarade`
+- Revalidation transitions via ScenarioSnapshot:
+  - `SC_REVALIDATE` couvre events + hardware probes + vérifs ciblées step2:
+    - `SC_REVALIDATE_STEP2 event=timer ... changed=1`
+    - `SC_REVALIDATE_STEP2 event=action name=ACTION_FORCE_ETAPE2 ... changed=1`
+    - `SC_REVALIDATE_STEP2 event=button label=BTN5_SHORT ... changed=1`
+  - `SC_REVALIDATE_ALL` exécuté sur tous les scénarios built-in.
+- Build/flash Freenove validés (`/dev/cu.usbmodem5AB90753301`):
+  - `pio run -e freenove_esp32s3_full_with_ui` PASS
+  - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` PASS
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` PASS
+  - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` PASS (x2 après patch final)
+- Validation série réseau:
+  - `WIFI_AP_ON` PASS (`ssid=Les cils`, `mode=AP_STA`, `ip=192.168.4.1`)
+  - `WIFI_AP_OFF` PASS
+  - `WIFI_TEST` PASS (requête de connexion STA vers `Les cils`)
+  - `ESPNOW_SEND` PASS (émission OK), pas de loopback RX local observé (`rx=0`) sur test mono-carte.
 
 ## TODO Freenove ESP32-S3 (contrat agent)
 

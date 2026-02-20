@@ -60,6 +60,31 @@
 - Note d'incohérence traitée:
   - si AP fallback et cible locale partagent le même SSID (`Les cils`), le retry local coupe brièvement l'AP fallback pour éviter l'auto-association.
 
+## [2026-02-21] Freenove WebUI parity réseau avec RTC (Codex)
+
+- Branche de travail: `feat/freenove-webui-network-ops-parity`
+- Tracking GitHub:
+  - issue firmware: https://github.com/electron-rare/le-mystere-professeur-zacus/issues/93
+  - coordination RTC: https://github.com/electron-rare/RTC_BL_PHONE/issues/6
+  - PR RTC liée (ops web): https://github.com/electron-rare/RTC_BL_PHONE/pull/8
+- Runtime WebUI enrichi (parité endpoints réseau):
+  - `POST /api/network/wifi/reconnect`
+  - `POST /api/network/espnow/on`
+  - `POST /api/network/espnow/off`
+  - routes existantes conservées (`/api/status`, `/api/network/wifi`, `/api/network/espnow`, `/api/network/espnow/peer`, `/api/network/espnow/send`, `/api/control`)
+- Validation exécutée:
+  - `pio run -e freenove_esp32s3_full_with_ui` PASS
+  - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` PASS
+  - HTTP (`curl`):
+    - `POST /api/network/espnow/off` => `{"action":"ESPNOW_OFF","ok":true}`
+    - `POST /api/network/espnow/on` => `{"action":"ESPNOW_ON","ok":true}`
+    - `POST /api/network/wifi/reconnect` => `{"action":"WIFI_RECONNECT","ok":true}`
+    - `POST /api/control` (`ESPNOW_OFF`, `ESPNOW_ON`, `WIFI_RECONNECT`) => `ok=true`
+  - monitor série (`pio device monitor --port /dev/cu.usbmodem5AB90753301 --baud 115200`):
+    - `NET_STATUS` cohérent (`sta_ssid=Les cils`, `fallback_ap=0`)
+    - `ESPNOW_STATUS_JSON` cohérent (`ready=1`)
+    - logs observés: `[NET] ESP-NOW off` puis `[NET] ESP-NOW ready`
+
 ## [2026-02-20] Freenove WiFi/AP fallback local + ESP-NOW bridge/story + UI FX (Codex)
 
 - Exigence appliquée: l'AP ne sert qu'en fallback si la carte n'est pas sur le WiFi local (`Les cils`).

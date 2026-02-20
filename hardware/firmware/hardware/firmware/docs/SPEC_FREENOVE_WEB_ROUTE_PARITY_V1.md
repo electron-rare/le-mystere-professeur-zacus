@@ -54,6 +54,9 @@ Routes backend exposées en plus (alias/network API):
 ### EZ-01 — Checker parity Freenove
 - Un script de parity DOIT comparer routes frontend et backend.
 - Le gate DOIT échouer si une route frontend n'existe pas côté backend.
+- Implémentation cible v1:
+  - script: `hardware/firmware/tools/dev/check_freenove_web_route_parity.py`
+  - workflow: `.github/workflows/freenove-route-parity.yml`
 
 ### EZ-02 — Support routes alias
 - Le checker DOIT accepter la coexistence legacy + `/api/network/*`.

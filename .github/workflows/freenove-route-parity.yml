@@ -1,0 +1,27 @@
+name: Freenove Route Parity
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "hardware/firmware/hardware/firmware/ui_freenove_allinone/src/main.cpp"
+      - "hardware/firmware/tools/dev/check_freenove_web_route_parity.py"
+      - ".github/workflows/freenove-route-parity.yml"
+  push:
+    branches: [main]
+    paths:
+      - "hardware/firmware/hardware/firmware/ui_freenove_allinone/src/main.cpp"
+      - "hardware/firmware/tools/dev/check_freenove_web_route_parity.py"
+      - ".github/workflows/freenove-route-parity.yml"
+
+jobs:
+  route-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Run route parity check
+        run: python hardware/firmware/tools/dev/check_freenove_web_route_parity.py

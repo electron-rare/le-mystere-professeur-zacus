@@ -1,0 +1,10 @@
+{
+  "id": "APP_ESPNOW",
+  "app": "ESPNOW_STACK",
+  "config": {
+    "enabled_on_boot": true,
+    "bridge_to_story_event": true,
+    "peers": [],
+    "payload_format": "SC_EVENT <type> <name> | SC_EVENT_RAW <event> | JSON{cmd|raw|event|event_type/event_name} | SERIAL:<event> | TIMER:<event> | ACTION:<event> | UNLOCK | AUDIO_DONE"
+  }
+}

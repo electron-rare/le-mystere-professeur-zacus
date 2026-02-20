@@ -78,7 +78,9 @@ void NetworkManager::update(uint32_t now_ms) {
     force_refresh = true;
   }
 
-  if (force_ap_if_not_local_ && local_target_ssid_[0] != '\0' && !connected_to_local) {
+  const bool should_retry_local = local_target_ssid_[0] != '\0' &&
+                                  (force_ap_if_not_local_ ? !connected_to_local : (WiFi.status() != WL_CONNECTED));
+  if (should_retry_local) {
     if (!sta_connecting_ && (next_local_retry_at_ms_ == 0U || timeReached(now_ms, next_local_retry_at_ms_))) {
       if (fallback_ap_active_ && equalsIgnoreCase(fallback_ap_ssid_, local_target_ssid_)) {
         // Avoid self-association when fallback AP and local target share the same SSID.
@@ -345,7 +347,7 @@ bool NetworkManager::addEspNowPeer(const char* mac_text) {
   if (mac_text == nullptr || mac_text[0] == '\0') {
     return false;
   }
-  if (!espnow_enabled_ && !enableEspNow()) {
+  if (!ensureEspNowReady()) {
     return false;
   }
   uint8_t mac[6] = {0};
@@ -389,7 +391,7 @@ bool NetworkManager::espNowPeerAt(uint8_t index, char* out_mac, size_t out_capac
 }
 
 bool NetworkManager::sendEspNowText(const uint8_t mac[6], const char* text) {
-  if (!espnow_enabled_) {
+  if (!ensureEspNowReady()) {
     return false;
   }
   if (mac == nullptr || text == nullptr || text[0] == '\0') {
@@ -398,17 +400,33 @@ bool NetworkManager::sendEspNowText(const uint8_t mac[6], const char* text) {
 
   if (!isBroadcastMac(mac)) {
     if (!addEspNowPeerInternal(mac)) {
-      Serial.println("[NET] ESP-NOW add peer failed");
-      return false;
+      if (ensureEspNowReady() && addEspNowPeerInternal(mac)) {
+        // recovered
+      } else {
+        Serial.println("[NET] ESP-NOW add peer failed");
+        return false;
+      }
     }
   } else {
     // ESP-NOW broadcast still needs an explicit peer on some SDK versions.
-    addEspNowPeerInternal(mac);
+    if (!addEspNowPeerInternal(mac)) {
+      if (!(ensureEspNowReady() && addEspNowPeerInternal(mac))) {
+        Serial.println("[NET] ESP-NOW add peer failed");
+      }
+    }
   }
 
-  const esp_err_t err = esp_now_send(mac,
-                                     reinterpret_cast<const uint8_t*>(text),
-                                     static_cast<size_t>(std::strlen(text)));
+  esp_err_t err = esp_now_send(mac,
+                               reinterpret_cast<const uint8_t*>(text),
+                               static_cast<size_t>(std::strlen(text)));
+  if (err == ESP_ERR_ESPNOW_NOT_INIT) {
+    // WiFi mode switches can deinit ESP-NOW internally: recover once, then retry the same payload.
+    espnow_enabled_ = false;
+    if (enableEspNow()) {
+      addEspNowPeerInternal(mac);
+      err = esp_now_send(mac, reinterpret_cast<const uint8_t*>(text), static_cast<size_t>(std::strlen(text)));
+    }
+  }
   if (err != ESP_OK) {
     ++espnow_tx_fail_;
     Serial.printf("[NET] ESP-NOW send failed err=%d\n", static_cast<int>(err));
@@ -416,6 +434,24 @@ bool NetworkManager::sendEspNowText(const uint8_t mac[6], const char* text) {
   }
   cachePeer(mac);
   return true;
+}
+
+bool NetworkManager::ensureEspNowReady() {
+  if (!espnow_enabled_) {
+    return enableEspNow();
+  }
+
+  esp_now_peer_num_t peer_num = {};
+  const esp_err_t err = esp_now_get_peer_num(&peer_num);
+  if (err == ESP_OK) {
+    return true;
+  }
+  if (err == ESP_ERR_ESPNOW_NOT_INIT) {
+    espnow_enabled_ = false;
+    return enableEspNow();
+  }
+  Serial.printf("[NET] ESP-NOW health check err=%d\n", static_cast<int>(err));
+  return false;
 }
 
 bool NetworkManager::sendEspNowTarget(const char* target, const char* text) {
@@ -679,7 +715,7 @@ void NetworkManager::refreshSnapshot() {
   copyText(snapshot_.mode, sizeof(snapshot_.mode), wifiModeLabel(static_cast<uint8_t>(mode)));
   copyText(snapshot_.state,
            sizeof(snapshot_.state),
-           networkStateLabel(snapshot_.local_match,
+           networkStateLabel(snapshot_.sta_connected,
                              sta_connecting_,
                              snapshot_.ap_enabled,
                              snapshot_.fallback_ap_active));

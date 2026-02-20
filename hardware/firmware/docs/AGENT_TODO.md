@@ -15,13 +15,20 @@
 - Coordination GitHub:
   - issue firmware: https://github.com/electron-rare/le-mystere-professeur-zacus/issues/91
   - issue RTC (binôme, branche `audit/telephony-webserver`): https://github.com/electron-rare/RTC_BL_PHONE/issues/6
+  - PR firmware: https://github.com/electron-rare/le-mystere-professeur-zacus/pull/92
 - Runtime Freenove mis à jour:
   - AP fallback piloté par cible locale (`Les cils`) + retry périodique (`local_retry_ms`)
+  - règle appliquée: AP actif si aucun WiFi connu n'est connecté (fallback), AP coupé quand la STA est reconnectée à `Les cils`
   - indicateurs réseau série ajoutés: `local_target`, `local_match`
   - commande série ajoutée: `ESPNOW_STATUS_JSON` (format RTC: ready/peer_count/tx_ok/tx_fail/rx_count/last_rx_mac/peers)
   - bootstrap peers ESP-NOW au boot via `APP_ESPNOW.config.peers`
+  - WebUI embarquée (`http://<ip>/`) avec endpoints:
+    - `GET /api/status`
+    - `POST /api/wifi/connect`, `POST /api/wifi/disconnect`
+    - `POST /api/espnow/send`
+    - `POST /api/scenario/unlock`, `POST /api/scenario/next`
 - Data story apps mises à jour:
-  - `data/story/apps/APP_WIFI.json`: `local_ssid`, `local_password`, `ap_policy=force_if_not_local`, `local_retry_ms`
+  - `data/story/apps/APP_WIFI.json`: `local_ssid`, `local_password`, `ap_policy=if_no_known_wifi`, `local_retry_ms`
   - `data/story/apps/APP_ESPNOW.json`: `peers` + contrat payload enrichi
 - Validations exécutées (PIO only):
   - `pio run -e freenove_esp32s3_full_with_ui` PASS
@@ -29,10 +36,15 @@
   - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` PASS
   - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` PASS
   - monitor série (`pio device monitor --port /dev/cu.usbmodem5AB90753301 --baud 115200`):
-    - boot config: `local=Les cils ... ap_policy=1 retry_ms=15000`
+    - boot config: `local=Les cils ... ap_policy=0 retry_ms=15000`
     - `NET_STATUS ... local_target=Les cils local_match=1 ... fallback_ap=0` (local connecté)
     - `ESPNOW_STATUS_JSON` OK
     - `WIFI_DISCONNECT` => `fallback_ap=1` puis retry local
+    - après reconnect WiFi: `ESPNOW_SEND broadcast ping` => recovery auto ESP-NOW + `ACK ... ok=1`
+  - WebUI:
+    - `GET /api/status` OK (`network/local_match`, `espnow`, `story`, `audio`)
+    - `POST /api/scenario/unlock` et `POST /api/scenario/next` OK (transitions observées)
+    - `POST /api/wifi/connect` OK
 - Note d'incohérence traitée:
   - si AP fallback et cible locale partagent le même SSID (`Les cils`), le retry local coupe brièvement l'AP fallback pour éviter l'auto-association.
 

@@ -78,6 +78,7 @@ class NetworkManager {
   bool isConnectedToSelfAp() const;
   bool isConnectedToLocalTarget() const;
   bool shouldForceFallbackAp() const;
+  bool ensureEspNowReady();
   bool addEspNowPeerInternal(const uint8_t mac[6]);
   bool removeEspNowPeerInternal(const uint8_t mac[6]);
   void cachePeer(const uint8_t mac[6]);

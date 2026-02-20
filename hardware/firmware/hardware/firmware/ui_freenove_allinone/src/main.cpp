@@ -1,6 +1,7 @@
 // main.cpp - Freenove ESP32-S3 all-in-one runtime loop.
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <WebServer.h>
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
@@ -34,7 +35,7 @@ struct RuntimeNetworkConfig {
   char local_password[65] = "mascarade";
   char ap_default_ssid[33] = "Les cils";
   char ap_default_password[65] = "mascarade";
-  bool force_ap_if_not_local = true;
+  bool force_ap_if_not_local = false;
   uint32_t local_retry_ms = kDefaultLocalRetryMs;
   bool espnow_enabled_on_boot = true;
   bool espnow_bridge_to_story_event = true;
@@ -50,6 +51,8 @@ ButtonManager g_buttons;
 TouchManager g_touch;
 NetworkManager g_network;
 RuntimeNetworkConfig g_network_cfg;
+WebServer g_web_server(80);
+bool g_web_started = false;
 char g_serial_line[kSerialLineCapacity] = {0};
 size_t g_serial_line_len = 0U;
 
@@ -245,7 +248,7 @@ void resetRuntimeNetworkConfig() {
   copyText(g_network_cfg.local_password, sizeof(g_network_cfg.local_password), kDefaultWifiTestPassword);
   copyText(g_network_cfg.ap_default_ssid, sizeof(g_network_cfg.ap_default_ssid), kDefaultWifiTestSsid);
   copyText(g_network_cfg.ap_default_password, sizeof(g_network_cfg.ap_default_password), kDefaultWifiTestPassword);
-  g_network_cfg.force_ap_if_not_local = true;
+  g_network_cfg.force_ap_if_not_local = false;
   g_network_cfg.local_retry_ms = kDefaultLocalRetryMs;
   g_network_cfg.espnow_enabled_on_boot = true;
   g_network_cfg.espnow_bridge_to_story_event = true;
@@ -269,7 +272,7 @@ void loadRuntimeNetworkConfig() {
       const char* ap_ssid = config["ap_default_ssid"] | config["ap_ssid"] | "";
       const char* ap_password = config["ap_default_password"] | config["ap_password"] | "";
       const char* ap_policy = config["ap_policy"] | "";
-      const bool ap_policy_bool = config["ap_policy_force_if_not_local"] | true;
+      const bool ap_policy_bool = config["ap_policy_force_if_not_local"] | false;
       const uint32_t local_retry_ms = config["local_retry_ms"] | kDefaultLocalRetryMs;
       if (hostname[0] != '\0') {
         copyText(g_network_cfg.hostname, sizeof(g_network_cfg.hostname), hostname);
@@ -297,7 +300,11 @@ void loadRuntimeNetworkConfig() {
         char policy_normalized[32] = {0};
         copyText(policy_normalized, sizeof(policy_normalized), ap_policy);
         toLowerAsciiInPlace(policy_normalized);
-        g_network_cfg.force_ap_if_not_local = (std::strcmp(policy_normalized, "force_if_not_local") == 0);
+        if (std::strcmp(policy_normalized, "force_if_not_local") == 0) {
+          g_network_cfg.force_ap_if_not_local = true;
+        } else if (std::strcmp(policy_normalized, "if_no_known_wifi") == 0) {
+          g_network_cfg.force_ap_if_not_local = false;
+        }
       } else {
         g_network_cfg.force_ap_if_not_local = ap_policy_bool;
       }
@@ -698,6 +705,192 @@ void printRuntimeStatus() {
                 net.ip,
                 g_buttons.currentKey(),
                 g_buttons.lastAnalogMilliVolts());
+}
+
+constexpr const char* kWebUiIndex = R"HTML(
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Zacus Freenove</title>
+  <style>
+    body { font-family: sans-serif; margin: 1rem; background: #111; color: #eee; }
+    .card { border: 1px solid #444; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+    button { margin: 0.25rem; padding: 0.5rem 0.8rem; }
+    input { margin: 0.25rem; padding: 0.4rem; }
+    pre { white-space: pre-wrap; word-break: break-word; background: #1b1b1b; padding: 0.8rem; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <h2>Zacus Freenove WebUI</h2>
+  <div class="card">
+    <button onclick="unlock()">UNLOCK</button>
+    <button onclick="nextStep()">NEXT</button>
+    <button onclick="wifiDisc()">WIFI_DISCONNECT</button>
+    <button onclick="refreshStatus()">Refresh</button>
+  </div>
+  <div class="card">
+    <input id="ssid" placeholder="SSID" />
+    <input id="pass" placeholder="Password" />
+    <button onclick="wifiConn()">WIFI_CONNECT</button>
+  </div>
+  <div class="card">
+    <input id="target" placeholder="ESP-NOW target (mac|broadcast)" />
+    <input id="payload" placeholder="Payload" />
+    <button onclick="espnowSend()">ESPNOW_SEND</button>
+  </div>
+  <div class="card">
+    <pre id="status">loading...</pre>
+  </div>
+  <script>
+    async function post(path, params) {
+      const body = new URLSearchParams(params || {});
+      await fetch(path, { method: "POST", body });
+      await refreshStatus();
+    }
+    async function refreshStatus() {
+      const res = await fetch("/api/status");
+      const json = await res.json();
+      document.getElementById("status").textContent = JSON.stringify(json, null, 2);
+    }
+    function unlock() { return post("/api/scenario/unlock"); }
+    function nextStep() { return post("/api/scenario/next"); }
+    function wifiDisc() { return post("/api/wifi/disconnect"); }
+    function wifiConn() {
+      return post("/api/wifi/connect", {
+        ssid: document.getElementById("ssid").value,
+        password: document.getElementById("pass").value
+      });
+    }
+    function espnowSend() {
+      return post("/api/espnow/send", {
+        target: document.getElementById("target").value,
+        payload: document.getElementById("payload").value
+      });
+    }
+    refreshStatus();
+    setInterval(refreshStatus, 3000);
+  </script>
+</body>
+</html>
+)HTML";
+
+template <typename TDocument>
+void webSendJsonDocument(const TDocument& document, int status_code = 200) {
+  String payload;
+  serializeJson(document, payload);
+  g_web_server.send(status_code, "application/json", payload);
+}
+
+void webSendResult(const char* action, bool ok) {
+  StaticJsonDocument<192> document;
+  document["action"] = action;
+  document["ok"] = ok;
+  webSendJsonDocument(document, ok ? 200 : 400);
+}
+
+void webSendStatus() {
+  const NetworkManager::Snapshot net = g_network.snapshot();
+  const ScenarioSnapshot scenario = g_scenario.snapshot();
+
+  StaticJsonDocument<1024> document;
+  JsonObject network = document["network"].to<JsonObject>();
+  network["state"] = net.state;
+  network["mode"] = net.mode;
+  network["sta_connected"] = net.sta_connected;
+  network["sta_connecting"] = net.sta_connecting;
+  network["fallback_ap"] = net.fallback_ap_active;
+  network["sta_ssid"] = net.sta_ssid;
+  network["ap_ssid"] = net.ap_ssid;
+  network["local_target"] = net.local_target;
+  network["local_match"] = net.local_match;
+  network["ip"] = net.ip;
+  network["rssi"] = net.rssi;
+
+  JsonObject espnow = document["espnow"].to<JsonObject>();
+  espnow["ready"] = net.espnow_enabled;
+  espnow["peer_count"] = net.espnow_peer_count;
+  espnow["tx_ok"] = net.espnow_tx_ok;
+  espnow["tx_fail"] = net.espnow_tx_fail;
+  espnow["rx_count"] = net.espnow_rx_packets;
+  espnow["last_rx_mac"] = net.last_rx_peer;
+  JsonArray peers = espnow["peers"].to<JsonArray>();
+  for (uint8_t index = 0U; index < g_network.espNowPeerCount(); ++index) {
+    char peer[18] = {0};
+    if (!g_network.espNowPeerAt(index, peer, sizeof(peer))) {
+      continue;
+    }
+    peers.add(peer);
+  }
+
+  JsonObject story = document["story"].to<JsonObject>();
+  story["scenario"] = scenarioIdFromSnapshot(scenario);
+  story["step"] = stepIdFromSnapshot(scenario);
+  story["screen"] = (scenario.screen_scene_id != nullptr) ? scenario.screen_scene_id : "";
+  story["audio_pack"] = (scenario.audio_pack_id != nullptr) ? scenario.audio_pack_id : "";
+
+  JsonObject audio = document["audio"].to<JsonObject>();
+  audio["playing"] = g_audio.isPlaying();
+  audio["track"] = g_audio.currentTrack();
+  audio["volume"] = g_audio.volume();
+
+  webSendJsonDocument(document);
+}
+
+void setupWebUi() {
+  g_web_server.on("/", HTTP_GET, []() {
+    g_web_server.send(200, "text/html", kWebUiIndex);
+  });
+
+  g_web_server.on("/api/status", HTTP_GET, []() {
+    webSendStatus();
+  });
+
+  g_web_server.on("/api/wifi/disconnect", HTTP_POST, []() {
+    g_network.disconnectSta();
+    webSendResult("WIFI_DISCONNECT", true);
+  });
+
+  g_web_server.on("/api/wifi/connect", HTTP_POST, []() {
+    const String ssid = g_web_server.arg("ssid");
+    const String password = g_web_server.arg("password");
+    if (ssid.isEmpty()) {
+      webSendResult("WIFI_CONNECT", false);
+      return;
+    }
+    const bool ok = g_network.connectSta(ssid.c_str(), password.c_str());
+    webSendResult("WIFI_CONNECT", ok);
+  });
+
+  g_web_server.on("/api/espnow/send", HTTP_POST, []() {
+    const String target = g_web_server.arg("target");
+    const String payload = g_web_server.arg("payload");
+    if (target.isEmpty() || payload.isEmpty()) {
+      webSendResult("ESPNOW_SEND", false);
+      return;
+    }
+    const bool ok = g_network.sendEspNowTarget(target.c_str(), payload.c_str());
+    webSendResult("ESPNOW_SEND", ok);
+  });
+
+  g_web_server.on("/api/scenario/unlock", HTTP_POST, []() {
+    g_scenario.notifyUnlock(millis());
+    webSendResult("UNLOCK", true);
+  });
+
+  g_web_server.on("/api/scenario/next", HTTP_POST, []() {
+    g_scenario.notifyButton(5U, false, millis());
+    webSendResult("NEXT", true);
+  });
+
+  g_web_server.onNotFound([]() {
+    g_web_server.send(404, "application/json", "{\"ok\":false,\"error\":\"not_found\"}");
+  });
+
+  g_web_server.begin();
+  g_web_started = true;
+  Serial.println("[WEB] started :80");
 }
 
 void printScenarioCoverage() {
@@ -1402,6 +1595,7 @@ void setup() {
   } else {
     Serial.println("[NET] ESP-NOW boot disabled by APP_ESPNOW config");
   }
+  setupWebUi();
   g_audio.begin();
   Serial.printf("[MAIN] audio profile=%u:%s count=%u\n",
                 g_audio.outputProfile(),
@@ -1474,5 +1668,8 @@ void loop() {
   startPendingAudioIfAny();
   refreshSceneIfNeeded(false);
   g_ui.update();
+  if (g_web_started) {
+    g_web_server.handleClient();
+  }
   delay(5);
 }

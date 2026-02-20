@@ -1,5 +1,8 @@
 # ESP32 Story V2 — Spécifications WiFi & WebUI
 
+Voir aussi:
+- `SPEC_FREENOVE_WEB_ROUTE_PARITY_V1.md` (spec orchestrateur parity frontend/backend)
+
 ## Objectif
 Décrire la connectivité réseau de l’ESP32 (mode station et portail captif), détailler la WebUI exposée, et compiler les commandes / scripts de vérification qui permettent de valider la santé WiFi, les WebSocket et la reprise après perte de connectivité.
 

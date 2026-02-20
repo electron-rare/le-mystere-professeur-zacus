@@ -35,7 +35,7 @@
       - `POST /api/network/wifi/connect`, `POST /api/network/wifi/disconnect`
       - `POST /api/control` (dispatch d'actions)
   - correction WebUI:
-    - `WIFI_DISCONNECT` est maintenant différé d'un tick loop pour laisser la réponse HTTP sortir avant la coupure STA
+    - `WIFI_DISCONNECT` est maintenant différé (~250 ms) pour laisser la réponse HTTP sortir avant la coupure STA
   - Data story apps mises à jour:
     - `data/story/apps/APP_WIFI.json`: `local_ssid`, `local_password`, `ap_policy=if_no_known_wifi`, `local_retry_ms`
     - `data/story/apps/APP_ESPNOW.json`: `peers` + contrat payload enrichi

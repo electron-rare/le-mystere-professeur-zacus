@@ -54,6 +54,7 @@ RuntimeNetworkConfig g_network_cfg;
 WebServer g_web_server(80);
 bool g_web_started = false;
 bool g_web_disconnect_sta_pending = false;
+uint32_t g_web_disconnect_sta_at_ms = 0U;
 char g_serial_line[kSerialLineCapacity] = {0};
 size_t g_serial_line_len = 0U;
 
@@ -864,6 +865,11 @@ void webSendEspNowPeerList() {
   webSendJsonDocument(document);
 }
 
+void webScheduleStaDisconnect() {
+  g_web_disconnect_sta_pending = true;
+  g_web_disconnect_sta_at_ms = millis() + 250U;
+}
+
 bool webDispatchAction(const String& action_raw) {
   String action = action_raw;
   action.trim();
@@ -880,7 +886,7 @@ bool webDispatchAction(const String& action_raw) {
     return true;
   }
   if (action.equalsIgnoreCase("WIFI_DISCONNECT")) {
-    g_web_disconnect_sta_pending = true;
+    webScheduleStaDisconnect();
     return true;
   }
 
@@ -1000,12 +1006,12 @@ void setupWebUi() {
   });
 
   g_web_server.on("/api/wifi/disconnect", HTTP_POST, []() {
-    g_web_disconnect_sta_pending = true;
+    webScheduleStaDisconnect();
     webSendResult("WIFI_DISCONNECT", true);
   });
 
   g_web_server.on("/api/network/wifi/disconnect", HTTP_POST, []() {
-    g_web_disconnect_sta_pending = true;
+    webScheduleStaDisconnect();
     webSendResult("WIFI_DISCONNECT", true);
   });
 
@@ -1944,7 +1950,8 @@ void loop() {
   g_ui.update();
   if (g_web_started) {
     g_web_server.handleClient();
-    if (g_web_disconnect_sta_pending) {
+    if (g_web_disconnect_sta_pending &&
+        static_cast<int32_t>(now_ms - g_web_disconnect_sta_at_ms) >= 0) {
       g_web_disconnect_sta_pending = false;
       g_network.disconnectSta();
     }

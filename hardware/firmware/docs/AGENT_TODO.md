@@ -27,7 +27,16 @@
     - `POST /api/wifi/connect`, `POST /api/wifi/disconnect`
     - `POST /api/espnow/send`
     - `POST /api/scenario/unlock`, `POST /api/scenario/next`
-- Data story apps mises à jour:
+    - endpoints alignés RTC:
+      - `GET /api/network/wifi`
+      - `GET /api/network/espnow`
+      - `GET/POST/DELETE /api/network/espnow/peer`
+      - `POST /api/network/espnow/send`
+      - `POST /api/network/wifi/connect`, `POST /api/network/wifi/disconnect`
+      - `POST /api/control` (dispatch d'actions)
+  - correction WebUI:
+    - `WIFI_DISCONNECT` est maintenant différé d'un tick loop pour laisser la réponse HTTP sortir avant la coupure STA
+  - Data story apps mises à jour:
   - `data/story/apps/APP_WIFI.json`: `local_ssid`, `local_password`, `ap_policy=if_no_known_wifi`, `local_retry_ms`
   - `data/story/apps/APP_ESPNOW.json`: `peers` + contrat payload enrichi
 - Validations exécutées (PIO only):
@@ -45,6 +54,9 @@
     - `GET /api/status` OK (`network/local_match`, `espnow`, `story`, `audio`)
     - `POST /api/scenario/unlock` et `POST /api/scenario/next` OK (transitions observées)
     - `POST /api/wifi/connect` OK
+    - `POST /api/network/wifi/disconnect` => réponse HTTP `200` reçue avant coupure STA (plus de timeout systématique)
+    - `POST /api/network/espnow/send` (payload JSON) OK
+    - `POST /api/control` (`SC_EVENT unlock`, `WIFI_DISCONNECT`) OK
 - Note d'incohérence traitée:
   - si AP fallback et cible locale partagent le même SSID (`Les cils`), le retry local coupe brièvement l'AP fallback pour éviter l'auto-association.
 

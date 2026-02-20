@@ -53,6 +53,7 @@ NetworkManager g_network;
 RuntimeNetworkConfig g_network_cfg;
 WebServer g_web_server(80);
 bool g_web_started = false;
+bool g_web_disconnect_sta_pending = false;
 char g_serial_line[kSerialLineCapacity] = {0};
 size_t g_serial_line_len = 0U;
 
@@ -707,6 +708,9 @@ void printRuntimeStatus() {
                 g_buttons.lastAnalogMilliVolts());
 }
 
+bool dispatchScenarioEventByType(StoryEventType type, const char* event_name, uint32_t now_ms);
+bool dispatchScenarioEventByName(const char* event_name, uint32_t now_ms);
+
 constexpr const char* kWebUiIndex = R"HTML(
 <!doctype html>
 <html>
@@ -790,11 +794,157 @@ void webSendResult(const char* action, bool ok) {
   webSendJsonDocument(document, ok ? 200 : 400);
 }
 
+template <size_t N>
+bool webParseJsonBody(StaticJsonDocument<N>* out_document) {
+  if (out_document == nullptr || !g_web_server.hasArg("plain")) {
+    return false;
+  }
+  const String body = g_web_server.arg("plain");
+  if (body.isEmpty()) {
+    return false;
+  }
+  const DeserializationError error = deserializeJson(*out_document, body);
+  return !error;
+}
+
+void webFillEspNowStatus(JsonObject out, const NetworkManager::Snapshot& net) {
+  out["ready"] = net.espnow_enabled;
+  out["peer_count"] = net.espnow_peer_count;
+  out["tx_ok"] = net.espnow_tx_ok;
+  out["tx_fail"] = net.espnow_tx_fail;
+  out["rx_count"] = net.espnow_rx_packets;
+  out["last_rx_mac"] = net.last_rx_peer;
+  JsonArray peers = out["peers"].to<JsonArray>();
+  for (uint8_t index = 0U; index < g_network.espNowPeerCount(); ++index) {
+    char peer[18] = {0};
+    if (!g_network.espNowPeerAt(index, peer, sizeof(peer))) {
+      continue;
+    }
+    peers.add(peer);
+  }
+}
+
+void webFillWifiStatus(JsonObject out, const NetworkManager::Snapshot& net) {
+  out["connected"] = net.sta_connected;
+  out["has_credentials"] = (g_network_cfg.local_ssid[0] != '\0');
+  out["ssid"] = net.sta_ssid;
+  out["ip"] = net.sta_connected ? net.ip : "";
+  out["rssi"] = net.rssi;
+  out["state"] = net.state;
+  out["ap_active"] = net.ap_enabled;
+  out["ap_ssid"] = net.ap_ssid;
+  out["ap_ip"] = (!net.sta_connected && net.ap_enabled) ? net.ip : "";
+  out["mode"] = net.mode;
+}
+
+void webSendWifiStatus() {
+  const NetworkManager::Snapshot net = g_network.snapshot();
+  StaticJsonDocument<384> document;
+  webFillWifiStatus(document.to<JsonObject>(), net);
+  webSendJsonDocument(document);
+}
+
+void webSendEspNowStatus() {
+  const NetworkManager::Snapshot net = g_network.snapshot();
+  StaticJsonDocument<512> document;
+  webFillEspNowStatus(document.to<JsonObject>(), net);
+  webSendJsonDocument(document);
+}
+
+void webSendEspNowPeerList() {
+  StaticJsonDocument<384> document;
+  JsonArray peers = document.to<JsonArray>();
+  for (uint8_t index = 0U; index < g_network.espNowPeerCount(); ++index) {
+    char peer[18] = {0};
+    if (!g_network.espNowPeerAt(index, peer, sizeof(peer))) {
+      continue;
+    }
+    peers.add(peer);
+  }
+  webSendJsonDocument(document);
+}
+
+bool webDispatchAction(const String& action_raw) {
+  String action = action_raw;
+  action.trim();
+  if (action.isEmpty()) {
+    return false;
+  }
+
+  if (action.equalsIgnoreCase("UNLOCK")) {
+    g_scenario.notifyUnlock(millis());
+    return true;
+  }
+  if (action.equalsIgnoreCase("NEXT")) {
+    g_scenario.notifyButton(5U, false, millis());
+    return true;
+  }
+  if (action.equalsIgnoreCase("WIFI_DISCONNECT")) {
+    g_web_disconnect_sta_pending = true;
+    return true;
+  }
+
+  if (startsWithIgnoreCase(action.c_str(), "WIFI_CONNECT ")) {
+    String ssid;
+    String password;
+    if (!splitSsidPass(action.c_str() + std::strlen("WIFI_CONNECT "), &ssid, &password)) {
+      return false;
+    }
+    return g_network.connectSta(ssid.c_str(), password.c_str());
+  }
+
+  if (startsWithIgnoreCase(action.c_str(), "ESPNOW_SEND ")) {
+    String args = action.substring(static_cast<unsigned int>(std::strlen("ESPNOW_SEND ")));
+    args.trim();
+    const int sep = args.indexOf(' ');
+    if (sep <= 0) {
+      return false;
+    }
+    String target = args.substring(0, static_cast<unsigned int>(sep));
+    String payload = args.substring(static_cast<unsigned int>(sep + 1));
+    target.trim();
+    payload.trim();
+    if (target.isEmpty() || payload.isEmpty()) {
+      return false;
+    }
+    return g_network.sendEspNowTarget(target.c_str(), payload.c_str());
+  }
+
+  if (startsWithIgnoreCase(action.c_str(), "SC_EVENT_RAW ")) {
+    String event_name = action.substring(static_cast<unsigned int>(std::strlen("SC_EVENT_RAW ")));
+    event_name.trim();
+    if (event_name.isEmpty()) {
+      return false;
+    }
+    return dispatchScenarioEventByName(event_name.c_str(), millis());
+  }
+
+  if (startsWithIgnoreCase(action.c_str(), "SC_EVENT ")) {
+    String args = action.substring(static_cast<unsigned int>(std::strlen("SC_EVENT ")));
+    args.trim();
+    if (args.isEmpty()) {
+      return false;
+    }
+    const int sep = args.indexOf(' ');
+    String type_text = (sep < 0) ? args : args.substring(0, static_cast<unsigned int>(sep));
+    String event_name = (sep < 0) ? String("") : args.substring(static_cast<unsigned int>(sep + 1));
+    type_text.trim();
+    event_name.trim();
+    StoryEventType event_type = StoryEventType::kNone;
+    if (!parseEventType(type_text.c_str(), &event_type)) {
+      return false;
+    }
+    return dispatchScenarioEventByType(event_type, event_name.isEmpty() ? nullptr : event_name.c_str(), millis());
+  }
+
+  return false;
+}
+
 void webSendStatus() {
   const NetworkManager::Snapshot net = g_network.snapshot();
   const ScenarioSnapshot scenario = g_scenario.snapshot();
 
-  StaticJsonDocument<1024> document;
+  StaticJsonDocument<1536> document;
   JsonObject network = document["network"].to<JsonObject>();
   network["state"] = net.state;
   network["mode"] = net.mode;
@@ -808,21 +958,11 @@ void webSendStatus() {
   network["ip"] = net.ip;
   network["rssi"] = net.rssi;
 
+  JsonObject wifi = document["wifi"].to<JsonObject>();
+  webFillWifiStatus(wifi, net);
+
   JsonObject espnow = document["espnow"].to<JsonObject>();
-  espnow["ready"] = net.espnow_enabled;
-  espnow["peer_count"] = net.espnow_peer_count;
-  espnow["tx_ok"] = net.espnow_tx_ok;
-  espnow["tx_fail"] = net.espnow_tx_fail;
-  espnow["rx_count"] = net.espnow_rx_packets;
-  espnow["last_rx_mac"] = net.last_rx_peer;
-  JsonArray peers = espnow["peers"].to<JsonArray>();
-  for (uint8_t index = 0U; index < g_network.espNowPeerCount(); ++index) {
-    char peer[18] = {0};
-    if (!g_network.espNowPeerAt(index, peer, sizeof(peer))) {
-      continue;
-    }
-    peers.add(peer);
-  }
+  webFillEspNowStatus(espnow, net);
 
   JsonObject story = document["story"].to<JsonObject>();
   story["scenario"] = scenarioIdFromSnapshot(scenario);
@@ -847,14 +987,66 @@ void setupWebUi() {
     webSendStatus();
   });
 
+  g_web_server.on("/api/network/wifi", HTTP_GET, []() {
+    webSendWifiStatus();
+  });
+
+  g_web_server.on("/api/network/espnow", HTTP_GET, []() {
+    webSendEspNowStatus();
+  });
+
+  g_web_server.on("/api/network/espnow/peer", HTTP_GET, []() {
+    webSendEspNowPeerList();
+  });
+
   g_web_server.on("/api/wifi/disconnect", HTTP_POST, []() {
-    g_network.disconnectSta();
+    g_web_disconnect_sta_pending = true;
+    webSendResult("WIFI_DISCONNECT", true);
+  });
+
+  g_web_server.on("/api/network/wifi/disconnect", HTTP_POST, []() {
+    g_web_disconnect_sta_pending = true;
     webSendResult("WIFI_DISCONNECT", true);
   });
 
   g_web_server.on("/api/wifi/connect", HTTP_POST, []() {
-    const String ssid = g_web_server.arg("ssid");
-    const String password = g_web_server.arg("password");
+    String ssid = g_web_server.arg("ssid");
+    String password = g_web_server.arg("password");
+    if (password.isEmpty()) {
+      password = g_web_server.arg("pass");
+    }
+    StaticJsonDocument<768> request_json;
+    if (webParseJsonBody(&request_json)) {
+      if (ssid.isEmpty()) {
+        ssid = request_json["ssid"] | "";
+      }
+      if (password.isEmpty()) {
+        password = request_json["pass"] | request_json["password"] | "";
+      }
+    }
+    if (ssid.isEmpty()) {
+      webSendResult("WIFI_CONNECT", false);
+      return;
+    }
+    const bool ok = g_network.connectSta(ssid.c_str(), password.c_str());
+    webSendResult("WIFI_CONNECT", ok);
+  });
+
+  g_web_server.on("/api/network/wifi/connect", HTTP_POST, []() {
+    String ssid = g_web_server.arg("ssid");
+    String password = g_web_server.arg("password");
+    if (password.isEmpty()) {
+      password = g_web_server.arg("pass");
+    }
+    StaticJsonDocument<768> request_json;
+    if (webParseJsonBody(&request_json)) {
+      if (ssid.isEmpty()) {
+        ssid = request_json["ssid"] | "";
+      }
+      if (password.isEmpty()) {
+        password = request_json["pass"] | request_json["password"] | "";
+      }
+    }
     if (ssid.isEmpty()) {
       webSendResult("WIFI_CONNECT", false);
       return;
@@ -864,14 +1056,83 @@ void setupWebUi() {
   });
 
   g_web_server.on("/api/espnow/send", HTTP_POST, []() {
-    const String target = g_web_server.arg("target");
-    const String payload = g_web_server.arg("payload");
-    if (target.isEmpty() || payload.isEmpty()) {
+    String target = g_web_server.arg("target");
+    String payload = g_web_server.arg("payload");
+    if (target.isEmpty()) {
+      target = g_web_server.arg("mac");
+    }
+    StaticJsonDocument<768> request_json;
+    if (webParseJsonBody(&request_json)) {
+      if (target.isEmpty()) {
+        target = request_json["target"] | request_json["mac"] | "broadcast";
+      }
+      if (payload.isEmpty()) {
+        if (request_json["payload"].is<JsonVariantConst>()) {
+          serializeJson(request_json["payload"], payload);
+        } else {
+          payload = request_json["payload"] | "";
+        }
+      }
+    }
+    if (target.isEmpty()) {
+      target = "broadcast";
+    }
+    if (payload.isEmpty()) {
       webSendResult("ESPNOW_SEND", false);
       return;
     }
     const bool ok = g_network.sendEspNowTarget(target.c_str(), payload.c_str());
     webSendResult("ESPNOW_SEND", ok);
+  });
+
+  g_web_server.on("/api/network/espnow/send", HTTP_POST, []() {
+    String target = g_web_server.arg("target");
+    String payload = g_web_server.arg("payload");
+    if (target.isEmpty()) {
+      target = g_web_server.arg("mac");
+    }
+    StaticJsonDocument<768> request_json;
+    if (webParseJsonBody(&request_json)) {
+      if (target.isEmpty()) {
+        target = request_json["target"] | request_json["mac"] | "broadcast";
+      }
+      if (payload.isEmpty()) {
+        if (request_json["payload"].is<JsonVariantConst>()) {
+          serializeJson(request_json["payload"], payload);
+        } else {
+          payload = request_json["payload"] | "";
+        }
+      }
+    }
+    if (target.isEmpty()) {
+      target = "broadcast";
+    }
+    if (payload.isEmpty()) {
+      webSendResult("ESPNOW_SEND", false);
+      return;
+    }
+    const bool ok = g_network.sendEspNowTarget(target.c_str(), payload.c_str());
+    webSendResult("ESPNOW_SEND", ok);
+  });
+
+  g_web_server.on("/api/network/espnow/peer", HTTP_POST, []() {
+    String mac = g_web_server.arg("mac");
+    StaticJsonDocument<256> request_json;
+    if (webParseJsonBody(&request_json) && mac.isEmpty()) {
+      mac = request_json["mac"] | "";
+    }
+    const bool ok = !mac.isEmpty() && g_network.addEspNowPeer(mac.c_str());
+    webSendResult("ESPNOW_PEER_ADD", ok);
+  });
+
+  g_web_server.on("/api/network/espnow/peer", HTTP_DELETE, []() {
+    String mac = g_web_server.arg("mac");
+    StaticJsonDocument<256> request_json;
+    if (webParseJsonBody(&request_json) && mac.isEmpty()) {
+      mac = request_json["mac"] | "";
+    }
+    const bool ok = !mac.isEmpty() && g_network.removeEspNowPeer(mac.c_str());
+    webSendResult("ESPNOW_PEER_DEL", ok);
   });
 
   g_web_server.on("/api/scenario/unlock", HTTP_POST, []() {
@@ -882,6 +1143,19 @@ void setupWebUi() {
   g_web_server.on("/api/scenario/next", HTTP_POST, []() {
     g_scenario.notifyButton(5U, false, millis());
     webSendResult("NEXT", true);
+  });
+
+  g_web_server.on("/api/control", HTTP_POST, []() {
+    String action = g_web_server.arg("action");
+    StaticJsonDocument<768> request_json;
+    if (webParseJsonBody(&request_json) && action.isEmpty()) {
+      action = request_json["action"] | "";
+    }
+    const bool ok = webDispatchAction(action);
+    StaticJsonDocument<256> response;
+    response["ok"] = ok;
+    response["action"] = action;
+    webSendJsonDocument(response, ok ? 200 : 400);
   });
 
   g_web_server.onNotFound([]() {
@@ -1670,6 +1944,10 @@ void loop() {
   g_ui.update();
   if (g_web_started) {
     g_web_server.handleClient();
+    if (g_web_disconnect_sta_pending) {
+      g_web_disconnect_sta_pending = false;
+      g_network.disconnectSta();
+    }
   }
   delay(5);
 }

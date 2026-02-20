@@ -363,7 +363,10 @@ bool NetworkManager::addEspNowPeer(const char* mac_text) {
 }
 
 bool NetworkManager::removeEspNowPeer(const char* mac_text) {
-  if (mac_text == nullptr || mac_text[0] == '\0' || !espnow_enabled_) {
+  if (mac_text == nullptr || mac_text[0] == '\0') {
+    return false;
+  }
+  if (!ensureEspNowReady()) {
     return false;
   }
   uint8_t mac[6] = {0};

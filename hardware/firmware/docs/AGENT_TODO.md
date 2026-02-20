@@ -37,8 +37,8 @@
   - correction WebUI:
     - `WIFI_DISCONNECT` est maintenant différé d'un tick loop pour laisser la réponse HTTP sortir avant la coupure STA
   - Data story apps mises à jour:
-  - `data/story/apps/APP_WIFI.json`: `local_ssid`, `local_password`, `ap_policy=if_no_known_wifi`, `local_retry_ms`
-  - `data/story/apps/APP_ESPNOW.json`: `peers` + contrat payload enrichi
+    - `data/story/apps/APP_WIFI.json`: `local_ssid`, `local_password`, `ap_policy=if_no_known_wifi`, `local_retry_ms`
+    - `data/story/apps/APP_ESPNOW.json`: `peers` + contrat payload enrichi
 - Validations exécutées (PIO only):
   - `pio run -e freenove_esp32s3_full_with_ui` PASS
   - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` PASS

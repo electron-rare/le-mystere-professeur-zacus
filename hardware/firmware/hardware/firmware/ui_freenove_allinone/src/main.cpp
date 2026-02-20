@@ -733,6 +733,7 @@ constexpr const char* kWebUiIndex = R"HTML(
     <button onclick="unlock()">UNLOCK</button>
     <button onclick="nextStep()">NEXT</button>
     <button onclick="wifiDisc()">WIFI_DISCONNECT</button>
+    <button onclick="wifiReconn()">WIFI_RECONNECT</button>
     <button onclick="refreshStatus()">Refresh</button>
   </div>
   <div class="card">
@@ -744,6 +745,8 @@ constexpr const char* kWebUiIndex = R"HTML(
     <input id="target" placeholder="ESP-NOW target (mac|broadcast)" />
     <input id="payload" placeholder="Payload" />
     <button onclick="espnowSend()">ESPNOW_SEND</button>
+    <button onclick="espnowOn()">ESPNOW_ON</button>
+    <button onclick="espnowOff()">ESPNOW_OFF</button>
   </div>
   <div class="card">
     <pre id="status">loading...</pre>
@@ -762,12 +765,15 @@ constexpr const char* kWebUiIndex = R"HTML(
     function unlock() { return post("/api/scenario/unlock"); }
     function nextStep() { return post("/api/scenario/next"); }
     function wifiDisc() { return post("/api/wifi/disconnect"); }
+    function wifiReconn() { return post("/api/network/wifi/reconnect"); }
     function wifiConn() {
       return post("/api/wifi/connect", {
         ssid: document.getElementById("ssid").value,
         password: document.getElementById("pass").value
       });
     }
+    function espnowOn() { return post("/api/network/espnow/on"); }
+    function espnowOff() { return post("/api/network/espnow/off"); }
     function espnowSend() {
       return post("/api/espnow/send", {
         target: document.getElementById("target").value,
@@ -865,6 +871,13 @@ void webSendEspNowPeerList() {
   webSendJsonDocument(document);
 }
 
+bool webReconnectLocalWifi() {
+  if (g_network_cfg.local_ssid[0] == '\0') {
+    return false;
+  }
+  return g_network.connectSta(g_network_cfg.local_ssid, g_network_cfg.local_password);
+}
+
 void webScheduleStaDisconnect() {
   g_web_disconnect_sta_pending = true;
   g_web_disconnect_sta_at_ms = millis() + 250U;
@@ -887,6 +900,16 @@ bool webDispatchAction(const String& action_raw) {
   }
   if (action.equalsIgnoreCase("WIFI_DISCONNECT")) {
     webScheduleStaDisconnect();
+    return true;
+  }
+  if (action.equalsIgnoreCase("WIFI_RECONNECT")) {
+    return webReconnectLocalWifi();
+  }
+  if (action.equalsIgnoreCase("ESPNOW_ON")) {
+    return g_network.enableEspNow();
+  }
+  if (action.equalsIgnoreCase("ESPNOW_OFF")) {
+    g_network.disableEspNow();
     return true;
   }
 
@@ -1015,6 +1038,11 @@ void setupWebUi() {
     webSendResult("WIFI_DISCONNECT", true);
   });
 
+  g_web_server.on("/api/network/wifi/reconnect", HTTP_POST, []() {
+    const bool ok = webReconnectLocalWifi();
+    webSendResult("WIFI_RECONNECT", ok);
+  });
+
   g_web_server.on("/api/wifi/connect", HTTP_POST, []() {
     String ssid = g_web_server.arg("ssid");
     String password = g_web_server.arg("password");
@@ -1119,6 +1147,16 @@ void setupWebUi() {
     }
     const bool ok = g_network.sendEspNowTarget(target.c_str(), payload.c_str());
     webSendResult("ESPNOW_SEND", ok);
+  });
+
+  g_web_server.on("/api/network/espnow/on", HTTP_POST, []() {
+    const bool ok = g_network.enableEspNow();
+    webSendResult("ESPNOW_ON", ok);
+  });
+
+  g_web_server.on("/api/network/espnow/off", HTTP_POST, []() {
+    g_network.disableEspNow();
+    webSendResult("ESPNOW_OFF", true);
   });
 
   g_web_server.on("/api/network/espnow/peer", HTTP_POST, []() {

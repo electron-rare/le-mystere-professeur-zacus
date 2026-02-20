@@ -1,14 +1,525 @@
-// scenario_manager.cpp - Gestion des scénarios pour firmware all-in-one
+// scenario_manager.cpp - Story transitions + timing hooks.
 #include "scenario_manager.h"
 
-void ScenarioManager::begin() {
-  // TODO: Charger le scénario par défaut depuis LittleFS
+#include <ArduinoJson.h>
+#include <LittleFS.h>
+#include <cstring>
+
+#include "scenarios/default_scenario_v2.h"
+
+namespace {
+
+constexpr uint32_t kEtape2DelayMs = 15UL * 60UL * 1000UL;
+constexpr uint32_t kEtape2TestDelayMs = 5000U;
+
+bool eventNameMatches(const char* expected, const char* actual) {
+  if (expected == nullptr || expected[0] == '\0') {
+    return true;
+  }
+  if (actual == nullptr) {
+    return false;
+  }
+  return std::strcmp(expected, actual) == 0;
 }
 
-void ScenarioManager::nextStep() {
-  // TODO: Passer à l'étape suivante du scénario
+const char* stringOrNull(JsonVariantConst value) {
+  if (!value.is<const char*>()) {
+    return nullptr;
+  }
+  const char* text = value.as<const char*>();
+  if (text == nullptr || text[0] == '\0') {
+    return nullptr;
+  }
+  return text;
+}
+
+bool loadScenarioIdFromFile(const char* scenario_file_path, String* out_scenario_id) {
+  if (scenario_file_path == nullptr || scenario_file_path[0] == '\0' || out_scenario_id == nullptr) {
+    return false;
+  }
+  if (!LittleFS.exists(scenario_file_path)) {
+    return false;
+  }
+
+  File file = LittleFS.open(scenario_file_path, "r");
+  if (!file) {
+    Serial.printf("[SCENARIO] failed to open scenario config: %s\n", scenario_file_path);
+    return false;
+  }
+  const size_t file_size = static_cast<size_t>(file.size());
+  if (file_size == 0U || file_size > 12288U) {
+    file.close();
+    Serial.printf("[SCENARIO] unexpected scenario config size: %s (%u bytes)\n",
+                  scenario_file_path,
+                  static_cast<unsigned int>(file_size));
+    return false;
+  }
+
+  DynamicJsonDocument document(file_size + 512U);
+  const DeserializationError error = deserializeJson(document, file);
+  file.close();
+  if (error) {
+    Serial.printf("[SCENARIO] invalid scenario config json (%s): %s\n",
+                  scenario_file_path,
+                  error.c_str());
+    return false;
+  }
+
+  const char* scenario_id = nullptr;
+  JsonVariantConst candidate = document["scenario"];
+  if (candidate.is<const char*>()) {
+    scenario_id = candidate.as<const char*>();
+  }
+  if ((scenario_id == nullptr || scenario_id[0] == '\0')) {
+    candidate = document["scenario_id"];
+    if (candidate.is<const char*>()) {
+      scenario_id = candidate.as<const char*>();
+    }
+  }
+  if ((scenario_id == nullptr || scenario_id[0] == '\0')) {
+    candidate = document["id"];
+    if (candidate.is<const char*>()) {
+      scenario_id = candidate.as<const char*>();
+    }
+  }
+  if (scenario_id == nullptr || scenario_id[0] == '\0') {
+    Serial.printf("[SCENARIO] missing scenario id in config: %s\n", scenario_file_path);
+    return false;
+  }
+
+  *out_scenario_id = scenario_id;
+  return true;
+}
+
+}  // namespace
+
+bool ScenarioManager::begin(const char* scenario_file_path) {
+  scenario_ = nullptr;
+  initial_step_override_.remove(0);
+  clearStepResourceOverrides();
+  String selected_scenario_id;
+  if (loadScenarioIdFromFile(scenario_file_path, &selected_scenario_id)) {
+    scenario_ = storyScenarioV2ById(selected_scenario_id.c_str());
+    if (scenario_ != nullptr) {
+      Serial.printf("[SCENARIO] selected id from %s: %s\n",
+                    scenario_file_path,
+                    selected_scenario_id.c_str());
+    } else {
+      Serial.printf("[SCENARIO] unknown id in %s: %s (fallback default)\n",
+                    scenario_file_path,
+                    selected_scenario_id.c_str());
+    }
+  } else if (scenario_file_path != nullptr && scenario_file_path[0] != '\0') {
+    Serial.printf("[SCENARIO] no valid scenario config at %s (fallback default)\n", scenario_file_path);
+  }
+
+  if (scenario_ == nullptr) {
+    scenario_ = storyScenarioV2Default();
+  }
+  if (scenario_ == nullptr) {
+    Serial.println("[SCENARIO] default scenario unavailable");
+    return false;
+  }
+
+  if (storyValidateScenarioDef(*scenario_, nullptr)) {
+    Serial.printf("[SCENARIO] loaded built-in scenario: %s v%u (%u steps)\n",
+                  scenario_->id,
+                  scenario_->version,
+                  scenario_->stepCount);
+  } else {
+    Serial.printf("[SCENARIO] warning: validation failed for %s\n", scenario_->id);
+  }
+
+  loadStepResourceOverrides(scenario_file_path);
+  reset();
+  return true;
 }
 
 void ScenarioManager::reset() {
-  // TODO: Réinitialiser le scénario
+  if (scenario_ == nullptr) {
+    return;
+  }
+  const char* initial_step_id = scenario_->initialStepId;
+  if (!initial_step_override_.isEmpty()) {
+    initial_step_id = initial_step_override_.c_str();
+  }
+  current_step_index_ = storyFindStepIndex(*scenario_, initial_step_id);
+  if (current_step_index_ < 0 && scenario_->stepCount > 0U) {
+    current_step_index_ = 0;
+  }
+  step_entered_at_ms_ = millis();
+  pending_audio_pack_.remove(0);
+  scene_changed_ = true;
+  timer_armed_ = false;
+  timer_fired_ = false;
+  etape2_due_at_ms_ = 0U;
+
+  const ScenarioSnapshot state = snapshot();
+  if (state.audio_pack_id != nullptr && state.audio_pack_id[0] != '\0') {
+    pending_audio_pack_ = state.audio_pack_id;
+  }
+}
+
+void ScenarioManager::tick(uint32_t now_ms) {
+  if (scenario_ == nullptr || current_step_index_ < 0) {
+    return;
+  }
+  evaluateAfterMsTransitions(now_ms);
+  if (timer_armed_ && !timer_fired_ && etape2_due_at_ms_ > 0U && now_ms >= etape2_due_at_ms_) {
+    timer_fired_ = true;
+    dispatchEvent(StoryEventType::kTimer, "ETAPE2_DUE", now_ms, "timer_due");
+  }
+}
+
+void ScenarioManager::notifyUnlock(uint32_t now_ms) {
+  timer_armed_ = true;
+  timer_fired_ = false;
+  etape2_due_at_ms_ = now_ms + (test_mode_ ? kEtape2TestDelayMs : kEtape2DelayMs);
+  dispatchEvent(StoryEventType::kUnlock, "UNLOCK", now_ms, "button_unlock");
+}
+
+void ScenarioManager::notifyButton(uint8_t key, bool long_press, uint32_t now_ms) {
+  switch (key) {
+    case 1:
+      if (long_press) {
+        dispatchEvent(StoryEventType::kSerial, "FORCE_ETAPE2", now_ms, "btn1_long");
+      } else {
+        notifyUnlock(now_ms);
+      }
+      break;
+    case 2:
+      if (long_press) {
+        test_mode_ = !test_mode_;
+        Serial.printf("[SCENARIO] test_mode=%u\n", test_mode_ ? 1U : 0U);
+      }
+      break;
+    case 3:
+      if (long_press) {
+        dispatchEvent(StoryEventType::kSerial, "FORCE_ETAPE2", now_ms, "btn3_long");
+      }
+      break;
+    case 4:
+      if (long_press) {
+        dispatchEvent(StoryEventType::kSerial, "FORCE_DONE", now_ms, "btn4_long");
+      }
+      break;
+    case 5:
+      if (long_press) {
+        dispatchEvent(StoryEventType::kSerial, "FORCE_DONE", now_ms, "btn5_long");
+      } else {
+        dispatchEvent(StoryEventType::kSerial, "NEXT", now_ms, "btn5_short");
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+void ScenarioManager::notifyAudioDone(uint32_t now_ms) {
+  dispatchEvent(StoryEventType::kAudioDone, "AUDIO_DONE", now_ms, "audio_done");
+}
+
+ScenarioSnapshot ScenarioManager::snapshot() const {
+  ScenarioSnapshot out;
+  out.scenario = scenario_;
+  out.step = currentStep();
+  if (out.step != nullptr) {
+    const char* screen_scene_id = out.step->resources.screenSceneId;
+    const char* audio_pack_id = out.step->resources.audioPackId;
+    applyStepResourceOverride(out.step, &screen_scene_id, &audio_pack_id);
+    out.screen_scene_id = screen_scene_id;
+    out.audio_pack_id = audio_pack_id;
+    out.mp3_gate_open = out.step->mp3GateOpen;
+  }
+  return out;
+}
+
+bool ScenarioManager::consumeSceneChanged() {
+  const bool changed = scene_changed_;
+  scene_changed_ = false;
+  return changed;
+}
+
+bool ScenarioManager::consumeAudioRequest(String* out_audio_pack_id) {
+  if (pending_audio_pack_.isEmpty()) {
+    return false;
+  }
+  if (out_audio_pack_id != nullptr) {
+    *out_audio_pack_id = pending_audio_pack_;
+  }
+  pending_audio_pack_.remove(0);
+  return true;
+}
+
+bool ScenarioManager::dispatchEvent(StoryEventType type,
+                                    const char* event_name,
+                                    uint32_t now_ms,
+                                    const char* source) {
+  const StepDef* step = currentStep();
+  if (step == nullptr || step->transitionCount == 0U) {
+    return false;
+  }
+
+  const TransitionDef* selected = nullptr;
+  for (uint8_t i = 0; i < step->transitionCount; ++i) {
+    const TransitionDef& transition = step->transitions[i];
+    if (!transitionMatches(transition, type, event_name)) {
+      continue;
+    }
+    if (selected == nullptr || transition.priority > selected->priority) {
+      selected = &transition;
+    }
+  }
+  if (selected == nullptr) {
+    return false;
+  }
+  if (!applyTransition(*selected, now_ms, source)) {
+    return false;
+  }
+  runImmediateTransitions(now_ms, source);
+  return true;
+}
+
+bool ScenarioManager::applyTransition(const TransitionDef& transition,
+                                      uint32_t now_ms,
+                                      const char* source) {
+  if (scenario_ == nullptr || transition.targetStepId == nullptr) {
+    return false;
+  }
+  const int8_t target = storyFindStepIndex(*scenario_, transition.targetStepId);
+  if (target < 0) {
+    Serial.printf("[SCENARIO] invalid transition target: %s\n", transition.targetStepId);
+    return false;
+  }
+  enterStep(target, now_ms, source);
+  return true;
+}
+
+bool ScenarioManager::runImmediateTransitions(uint32_t now_ms, const char* source) {
+  bool moved = false;
+  for (uint8_t guard = 0; guard < 8U; ++guard) {
+    const StepDef* step = currentStep();
+    if (step == nullptr || step->transitionCount == 0U) {
+      break;
+    }
+    const TransitionDef* selected = nullptr;
+    for (uint8_t i = 0; i < step->transitionCount; ++i) {
+      const TransitionDef& transition = step->transitions[i];
+      if (transition.trigger != StoryTransitionTrigger::kImmediate) {
+        continue;
+      }
+      if (selected == nullptr || transition.priority > selected->priority) {
+        selected = &transition;
+      }
+    }
+    if (selected == nullptr) {
+      break;
+    }
+    if (!applyTransition(*selected, now_ms, source)) {
+      break;
+    }
+    moved = true;
+  }
+  return moved;
+}
+
+void ScenarioManager::evaluateAfterMsTransitions(uint32_t now_ms) {
+  const StepDef* step = currentStep();
+  if (step == nullptr || step->transitionCount == 0U) {
+    return;
+  }
+
+  const TransitionDef* selected = nullptr;
+  for (uint8_t i = 0; i < step->transitionCount; ++i) {
+    const TransitionDef& transition = step->transitions[i];
+    if (transition.trigger != StoryTransitionTrigger::kAfterMs) {
+      continue;
+    }
+    if (now_ms - step_entered_at_ms_ < transition.afterMs) {
+      continue;
+    }
+    if (selected == nullptr || transition.priority > selected->priority) {
+      selected = &transition;
+    }
+  }
+  if (selected != nullptr) {
+    if (applyTransition(*selected, now_ms, "after_ms")) {
+      runImmediateTransitions(now_ms, "after_ms");
+    }
+  }
+}
+
+void ScenarioManager::enterStep(int8_t step_index, uint32_t now_ms, const char* source) {
+  if (scenario_ == nullptr || step_index < 0 || step_index >= static_cast<int8_t>(scenario_->stepCount)) {
+    return;
+  }
+
+  current_step_index_ = step_index;
+  step_entered_at_ms_ = now_ms;
+  scene_changed_ = true;
+
+  const StepDef* step = currentStep();
+  if (step == nullptr) {
+    return;
+  }
+
+  pending_audio_pack_.remove(0);
+  const char* screen_scene_id = step->resources.screenSceneId;
+  const char* audio_pack_id = step->resources.audioPackId;
+  applyStepResourceOverride(step, &screen_scene_id, &audio_pack_id);
+  if (audio_pack_id != nullptr && audio_pack_id[0] != '\0') {
+    pending_audio_pack_ = audio_pack_id;
+  }
+  Serial.printf("[SCENARIO] step=%s via=%s\n", step->id, source != nullptr ? source : "n/a");
+}
+
+const StepDef* ScenarioManager::currentStep() const {
+  if (scenario_ == nullptr || current_step_index_ < 0 || current_step_index_ >= static_cast<int8_t>(scenario_->stepCount)) {
+    return nullptr;
+  }
+  return &scenario_->steps[current_step_index_];
+}
+
+bool ScenarioManager::transitionMatches(const TransitionDef& transition,
+                                        StoryEventType type,
+                                        const char* event_name) const {
+  if (transition.trigger != StoryTransitionTrigger::kOnEvent) {
+    return false;
+  }
+  if (transition.eventType != type) {
+    return false;
+  }
+  return eventNameMatches(transition.eventName, event_name);
+}
+
+void ScenarioManager::clearStepResourceOverrides() {
+  for (uint8_t index = 0; index < step_resource_override_count_; ++index) {
+    step_resource_overrides_[index].step_id.remove(0);
+    step_resource_overrides_[index].screen_scene_id.remove(0);
+    step_resource_overrides_[index].audio_pack_id.remove(0);
+  }
+  step_resource_override_count_ = 0U;
+}
+
+void ScenarioManager::loadStepResourceOverrides(const char* scenario_file_path) {
+  clearStepResourceOverrides();
+  if (scenario_file_path == nullptr || scenario_file_path[0] == '\0') {
+    return;
+  }
+  if (!LittleFS.exists(scenario_file_path)) {
+    return;
+  }
+
+  File file = LittleFS.open(scenario_file_path, "r");
+  if (!file) {
+    return;
+  }
+  const size_t file_size = static_cast<size_t>(file.size());
+  if (file_size == 0U || file_size > 12288U) {
+    file.close();
+    return;
+  }
+
+  DynamicJsonDocument document(file_size + 1024U);
+  const DeserializationError error = deserializeJson(document, file);
+  file.close();
+  if (error) {
+    Serial.printf("[SCENARIO] override parse failed (%s): %s\n", scenario_file_path, error.c_str());
+    return;
+  }
+
+  const char* initial_step = stringOrNull(document["initial_step"]);
+  if (initial_step == nullptr) {
+    initial_step = stringOrNull(document["initialStepId"]);
+  }
+  if (initial_step != nullptr) {
+    initial_step_override_ = initial_step;
+    Serial.printf("[SCENARIO] override initial_step=%s\n", initial_step_override_.c_str());
+  }
+
+  JsonArrayConst steps = document["steps"].as<JsonArrayConst>();
+  if (steps.isNull()) {
+    return;
+  }
+
+  for (JsonVariantConst variant : steps) {
+    if (!variant.is<JsonObjectConst>()) {
+      continue;
+    }
+    JsonObjectConst step_obj = variant.as<JsonObjectConst>();
+    const char* step_id = stringOrNull(step_obj["id"]);
+    if (step_id == nullptr) {
+      continue;
+    }
+
+    const char* screen_scene_id = stringOrNull(step_obj["screen_scene_id"]);
+    if (screen_scene_id == nullptr) {
+      screen_scene_id = stringOrNull(step_obj["screenSceneId"]);
+    }
+    if (screen_scene_id == nullptr) {
+      screen_scene_id = stringOrNull(step_obj["resources"]["screen_scene_id"]);
+    }
+    if (screen_scene_id == nullptr) {
+      screen_scene_id = stringOrNull(step_obj["resources"]["screenSceneId"]);
+    }
+
+    const char* audio_pack_id = stringOrNull(step_obj["audio_pack_id"]);
+    if (audio_pack_id == nullptr) {
+      audio_pack_id = stringOrNull(step_obj["audioPackId"]);
+    }
+    if (audio_pack_id == nullptr) {
+      audio_pack_id = stringOrNull(step_obj["resources"]["audio_pack_id"]);
+    }
+    if (audio_pack_id == nullptr) {
+      audio_pack_id = stringOrNull(step_obj["resources"]["audioPackId"]);
+    }
+
+    if (screen_scene_id == nullptr && audio_pack_id == nullptr) {
+      continue;
+    }
+    if (step_resource_override_count_ >= kMaxStepResourceOverrides) {
+      Serial.printf("[SCENARIO] step overrides truncated at %u entries\n", kMaxStepResourceOverrides);
+      break;
+    }
+
+    StepResourceOverride& entry = step_resource_overrides_[step_resource_override_count_++];
+    entry.step_id = step_id;
+    entry.screen_scene_id = (screen_scene_id != nullptr) ? screen_scene_id : "";
+    entry.audio_pack_id = (audio_pack_id != nullptr) ? audio_pack_id : "";
+  }
+
+  if (step_resource_override_count_ > 0U) {
+    Serial.printf("[SCENARIO] loaded %u step resource overrides\n", step_resource_override_count_);
+  }
+}
+
+const ScenarioManager::StepResourceOverride* ScenarioManager::findStepResourceOverride(const char* step_id) const {
+  if (step_id == nullptr || step_id[0] == '\0') {
+    return nullptr;
+  }
+  for (uint8_t index = 0; index < step_resource_override_count_; ++index) {
+    const StepResourceOverride& candidate = step_resource_overrides_[index];
+    if (candidate.step_id == step_id) {
+      return &candidate;
+    }
+  }
+  return nullptr;
+}
+
+void ScenarioManager::applyStepResourceOverride(const StepDef* step,
+                                                const char** out_screen_scene_id,
+                                                const char** out_audio_pack_id) const {
+  if (step == nullptr) {
+    return;
+  }
+  const StepResourceOverride* entry = findStepResourceOverride(step->id);
+  if (entry == nullptr) {
+    return;
+  }
+  if (out_screen_scene_id != nullptr && !entry->screen_scene_id.isEmpty()) {
+    *out_screen_scene_id = entry->screen_scene_id.c_str();
+  }
+  if (out_audio_pack_id != nullptr && !entry->audio_pack_id.isEmpty()) {
+    *out_audio_pack_id = entry->audio_pack_id.c_str();
+  }
 }

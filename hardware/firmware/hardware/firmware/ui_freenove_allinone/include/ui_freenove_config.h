@@ -1,53 +1,102 @@
 #pragma once
 
-// --- Core UI defines ---
-#define SPI_FREQUENCY         40000000   // Fréquence SPI écran
-#define SPI_READ_FREQUENCY    20000000   // Fréquence SPI lecture
-#define SPI_TOUCH_FREQUENCY   2500000    // Fréquence SPI tactile
-#define UI_LCD_SPI_HOST       0          // SPI Host LCD
-#define UI_SERIAL_BAUD        57600      // Baudrate UI link interne
-#define UI_ROTATION           1          // Rotation UI par défaut
-#define ILI9488_DRIVER        // Driver écran ILI9488
-#define TFT_RGB_ORDER         TFT_BGR    // Ordre RGB écran
+// Freenove Media Kit reference profile (Sketch_19):
+// - FNK0102B ST7796 320x480 by default, rotation 1
+// - Buttons via analog ladder on GPIO19
+// - I2S output BCLK=42, WS=41, DOUT=1
 
-// Configuration hardware Freenove Media Kit All-in-One (ESP32-S3)
+#ifndef FREENOVE_LCD_VARIANT_FNK0102A
+#define FREENOVE_LCD_VARIANT_FNK0102A 0
+#endif
 
-// --- Display ---
-#define FREENOVE_LCD_WIDTH      480  // Largeur écran
-#define FREENOVE_LCD_HEIGHT     320  // Hauteur écran
-#define FREENOVE_LCD_ROTATION   1    // Rotation écran (0-3)
+#ifndef FREENOVE_LCD_VARIANT_FNK0102B
+#define FREENOVE_LCD_VARIANT_FNK0102B 1
+#endif
 
-// --- TFT SPI ---
-#define FREENOVE_TFT_SCK        18   // GPIO 18 : SCK (SPI écran)
-#define FREENOVE_TFT_MOSI       23   // GPIO 23 : MOSI (SPI écran)
-#define FREENOVE_TFT_MISO       19   // GPIO 19 : MISO (optionnel)
-#define FREENOVE_TFT_CS         5    // GPIO 5  : CS (partagé BTN4)
-#define FREENOVE_TFT_DC         16   // GPIO 16 : DC (commande/données)
-#define FREENOVE_TFT_RST        17   // GPIO 17 : RESET écran
-#define FREENOVE_TFT_BL         4    // GPIO 4  : BL (partagé BTN3)
+#if FREENOVE_LCD_VARIANT_FNK0102A && FREENOVE_LCD_VARIANT_FNK0102B
+#error "Select one LCD variant only (FNK0102A xor FNK0102B)."
+#endif
 
-// --- Touch SPI (XPT2046) ---
-#define FREENOVE_TOUCH_CS       21   // GPIO 21 : CS tactile
-#define FREENOVE_TOUCH_IRQ      22   // GPIO 22 : IRQ tactile
+#if !FREENOVE_LCD_VARIANT_FNK0102A && !FREENOVE_LCD_VARIANT_FNK0102B
+#error "At least one LCD variant must be enabled."
+#endif
 
-// --- Buttons (internal pull-up) ---
-#define FREENOVE_BTN_1          2    // GPIO 2  : Bouton 1
-#define FREENOVE_BTN_2          3    // GPIO 3  : Bouton 2
-#define FREENOVE_BTN_3          4    // GPIO 4  : Bouton 3 (BL shared)
-#define FREENOVE_BTN_4          5    // GPIO 5  : Bouton 4 (CS shared)
-// Attention : ne pas activer BL et BTN3 ou CS et BTN4 simultanément.
+#define UI_LCD_SPI_HOST 1
+#define UI_SERIAL_BAUD 57600
+#define UI_ROTATION 1
 
-// --- Audio (I2S only) ---
-#define FREENOVE_I2S_WS         25   // GPIO 25 : I2S WS (obligatoire)
-#define FREENOVE_I2S_BCK        26   // GPIO 26 : I2S BCK
-#define FREENOVE_I2S_DOUT       27   // GPIO 27 : I2S DOUT
+#if FREENOVE_LCD_VARIANT_FNK0102A
+#define FREENOVE_LCD_LABEL "FNK0102A_ST7789_135x240"
+#define FREENOVE_LCD_WIDTH 135
+#define FREENOVE_LCD_HEIGHT 240
+#define ST7789_DRIVER
+#define TFT_WIDTH 135
+#define TFT_HEIGHT 240
+#define TFT_SDA_READ
+#define TFT_RGB_ORDER TFT_BGR
+#define TFT_INVERSION_ON
+#else
+#define FREENOVE_LCD_LABEL "FNK0102B_ST7796_320x480"
+#define FREENOVE_LCD_WIDTH 320
+#define FREENOVE_LCD_HEIGHT 480
+#define ST7796_DRIVER
+#define TFT_INVERSION_ON
+#endif
 
-// --- Misc peripherals ---
-#define FREENOVE_LED            13   // GPIO 13 : indicateur LED
-#define FREENOVE_BUZZER         12   // GPIO 12 : buzzer (PWM)
-#define FREENOVE_DHT11          14   // GPIO 14 : DHT11 (si utilisé)
-#define FREENOVE_I2C_SDA        8    // GPIO 8  : SDA I2C (MPU6050, capteurs)
-#define FREENOVE_I2C_SCL        9    // GPIO 9  : SCL I2C
-#define FREENOVE_MPU6050_ADDR   0x68 // Adresse I2C MPU6050 (optionnel)
+#define FREENOVE_LCD_ROTATION 1
 
-// Ce firmware repose sur l'I2S pour l'audio et sur un seul ESP32-S3; UI link externe n'est pas requis.
+// TFT SPI pins (official Freenove setup).
+#define FREENOVE_TFT_SCK 47
+#define FREENOVE_TFT_MOSI 21
+#define FREENOVE_TFT_MISO -1
+#define FREENOVE_TFT_CS -1
+#define FREENOVE_TFT_DC 45
+#define FREENOVE_TFT_RST 20
+#define FREENOVE_TFT_BL 2
+
+// TFT_eSPI bridge defines.
+#define USER_SETUP_LOADED 1
+#define TFT_MOSI FREENOVE_TFT_MOSI
+#define TFT_SCLK FREENOVE_TFT_SCK
+#define TFT_MISO FREENOVE_TFT_MISO
+#define TFT_CS FREENOVE_TFT_CS
+#define TFT_DC FREENOVE_TFT_DC
+#define TFT_RST FREENOVE_TFT_RST
+#define TFT_BL FREENOVE_TFT_BL
+#define TFT_BACKLIGHT_ON HIGH
+#define SPI_FREQUENCY 80000000
+#define SPI_READ_FREQUENCY 20000000
+#define SUPPORT_TRANSACTIONS
+#define USE_FSPI_PORT
+
+// Buttons: analog ladder by default (5 keys).
+#define FREENOVE_BTN_ANALOG_PIN 19
+#define FREENOVE_BTN_1 -1
+#define FREENOVE_BTN_2 -1
+#define FREENOVE_BTN_3 -1
+#define FREENOVE_BTN_4 -1
+#define FREENOVE_BTN_LONG_PRESS_MS 700
+
+#ifndef FREENOVE_HAS_TOUCH
+#define FREENOVE_HAS_TOUCH 0
+#endif
+
+#if FREENOVE_HAS_TOUCH
+#define FREENOVE_TOUCH_CS 9
+#define FREENOVE_TOUCH_IRQ 15
+#define SPI_TOUCH_FREQUENCY 2500000
+#define TOUCH_CS FREENOVE_TOUCH_CS
+#else
+#define TOUCH_CS -1
+#endif
+
+// Storage and audio buses from Freenove reference.
+#define FREENOVE_SDMMC_CMD 38
+#define FREENOVE_SDMMC_CLK 39
+#define FREENOVE_SDMMC_D0 40
+#define FREENOVE_I2S_WS 41
+#define FREENOVE_I2S_BCK 42
+#define FREENOVE_I2S_DOUT 1
+#define FREENOVE_I2S_IN_SCK 3
+#define FREENOVE_I2S_IN_WS 14
+#define FREENOVE_I2S_IN_DIN 46

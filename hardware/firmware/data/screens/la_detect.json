@@ -1,0 +1,12 @@
+{
+  "id": "SCENE_LA_DETECT",
+  "effect": "scan",
+  "theme": {
+    "bg": "#041F1B",
+    "accent": "#2CE5A6",
+    "text": "#EFFFF8"
+  },
+  "content": {
+    "description": "Detection en cours"
+  }
+}

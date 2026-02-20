@@ -1,0 +1,12 @@
+{
+  "id": "SCENE_REWARD",
+  "title": "RECOMPENSE",
+  "subtitle": "Indice debloque",
+  "symbol": "WIN",
+  "effect": "celebrate",
+  "theme": {
+    "bg": "#2A103E",
+    "accent": "#F9D860",
+    "text": "#FFF9E6"
+  }
+}

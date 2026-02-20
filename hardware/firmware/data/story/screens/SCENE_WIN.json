@@ -1,0 +1,12 @@
+{
+  "id": "SCENE_WIN",
+  "title": "VICTOIRE",
+  "subtitle": "Etape validee",
+  "symbol": "WIN",
+  "effect": "celebrate",
+  "theme": {
+    "bg": "#231038",
+    "accent": "#F4CB4A",
+    "text": "#FFF8E2"
+  }
+}

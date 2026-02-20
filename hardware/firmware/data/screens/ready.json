@@ -1,0 +1,12 @@
+{
+  "id": "SCENE_READY",
+  "effect": "pulse",
+  "theme": {
+    "bg": "#0F2A12",
+    "accent": "#6CD96B",
+    "text": "#EDFFED"
+  },
+  "content": {
+    "description": "Pret"
+  }
+}

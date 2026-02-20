@@ -2,29 +2,25 @@
 
 | Fonction         | Broche ESP32-S3 | Signal TFT/Touch/Audio | Remarques                      |
 |------------------|-----------------|-----------------------|--------------------------------|
-| TFT SCK          | GPIO 18         | SCK                   | SPI écran                      |
-| TFT MOSI         | GPIO 23         | MOSI                  | SPI écran                      |
-| TFT MISO         | GPIO 19         | MISO                  | SPI écran (si utilisé)         |
-| TFT CS           | GPIO 5          | CS                    | Chip Select écran              |
-| TFT DC           | GPIO 16         | DC                    | Data/Command écran             |
-| TFT RESET        | GPIO 17         | RESET                 | Reset écran                    |
-| TFT BL           | GPIO 4          | BL                    | Rétroéclairage (PWM possible)  |
-| Touch CS         | GPIO 21         | CS (XPT2046)          | SPI tactile                    |
-| Touch IRQ        | GPIO 22         | IRQ (XPT2046)         | Interruption tactile           |
-| Bouton 1         | GPIO 2          | BTN1                  | Pull-up interne                |
-| Bouton 2         | GPIO 3          | BTN2                  | Pull-up interne                |
-| Bouton 3         | GPIO 4          | BTN3                  | Pull-up interne                |
-| Bouton 4         | GPIO 5          | BTN4                  | Pull-up interne                |
-| Audio I2S WS     | GPIO 25         | WS                    | I2S audio                      |
-| Audio I2S BCK    | GPIO 26         | BCK                   | I2S audio                      |
-| Audio I2S DOUT   | GPIO 27         | DOUT                  | I2S audio                      |
+| TFT SCK          | GPIO 47         | SCK                   | SPI écran (FNK0102B)           |
+| TFT MOSI         | GPIO 21         | MOSI                  | SPI écran                      |
+| TFT MISO         | -1              | MISO                  | non utilisé                    |
+| TFT CS           | -1              | CS                    | câblage board intégré          |
+| TFT DC           | GPIO 45         | DC                    | Data/Command écran             |
+| TFT RESET        | GPIO 20         | RESET                 | Reset écran                    |
+| TFT BL           | GPIO 2          | BL                    | Rétroéclairage                 |
+| Touch CS         | GPIO 9          | CS (XPT2046)          | optionnel (`FREENOVE_HAS_TOUCH`) |
+| Touch IRQ        | GPIO 15         | IRQ (XPT2046)         | optionnel                      |
+| Boutons          | GPIO 19         | ADC ladder (5 touches)| key1..key5 par seuils analogiques |
+| Audio I2S WS     | GPIO 41         | WS                    | profil principal Sketch_19     |
+| Audio I2S BCK    | GPIO 42         | BCK                   | profil principal Sketch_19     |
+| Audio I2S DOUT   | GPIO 1          | DOUT                  | profil principal Sketch_19     |
 | Alim écran/audio | 3V3/5V/GND      | -                     | Respecter les tensions         |
 
 **Remarques** :
-- Adapter les GPIO selon la version du kit (voir schéma Freenove officiel)
-- Certains signaux peuvent être multiplexés selon les options du kit
-- Pour l’audio, vérifier la compatibilité du codec (DAC/AMP)
-- Pour le tactile, vérifier le contrôleur (XPT2046 ou autre)
+- Profil audio runtime sélectionnable par série: `AUDIO_PROFILE <idx>` puis `AUDIO_TEST`.
+- Profils fournis: `0=sketch19`, `1=swap_bck_ws`, `2=dout2_alt`.
+- Le tactile est désactivé par défaut (`FREENOVE_HAS_TOUCH=0`).
 
 
 # Firmware Freenove Media Kit All-in-One

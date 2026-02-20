@@ -1,0 +1,12 @@
+{
+  "id": "SCENE_BROKEN",
+  "effect": "blink",
+  "theme": {
+    "bg": "#2A0508",
+    "accent": "#FF4A45",
+    "text": "#FFF1F1"
+  },
+  "content": {
+    "description": "Ecran de transition prototype"
+  }
+}

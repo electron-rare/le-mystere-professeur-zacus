@@ -9,6 +9,24 @@
 7. Consigner les logs et artefacts produits (logs/rc_live/freenove_esp32s3_YYYYMMDD.log, artifacts/rc_live/freenove_esp32s3_YYYYMMDD.html).
 8. Documenter toute anomalie ou fail dans AGENT_TODO.md.
 
+## [2026-02-20] Freenove audio + écran + chaîne scénario/écran (Codex)
+
+- Checkpoint sécurité exécuté: branche `main`, `git diff --stat` capturé, patch/status sauvegardés:
+  - `/tmp/zacus_checkpoint/20260220_203024_wip.patch`
+  - `/tmp/zacus_checkpoint/20260220_203024_status.txt`
+- Scan artefacts trackés (`.pio`, `.platformio`, `logs`, `dist`, `build`, `node_modules`, `.venv`): aucun chemin tracké.
+- Build/flash Freenove validés (`/dev/cu.usbmodem5AB90753301`):
+  - `pio run -e freenove_esp32s3_full_with_ui` PASS
+  - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` PASS
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` PASS
+  - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` PASS
+- Validation série (`pio device monitor --port /dev/cu.usbmodem5AB90753301 --baud 115200`) :
+  - `AUDIO_TEST` PASS (tonalité intégrée RTTTL, sans dépendance LittleFS)
+  - `AUDIO_TEST_FS` PASS (`/music/boot_radio.mp3`)
+  - `AUDIO_PROFILE 0/1/2` PASS (switch runtime pinout I2S)
+  - `UNLOCK` -> transition `STEP_U_SON_PROTO`, audio pack `PACK_BOOT_RADIO`, puis `audio_done` -> transition `STEP_WAIT_ETAPE2` PASS.
+- Incohérence restante observée au boot: warning HAL SPI `spiAttachMISO(): HSPI Does not have default pins on ESP32S3!` (non bloquant en exécution actuelle).
+
 ## TODO Freenove ESP32-S3 (contrat agent)
 
 ### [2026-02-17] Log détaillé des étapes réalisées – Freenove ESP32-S3

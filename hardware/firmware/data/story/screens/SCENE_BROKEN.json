@@ -1,0 +1,12 @@
+{
+  "id": "SCENE_BROKEN",
+  "title": "PROTO U-SON",
+  "subtitle": "Signal brouille",
+  "symbol": "ALERT",
+  "effect": "blink",
+  "theme": {
+    "bg": "#2A0508",
+    "accent": "#FF4A45",
+    "text": "#FFF1F1"
+  }
+}

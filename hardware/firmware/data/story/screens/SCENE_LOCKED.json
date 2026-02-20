@@ -1,0 +1,12 @@
+{
+  "id": "SCENE_LOCKED",
+  "title": "VERROUILLE",
+  "subtitle": "Attente de debloquage",
+  "symbol": "LOCK",
+  "effect": "pulse",
+  "theme": {
+    "bg": "#08152D",
+    "accent": "#3E8DFF",
+    "text": "#F5F8FF"
+  }
+}

@@ -2,28 +2,21 @@
 
 | Fonction         | Pin (ESP32-S3) | Définition macro         | Remarque/Conflit |
 |------------------|----------------|-------------------------|------------------|
-| LCD Width        | 480            | FREENOVE_LCD_WIDTH      |                  |
-| LCD Height       | 320            | FREENOVE_LCD_HEIGHT     |                  |
-| TFT SCK          | 2/18           | FREENOVE_TFT_SCK        | Différence board |
-| TFT MOSI         | 3/23           | FREENOVE_TFT_MOSI       |                  |
-| TFT MISO         | 4/19           | FREENOVE_TFT_MISO       | Optionnel        |
-| TFT CS           | 5              | FREENOVE_TFT_CS         | Partagé BTN_4    |
-| TFT DC           | 6/16           | FREENOVE_TFT_DC         |                  |
-| TFT RST          | 7/17           | FREENOVE_TFT_RST        |                  |
-| TFT BL           | 4              | FREENOVE_TFT_BL         | Partagé BTN_3    |
-| Touch CS         | 9/21           | FREENOVE_TOUCH_CS       |                  |
-| Touch IRQ        | 15/22          | FREENOVE_TOUCH_IRQ      |                  |
-| UART TX          | 43/0/1         | FREENOVE_UART_TX        | Adapter board    |
-| UART RX          | 44/3           | FREENOVE_UART_RX        | Adapter board    |
-| I2S WS           | 25             | FREENOVE_I2S_WS         | ESP32 only       |
-| I2S BCK          | 26             | FREENOVE_I2S_BCK        | ESP32 only       |
-| I2S DOUT         | 27             | FREENOVE_I2S_DOUT       | ESP32 only       |
-| LED              | 13             | FREENOVE_LED            | Si dispo         |
-| Buzzer           | 12             | FREENOVE_BUZZER         | Si dispo         |
-| DHT11            | 14             | FREENOVE_DHT11          | Si dispo         |
-| I2C SDA          | 8              | FREENOVE_I2C_SDA        | Si utilisé       |
-| I2C SCL          | 9              | FREENOVE_I2C_SCL        | Si utilisé       |
-| MPU6050 Addr     | 0x68           | FREENOVE_MPU6050_ADDR   | Si utilisé       |
+| LCD Width        | 320            | FREENOVE_LCD_WIDTH      | panneau physique |
+| LCD Height       | 480            | FREENOVE_LCD_HEIGHT     | panneau physique |
+| TFT SCK          | 47             | FREENOVE_TFT_SCK        | profil Sketch_19 |
+| TFT MOSI         | 21             | FREENOVE_TFT_MOSI       | profil Sketch_19 |
+| TFT MISO         | -1             | FREENOVE_TFT_MISO       | non utilisé      |
+| TFT CS           | -1             | FREENOVE_TFT_CS         | board intégré    |
+| TFT DC           | 45             | FREENOVE_TFT_DC         |                  |
+| TFT RST          | 20             | FREENOVE_TFT_RST        |                  |
+| TFT BL           | 2              | FREENOVE_TFT_BL         |                  |
+| Touch CS         | 9              | FREENOVE_TOUCH_CS       | optionnel        |
+| Touch IRQ        | 15             | FREENOVE_TOUCH_IRQ      | optionnel        |
+| Boutons          | 19             | FREENOVE_BTN_ANALOG_PIN | ladder analogique|
+| I2S WS           | 41             | FREENOVE_I2S_WS         | profil principal |
+| I2S BCK          | 42             | FREENOVE_I2S_BCK        | profil principal |
+| I2S DOUT         | 1              | FREENOVE_I2S_DOUT       | profil principal |
 
 ### Librairies recommandées
 - [TFT_eSPI](https://github.com/Bodmer/TFT_eSPI) (écran TFT)

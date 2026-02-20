@@ -1,0 +1,30 @@
+{
+  "id": "DEFAULT",
+  "scenario": "DEFAULT",
+  "initial_step": "STEP_WAIT_UNLOCK",
+  "steps": [
+    {
+      "id": "STEP_WAIT_UNLOCK",
+      "screen_scene_id": "SCENE_LOCKED"
+    },
+    {
+      "id": "STEP_U_SON_PROTO",
+      "screen_scene_id": "SCENE_BROKEN",
+      "audio_pack_id": "PACK_BOOT_RADIO"
+    },
+    {
+      "id": "STEP_WAIT_ETAPE2",
+      "screen_scene_id": "SCENE_LA_DETECT"
+    },
+    {
+      "id": "STEP_ETAPE2",
+      "screen_scene_id": "SCENE_WIN",
+      "audio_pack_id": "PACK_WIN"
+    },
+    {
+      "id": "STEP_DONE",
+      "screen_scene_id": "SCENE_READY"
+    }
+  ],
+  "source": "littlefs-default"
+}

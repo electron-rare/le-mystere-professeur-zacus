@@ -1,0 +1,12 @@
+{
+  "id": "SCENE_SEARCH",
+  "title": "RECHERCHE",
+  "subtitle": "Analyse des indices",
+  "symbol": "SCAN",
+  "effect": "scan",
+  "theme": {
+    "bg": "#05261F",
+    "accent": "#35E7B0",
+    "text": "#EFFFF8"
+  }
+}

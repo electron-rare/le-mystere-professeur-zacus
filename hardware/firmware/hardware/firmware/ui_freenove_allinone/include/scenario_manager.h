@@ -1,9 +1,64 @@
-// scenario_manager.h - Interface gestion scénario
+// scenario_manager.h - Story runtime wrapper for Freenove all-in-one.
 #pragma once
+
+#include <Arduino.h>
+
+#include "core/scenario_def.h"
+
+struct ScenarioSnapshot {
+  const ScenarioDef* scenario = nullptr;
+  const StepDef* step = nullptr;
+  const char* screen_scene_id = nullptr;
+  const char* audio_pack_id = nullptr;
+  bool mp3_gate_open = false;
+};
 
 class ScenarioManager {
  public:
-  void begin();
-  void nextStep();
+  bool begin(const char* scenario_file_path);
   void reset();
+  void tick(uint32_t now_ms);
+
+  void notifyUnlock(uint32_t now_ms);
+  void notifyButton(uint8_t key, bool long_press, uint32_t now_ms);
+  void notifyAudioDone(uint32_t now_ms);
+
+  ScenarioSnapshot snapshot() const;
+  bool consumeSceneChanged();
+  bool consumeAudioRequest(String* out_audio_pack_id);
+
+ private:
+  struct StepResourceOverride {
+    String step_id;
+    String screen_scene_id;
+    String audio_pack_id;
+  };
+
+  static constexpr uint8_t kMaxStepResourceOverrides = 24U;
+
+  void clearStepResourceOverrides();
+  void loadStepResourceOverrides(const char* scenario_file_path);
+  const StepResourceOverride* findStepResourceOverride(const char* step_id) const;
+  void applyStepResourceOverride(const StepDef* step, const char** out_screen_scene_id, const char** out_audio_pack_id) const;
+
+  bool dispatchEvent(StoryEventType type, const char* event_name, uint32_t now_ms, const char* source);
+  bool applyTransition(const TransitionDef& transition, uint32_t now_ms, const char* source);
+  bool runImmediateTransitions(uint32_t now_ms, const char* source);
+  void evaluateAfterMsTransitions(uint32_t now_ms);
+  void enterStep(int8_t step_index, uint32_t now_ms, const char* source);
+  const StepDef* currentStep() const;
+  bool transitionMatches(const TransitionDef& transition, StoryEventType type, const char* event_name) const;
+
+  const ScenarioDef* scenario_ = nullptr;
+  int8_t current_step_index_ = -1;
+  uint32_t step_entered_at_ms_ = 0U;
+  bool scene_changed_ = false;
+  bool test_mode_ = false;
+  bool timer_armed_ = false;
+  bool timer_fired_ = false;
+  uint32_t etape2_due_at_ms_ = 0U;
+  String pending_audio_pack_;
+  String initial_step_override_;
+  StepResourceOverride step_resource_overrides_[kMaxStepResourceOverrides];
+  uint8_t step_resource_override_count_ = 0U;
 };

@@ -1,0 +1,12 @@
+{
+  "id": "SCENE_READY",
+  "title": "PRET",
+  "subtitle": "Scenario termine",
+  "symbol": "READY",
+  "effect": "pulse",
+  "theme": {
+    "bg": "#0F2A12",
+    "accent": "#6CD96B",
+    "text": "#EDFFED"
+  }
+}

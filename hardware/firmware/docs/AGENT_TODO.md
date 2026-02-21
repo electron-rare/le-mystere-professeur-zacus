@@ -9,6 +9,18 @@
 7. Consigner les logs et artefacts produits (logs/rc_live/freenove_esp32s3_YYYYMMDD.log, artifacts/rc_live/freenove_esp32s3_YYYYMMDD.html).
 8. Documenter toute anomalie ou fail dans AGENT_TODO.md.
 
+## [2026-02-21] Firmware workflow hardening (Codex)
+
+- PR de correction et merge: `feat/fix-firmware-story-workflow` → PR #105 → squash merge (main).
+- Fichier touché: `.github/workflows/firmware-story-v2.yml`
+- Correctifs:
+  - indentation YAML corrigée sur `concurrency.cancel-in-progress` (anciennement bloquant l’exécution du workflow).
+  - correction du répertoire de travail du job `story-toolchain` (`hardware/firmware` au lieu de `hardware/firmware/esp32_audio` inexistant).
+  - alignement des artefacts de job `story-toolchain` vers les chemins existants.
+- Validation:
+  - PR checks: `story toolchain`, `validate`, `build env` (esp32dev/esp32_release/esp8266_oled/ui_rp2040_*) pass.
+  - PR #105 mergeée (commit `04e4e50`) avec workflow OK.
+
 ## [2026-02-21] Freenove AP fallback dédié (anti-oscillation hors Les cils) (Codex)
 
 - Contexte coordination merge train: PR Zacus #101 mergée, puis patch dédié AP fallback.

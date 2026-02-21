@@ -10,6 +10,8 @@ Bienvenue dans la documentation du firmware multi-MCU du projet **Le Mystère du
 - **[Quickstart](QUICKSTART.md)** - Guide de démarrage rapide (build, flash, test)
 - **[Agents Contract](../AGENTS.md)** - Règles de développement assisté par IA
 
+Règle active: les contributions valides passent uniquement par `main`.
+
 ### 🏗️ Architecture
 
 - **[UML Index](uml/INDEX.md)** - Documentation UML par blocs (plus lisible)

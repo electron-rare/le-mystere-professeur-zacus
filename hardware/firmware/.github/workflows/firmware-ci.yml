@@ -2,9 +2,9 @@ name: Firmware CI
 
 on:
   push:
-    branches: [ main, hardware/firmware ]
+    branches: [ main ]
   pull_request:
-    branches: [ main, hardware/firmware ]
+    branches: [ main ]
 
 jobs:
   build:

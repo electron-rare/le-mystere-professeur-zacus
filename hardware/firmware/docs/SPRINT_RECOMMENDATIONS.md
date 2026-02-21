@@ -1,7 +1,7 @@
 # Recommandations Sprint - Firmware
 
 Date: 15 février 2026  
-Branche: `hardware/firmware`  
+Branche active: `main` (toutes les fusions se font via PR/merge sur `main`)  
 Contexte: Post-refactor, pre-merge PR #86
 
 ## Résumé exécutif
@@ -315,7 +315,7 @@ name: Firmware CI
 
 on:
   push:
-    branches: [main, hardware/firmware]
+    branches: [main]
   pull_request:
     branches: [main]
 

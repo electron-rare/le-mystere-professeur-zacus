@@ -456,7 +456,10 @@
 # Agent TODO & governance
 
 ## 1. Structural sweep & merge
-- [ ] Commit the pending cleanup described in `docs/SPRINT_RECOMMENDATIONS.md:18-80` (structure/tree fixes + PR #86 merge/tag) so the repo is back on main.
+- [x] Commit the pending cleanup described in `docs/SPRINT_RECOMMENDATIONS.md:18-80` (structure/tree fixes + PR #86 merge/tag) so the repo is back on main.
+- [x] Consolidation 2026-02-21 exécutée: `feat/fix-firmware-story-workflow`, `feat/freenove-ap-fallback-stable`, `feat/freenove-webui-network-ops-parity` intégrés dans l’historique de `main`; CI GitHub Actions désormais limité à `main` seulement.
+- [x] Branches de travail supprimées (local + remote): `feat/freenove-ap-local-espnow-rtc-sync`, `origin/feat/fix-firmware-story-workflow`, `origin/feat/freenove-ap-fallback-stable`, `origin/feat/freenove-webui-network-ops-parity`.
+- [x] Tags de sauvegarde créés avant suppression: `backup/20260221_212813/feat-fix-firmware-story-workflow-1b4c328`, `backup/20260221_212813/feat-fix-firmware-story-workflow-b530be3`, `backup/20260221_212813/feat-freenove-ap-fallback-stable`, `backup/20260221_212813/feat-freenove-webui-network-ops-parity`, `backup/20260221_212813/feat-freenove-ap-local-espnow-rtc-sync`.
 
 ## 2. Build/test gates
 - [x] Re-run `./build_all.sh` (`build_all.sh:6`); artifacts landed under `artifacts/build/` and logs live in `logs/run_matrix_and_smoke_*.log` if rerun again via the smoke gate.

@@ -33,9 +33,10 @@ struct RuntimeNetworkConfig {
   char wifi_test_password[65] = "mascarade";
   char local_ssid[33] = "Les cils";
   char local_password[65] = "mascarade";
-  char ap_default_ssid[33] = "Les cils";
+  char ap_default_ssid[33] = "Freenove-Setup";
   char ap_default_password[65] = "mascarade";
   bool force_ap_if_not_local = false;
+  bool pause_local_retry_when_ap_client = false;
   uint32_t local_retry_ms = kDefaultLocalRetryMs;
   bool espnow_enabled_on_boot = true;
   bool espnow_bridge_to_story_event = true;
@@ -248,9 +249,10 @@ void resetRuntimeNetworkConfig() {
   copyText(g_network_cfg.wifi_test_password, sizeof(g_network_cfg.wifi_test_password), kDefaultWifiTestPassword);
   copyText(g_network_cfg.local_ssid, sizeof(g_network_cfg.local_ssid), kDefaultWifiTestSsid);
   copyText(g_network_cfg.local_password, sizeof(g_network_cfg.local_password), kDefaultWifiTestPassword);
-  copyText(g_network_cfg.ap_default_ssid, sizeof(g_network_cfg.ap_default_ssid), kDefaultWifiTestSsid);
+  copyText(g_network_cfg.ap_default_ssid, sizeof(g_network_cfg.ap_default_ssid), "Freenove-Setup");
   copyText(g_network_cfg.ap_default_password, sizeof(g_network_cfg.ap_default_password), kDefaultWifiTestPassword);
   g_network_cfg.force_ap_if_not_local = false;
+  g_network_cfg.pause_local_retry_when_ap_client = false;
   g_network_cfg.local_retry_ms = kDefaultLocalRetryMs;
   g_network_cfg.espnow_enabled_on_boot = true;
   g_network_cfg.espnow_bridge_to_story_event = true;
@@ -275,6 +277,7 @@ void loadRuntimeNetworkConfig() {
       const char* ap_password = config["ap_default_password"] | config["ap_password"] | "";
       const char* ap_policy = config["ap_policy"] | "";
       const bool ap_policy_bool = config["ap_policy_force_if_not_local"] | false;
+      const bool pause_retry_when_ap_client = config["pause_local_retry_when_ap_client"] | false;
       const uint32_t local_retry_ms = config["local_retry_ms"] | kDefaultLocalRetryMs;
       if (hostname[0] != '\0') {
         copyText(g_network_cfg.hostname, sizeof(g_network_cfg.hostname), hostname);
@@ -310,6 +313,7 @@ void loadRuntimeNetworkConfig() {
       } else {
         g_network_cfg.force_ap_if_not_local = ap_policy_bool;
       }
+      g_network_cfg.pause_local_retry_when_ap_client = pause_retry_when_ap_client;
       if (local_retry_ms >= 1000U) {
         g_network_cfg.local_retry_ms = local_retry_ms;
       }
@@ -353,12 +357,15 @@ void loadRuntimeNetworkConfig() {
     }
   }
 
-  Serial.printf("[NET] cfg host=%s local=%s wifi_test=%s ap_default=%s ap_policy=%u retry_ms=%lu espnow_boot=%u bridge_story=%u peers=%u\n",
+  Serial.printf(
+      "[NET] cfg host=%s local=%s wifi_test=%s ap_default=%s ap_policy=%u pause_retry_on_ap_client=%u retry_ms=%lu "
+      "espnow_boot=%u bridge_story=%u peers=%u\n",
                 g_network_cfg.hostname,
                 g_network_cfg.local_ssid,
                 g_network_cfg.wifi_test_ssid,
                 g_network_cfg.ap_default_ssid,
                 g_network_cfg.force_ap_if_not_local ? 1U : 0U,
+                g_network_cfg.pause_local_retry_when_ap_client ? 1U : 0U,
                 static_cast<unsigned long>(g_network_cfg.local_retry_ms),
                 g_network_cfg.espnow_enabled_on_boot ? 1U : 0U,
                 g_network_cfg.espnow_bridge_to_story_event ? 1U : 0U,
@@ -615,7 +622,8 @@ bool splitSsidPass(const char* argument, String* out_ssid, String* out_pass) {
 void printNetworkStatus() {
   const NetworkManager::Snapshot net = g_network.snapshot();
   Serial.printf("NET_STATUS state=%s mode=%s sta=%u connecting=%u ap=%u fallback_ap=%u espnow=%u ip=%s sta_ssid=%s "
-                "ap_ssid=%s local_target=%s local_match=%u rssi=%ld peers=%u rx=%lu tx_ok=%lu tx_fail=%lu drop=%lu\n",
+                "ap_ssid=%s ap_clients=%u local_target=%s local_match=%u local_retry_paused=%u rssi=%ld peers=%u rx=%lu "
+                "tx_ok=%lu tx_fail=%lu drop=%lu\n",
                 net.state,
                 net.mode,
                 net.sta_connected ? 1U : 0U,
@@ -626,8 +634,10 @@ void printNetworkStatus() {
                 net.ip,
                 net.sta_ssid[0] != '\0' ? net.sta_ssid : "n/a",
                 net.ap_ssid[0] != '\0' ? net.ap_ssid : "n/a",
+                static_cast<unsigned int>(net.ap_clients),
                 net.local_target[0] != '\0' ? net.local_target : "n/a",
                 net.local_match ? 1U : 0U,
+                net.local_retry_paused ? 1U : 0U,
                 static_cast<long>(net.rssi),
                 net.espnow_peer_count,
                 static_cast<unsigned long>(net.espnow_rx_packets),
@@ -841,6 +851,8 @@ void webFillWifiStatus(JsonObject out, const NetworkManager::Snapshot& net) {
   out["ap_active"] = net.ap_enabled;
   out["ap_ssid"] = net.ap_ssid;
   out["ap_ip"] = (!net.sta_connected && net.ap_enabled) ? net.ip : "";
+  out["ap_clients"] = net.ap_clients;
+  out["local_retry_paused"] = net.local_retry_paused;
   out["mode"] = net.mode;
 }
 
@@ -984,6 +996,8 @@ void webSendStatus() {
   network["ap_ssid"] = net.ap_ssid;
   network["local_target"] = net.local_target;
   network["local_match"] = net.local_match;
+  network["ap_clients"] = net.ap_clients;
+  network["local_retry_paused"] = net.local_retry_paused;
   network["ip"] = net.ip;
   network["rssi"] = net.rssi;
 
@@ -1890,7 +1904,8 @@ void setup() {
   g_network.configureLocalPolicy(g_network_cfg.local_ssid,
                                  g_network_cfg.local_password,
                                  g_network_cfg.force_ap_if_not_local,
-                                 g_network_cfg.local_retry_ms);
+                                 g_network_cfg.local_retry_ms,
+                                 g_network_cfg.pause_local_retry_when_ap_client);
   if (g_network_cfg.local_ssid[0] != '\0') {
     const bool connect_started = g_network.connectSta(g_network_cfg.local_ssid, g_network_cfg.local_password);
     Serial.printf("[NET] boot wifi target=%s started=%u\n",

@@ -9,6 +9,34 @@
 7. Consigner les logs et artefacts produits (logs/rc_live/freenove_esp32s3_YYYYMMDD.log, artifacts/rc_live/freenove_esp32s3_YYYYMMDD.html).
 8. Documenter toute anomalie ou fail dans AGENT_TODO.md.
 
+## [2026-02-21] Freenove AP fallback dédié (anti-oscillation hors Les cils) (Codex)
+
+- Contexte coordination merge train: PR Zacus #101 mergée, puis patch dédié AP fallback.
+- Patch runtime réseau:
+  - séparation SSID local vs AP fallback (`local_ssid=Les cils`, `ap_default_ssid=Freenove-Setup`)
+  - nouveau flag config: `pause_local_retry_when_ap_client`
+  - retry STA vers `Les cils` mis en pause si client connecté à l'AP fallback
+  - nouveaux indicateurs exposés:
+    - série `NET_STATUS`: `ap_clients`, `local_retry_paused`
+    - WebUI `/api/status` + `/api/network/wifi`: `ap_clients`, `local_retry_paused`
+- Fichiers touchés:
+  - `data/story/apps/APP_WIFI.json`
+  - `hardware/firmware/ui_freenove_allinone/include/network_manager.h`
+  - `hardware/firmware/ui_freenove_allinone/src/network_manager.cpp`
+  - `hardware/firmware/ui_freenove_allinone/src/main.cpp`
+- Notes:
+  - pas de constantes hardcodées nouvelles pour credentials AP en dehors de la config runtime/littlefs
+  - comportement historique conservé si `pause_local_retry_when_ap_client=false`.
+  - validations exécutées (PIO only):
+    - `pio run -e freenove_esp32s3_full_with_ui` ✅
+    - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅
+    - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅
+    - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+    - série `NET_STATUS`, `SC_REVALIDATE`, `SC_REVALIDATE_ALL`, `ESPNOW_STATUS_JSON` ✅
+    - WebUI `GET /api/status`, `GET /api/network/wifi` (champs `ap_clients`, `local_retry_paused`) ✅
+  - limite de validation:
+    - le cas `local_retry_paused=1` nécessite un client connecté sur l'AP fallback pendant l'absence de `Les cils` (non reproduit sur ce run).
+
 ## [2026-02-21] Freenove story/ui/network pass final + revalidate step(x) (Codex)
 
 - Checkpoint sécurité exécuté:

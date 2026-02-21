@@ -21,6 +21,24 @@
   - PR checks: `story toolchain`, `validate`, `build env` (esp32dev/esp32_release/esp8266_oled/ui_rp2040_*) pass.
   - PR #105 mergeée (commit `04e4e50`) avec workflow OK.
 
+## [2026-02-21] Coordination Orchestrator binôme (Kill_LIFE + Zacus + RTC)
+
+- PR Kill_LIFE `#11` a été vérifiée et validée manuellement (`scope`):
+  - scripts/tools d'orchestration (`tools/ai/zeroclaw_*`, y compris `zeroclaw_stack_up.sh`, `zeroclaw_hw_firmware_loop.sh`, `zeroclaw_watch_1min.sh`);
+  - docs techniques `specs/*`.
+- Vérification stricte:
+  - `gh pr checks 11 --repo electron-rare/Kill_LIFE` : tous ✅ (`api_contract`, `lint-and-contract`, `ZeroClaw Dual Orchestrator`, etc.).
+  - aucun artefact hors-scope ajouté dans le PR.
+- Merge status:
+  - PR fermé via squash (commit `e8e44048a8b36b7debcb12788183b34045dde7f2`) sur `main`.
+  - commentaire de clôture codex publié (PASS) dans PR #11.
+- Coordination inter-repos:
+  - PR Zacus déjà alignée côté AP/ESP-NOW/WebUI (PRs/faits et mergeés précédemment dans ce chantier).
+  - `RTC_BL_PHONE`: aucun PR ouvert en cours au moment du contrôle (`gh pr list --state open` vide).
+- Actions de traçabilité:
+  - pas de dette bloquante détectée.
+  - prochaine étape: continuer surveillance post-merge (runbook ZeroClaw/CI + vérification liaison `watcher`).
+
 ## [2026-02-21] Freenove AP fallback dédié (anti-oscillation hors Les cils) (Codex)
 
 - Contexte coordination merge train: PR Zacus #101 mergée, puis patch dédié AP fallback.

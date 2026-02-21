@@ -3,6 +3,8 @@ export type ScenarioMeta = {
   duration_s?: number
   estimated_duration_s?: number
   description?: string
+  current_step?: string
+  is_current?: boolean
 }
 
 export type StreamMessage = {

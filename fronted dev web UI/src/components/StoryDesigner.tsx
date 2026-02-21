@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { yaml } from '@codemirror/lang-yaml'
+import type { DeviceCapabilities } from '../lib/deviceApi'
 
 type ValidationResult = {
   valid: boolean
@@ -17,21 +18,73 @@ type StoryDesignerProps = {
   onValidate: (yaml: string) => Promise<ValidationResult>
   onDeploy: (yaml: string) => Promise<DeployResult>
   onTestRun: (yaml: string) => Promise<void>
+  capabilities: DeviceCapabilities
 }
 
 const TEMPLATE_LIBRARY: Record<string, string> = {
-  DEFAULT: '# Template placeholder. Replace with real spec.\nscenario_id: DEFAULT\nsteps: []\n',
-  EXPRESS: '# Template placeholder. Replace with real spec.\nscenario_id: EXPRESS\nsteps: []\n',
-  EXPRESS_DONE: '# Template placeholder. Replace with real spec.\nscenario_id: EXPRESS_DONE\nsteps: []\n',
-  SPECTRE: '# Template placeholder. Replace with real spec.\nscenario_id: SPECTRE\nsteps: []\n',
+  DEFAULT: `id: DEFAULT
+version: 2
+initial_step_id: STEP_WAIT_UNLOCK
+steps:
+  - id: STEP_WAIT_UNLOCK
+    screen_scene_id: SCENE_LOCKED
+  - id: STEP_U_SON_PROTO
+    screen_scene_id: SCENE_BROKEN
+    audio_pack_id: PACK_BOOT_RADIO
+`,
+  EXAMPLE_UNLOCK_EXPRESS: `id: EXAMPLE_UNLOCK_EXPRESS
+version: 2
+initial_step_id: STEP_WAIT_UNLOCK
+steps:
+  - id: STEP_WAIT_UNLOCK
+    screen_scene_id: SCENE_LOCKED
+  - id: STEP_WIN
+    screen_scene_id: SCENE_REWARD
+    audio_pack_id: PACK_WIN
+`,
+  EXEMPLE_UNLOCK_EXPRESS_DONE: `id: EXEMPLE_UNLOCK_EXPRESS_DONE
+version: 2
+initial_step_id: STEP_WAIT_UNLOCK
+steps:
+  - id: STEP_WAIT_UNLOCK
+    screen_scene_id: SCENE_LOCKED
+  - id: STEP_WIN
+    screen_scene_id: SCENE_REWARD
+    audio_pack_id: PACK_WIN
+`,
+  SPECTRE_RADIO_LAB: `id: SPECTRE_RADIO_LAB
+version: 2
+initial_step_id: STEP_WAIT_UNLOCK
+steps:
+  - id: STEP_WAIT_UNLOCK
+    screen_scene_id: SCENE_LOCKED
+  - id: STEP_SONAR_SEARCH
+    screen_scene_id: SCENE_SEARCH
+  - id: STEP_MORSE_CLUE
+    screen_scene_id: SCENE_BROKEN
+`,
+  ZACUS_V1_UNLOCK_ETAPE2: `id: ZACUS_V1_UNLOCK_ETAPE2
+version: 2
+initial_step_id: STEP_BOOT_WAIT
+steps:
+  - id: STEP_BOOT_WAIT
+    screen_scene_id: SCENE_LOCKED
+  - id: STEP_BOOT_USON
+    screen_scene_id: SCENE_LOCKED
+    audio_pack_id: PACK_BOOT_RADIO
+`,
 }
 
-const StoryDesigner = ({ onValidate, onDeploy, onTestRun }: StoryDesignerProps) => {
-  const [draft, setDraft] = useState<string>(() => localStorage.getItem('story-draft') ?? '')
+const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryDesignerProps) => {
+  const [draft, setDraft] = useState<string>(() => localStorage.getItem('story-draft') ?? TEMPLATE_LIBRARY.DEFAULT)
   const [status, setStatus] = useState('')
   const [errors, setErrors] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [selectedTemplate, setSelectedTemplate] = useState('')
+
+  const validateEnabled = capabilities.canValidate
+  const deployEnabled = capabilities.canDeploy
+  const testRunEnabled = capabilities.canDeploy && capabilities.canSelectScenario && capabilities.canStart
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -58,19 +111,24 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun }: StoryDesignerProps) 
     setSelectedTemplate(value)
     if (value && TEMPLATE_LIBRARY[value]) {
       setDraft(TEMPLATE_LIBRARY[value])
-      setStatus('Template loaded. Review and update before deploy.')
+      setStatus('Template loaded. Review and adjust resources before deploy.')
       setErrors([])
     }
   }
 
   const handleValidate = async () => {
+    if (!validateEnabled) {
+      setStatus('Validation is unavailable in legacy mode.')
+      return
+    }
+
     setBusy(true)
     setStatus('')
     setErrors([])
     try {
       const result = await onValidate(draft)
       if (result.valid) {
-        setStatus('Validation passed ✓')
+        setStatus('Validation passed.')
       } else {
         setStatus('Validation errors found')
         setErrors(result.errors ?? ['Invalid YAML'])
@@ -83,6 +141,11 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun }: StoryDesignerProps) 
   }
 
   const handleDeploy = async () => {
+    if (!deployEnabled) {
+      setStatus('Deployment is unavailable in legacy mode.')
+      return
+    }
+
     setBusy(true)
     setStatus('')
     setErrors([])
@@ -101,6 +164,11 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun }: StoryDesignerProps) 
   }
 
   const handleTestRun = async () => {
+    if (!testRunEnabled) {
+      setStatus('Test run requires Story V2 select/start/deploy APIs.')
+      return
+    }
+
     setBusy(true)
     setStatus('')
     setErrors([])
@@ -122,6 +190,13 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun }: StoryDesignerProps) 
         <h2 className="text-2xl font-semibold">Story Designer</h2>
         <p className="text-sm text-[var(--ink-500)]">Draft YAML scenarios and deploy them to the device.</p>
       </div>
+
+      {(!validateEnabled || !deployEnabled) && (
+        <div className="glass-panel rounded-2xl border border-[var(--ink-500)] p-4 text-sm text-[var(--ink-700)]">
+          Story Designer is in read/edit mode. Validate/deploy actions require Story V2 API support.
+        </div>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="glass-panel rounded-3xl p-4">
           <CodeMirror
@@ -151,7 +226,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun }: StoryDesignerProps) 
               ))}
             </select>
             <p className="text-xs text-[var(--ink-500)]">
-              Templates are placeholders. Replace them with the real specs before deploy.
+              Templates use real scenario IDs and provide an editable starting point.
             </p>
           </div>
 
@@ -159,7 +234,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun }: StoryDesignerProps) 
             <button
               type="button"
               onClick={handleValidate}
-              disabled={busy}
+              disabled={busy || !validateEnabled}
               className="focus-ring min-h-[44px] rounded-full border border-[var(--ink-700)] px-4 text-sm font-semibold text-[var(--ink-700)] disabled:opacity-70"
             >
               Validate
@@ -167,7 +242,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun }: StoryDesignerProps) 
             <button
               type="button"
               onClick={handleDeploy}
-              disabled={busy}
+              disabled={busy || !deployEnabled}
               className="focus-ring min-h-[44px] rounded-full bg-[var(--accent-500)] px-4 text-sm font-semibold text-white disabled:opacity-70"
             >
               Deploy
@@ -175,7 +250,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun }: StoryDesignerProps) 
             <button
               type="button"
               onClick={handleTestRun}
-              disabled={busy}
+              disabled={busy || !testRunEnabled}
               className="focus-ring min-h-[44px] rounded-full border border-[var(--ink-500)] px-4 text-sm font-semibold text-[var(--ink-500)] disabled:opacity-70 sm:col-span-2"
             >
               Test Run (30 sec)
@@ -202,3 +277,4 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun }: StoryDesignerProps) 
 }
 
 export default StoryDesigner
+

@@ -1,12 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ScenarioSelector from './components/ScenarioSelector'
 import LiveOrchestrator from './components/LiveOrchestrator'
 import StoryDesigner from './components/StoryDesigner'
 import type { ScenarioMeta } from './types/story'
 import {
   API_BASE,
+  type ApiFlavor,
+  type DeviceCapabilities,
   deployStory,
-  getStoryList,
+  getCapabilities,
+  getRuntimeInfo,
+  listScenarios,
   pauseStory,
   resumeStory,
   selectStory,
@@ -21,6 +25,12 @@ const VIEW_LABELS: Record<ViewKey, string> = {
   selector: 'Scenario Selector',
   orchestrator: 'Live Orchestrator',
   designer: 'Story Designer',
+}
+
+const FLAVOR_LABELS: Record<ApiFlavor, string> = {
+  story_v2: 'Story V2 API',
+  freenove_legacy: 'Freenove Legacy API',
+  unknown: 'Unknown API',
 }
 
 const friendlyError = (err: unknown, fallback: string) => {
@@ -48,34 +58,60 @@ const App = () => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [activeScenario, setActiveScenario] = useState<string>('')
+  const [apiFlavor, setApiFlavor] = useState<ApiFlavor>('unknown')
+  const [capabilities, setCapabilities] = useState<DeviceCapabilities>(() => getCapabilities('unknown'))
+  const [resolvedBase, setResolvedBase] = useState(API_BASE)
+  const testRunTimerRef = useRef<number | null>(null)
 
   const loadScenarios = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
-      const result = await getStoryList()
-      setScenarios((result as ScenarioMeta[]) ?? [])
+      const runtime = await getRuntimeInfo()
+      setApiFlavor(runtime.flavor)
+      setCapabilities(runtime.capabilities)
+      setResolvedBase(runtime.base)
+
+      const result = await listScenarios()
+      setScenarios(result)
+      setActiveScenario((previous) => previous || result[0]?.id || '')
     } catch (err) {
-      setError(friendlyError(err, `Cannot reach device at ${API_BASE}. Check connection.`))
+      setError(friendlyError(err, `Cannot reach device at ${resolvedBase}. Check connection.`))
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [resolvedBase])
 
   useEffect(() => {
-    loadScenarios()
+    void loadScenarios()
   }, [loadScenarios])
 
-  const handlePlay = useCallback(async (scenarioId: string) => {
-    try {
-      await selectStory(scenarioId)
-      await startStory()
-      setActiveScenario(scenarioId)
-      setView('orchestrator')
-    } catch (err) {
-      throw new Error(friendlyError(err, 'Unable to start scenario.'))
-    }
-  }, [])
+  useEffect(
+    () => () => {
+      if (testRunTimerRef.current) {
+        window.clearTimeout(testRunTimerRef.current)
+      }
+    },
+    [],
+  )
+
+  const handlePlay = useCallback(
+    async (scenarioId: string) => {
+      try {
+        if (capabilities.canSelectScenario) {
+          await selectStory(scenarioId)
+        }
+        if (capabilities.canStart) {
+          await startStory()
+        }
+        setActiveScenario(scenarioId)
+        setView('orchestrator')
+      } catch (err) {
+        throw new Error(friendlyError(err, 'Unable to open scenario.'))
+      }
+    },
+    [capabilities.canSelectScenario, capabilities.canStart],
+  )
 
   const handleValidate = useCallback(async (yaml: string) => {
     try {
@@ -96,6 +132,10 @@ const App = () => {
   const handleTestRun = useCallback(
     async (yaml: string) => {
       try {
+        if (!capabilities.canDeploy || !capabilities.canSelectScenario || !capabilities.canStart) {
+          throw new Error('Test run is only available when Story V2 deploy/start APIs are enabled.')
+        }
+
         const deployResult = (await deployStory(yaml)) as { deployed?: string; status: 'ok' | 'error' }
         if (deployResult.status !== 'ok' || !deployResult.deployed) {
           throw new Error('Deploy failed before test run.')
@@ -104,15 +144,43 @@ const App = () => {
         await startStory()
         setActiveScenario(deployResult.deployed)
         setView('orchestrator')
-        window.setTimeout(() => {
+        if (testRunTimerRef.current) {
+          window.clearTimeout(testRunTimerRef.current)
+        }
+        testRunTimerRef.current = window.setTimeout(() => {
           setView('selector')
+          testRunTimerRef.current = null
         }, 30000)
       } catch (err) {
         throw new Error(friendlyError(err, 'Test run failed.'))
       }
     },
-    [],
+    [capabilities.canDeploy, capabilities.canSelectScenario, capabilities.canStart],
   )
+
+  const handlePause = useCallback(async () => {
+    try {
+      await pauseStory()
+    } catch (err) {
+      throw new Error(friendlyError(err, 'Unable to pause scenario.'))
+    }
+  }, [])
+
+  const handleResume = useCallback(async () => {
+    try {
+      await resumeStory()
+    } catch (err) {
+      throw new Error(friendlyError(err, 'Unable to resume scenario.'))
+    }
+  }, [])
+
+  const handleSkip = useCallback(async () => {
+    try {
+      await skipStory()
+    } catch (err) {
+      throw new Error(friendlyError(err, 'Unable to skip step.'))
+    }
+  }, [])
 
   const pageContent = useMemo(() => {
     if (view === 'selector') {
@@ -121,6 +189,8 @@ const App = () => {
           scenarios={scenarios}
           loading={loading}
           error={error}
+          flavor={apiFlavor}
+          capabilities={capabilities}
           onRetry={loadScenarios}
           onPlay={handlePlay}
         />
@@ -132,24 +202,49 @@ const App = () => {
         <LiveOrchestrator
           scenarioId={activeScenario || 'Unknown'}
           onBack={() => setView('selector')}
-          onPause={pauseStory}
-          onResume={resumeStory}
-          onSkip={skipStory}
+          onPause={handlePause}
+          onResume={handleResume}
+          onSkip={handleSkip}
+          capabilities={capabilities}
         />
       )
     }
 
     return (
-      <StoryDesigner onValidate={handleValidate} onDeploy={handleDeploy} onTestRun={handleTestRun} />
+      <StoryDesigner
+        onValidate={handleValidate}
+        onDeploy={handleDeploy}
+        onTestRun={handleTestRun}
+        capabilities={capabilities}
+      />
     )
-  }, [view, scenarios, loading, error, loadScenarios, handlePlay, activeScenario, handleDeploy, handleTestRun, handleValidate])
+  }, [
+    view,
+    scenarios,
+    loading,
+    error,
+    apiFlavor,
+    capabilities,
+    loadScenarios,
+    handlePlay,
+    activeScenario,
+    handlePause,
+    handleResume,
+    handleSkip,
+    handleDeploy,
+    handleTestRun,
+    handleValidate,
+  ])
 
   return (
     <div className="min-h-screen px-4 py-8 md:px-10">
       <header className="glass-panel mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 rounded-3xl px-6 py-4">
         <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-[var(--ink-500)]">Story V2</p>
+          <p className="text-xs uppercase tracking-[0.3em] text-[var(--ink-500)]">
+            {FLAVOR_LABELS[apiFlavor]}
+          </p>
           <h1 className="text-3xl font-semibold">Mission Control</h1>
+          <p className="text-xs text-[var(--ink-500)]">Target {resolvedBase}</p>
         </div>
         <nav className="flex flex-wrap gap-2">
           {(Object.keys(VIEW_LABELS) as ViewKey[]).map((key) => (

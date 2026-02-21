@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { ApiFlavor, DeviceCapabilities } from '../lib/deviceApi'
 import type { ScenarioMeta } from '../types/story'
 
 const formatDuration = (scenario: ScenarioMeta) => {
@@ -13,14 +14,18 @@ const formatDuration = (scenario: ScenarioMeta) => {
 type ScenarioSelectorProps = {
   scenarios: ScenarioMeta[]
   loading: boolean
+  flavor: ApiFlavor
+  capabilities: DeviceCapabilities
   error?: string
   onRetry: () => void
   onPlay: (scenarioId: string) => Promise<void>
 }
 
-const ScenarioSelector = ({ scenarios, loading, error, onRetry, onPlay }: ScenarioSelectorProps) => {
+const ScenarioSelector = ({ scenarios, loading, flavor, capabilities, error, onRetry, onPlay }: ScenarioSelectorProps) => {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [actionError, setActionError] = useState('')
+  const legacyMode = flavor === 'freenove_legacy'
+  const playLabel = capabilities.canSelectScenario || capabilities.canStart ? 'Play' : 'Open monitor'
 
   const handlePlay = async (scenarioId: string) => {
     setActionError('')
@@ -69,16 +74,41 @@ const ScenarioSelector = ({ scenarios, loading, error, onRetry, onPlay }: Scenar
         </div>
       )}
 
+      {legacyMode && (
+        <div className="glass-panel rounded-2xl border border-[var(--ink-500)] p-4 text-sm text-[var(--ink-700)]">
+          Legacy mode detected. Scenario selection and start are unavailable, but you can monitor and use supported
+          runtime controls.
+        </div>
+      )}
+
+      {!loading && !error && scenarios.length === 0 && (
+        <div className="glass-panel rounded-2xl border border-[var(--ink-500)] p-4 text-sm text-[var(--ink-700)]">
+          No scenario metadata available from the connected device.
+        </div>
+      )}
+
       {!loading && !error && (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {scenarios.map((scenario) => (
             <article key={scenario.id} className="glass-panel flex h-full flex-col justify-between gap-4 rounded-3xl p-5">
               <div className="space-y-2">
-                <h3 className="text-xl font-semibold">{scenario.id}</h3>
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-xl font-semibold">{scenario.id}</h3>
+                  {scenario.is_current && (
+                    <span className="rounded-full border border-[var(--ink-500)] px-2 py-1 text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">
+                      Current
+                    </span>
+                  )}
+                </div>
                 <div className="text-xs uppercase tracking-[0.2em] text-[var(--ink-500)]">{formatDuration(scenario)}</div>
                 <p className="text-sm text-[var(--ink-700)]">
                   {scenario.description ?? 'No description provided.'}
                 </p>
+                {scenario.current_step && (
+                  <p className="text-xs uppercase tracking-[0.2em] text-[var(--ink-500)]">
+                    Step {scenario.current_step}
+                  </p>
+                )}
               </div>
               <button
                 type="button"
@@ -86,7 +116,7 @@ const ScenarioSelector = ({ scenarios, loading, error, onRetry, onPlay }: Scenar
                 disabled={activeId === scenario.id}
                 className="focus-ring min-h-[44px] rounded-full bg-[var(--accent-500)] px-4 text-sm font-semibold text-white transition hover:bg-[var(--accent-700)] disabled:cursor-not-allowed disabled:opacity-70"
               >
-                {activeId === scenario.id ? 'Starting...' : 'Play'}
+                {activeId === scenario.id ? 'Opening...' : playLabel}
               </button>
             </article>
           ))}

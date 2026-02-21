@@ -1,31 +1,30 @@
 import { useEffect, useRef, useState } from 'react'
+import { connectStream } from '../lib/deviceApi'
 import type { StreamMessage } from '../types/story'
 
 type StreamStatus = 'connecting' | 'open' | 'closed' | 'error'
+type StreamTransport = 'ws' | 'sse' | 'none'
 
 type StreamOptions = {
   onMessage: (message: StreamMessage) => void
 }
 
-export const useStoryStream = (url: string, options: StreamOptions) => {
+export const useStoryStream = (options: StreamOptions) => {
   const { onMessage } = options
   const [status, setStatus] = useState<StreamStatus>('connecting')
+  const [transport, setTransport] = useState<StreamTransport>('none')
   const retryRef = useRef(0)
   const reconnectTimerRef = useRef<number | null>(null)
   const activeRef = useRef(true)
-  const socketRef = useRef<WebSocket | null>(null)
+  const connectionRef = useRef<{ close: () => void } | null>(null)
 
   useEffect(() => {
     activeRef.current = true
 
-    const cleanupSocket = () => {
-      if (socketRef.current) {
-        socketRef.current.onopen = null
-        socketRef.current.onclose = null
-        socketRef.current.onerror = null
-        socketRef.current.onmessage = null
-        socketRef.current.close()
-        socketRef.current = null
+    const cleanupConnection = () => {
+      if (connectionRef.current) {
+        connectionRef.current.close()
+        connectionRef.current = null
       }
     }
 
@@ -33,57 +32,65 @@ export const useStoryStream = (url: string, options: StreamOptions) => {
       if (!activeRef.current) {
         return
       }
-      const delay = Math.min(1000 * 2 ** retryRef.current, 30000)
+      if (reconnectTimerRef.current) {
+        window.clearTimeout(reconnectTimerRef.current)
+      }
+      const delay = Math.min(1000 * 2 ** retryRef.current, 10000)
       retryRef.current += 1
       reconnectTimerRef.current = window.setTimeout(() => {
-        connect()
+        void connect()
       }, delay)
     }
 
-    const connect = () => {
+    const connect = async () => {
       if (!activeRef.current) {
         return
       }
 
-      cleanupSocket()
+      cleanupConnection()
       setStatus('connecting')
-      const socket = new WebSocket(url)
-      socketRef.current = socket
-
-      socket.onopen = () => {
-        retryRef.current = 0
-        setStatus('open')
-      }
-
-      socket.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data) as StreamMessage
-          onMessage(payload)
-        } catch {
-          onMessage({ type: 'error', data: { message: 'Invalid stream payload' } })
+      try {
+        const connection = await connectStream({
+          onMessage,
+          onStatus: (nextStatus) => {
+            setStatus(nextStatus)
+            if (nextStatus === 'open') {
+              retryRef.current = 0
+            }
+            if (nextStatus === 'closed') {
+              scheduleReconnect()
+            }
+          },
+        })
+        if (!activeRef.current) {
+          connection.close()
+          return
         }
-      }
-
-      socket.onerror = () => {
+        connectionRef.current = connection
+        setTransport(connection.kind)
+      } catch (error) {
         setStatus('error')
-      }
-
-      socket.onclose = () => {
-        setStatus('closed')
+        onMessage({
+          type: 'error',
+          data: {
+            message: error instanceof Error ? error.message : 'Unable to connect to story stream',
+          },
+        })
         scheduleReconnect()
       }
     }
 
-    connect()
+    void connect()
 
     return () => {
       activeRef.current = false
       if (reconnectTimerRef.current) {
         window.clearTimeout(reconnectTimerRef.current)
       }
-      cleanupSocket()
+      cleanupConnection()
+      setTransport('none')
     }
-  }, [url, onMessage])
+  }, [onMessage])
 
-  return { status }
+  return { status, transport }
 }

@@ -55,6 +55,7 @@ void NetworkManager::update(uint32_t now_ms) {
   }
 
   const bool connected_to_local = isConnectedToLocalTarget();
+  const bool was_retry_paused = local_retry_paused_;
   bool force_refresh = false;
 
   if (sta_connecting_) {
@@ -80,8 +81,20 @@ void NetworkManager::update(uint32_t now_ms) {
 
   const bool should_retry_local = local_target_ssid_[0] != '\0' &&
                                   (force_ap_if_not_local_ ? !connected_to_local : (WiFi.status() != WL_CONNECTED));
+  const uint8_t ap_clients = (fallback_ap_active_ && !manual_ap_active_) ? WiFi.softAPgetStationNum() : 0U;
+  local_retry_paused_ =
+      should_retry_local && fallback_ap_active_ && pause_local_retry_when_ap_client_ && (ap_clients > 0U);
+  if (local_retry_paused_ != was_retry_paused) {
+    force_refresh = true;
+  }
+
   if (should_retry_local) {
-    if (!sta_connecting_ && (next_local_retry_at_ms_ == 0U || timeReached(now_ms, next_local_retry_at_ms_))) {
+    if (local_retry_paused_) {
+      if (next_local_retry_at_ms_ == 0U || timeReached(now_ms, next_local_retry_at_ms_)) {
+        next_local_retry_at_ms_ = now_ms + local_retry_ms_;
+        Serial.printf("[NET] local retry paused ap_clients=%u\n", ap_clients);
+      }
+    } else if (!sta_connecting_ && (next_local_retry_at_ms_ == 0U || timeReached(now_ms, next_local_retry_at_ms_))) {
       if (fallback_ap_active_ && equalsIgnoreCase(fallback_ap_ssid_, local_target_ssid_)) {
         // Avoid self-association when fallback AP and local target share the same SSID.
         WiFi.softAPdisconnect(true);
@@ -96,6 +109,7 @@ void NetworkManager::update(uint32_t now_ms) {
     }
   } else {
     next_local_retry_at_ms_ = 0U;
+    local_retry_paused_ = false;
   }
 
   if (!force_refresh && (now_ms - last_refresh_ms_) < 350U) {
@@ -118,7 +132,8 @@ void NetworkManager::configureFallbackAp(const char* ssid, const char* password)
 void NetworkManager::configureLocalPolicy(const char* ssid,
                                           const char* password,
                                           bool force_if_not_local,
-                                          uint32_t retry_ms) {
+                                          uint32_t retry_ms,
+                                          bool pause_retry_when_ap_client) {
   if (ssid != nullptr && ssid[0] != '\0') {
     copyText(local_target_ssid_, sizeof(local_target_ssid_), ssid);
   }
@@ -126,15 +141,18 @@ void NetworkManager::configureLocalPolicy(const char* ssid,
     copyText(local_target_password_, sizeof(local_target_password_), password);
   }
   force_ap_if_not_local_ = force_if_not_local;
+  pause_local_retry_when_ap_client_ = pause_retry_when_ap_client;
   if (retry_ms >= 1000U) {
     local_retry_ms_ = retry_ms;
   }
+  local_retry_paused_ = false;
   next_local_retry_at_ms_ = 0U;
   refreshSnapshot();
-  Serial.printf("[NET] local policy target=%s force_ap_if_not_local=%u retry_ms=%lu\n",
+  Serial.printf("[NET] local policy target=%s force_ap_if_not_local=%u retry_ms=%lu pause_retry_on_ap_client=%u\n",
                 local_target_ssid_,
                 force_ap_if_not_local_ ? 1U : 0U,
-                static_cast<unsigned long>(local_retry_ms_));
+                static_cast<unsigned long>(local_retry_ms_),
+                pause_local_retry_when_ap_client_ ? 1U : 0U);
 }
 
 bool NetworkManager::connectSta(const char* ssid, const char* password) {
@@ -168,6 +186,7 @@ void NetworkManager::disconnectSta() {
   }
   WiFi.disconnect(true, false);
   sta_connecting_ = false;
+  local_retry_paused_ = false;
   next_local_retry_at_ms_ = 0U;
   snapshot_.sta_ssid[0] = '\0';
   if (shouldForceFallbackAp() && !manual_ap_active_ && fallback_ap_ssid_[0] != '\0') {
@@ -263,6 +282,7 @@ void NetworkManager::stopAp() {
   WiFi.softAPdisconnect(true);
   manual_ap_active_ = false;
   fallback_ap_active_ = false;
+  local_retry_paused_ = false;
   if (WiFi.status() == WL_CONNECTED || sta_connecting_) {
     WiFi.mode(WIFI_STA);
   }
@@ -713,6 +733,7 @@ void NetworkManager::refreshSnapshot() {
   snapshot_.local_match = local_match;
   snapshot_.fallback_ap_active =
       fallback_ap_active_ && !manual_ap_active_ && snapshot_.ap_enabled && !snapshot_.local_match;
+  snapshot_.local_retry_paused = local_retry_paused_;
   snapshot_.rssi = snapshot_.sta_connected ? WiFi.RSSI() : 0;
   copyText(snapshot_.local_target, sizeof(snapshot_.local_target), local_target_ssid_);
   copyText(snapshot_.mode, sizeof(snapshot_.mode), wifiModeLabel(static_cast<uint8_t>(mode)));
@@ -734,8 +755,10 @@ void NetworkManager::refreshSnapshot() {
 
   if (snapshot_.ap_enabled) {
     copyText(snapshot_.ap_ssid, sizeof(snapshot_.ap_ssid), WiFi.softAPSSID().c_str());
+    snapshot_.ap_clients = WiFi.softAPgetStationNum();
   } else {
     snapshot_.ap_ssid[0] = '\0';
+    snapshot_.ap_clients = 0U;
   }
 
   snapshot_.espnow_peer_count = peer_cache_count_;

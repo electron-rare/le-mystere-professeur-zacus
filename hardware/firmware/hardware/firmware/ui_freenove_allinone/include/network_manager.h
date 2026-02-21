@@ -14,6 +14,7 @@ class NetworkManager {
     bool espnow_enabled = false;
     bool fallback_ap_active = false;
     bool local_match = false;
+    bool local_retry_paused = false;
     char state[16] = "idle";
     char mode[12] = "OFF";
     char sta_ssid[33] = {0};
@@ -21,6 +22,7 @@ class NetworkManager {
     char local_target[33] = {0};
     char ip[20] = "0.0.0.0";
     int32_t rssi = 0;
+    uint8_t ap_clients = 0U;
     uint8_t espnow_peer_count = 0U;
     uint32_t espnow_rx_packets = 0U;
     uint32_t espnow_tx_ok = 0U;
@@ -38,7 +40,8 @@ class NetworkManager {
   void configureLocalPolicy(const char* ssid,
                             const char* password,
                             bool force_if_not_local,
-                            uint32_t retry_ms);
+                            uint32_t retry_ms,
+                            bool pause_retry_when_ap_client);
   bool connectSta(const char* ssid, const char* password);
   void disconnectSta();
   bool startAp(const char* ssid, const char* password);
@@ -99,6 +102,8 @@ class NetworkManager {
   bool manual_ap_active_ = false;
   bool fallback_ap_active_ = false;
   bool force_ap_if_not_local_ = true;
+  bool pause_local_retry_when_ap_client_ = false;
+  bool local_retry_paused_ = false;
   uint32_t last_refresh_ms_ = 0U;
   uint32_t sta_connect_requested_at_ms_ = 0U;
   uint32_t next_local_retry_at_ms_ = 0U;

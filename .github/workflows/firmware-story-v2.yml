@@ -31,7 +31,7 @@ on:
 
 concurrency:
   group: firmware-story-v2-${{ github.ref }}
-   cancel-in-progress: true
+  cancel-in-progress: true
 
 jobs:
   story-toolchain:
@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: hardware/firmware/esp32_audio
+        working-directory: hardware/firmware
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -75,10 +75,10 @@ jobs:
         with:
           name: story-toolchain-logs
           path: |
-            hardware/firmware/esp32_audio/reports/ci/story_validate.log
-            hardware/firmware/esp32_audio/reports/ci/story_generate.log
-            hardware/firmware/esp32_audio/reports/ci/story_toolchain.log
-            hardware/firmware/esp32_audio/src/story/generated/*
+            hardware/firmware/reports/ci/story_validate.log
+            hardware/firmware/reports/ci/story_generate.log
+            hardware/firmware/reports/ci/story_toolchain.log
+            hardware/firmware/src/story/generated/*
           if-no-files-found: error
 
   build-firmware:

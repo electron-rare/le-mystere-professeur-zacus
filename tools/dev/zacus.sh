@@ -6,6 +6,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 FW_ROOT="$REPO_ROOT/hardware/firmware"
 RC_RUNNER="$FW_ROOT/tools/dev/run_matrix_and_smoke.sh"
 SMOKE_SCRIPT="$FW_ROOT/tools/dev/serial_smoke.py"
+ZEROCLAW_PREFLIGHT="$SCRIPT_DIR/zeroclaw_hw_preflight.sh"
 PROMPT_DIR="$SCRIPT_DIR/codex_prompts"
 ARTIFACT_ROOT="$REPO_ROOT/artifacts"
 PORTS_ARTIFACT_ROOT="$ARTIFACT_ROOT/ports"
@@ -35,6 +36,7 @@ Commands:
   rc       Run the RC live gate (always strict)
   smoke    Run the serial smoke helper (pass --role ... args)
   ports    Resolve ports once and show summary
+  zeroclaw-preflight  Run ZeroClaw USB preflight before hardware actions
   codex    Invoke Codex CLI with a prompt
   menu     Show the Zacus cockpit menu
   help     Show this usage
@@ -163,6 +165,14 @@ cmd_rc() {
 cmd_smoke() {
   info "running serial smoke"
   (cd "$FW_ROOT" && python3 "$SMOKE_SCRIPT" "$@")
+}
+
+cmd_zeroclaw_preflight() {
+  if [[ ! -x "$ZEROCLAW_PREFLIGHT" ]]; then
+    die "missing preflight script: $ZEROCLAW_PREFLIGHT"
+  fi
+  info "running zeroclaw hardware preflight"
+  "$ZEROCLAW_PREFLIGHT" "$@"
 }
 
 ensure_codex_ready() {
@@ -329,6 +339,7 @@ cmd_menu() {
     printf '  2) Serial smoke\n'
     printf '  3) Codex (run prompt)\n'
     printf '  4) Ports: resolve now\n'
+    printf '  5) ZeroClaw preflight\n'
     printf '  0) Exit\n'
     read -rp 'Choice: ' choice
     case "$choice" in
@@ -343,6 +354,9 @@ cmd_menu() {
         ;;
       4)
         cmd_ports
+        ;;
+      5)
+        cmd_zeroclaw_preflight --require-port
         ;;
       0)
         return 0
@@ -365,6 +379,9 @@ case "$command" in
     ;;
   ports)
     cmd_ports
+    ;;
+  zeroclaw-preflight|zc-preflight)
+    cmd_zeroclaw_preflight "$@"
     ;;
   codex)
     cmd_codex "$@"

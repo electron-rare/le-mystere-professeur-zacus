@@ -34,6 +34,7 @@ Dossier : `printables/`
 - `docs/index.md` + `docs/repo-status.md` pour la navigation et l’état du dépôt
 - `include-humain-IA/` (contenus annexes, renommé pour la portabilité)
 - `tools/dev/zacus.sh codex --prompt tools/dev/codex_prompts/zacus_overhaul_one_shot.md` lance le prompt de Codex directement depuis le dépôt.
+- `tools/dev/zacus.sh zeroclaw-preflight --require-port` lance le préflight USB ZeroClaw avant actions hardware.
 - Les artifacts de résolution de ports sont écrits sous `artifacts/ports/<timestamp>/ports_resolve.json` avec un pointeur `artifacts/ports/latest_ports_resolve.json`. Utilisez `ZACUS_MOCK_PORTS=1` (et `ZACUS_PORTS_FIXTURE=tools/test/fixtures/ports_list_macos.txt`) pour tester la boucle sans matériel.
 - `tools/dev/zacus.sh codex --prompt tools/dev/codex_prompts/zacus_overhaul_one_shot.md` lance le prompt de Codex directement depuis le dépôt.
 

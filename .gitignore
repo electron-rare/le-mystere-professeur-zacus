@@ -17,6 +17,11 @@ logs/
 **/logs/
 **/*.log
 
+# ZeroClaw local runtime (generated locally, never committed)
+/.zeroclaw/
+/config.toml
+/workspace/
+
 # Artifacts and caches
 artifacts/
 __pycache__/

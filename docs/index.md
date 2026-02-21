@@ -13,6 +13,7 @@
 - Styleguide (ton & structure) : `docs/STYLEGUIDE.md`
 - Workflows (validate/export) : `docs/WORKFLOWS.md`
 - Glossaire des identifiants : `docs/GLOSSARY.md`
+- Orchestration ZeroClaw (préflight + agent) : `docs/zeroclaw_orchestration.md`
 - Contribuer (workflow & licence) : `CONTRIBUTING.md`
 
 ## Astuce

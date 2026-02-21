@@ -32,6 +32,9 @@
 - Merge status:
   - PR fermé via squash (commit `e8e44048a8b36b7debcb12788183b34045dde7f2`) sur `main`.
   - commentaire de clôture codex publié (PASS) dans PR #11.
+- Correctif suite: PR Kill_LIFE `#12` créé pour durcir le fallback mismatch:
+  - `tools/ai/zeroclaw_hw_firmware_loop.sh` vérifie maintenant la stabilité du port USB avant fallback env.
+  - merge PR #12 (squash) validé, commit `5f517ae82b95c1988d6c07e888194dcc28e02ff3`.
 - Coordination inter-repos:
   - PR Zacus déjà alignée côté AP/ESP-NOW/WebUI (PRs/faits et mergeés précédemment dans ce chantier).
   - `RTC_BL_PHONE`: aucun PR ouvert en cours au moment du contrôle (`gh pr list --state open` vide).

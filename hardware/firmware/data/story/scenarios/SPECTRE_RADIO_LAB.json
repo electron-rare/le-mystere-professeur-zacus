@@ -1,16 +1,16 @@
 {
-  "id": "DEFAULT",
-  "scenario": "DEFAULT",
+  "id": "SPECTRE_RADIO_LAB",
+  "scenario": "SPECTRE_RADIO_LAB",
   "version": 2,
   "initial_step": "STEP_WAIT_UNLOCK",
   "hardware_events": {
     "button_short_1": "UNLOCK",
     "button_short_5": "BTN_NEXT",
-    "button_long_3": "FORCE_ETAPE2",
     "button_long_4": "FORCE_DONE",
     "espnow_event": "SERIAL:<payload>"
   },
   "app_bindings": [
+    "APP_LA",
     "APP_AUDIO",
     "APP_SCREEN",
     "APP_GATE",
@@ -19,7 +19,7 @@
   ],
   "actions_catalog": [
     "ACTION_TRACE_STEP",
-    "ACTION_FORCE_ETAPE2",
+    "ACTION_QUEUE_SONAR",
     "ACTION_REFRESH_SD"
   ],
   "steps": [
@@ -28,17 +28,18 @@
       "screen_scene_id": "SCENE_LOCKED"
     },
     {
-      "id": "STEP_U_SON_PROTO",
-      "screen_scene_id": "SCENE_BROKEN",
-      "audio_pack_id": "PACK_BOOT_RADIO"
+      "id": "STEP_SONAR_SEARCH",
+      "screen_scene_id": "SCENE_SEARCH",
+      "audio_pack_id": "PACK_SONAR_HINT"
     },
     {
-      "id": "STEP_WAIT_ETAPE2",
-      "screen_scene_id": "SCENE_LA_DETECT"
+      "id": "STEP_MORSE_CLUE",
+      "screen_scene_id": "SCENE_SEARCH",
+      "audio_pack_id": "PACK_MORSE_HINT"
     },
     {
-      "id": "STEP_ETAPE2",
-      "screen_scene_id": "SCENE_WIN",
+      "id": "STEP_WIN",
+      "screen_scene_id": "SCENE_REWARD",
       "audio_pack_id": "PACK_WIN"
     },
     {

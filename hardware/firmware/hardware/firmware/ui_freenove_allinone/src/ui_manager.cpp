@@ -105,6 +105,31 @@ bool parseHexColor(const char* text, lv_color_t* out_color) {
   return true;
 }
 
+const char* mapSymbolToken(const char* symbol) {
+  if (symbol == nullptr || symbol[0] == '\0') {
+    return nullptr;
+  }
+  if (std::strcmp(symbol, "LOCK") == 0) {
+    return LV_SYMBOL_CLOSE;
+  }
+  if (std::strcmp(symbol, "ALERT") == 0) {
+    return LV_SYMBOL_WARNING;
+  }
+  if (std::strcmp(symbol, "SCAN") == 0) {
+    return LV_SYMBOL_EYE_OPEN;
+  }
+  if (std::strcmp(symbol, "WIN") == 0) {
+    return LV_SYMBOL_OK;
+  }
+  if (std::strcmp(symbol, "READY") == 0) {
+    return LV_SYMBOL_POWER;
+  }
+  if (std::strcmp(symbol, "RUN") == 0) {
+    return LV_SYMBOL_PLAY;
+  }
+  return nullptr;
+}
+
 }  // namespace
 
 bool UiManager::begin() {
@@ -180,32 +205,47 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   const char* scenario_id = (scenario != nullptr && scenario->id != nullptr) ? scenario->id : "N/A";
   const char* scene_id = (screen_scene_id != nullptr && screen_scene_id[0] != '\0') ? screen_scene_id : "SCENE_READY";
 
+  String title = "MISSION";
+  String symbol = "RUN";
+  bool show_title = false;
+  bool show_symbol = true;
   SceneEffect effect = SceneEffect::kPulse;
+  uint16_t effect_speed_ms = 0U;
   lv_color_t bg = lv_color_hex(0x07132A);
   lv_color_t accent = lv_color_hex(0x2A76FF);
   lv_color_t secondary = lv_color_hex(0xE8F1FF);
 
   if (std::strcmp(scene_id, "SCENE_LOCKED") == 0) {
+    title = "VERROUILLE";
+    symbol = "LOCK";
     effect = SceneEffect::kPulse;
     bg = lv_color_hex(0x08152D);
     accent = lv_color_hex(0x3E8DFF);
     secondary = lv_color_hex(0xDBE8FF);
   } else if (std::strcmp(scene_id, "SCENE_BROKEN") == 0) {
+    title = "PROTO U-SON";
+    symbol = "ALERT";
     effect = SceneEffect::kBlink;
     bg = lv_color_hex(0x2A0508);
     accent = lv_color_hex(0xFF4A45);
     secondary = lv_color_hex(0xFFD5D1);
   } else if (std::strcmp(scene_id, "SCENE_LA_DETECT") == 0 || std::strcmp(scene_id, "SCENE_SEARCH") == 0) {
+    title = "DETECTION";
+    symbol = "SCAN";
     effect = SceneEffect::kScan;
     bg = lv_color_hex(0x041F1B);
     accent = lv_color_hex(0x2CE5A6);
     secondary = lv_color_hex(0xD9FFF0);
   } else if (std::strcmp(scene_id, "SCENE_WIN") == 0 || std::strcmp(scene_id, "SCENE_REWARD") == 0) {
+    title = "VICTOIRE";
+    symbol = "WIN";
     effect = SceneEffect::kCelebrate;
     bg = lv_color_hex(0x231038);
     accent = lv_color_hex(0xF4CB4A);
     secondary = lv_color_hex(0xFFF6C7);
   } else if (std::strcmp(scene_id, "SCENE_READY") == 0) {
+    title = "PRET";
+    symbol = "READY";
     effect = SceneEffect::kPulse;
     bg = lv_color_hex(0x0F2A12);
     accent = lv_color_hex(0x6CD96B);
@@ -216,7 +256,29 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     StaticJsonDocument<1024> document;
     const DeserializationError error = deserializeJson(document, screen_payload_json);
     if (!error) {
+      const char* payload_title = document["title"] | document["content"]["title"] | document["visual"]["title"] | "";
+      const char* payload_symbol = document["symbol"] | document["content"]["symbol"] | document["visual"]["symbol"] | "";
       const char* payload_effect = document["effect"] | document["visual"]["effect"] | document["content"]["effect"] | "";
+      if (payload_title[0] != '\0') {
+        title = payload_title;
+      }
+      if (payload_symbol[0] != '\0') {
+        symbol = payload_symbol;
+      }
+      if (document["show_title"].is<bool>()) {
+        show_title = document["show_title"].as<bool>();
+      } else if (document["visual"]["show_title"].is<bool>()) {
+        show_title = document["visual"]["show_title"].as<bool>();
+      } else if (document["content"]["show_title"].is<bool>()) {
+        show_title = document["content"]["show_title"].as<bool>();
+      }
+      if (document["show_symbol"].is<bool>()) {
+        show_symbol = document["show_symbol"].as<bool>();
+      } else if (document["visual"]["show_symbol"].is<bool>()) {
+        show_symbol = document["visual"]["show_symbol"].as<bool>();
+      } else if (document["content"]["show_symbol"].is<bool>()) {
+        show_symbol = document["content"]["show_symbol"].as<bool>();
+      }
       if (std::strcmp(payload_effect, "none") == 0 || std::strcmp(payload_effect, "steady") == 0) {
         effect = SceneEffect::kNone;
       } else if (std::strcmp(payload_effect, "pulse") == 0) {
@@ -237,6 +299,12 @@ void UiManager::renderScene(const ScenarioDef* scenario,
       parseHexColor(payload_bg, &bg);
       parseHexColor(payload_accent, &accent);
       parseHexColor(payload_secondary, &secondary);
+
+      if (document["effect_speed_ms"].is<unsigned int>()) {
+        effect_speed_ms = static_cast<uint16_t>(document["effect_speed_ms"].as<unsigned int>());
+      } else if (document["visual"]["effect_speed_ms"].is<unsigned int>()) {
+        effect_speed_ms = static_cast<uint16_t>(document["visual"]["effect_speed_ms"].as<unsigned int>());
+      }
     } else {
       Serial.printf("[UI] invalid scene payload (%s)\n", error.c_str());
     }
@@ -244,6 +312,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
 
   stopSceneAnimations();
   current_effect_ = effect;
+  effect_speed_ms_ = effect_speed_ms;
 
   lv_obj_set_style_bg_color(scene_root_, bg, LV_PART_MAIN);
   lv_obj_set_style_bg_color(scene_core_, accent, LV_PART_MAIN);
@@ -251,6 +320,21 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   lv_obj_set_style_border_color(scene_ring_outer_, accent, LV_PART_MAIN);
   lv_obj_set_style_border_color(scene_ring_inner_, secondary, LV_PART_MAIN);
   lv_obj_set_style_bg_color(scene_fx_bar_, accent, LV_PART_MAIN);
+  lv_obj_set_style_text_color(scene_title_label_, secondary, LV_PART_MAIN);
+  lv_obj_set_style_text_color(scene_symbol_label_, secondary, LV_PART_MAIN);
+  lv_label_set_text(scene_title_label_, title.c_str());
+  const char* symbol_glyph = mapSymbolToken(symbol.c_str());
+  lv_label_set_text(scene_symbol_label_, (symbol_glyph != nullptr) ? symbol_glyph : LV_SYMBOL_PLAY);
+  if (show_title) {
+    lv_obj_clear_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_add_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (show_symbol) {
+    lv_obj_clear_flag(scene_symbol_label_, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_add_flag(scene_symbol_label_, LV_OBJ_FLAG_HIDDEN);
+  }
   for (lv_obj_t* particle : scene_particles_) {
     lv_obj_set_style_bg_color(particle, secondary, LV_PART_MAIN);
   }
@@ -258,9 +342,12 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   lv_obj_set_style_bg_opa(scene_core_, audio_playing ? LV_OPA_COVER : LV_OPA_80, LV_PART_MAIN);
   applySceneEffect(effect);
   updatePageLine();
-  Serial.printf("[UI] scene=%s effect=%u scenario=%s audio=%u\n",
+  Serial.printf("[UI] scene=%s effect=%u speed=%u title=%u symbol=%u scenario=%s audio=%u\n",
                 scene_id,
                 static_cast<unsigned int>(effect),
+                static_cast<unsigned int>(effect_speed_ms_),
+                show_title ? 1U : 0U,
+                show_symbol ? 1U : 0U,
                 scenario_id,
                 audio_playing ? 1U : 0U);
 }
@@ -337,6 +424,20 @@ void UiManager::createWidgets() {
   lv_obj_set_style_text_opa(page_label_, LV_OPA_60, LV_PART_MAIN);
   lv_obj_set_style_text_color(page_label_, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
 
+  scene_title_label_ = lv_label_create(scene_root_);
+  scene_symbol_label_ = lv_label_create(scene_root_);
+  lv_obj_set_style_text_color(scene_title_label_, lv_color_hex(0xE8F1FF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(scene_symbol_label_, lv_color_hex(0xE8F1FF), LV_PART_MAIN);
+  lv_obj_set_style_text_font(scene_title_label_, &lv_font_montserrat_14, LV_PART_MAIN);
+  lv_obj_set_style_text_font(scene_symbol_label_, &lv_font_montserrat_18, LV_PART_MAIN);
+  lv_obj_set_style_text_opa(scene_title_label_, LV_OPA_80, LV_PART_MAIN);
+  lv_obj_set_style_text_opa(scene_symbol_label_, LV_OPA_90, LV_PART_MAIN);
+  lv_obj_align(scene_title_label_, LV_ALIGN_TOP_MID, 0, 10);
+  lv_obj_align(scene_symbol_label_, LV_ALIGN_CENTER, 0, 0);
+  lv_label_set_text(scene_title_label_, "MISSION");
+  lv_label_set_text(scene_symbol_label_, LV_SYMBOL_PLAY);
+  lv_obj_add_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
+
   stopSceneAnimations();
 }
 
@@ -410,6 +511,17 @@ void UiManager::stopSceneAnimations() {
     lv_obj_set_style_opa(scene_fx_bar_, LV_OPA_90, LV_PART_MAIN);
   }
 
+  if (scene_title_label_ != nullptr) {
+    lv_anim_del(scene_title_label_, nullptr);
+    lv_obj_set_style_opa(scene_title_label_, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_align(scene_title_label_, LV_ALIGN_TOP_MID, 0, 10);
+  }
+  if (scene_symbol_label_ != nullptr) {
+    lv_anim_del(scene_symbol_label_, nullptr);
+    lv_obj_set_style_opa(scene_symbol_label_, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_align(scene_symbol_label_, LV_ALIGN_CENTER, 0, 0);
+  }
+
   for (lv_obj_t* particle : scene_particles_) {
     if (particle == nullptr) {
       continue;
@@ -423,6 +535,13 @@ void UiManager::stopSceneAnimations() {
   if (page_label_ != nullptr && !lv_obj_has_flag(page_label_, LV_OBJ_FLAG_HIDDEN)) {
     lv_obj_align(page_label_, LV_ALIGN_BOTTOM_LEFT, 10, -8);
   }
+}
+
+uint16_t UiManager::resolveAnimMs(uint16_t fallback_ms) const {
+  if (effect_speed_ms_ < 80U) {
+    return fallback_ms;
+  }
+  return effect_speed_ms_;
 }
 
 void UiManager::applySceneEffect(SceneEffect effect) {
@@ -446,6 +565,7 @@ void UiManager::applySceneEffect(SceneEffect effect) {
   lv_anim_set_playback_time(&anim, 0);
 
   if (effect == SceneEffect::kPulse) {
+    const uint16_t pulse_ms = resolveAnimMs(640);
     int16_t core_small = min_dim / 4;
     if (core_small < 46) {
       core_small = 46;
@@ -457,8 +577,8 @@ void UiManager::applySceneEffect(SceneEffect effect) {
     lv_anim_set_var(&anim, scene_core_);
     lv_anim_set_exec_cb(&anim, animSetSize);
     lv_anim_set_values(&anim, core_small, core_large);
-    lv_anim_set_time(&anim, 640);
-    lv_anim_set_playback_time(&anim, 640);
+    lv_anim_set_time(&anim, pulse_ms);
+    lv_anim_set_playback_time(&anim, pulse_ms);
     lv_anim_start(&anim);
 
     if (scene_ring_inner_ != nullptr) {
@@ -467,15 +587,27 @@ void UiManager::applySceneEffect(SceneEffect effect) {
       lv_anim_set_var(&ring_anim, scene_ring_inner_);
       lv_anim_set_exec_cb(&ring_anim, animSetOpa);
       lv_anim_set_values(&ring_anim, 90, LV_OPA_COVER);
-      lv_anim_set_time(&ring_anim, 640);
-      lv_anim_set_playback_time(&ring_anim, 640);
+      lv_anim_set_time(&ring_anim, pulse_ms);
+      lv_anim_set_playback_time(&ring_anim, pulse_ms);
       lv_anim_set_repeat_count(&ring_anim, LV_ANIM_REPEAT_INFINITE);
       lv_anim_start(&ring_anim);
+    }
+    if (scene_symbol_label_ != nullptr) {
+      lv_anim_t symbol_anim;
+      lv_anim_init(&symbol_anim);
+      lv_anim_set_var(&symbol_anim, scene_symbol_label_);
+      lv_anim_set_exec_cb(&symbol_anim, animSetOpa);
+      lv_anim_set_values(&symbol_anim, 110, LV_OPA_COVER);
+      lv_anim_set_time(&symbol_anim, pulse_ms);
+      lv_anim_set_playback_time(&symbol_anim, pulse_ms);
+      lv_anim_set_repeat_count(&symbol_anim, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&symbol_anim);
     }
     return;
   }
 
   if (effect == SceneEffect::kScan) {
+    const uint16_t scan_ms = resolveAnimMs(920);
     int16_t bar_width = width - 84;
     if (bar_width < 90) {
       bar_width = 90;
@@ -486,23 +618,49 @@ void UiManager::applySceneEffect(SceneEffect effect) {
     lv_anim_set_var(&anim, scene_fx_bar_);
     lv_anim_set_exec_cb(&anim, animSetY);
     lv_anim_set_values(&anim, 20, height - 28);
-    lv_anim_set_time(&anim, 920);
-    lv_anim_set_playback_time(&anim, 920);
+    lv_anim_set_time(&anim, scan_ms);
+    lv_anim_set_playback_time(&anim, scan_ms);
     lv_anim_start(&anim);
+    if (scene_symbol_label_ != nullptr) {
+      lv_obj_align(scene_symbol_label_, LV_ALIGN_CENTER, 0, -8);
+      lv_anim_t symbol_scan;
+      lv_anim_init(&symbol_scan);
+      lv_anim_set_var(&symbol_scan, scene_symbol_label_);
+      lv_anim_set_exec_cb(&symbol_scan, animSetY);
+      lv_anim_set_values(&symbol_scan, (height / 2) - 24, (height / 2) + 12);
+      lv_anim_set_time(&symbol_scan, scan_ms);
+      lv_anim_set_playback_time(&symbol_scan, scan_ms);
+      lv_anim_set_repeat_count(&symbol_scan, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&symbol_scan);
+    }
     return;
   }
 
   if (effect == SceneEffect::kBlink) {
+    const uint16_t blink_ms = resolveAnimMs(170);
     lv_anim_set_var(&anim, scene_root_);
     lv_anim_set_exec_cb(&anim, animSetOpa);
     lv_anim_set_values(&anim, 120, LV_OPA_COVER);
-    lv_anim_set_time(&anim, 170);
-    lv_anim_set_playback_time(&anim, 170);
+    lv_anim_set_time(&anim, blink_ms);
+    lv_anim_set_playback_time(&anim, blink_ms);
     lv_anim_start(&anim);
+    if (scene_symbol_label_ != nullptr) {
+      lv_anim_t symbol_blink;
+      lv_anim_init(&symbol_blink);
+      lv_anim_set_var(&symbol_blink, scene_symbol_label_);
+      lv_anim_set_exec_cb(&symbol_blink, animSetOpa);
+      lv_anim_set_values(&symbol_blink, 80, LV_OPA_COVER);
+      lv_anim_set_time(&symbol_blink, blink_ms);
+      lv_anim_set_playback_time(&symbol_blink, blink_ms);
+      lv_anim_set_repeat_count(&symbol_blink, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&symbol_blink);
+    }
     return;
   }
 
   if (effect == SceneEffect::kCelebrate) {
+    const uint16_t celebrate_ms = resolveAnimMs(460);
+    const uint16_t celebrate_alt_ms = resolveAnimMs(420);
     if (scene_ring_outer_ != nullptr) {
       int16_t ring_small = min_dim - 88;
       if (ring_small < 84) {
@@ -517,8 +675,8 @@ void UiManager::applySceneEffect(SceneEffect effect) {
       lv_anim_set_var(&ring_anim, scene_ring_outer_);
       lv_anim_set_exec_cb(&ring_anim, animSetSize);
       lv_anim_set_values(&ring_anim, ring_small, ring_large);
-      lv_anim_set_time(&ring_anim, 460);
-      lv_anim_set_playback_time(&ring_anim, 460);
+      lv_anim_set_time(&ring_anim, celebrate_ms);
+      lv_anim_set_playback_time(&ring_anim, celebrate_ms);
       lv_anim_set_repeat_count(&ring_anim, LV_ANIM_REPEAT_INFINITE);
       lv_anim_start(&ring_anim);
     }
@@ -528,8 +686,8 @@ void UiManager::applySceneEffect(SceneEffect effect) {
     lv_anim_set_var(&width_anim, scene_fx_bar_);
     lv_anim_set_exec_cb(&width_anim, animSetWidth);
     lv_anim_set_values(&width_anim, 36, width - 36);
-    lv_anim_set_time(&width_anim, 420);
-    lv_anim_set_playback_time(&width_anim, 420);
+    lv_anim_set_time(&width_anim, celebrate_alt_ms);
+    lv_anim_set_playback_time(&width_anim, celebrate_alt_ms);
     lv_anim_set_repeat_count(&width_anim, LV_ANIM_REPEAT_INFINITE);
     lv_anim_start(&width_anim);
 
@@ -550,11 +708,22 @@ void UiManager::applySceneEffect(SceneEffect effect) {
       lv_anim_set_var(&particle_opa, particle);
       lv_anim_set_exec_cb(&particle_opa, animSetOpa);
       lv_anim_set_values(&particle_opa, 80, LV_OPA_COVER);
-      lv_anim_set_time(&particle_opa, 260);
-      lv_anim_set_playback_time(&particle_opa, 260);
+      lv_anim_set_time(&particle_opa, resolveAnimMs(260));
+      lv_anim_set_playback_time(&particle_opa, resolveAnimMs(260));
       lv_anim_set_repeat_count(&particle_opa, LV_ANIM_REPEAT_INFINITE);
       lv_anim_set_delay(&particle_opa, static_cast<uint16_t>(index * 40U));
       lv_anim_start(&particle_opa);
+    }
+    if (scene_symbol_label_ != nullptr) {
+      lv_anim_t symbol_celebrate;
+      lv_anim_init(&symbol_celebrate);
+      lv_anim_set_var(&symbol_celebrate, scene_symbol_label_);
+      lv_anim_set_exec_cb(&symbol_celebrate, animSetOpa);
+      lv_anim_set_values(&symbol_celebrate, 120, LV_OPA_COVER);
+      lv_anim_set_time(&symbol_celebrate, resolveAnimMs(360));
+      lv_anim_set_playback_time(&symbol_celebrate, resolveAnimMs(360));
+      lv_anim_set_repeat_count(&symbol_celebrate, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&symbol_celebrate);
     }
   }
 }

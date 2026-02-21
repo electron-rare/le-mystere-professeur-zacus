@@ -1,0 +1,9 @@
+{
+  "id": "APP_AUDIO",
+  "app": "AUDIO_PACK",
+  "config": {
+    "player": "littlefs_mp3",
+    "fallback": "builtin_tone",
+    "autoplay": true
+  }
+}

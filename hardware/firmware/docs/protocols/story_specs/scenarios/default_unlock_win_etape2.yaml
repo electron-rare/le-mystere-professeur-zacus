@@ -9,6 +9,10 @@ app_bindings:
     app: SCREEN_SCENE
   - id: APP_GATE
     app: MP3_GATE
+  - id: APP_WIFI
+    app: WIFI_STACK
+  - id: APP_ESPNOW
+    app: ESPNOW_STACK
 
 steps:
   - step_id: STEP_WAIT_UNLOCK
@@ -19,6 +23,8 @@ steps:
     apps:
       - APP_SCREEN
       - APP_GATE
+      - APP_WIFI
+      - APP_ESPNOW
     mp3_gate_open: false
     transitions:
       - trigger: on_event
@@ -36,6 +42,8 @@ steps:
     apps:
       - APP_AUDIO
       - APP_SCREEN
+      - APP_WIFI
+      - APP_ESPNOW
     mp3_gate_open: false
     transitions:
       - trigger: on_event
@@ -44,6 +52,12 @@ steps:
         target_step_id: STEP_WAIT_ETAPE2
         after_ms: 0
         priority: 100
+      - trigger: on_event
+        event_type: serial
+        event_name: BTN_NEXT
+        target_step_id: STEP_WAIT_ETAPE2
+        after_ms: 0
+        priority: 110
       - trigger: on_event
         event_type: serial
         event_name: FORCE_ETAPE2
@@ -56,9 +70,12 @@ steps:
     audio_pack_id: ""
     actions:
       - ACTION_TRACE_STEP
+      - ACTION_FORCE_ETAPE2
     apps:
       - APP_SCREEN
       - APP_GATE
+      - APP_WIFI
+      - APP_ESPNOW
     mp3_gate_open: false
     transitions:
       - trigger: on_event
@@ -67,6 +84,24 @@ steps:
         target_step_id: STEP_ETAPE2
         after_ms: 0
         priority: 100
+      - trigger: on_event
+        event_type: serial
+        event_name: BTN_NEXT
+        target_step_id: STEP_ETAPE2
+        after_ms: 0
+        priority: 105
+      - trigger: on_event
+        event_type: unlock
+        event_name: UNLOCK
+        target_step_id: STEP_ETAPE2
+        after_ms: 0
+        priority: 110
+      - trigger: on_event
+        event_type: action
+        event_name: ACTION_FORCE_ETAPE2
+        target_step_id: STEP_ETAPE2
+        after_ms: 0
+        priority: 115
       - trigger: on_event
         event_type: serial
         event_name: FORCE_ETAPE2
@@ -82,6 +117,8 @@ steps:
     apps:
       - APP_AUDIO
       - APP_SCREEN
+      - APP_WIFI
+      - APP_ESPNOW
     mp3_gate_open: false
     transitions:
       - trigger: on_event
@@ -90,6 +127,12 @@ steps:
         target_step_id: STEP_DONE
         after_ms: 0
         priority: 100
+      - trigger: on_event
+        event_type: serial
+        event_name: BTN_NEXT
+        target_step_id: STEP_DONE
+        after_ms: 0
+        priority: 110
       - trigger: on_event
         event_type: serial
         event_name: FORCE_DONE
@@ -106,5 +149,7 @@ steps:
     apps:
       - APP_SCREEN
       - APP_GATE
+      - APP_WIFI
+      - APP_ESPNOW
     mp3_gate_open: true
     transitions: []

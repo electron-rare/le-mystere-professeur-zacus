@@ -1,0 +1,10 @@
+{
+  "id": "ACTION_FORCE_ETAPE2",
+  "type": "emit_story_event",
+  "config": {
+    "event_type": "action",
+    "event_name": "ACTION_FORCE_ETAPE2",
+    "target": "STEP_ETAPE2"
+  }
+}
+

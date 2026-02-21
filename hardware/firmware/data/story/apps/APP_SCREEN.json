@@ -1,0 +1,10 @@
+{
+  "id": "APP_SCREEN",
+  "app": "SCREEN_SCENE",
+  "config": {
+    "renderer": "lvgl_fx",
+    "mode": "effect_first",
+    "show_title": false,
+    "show_symbol": true
+  }
+}

@@ -4,6 +4,11 @@
   "subtitle": "Signal brouille",
   "symbol": "ALERT",
   "effect": "blink",
+  "visual": {
+    "show_title": false,
+    "show_symbol": true,
+    "effect_speed_ms": 180
+  },
   "theme": {
     "bg": "#2A0508",
     "accent": "#FF4A45",

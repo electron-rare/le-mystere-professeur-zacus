@@ -1,0 +1,11 @@
+{
+  "id": "ACTION_REFRESH_SD",
+  "type": "refresh_storage",
+  "config": {
+    "targets": [
+      "story/scenarios",
+      "story/screens",
+      "story/audio"
+    ]
+  }
+}

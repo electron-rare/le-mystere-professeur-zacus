@@ -3,10 +3,12 @@
 #include <Arduino.h>
 
 #include "audio_pack_app.h"
+#include "espnow_stack_app.h"
 #include "la_detector_app.h"
 #include "mp3_gate_app.h"
 #include "screen_scene_app.h"
 #include "story_app.h"
+#include "wifi_stack_app.h"
 
 struct StoryAppValidation {
   bool ok = true;
@@ -48,4 +50,6 @@ class StoryAppHost {
   AudioPackApp audioPackApp_;
   ScreenSceneApp screenSceneApp_;
   Mp3GateApp mp3GateApp_;
+  WifiStackApp wifiStackApp_;
+  EspNowStackApp espNowStackApp_;
 };

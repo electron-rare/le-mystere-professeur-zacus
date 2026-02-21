@@ -35,6 +35,8 @@ enum class StoryAppType : uint8_t {
   kAudioPack,
   kScreenScene,
   kMp3Gate,
+  kWifiStack,
+  kEspNowStack,
 };
 
 struct AppBindingDef {

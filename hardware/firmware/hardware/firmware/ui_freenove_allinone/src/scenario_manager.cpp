@@ -135,6 +135,31 @@ bool ScenarioManager::begin(const char* scenario_file_path) {
   return true;
 }
 
+bool ScenarioManager::beginById(const char* scenario_id) {
+  scenario_ = nullptr;
+  initial_step_override_.remove(0);
+  clearStepResourceOverrides();
+
+  if (scenario_id != nullptr && scenario_id[0] != '\0') {
+    scenario_ = storyScenarioV2ById(scenario_id);
+  }
+  if (scenario_ == nullptr) {
+    Serial.printf("[SCENARIO] unknown scenario id: %s\n", (scenario_id != nullptr) ? scenario_id : "null");
+    return false;
+  }
+
+  if (storyValidateScenarioDef(*scenario_, nullptr)) {
+    Serial.printf("[SCENARIO] loaded built-in scenario by id: %s v%u (%u steps)\n",
+                  scenario_->id,
+                  scenario_->version,
+                  scenario_->stepCount);
+  } else {
+    Serial.printf("[SCENARIO] warning: validation failed for %s\n", scenario_->id);
+  }
+  reset();
+  return true;
+}
+
 void ScenarioManager::reset() {
   if (scenario_ == nullptr) {
     return;
@@ -207,7 +232,9 @@ void ScenarioManager::notifyButton(uint8_t key, bool long_press, uint32_t now_ms
       if (long_press) {
         dispatchEvent(StoryEventType::kSerial, "FORCE_DONE", now_ms, "btn5_long");
       } else {
-        dispatchEvent(StoryEventType::kSerial, "NEXT", now_ms, "btn5_short");
+        if (!dispatchEvent(StoryEventType::kSerial, "BTN_NEXT", now_ms, "btn5_short")) {
+          dispatchEvent(StoryEventType::kSerial, "NEXT", now_ms, "btn5_short_legacy");
+        }
       }
       break;
     default:
@@ -217,6 +244,21 @@ void ScenarioManager::notifyButton(uint8_t key, bool long_press, uint32_t now_ms
 
 void ScenarioManager::notifyAudioDone(uint32_t now_ms) {
   dispatchEvent(StoryEventType::kAudioDone, "AUDIO_DONE", now_ms, "audio_done");
+}
+
+bool ScenarioManager::notifySerialEvent(const char* event_name, uint32_t now_ms) {
+  const char* name = (event_name != nullptr && event_name[0] != '\0') ? event_name : "SERIAL_EVENT";
+  return dispatchEvent(StoryEventType::kSerial, name, now_ms, "serial_event");
+}
+
+bool ScenarioManager::notifyTimerEvent(const char* event_name, uint32_t now_ms) {
+  const char* name = (event_name != nullptr && event_name[0] != '\0') ? event_name : "TIMER_EVENT";
+  return dispatchEvent(StoryEventType::kTimer, name, now_ms, "timer_event");
+}
+
+bool ScenarioManager::notifyActionEvent(const char* event_name, uint32_t now_ms) {
+  const char* name = (event_name != nullptr && event_name[0] != '\0') ? event_name : "ACTION_EVENT";
+  return dispatchEvent(StoryEventType::kAction, name, now_ms, "action_event");
 }
 
 ScenarioSnapshot ScenarioManager::snapshot() const {
@@ -249,6 +291,32 @@ bool ScenarioManager::consumeAudioRequest(String* out_audio_pack_id) {
   }
   pending_audio_pack_.remove(0);
   return true;
+}
+
+uint32_t ScenarioManager::transitionEventMask() const {
+  if (scenario_ == nullptr || scenario_->steps == nullptr) {
+    return 0U;
+  }
+  uint32_t mask = 0U;
+  for (uint8_t step_index = 0; step_index < scenario_->stepCount; ++step_index) {
+    const StepDef& step = scenario_->steps[step_index];
+    if (step.transitions == nullptr || step.transitionCount == 0U) {
+      continue;
+    }
+    for (uint8_t transition_index = 0; transition_index < step.transitionCount; ++transition_index) {
+      const TransitionDef& transition = step.transitions[transition_index];
+      if (transition.trigger != StoryTransitionTrigger::kOnEvent &&
+          transition.trigger != StoryTransitionTrigger::kAfterMs) {
+        continue;
+      }
+      const uint8_t event_index = static_cast<uint8_t>(transition.eventType);
+      if (event_index >= 31U) {
+        continue;
+      }
+      mask |= (1UL << event_index);
+    }
+  }
+  return mask;
 }
 
 bool ScenarioManager::dispatchEvent(StoryEventType type,

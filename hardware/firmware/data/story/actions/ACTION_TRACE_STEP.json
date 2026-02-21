@@ -1,0 +1,8 @@
+{
+  "id": "ACTION_TRACE_STEP",
+  "type": "trace_step",
+  "config": {
+    "serial_log": true,
+    "tag": "story_step"
+  }
+}

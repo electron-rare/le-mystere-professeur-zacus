@@ -8,7 +8,7 @@ steps: list(include('step'), min=1)
 ---
 app_binding:
   id: str()
-  app: enum('LA_DETECTOR', 'AUDIO_PACK', 'SCREEN_SCENE', 'MP3_GATE')
+  app: enum('LA_DETECTOR', 'AUDIO_PACK', 'SCREEN_SCENE', 'MP3_GATE', 'WIFI_STACK', 'ESPNOW_STACK')
   config: include('la_config', required=False)
 
 la_config:

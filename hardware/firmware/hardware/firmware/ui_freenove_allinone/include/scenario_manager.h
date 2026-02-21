@@ -16,16 +16,21 @@ struct ScenarioSnapshot {
 class ScenarioManager {
  public:
   bool begin(const char* scenario_file_path);
+  bool beginById(const char* scenario_id);
   void reset();
   void tick(uint32_t now_ms);
 
   void notifyUnlock(uint32_t now_ms);
   void notifyButton(uint8_t key, bool long_press, uint32_t now_ms);
   void notifyAudioDone(uint32_t now_ms);
+  bool notifySerialEvent(const char* event_name, uint32_t now_ms);
+  bool notifyTimerEvent(const char* event_name, uint32_t now_ms);
+  bool notifyActionEvent(const char* event_name, uint32_t now_ms);
 
   ScenarioSnapshot snapshot() const;
   bool consumeSceneChanged();
   bool consumeAudioRequest(String* out_audio_pack_id);
+  uint32_t transitionEventMask() const;
 
  private:
   struct StepResourceOverride {

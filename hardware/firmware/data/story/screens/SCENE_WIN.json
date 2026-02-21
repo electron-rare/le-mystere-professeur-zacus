@@ -4,6 +4,11 @@
   "subtitle": "Etape validee",
   "symbol": "WIN",
   "effect": "celebrate",
+  "visual": {
+    "show_title": false,
+    "show_symbol": true,
+    "effect_speed_ms": 420
+  },
   "theme": {
     "bg": "#231038",
     "accent": "#F4CB4A",

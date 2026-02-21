@@ -34,6 +34,7 @@ class UiManager {
   void updatePageLine();
   void stopSceneAnimations();
   void applySceneEffect(SceneEffect effect);
+  uint16_t resolveAnimMs(uint16_t fallback_ms) const;
 
   static void displayFlushCb(lv_disp_drv_t* disp, const lv_area_t* area, lv_color_t* color_p);
   static void keypadReadCb(lv_indev_drv_t* drv, lv_indev_data_t* data);
@@ -52,8 +53,11 @@ class UiManager {
   lv_obj_t* scene_ring_inner_ = nullptr;
   lv_obj_t* scene_fx_bar_ = nullptr;
   lv_obj_t* page_label_ = nullptr;
+  lv_obj_t* scene_title_label_ = nullptr;
+  lv_obj_t* scene_symbol_label_ = nullptr;
   lv_obj_t* scene_particles_[4] = {nullptr, nullptr, nullptr, nullptr};
   SceneEffect current_effect_ = SceneEffect::kNone;
+  uint16_t effect_speed_ms_ = 0U;
 
   uint32_t pending_key_code_ = LV_KEY_ENTER;
   bool key_press_pending_ = false;

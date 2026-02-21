@@ -4,6 +4,11 @@
   "subtitle": "Attente de debloquage",
   "symbol": "LOCK",
   "effect": "pulse",
+  "visual": {
+    "show_title": false,
+    "show_symbol": true,
+    "effect_speed_ms": 680
+  },
   "theme": {
     "bg": "#08152D",
     "accent": "#3E8DFF",

@@ -4,6 +4,11 @@
   "subtitle": "Scenario termine",
   "symbol": "READY",
   "effect": "pulse",
+  "visual": {
+    "show_title": false,
+    "show_symbol": true,
+    "effect_speed_ms": 620
+  },
   "theme": {
     "bg": "#0F2A12",
     "accent": "#6CD96B",

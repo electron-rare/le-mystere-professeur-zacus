@@ -1,8 +1,8 @@
 {
-  "id": "DEFAULT",
-  "scenario": "DEFAULT",
+  "id": "ZACUS_V1_UNLOCK_ETAPE2",
+  "scenario": "ZACUS_V1_UNLOCK_ETAPE2",
   "version": 2,
-  "initial_step": "STEP_WAIT_UNLOCK",
+  "initial_step": "STEP_BOOT_WAIT",
   "hardware_events": {
     "button_short_1": "UNLOCK",
     "button_short_5": "BTN_NEXT",
@@ -11,6 +11,7 @@
     "espnow_event": "SERIAL:<payload>"
   },
   "app_bindings": [
+    "APP_LA",
     "APP_AUDIO",
     "APP_SCREEN",
     "APP_GATE",
@@ -19,26 +20,25 @@
   ],
   "actions_catalog": [
     "ACTION_TRACE_STEP",
-    "ACTION_FORCE_ETAPE2",
     "ACTION_REFRESH_SD"
   ],
   "steps": [
     {
-      "id": "STEP_WAIT_UNLOCK",
+      "id": "STEP_BOOT_WAIT",
       "screen_scene_id": "SCENE_LOCKED"
     },
     {
-      "id": "STEP_U_SON_PROTO",
-      "screen_scene_id": "SCENE_BROKEN",
+      "id": "STEP_BOOT_USON",
+      "screen_scene_id": "SCENE_LOCKED",
       "audio_pack_id": "PACK_BOOT_RADIO"
     },
     {
-      "id": "STEP_WAIT_ETAPE2",
-      "screen_scene_id": "SCENE_LA_DETECT"
+      "id": "STEP_LA_DETECT",
+      "screen_scene_id": "SCENE_SEARCH"
     },
     {
-      "id": "STEP_ETAPE2",
-      "screen_scene_id": "SCENE_WIN",
+      "id": "STEP_WIN",
+      "screen_scene_id": "SCENE_REWARD",
       "audio_pack_id": "PACK_WIN"
     },
     {

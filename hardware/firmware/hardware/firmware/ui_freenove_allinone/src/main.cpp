@@ -1352,46 +1352,44 @@ void runScenarioRevalidate(uint32_t now_ms) {
                   after.audio_pack_id != nullptr ? after.audio_pack_id : "n/a");
   }
 
-  g_scenario.reset();
-  g_scenario.notifyUnlock(now_ms);
-  g_scenario.notifyAudioDone(now_ms);
+  auto prepareStepXProbe = [&]() {
+    g_scenario.reset();
+    g_scenario.notifyUnlock(now_ms);
+    g_scenario.notifyAudioDone(now_ms);
+    return g_scenario.snapshot();
+  };
+
   {
-    const ScenarioSnapshot before = g_scenario.snapshot();
+    const ScenarioSnapshot before = prepareStepXProbe();
     const bool dispatched = g_scenario.notifyTimerEvent("ETAPE2_DUE", now_ms);
     const ScenarioSnapshot after = g_scenario.snapshot();
     const bool changed = std::strcmp(stepIdFromSnapshot(before), stepIdFromSnapshot(after)) != 0;
-    Serial.printf("SC_REVALIDATE_STEP2 event=timer name=ETAPE2_DUE dispatched=%u changed=%u step_before=%s step_after=%s\n",
+    Serial.printf("SC_REVALIDATE_STEPX event=timer name=ETAPE2_DUE dispatched=%u changed=%u anchor_step=%s step_after=%s\n",
                   dispatched ? 1U : 0U,
                   changed ? 1U : 0U,
                   stepIdFromSnapshot(before),
                   stepIdFromSnapshot(after));
   }
 
-  g_scenario.reset();
-  g_scenario.notifyUnlock(now_ms);
-  g_scenario.notifyAudioDone(now_ms);
   {
-    const ScenarioSnapshot before = g_scenario.snapshot();
+    const ScenarioSnapshot before = prepareStepXProbe();
     const bool dispatched = g_scenario.notifyActionEvent("ACTION_FORCE_ETAPE2", now_ms);
     const ScenarioSnapshot after = g_scenario.snapshot();
     const bool changed = std::strcmp(stepIdFromSnapshot(before), stepIdFromSnapshot(after)) != 0;
     Serial.printf(
-        "SC_REVALIDATE_STEP2 event=action name=ACTION_FORCE_ETAPE2 dispatched=%u changed=%u step_before=%s step_after=%s\n",
+        "SC_REVALIDATE_STEPX event=action name=ACTION_FORCE_ETAPE2 dispatched=%u changed=%u anchor_step=%s step_after=%s\n",
         dispatched ? 1U : 0U,
         changed ? 1U : 0U,
         stepIdFromSnapshot(before),
         stepIdFromSnapshot(after));
   }
 
-  g_scenario.reset();
-  g_scenario.notifyUnlock(now_ms);
-  g_scenario.notifyAudioDone(now_ms);
   {
-    const ScenarioSnapshot before = g_scenario.snapshot();
+    const ScenarioSnapshot before = prepareStepXProbe();
     g_scenario.notifyButton(5U, false, now_ms);
     const ScenarioSnapshot after = g_scenario.snapshot();
     const bool changed = std::strcmp(stepIdFromSnapshot(before), stepIdFromSnapshot(after)) != 0;
-    Serial.printf("SC_REVALIDATE_STEP2 event=button label=BTN5_SHORT changed=%u step_before=%s step_after=%s\n",
+    Serial.printf("SC_REVALIDATE_STEPX event=button label=BTN5_SHORT changed=%u anchor_step=%s step_after=%s\n",
                   changed ? 1U : 0U,
                   stepIdFromSnapshot(before),
                   stepIdFromSnapshot(after));

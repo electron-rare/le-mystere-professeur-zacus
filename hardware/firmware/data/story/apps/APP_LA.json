@@ -1,0 +1,8 @@
+{
+  "id": "APP_LA",
+  "app": "LA_DETECTOR",
+  "config": {
+    "unlock_event": "UNLOCK",
+    "timeout_ms": 30000
+  }
+}

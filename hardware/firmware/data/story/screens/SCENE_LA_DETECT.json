@@ -4,6 +4,11 @@
   "subtitle": "Balayage en cours",
   "symbol": "SCAN",
   "effect": "scan",
+  "visual": {
+    "show_title": false,
+    "show_symbol": true,
+    "effect_speed_ms": 960
+  },
   "theme": {
     "bg": "#041F1B",
     "accent": "#2CE5A6",

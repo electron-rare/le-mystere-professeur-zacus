@@ -1,0 +1,8 @@
+{
+  "id": "APP_GATE",
+  "app": "MP3_GATE",
+  "config": {
+    "mode": "strict",
+    "close_on_step_done": true
+  }
+}

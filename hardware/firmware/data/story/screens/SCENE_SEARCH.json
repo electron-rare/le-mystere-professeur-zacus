@@ -4,6 +4,11 @@
   "subtitle": "Analyse des indices",
   "symbol": "SCAN",
   "effect": "scan",
+  "visual": {
+    "show_title": false,
+    "show_symbol": true,
+    "effect_speed_ms": 920
+  },
   "theme": {
     "bg": "#05261F",
     "accent": "#35E7B0",

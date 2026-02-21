@@ -1,0 +1,8 @@
+{
+  "id": "ACTION_QUEUE_SONAR",
+  "type": "queue_audio_pack",
+  "config": {
+    "pack_id": "PACK_SONAR_HINT",
+    "priority": "normal"
+  }
+}

@@ -1,81 +1,71 @@
-# ---
-
-#
-name: Firmware CI/CD
-on:
-  push:
-  pull_request:
-
-name: Story V2 Firmware Tests
+name: Story Spec Pipeline
 
 on:
   push:
-    branches: [story-V2]
+    paths:
+      - "game/scenarios/**"
+      - "docs/protocols/story_specs/**"
+      - "lib/zacus_story_gen_ai/**"
+      - "hardware/libs/story/tools/story_gen/**"
+      - "hardware/libs/story/src/generated/**"
+      - ".github/workflows/firmware-story-v2.yml"
   pull_request:
-    branches: [story-V2]
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    paths:
+      - "game/scenarios/**"
+      - "docs/protocols/story_specs/**"
+      - "lib/zacus_story_gen_ai/**"
+      - "hardware/libs/story/tools/story_gen/**"
+      - "hardware/libs/story/src/generated/**"
+      - ".github/workflows/firmware-story-v2.yml"
+
+jobs:
+  story-spec:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Story generator dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e lib/zacus_story_gen_ai
+
+      - name: Validate Story specs
+        run: |
+          if [ -d game/scenarios ]; then
+            GAME_DIR="game/scenarios"
+          elif [ -d ../game/scenarios ]; then
+            GAME_DIR="../game/scenarios"
+          else
+            echo "Missing game/scenarios source of truth" >&2
+            exit 1
+          fi
+          ./tools/dev/story-gen validate --game-dir "$GAME_DIR"
+
+      - name: Generate Story C++ and bundle
+        run: |
+          if [ -d game/scenarios ]; then
+            GAME_DIR="game/scenarios"
+          elif [ -d ../game/scenarios ]; then
+            GAME_DIR="../game/scenarios"
+          else
+            echo "Missing game/scenarios source of truth" >&2
+            exit 1
+          fi
+          ./tools/dev/story-gen generate-cpp --game-dir "$GAME_DIR"
+          ./tools/dev/story-gen generate-bundle --game-dir "$GAME_DIR"
+
+      - name: Ensure generated C++ is up-to-date
+        run: |
+          git diff --exit-code -- hardware/libs/story/src/generated
+
+      - name: Archive generated Story bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: story-bundle
+          path: artifacts/story_fs/deploy/story/

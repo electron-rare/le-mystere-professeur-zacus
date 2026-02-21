@@ -15,6 +15,10 @@ app_bindings:
     app: SCREEN_SCENE
   - id: APP_GATE
     app: MP3_GATE
+  - id: APP_WIFI
+    app: WIFI_STACK
+  - id: APP_ESPNOW
+    app: ESPNOW_STACK
 
 steps:
   - step_id: STEP_WAIT_UNLOCK
@@ -26,6 +30,8 @@ steps:
       - APP_LA
       - APP_SCREEN
       - APP_GATE
+      - APP_WIFI
+      - APP_ESPNOW
     mp3_gate_open: false
     transitions:
       - trigger: on_event
@@ -44,6 +50,8 @@ steps:
       - APP_AUDIO
       - APP_SCREEN
       - APP_GATE
+      - APP_WIFI
+      - APP_ESPNOW
     mp3_gate_open: false
     transitions:
       - trigger: on_event
@@ -68,5 +76,7 @@ steps:
     apps:
       - APP_SCREEN
       - APP_GATE
+      - APP_WIFI
+      - APP_ESPNOW
     mp3_gate_open: true
     transitions: []

@@ -28,7 +28,7 @@ except Exception:  # pragma: no cover - dependency error surfaced at runtime
 
 ALLOWED_TRIGGER = {"on_event", "after_ms", "immediate"}
 ALLOWED_EVENT = {"none", "unlock", "audio_done", "timer", "serial", "action"}
-ALLOWED_APP = {"LA_DETECTOR", "AUDIO_PACK", "SCREEN_SCENE", "MP3_GATE"}
+ALLOWED_APP = {"LA_DETECTOR", "AUDIO_PACK", "SCREEN_SCENE", "MP3_GATE", "WIFI_STACK", "ESPNOW_STACK"}
 
 EVENT_CPP = {
     "none": "StoryEventType::kNone",
@@ -48,6 +48,8 @@ APP_CPP = {
     "AUDIO_PACK": "StoryAppType::kAudioPack",
     "SCREEN_SCENE": "StoryAppType::kScreenScene",
     "MP3_GATE": "StoryAppType::kMp3Gate",
+    "WIFI_STACK": "StoryAppType::kWifiStack",
+    "ESPNOW_STACK": "StoryAppType::kEspNowStack",
 }
 
 

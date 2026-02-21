@@ -9,6 +9,30 @@
 7. Consigner les logs et artefacts produits (logs/rc_live/freenove_esp32s3_YYYYMMDD.log, artifacts/rc_live/freenove_esp32s3_YYYYMMDD.html).
 8. Documenter toute anomalie ou fail dans AGENT_TODO.md.
 
+## [2026-02-21] Freenove story/ui/network pass final + revalidate step(x) (Codex)
+
+- Checkpoint sécurité exécuté:
+  - branche: `feat/freenove-webui-network-ops-parity`
+  - patch/status: `/tmp/zacus_checkpoint/20260221_021417_wip.patch`, `/tmp/zacus_checkpoint/20260221_021417_status.txt`
+  - scan artefacts trackés (`.pio`, `.platformio`, `logs`, `dist`, `build`, `node_modules`, `.venv`): aucun.
+- Correctif incohérence revalidate:
+  - `SC_REVALIDATE_STEP2` renommé en `SC_REVALIDATE_STEPX`
+  - logs enrichis avec `anchor_step=<step courant>` pour éviter l'ambiguïté multi-scénarios.
+- Validations PIO:
+  - `pio run -e freenove_esp32s3_full_with_ui` PASS (x2)
+  - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` PASS
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` PASS
+  - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` PASS (x2)
+- Evidence série (`pio device monitor --port /dev/cu.usbmodem5AB90753301 --baud 115200`):
+  - `SC_COVERAGE scenario=DEFAULT unlock=1 audio_done=1 timer=1 serial=1 action=1`
+  - `SC_REVALIDATE` OK avec `SC_REVALIDATE_STEPX ... anchor_step=STEP_WAIT_ETAPE2 ... step_after=STEP_ETAPE2`
+  - `ESPNOW_STATUS_JSON` OK (`ready=true`, compteurs cohérents)
+  - `ESPNOW_SEND broadcast ping` OK (`ACK ... ok=1`)
+  - `NET_STATUS` local connecté validé (`sta_ssid=Les cils`, `local_match=1`, `fallback_ap=0`).
+- Evidence WebUI:
+  - `GET /api/status`, `GET /api/network/wifi`, `GET /api/network/espnow` OK
+  - `POST /api/control` avec `SC_EVENT unlock UNLOCK` OK (`ok=true` + transition observée en série).
+
 ## [2026-02-20] GH binôme Freenove AP local + alignement ESP-NOW RTC (Codex)
 
 - Branche de travail: `feat/freenove-ap-local-espnow-rtc-sync`

@@ -1,7 +1,45 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
-import { yaml } from '@codemirror/lang-yaml'
+import { yaml as yamlLanguage } from '@codemirror/lang-yaml'
+import {
+  Background,
+  Controls,
+  Handle,
+  MarkerType,
+  MiniMap,
+  Position,
+  ReactFlow,
+  type Connection,
+  type Edge as FlowEdge,
+  type Node as FlowNode,
+  type NodeProps,
+} from '@xyflow/react'
+import '@xyflow/react/dist/style.css'
 import type { DeviceCapabilities } from '../lib/deviceApi'
+import {
+  DEFAULT_AFTER_MS,
+  DEFAULT_EVENT_NAME,
+  DEFAULT_EVENT_TYPE,
+  DEFAULT_NODE_APPS,
+  DEFAULT_PRIORITY,
+  DEFAULT_SCENARIO_ID,
+  DEFAULT_SCENARIO_VERSION,
+  DEFAULT_SCENE_ID,
+  DEFAULT_STEP_ID,
+  DEFAULT_TRIGGER,
+  autoLayoutStoryGraph,
+  generateStoryYamlFromGraph,
+  inferEventTypeFromName,
+  importStoryYamlToGraph,
+  STORY_TEMPLATE_LIBRARY,
+  type AppBinding,
+  type EventType,
+  type StoryEdge,
+  type StoryGraphDocument,
+  type StoryNode,
+  validateStoryGraph,
+} from '../features/story-designer'
+import { Badge, Button, Field, InlineNotice, Panel, SectionHeader } from './ui'
 
 type ValidationResult = {
   valid: boolean
@@ -21,771 +59,234 @@ type StoryDesignerProps = {
   capabilities: DeviceCapabilities
 }
 
-type EditorNode = {
-  id: string
+type TabKey = 'graph' | 'bindings' | 'yaml'
+
+type FlowNodeData = {
   stepId: string
   screenSceneId: string
   audioPackId: string
-  actionsCsv: string
-  appsCsv: string
-  mp3GateOpen: boolean
-  x: number
-  y: number
   isInitial: boolean
 }
 
-type EditorEdge = {
-  id: string
-  fromNodeId: string
-  toNodeId: string
-  trigger: string
-  eventType: string
-  eventName: string
-  afterMs: number
-  priority: number
-}
+type StoryCanvasNode = FlowNode<FlowNodeData, 'storyNode'>
 
-type GraphSnapshot = {
-  nodes: EditorNode[]
-  edges: EditorEdge[]
-  linkSourceId: string | null
-  linkEventName: string
-  linkEventType: string
-}
+type StatusTone = 'info' | 'success' | 'warning' | 'error'
 
-type DragState = {
-  nodeId: string
-  offsetX: number
-  offsetY: number
-}
+const NODE_WIDTH = 260
+const NODE_HEIGHT = 300
 
-const NODE_WIDTH = 250
-const NODE_HEIGHT = 360
-const CANVAS_HEIGHT = 560
-const NODE_HORIZONTAL_GAP = 300
-const NODE_VERTICAL_GAP = 220
+const normalizeTokenInput = (value: string) => value.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_')
 
-const TEMPLATE_LIBRARY: Record<string, string> = {
-  DEFAULT: `id: DEFAULT
-version: 2
-initial_step: STEP_WAIT_UNLOCK
-app_bindings:
-  - id: APP_LA
-    app: LA_DETECTOR
-    config:
-      hold_ms: 3000
-      unlock_event: UNLOCK
-      require_listening: true
-  - id: APP_AUDIO
-    app: AUDIO_PACK
-  - id: APP_SCREEN
-    app: SCREEN_SCENE
-  - id: APP_GATE
-    app: MP3_GATE
-steps:
-  - step_id: STEP_WAIT_UNLOCK
-    screen_scene_id: SCENE_LOCKED
-    audio_pack_id: ""
-    actions:
-      - ACTION_TRACE_STEP
-    apps:
-      - APP_LA
-      - APP_SCREEN
-      - APP_GATE
-    mp3_gate_open: false
-    transitions:
-      - trigger: on_event
-        event_type: unlock
-        event_name: UNLOCK
-        target_step_id: STEP_U_SON_PROTO
-        after_ms: 0
-        priority: 100
-  - step_id: STEP_U_SON_PROTO
-    screen_scene_id: SCENE_BROKEN
-    audio_pack_id: PACK_BOOT_RADIO
-    actions:
-      - ACTION_TRACE_STEP
-    apps:
-      - APP_AUDIO
-      - APP_SCREEN
-      - APP_GATE
-    mp3_gate_open: false
-    transitions: []
-`,
-  EXAMPLE_UNLOCK_EXPRESS: `id: EXAMPLE_UNLOCK_EXPRESS
-version: 2
-initial_step: STEP_WAIT_UNLOCK
-app_bindings:
-  - id: APP_LA
-    app: LA_DETECTOR
-    config:
-      hold_ms: 3000
-      unlock_event: UNLOCK
-      require_listening: true
-  - id: APP_AUDIO
-    app: AUDIO_PACK
-  - id: APP_SCREEN
-    app: SCREEN_SCENE
-  - id: APP_GATE
-    app: MP3_GATE
-steps:
-  - step_id: STEP_WAIT_UNLOCK
-    screen_scene_id: SCENE_LOCKED
-    audio_pack_id: ""
-    actions:
-      - ACTION_TRACE_STEP
-    apps:
-      - APP_LA
-      - APP_SCREEN
-      - APP_GATE
-    mp3_gate_open: false
-    transitions:
-      - trigger: on_event
-        event_type: unlock
-        event_name: UNLOCK
-        target_step_id: STEP_WIN
-        after_ms: 0
-        priority: 100
-  - step_id: STEP_WIN
-    screen_scene_id: SCENE_REWARD
-    audio_pack_id: PACK_WIN
-    actions:
-      - ACTION_TRACE_STEP
-    apps:
-      - APP_AUDIO
-      - APP_SCREEN
-      - APP_GATE
-    mp3_gate_open: false
-    transitions: []
-`,
-  EXEMPLE_UNLOCK_EXPRESS_DONE: `id: EXEMPLE_UNLOCK_EXPRESS_DONE
-version: 2
-initial_step: STEP_WAIT_UNLOCK
-app_bindings:
-  - id: APP_LA
-    app: LA_DETECTOR
-    config:
-      hold_ms: 3000
-      unlock_event: UNLOCK
-      require_listening: true
-  - id: APP_AUDIO
-    app: AUDIO_PACK
-  - id: APP_SCREEN
-    app: SCREEN_SCENE
-  - id: APP_GATE
-    app: MP3_GATE
-steps:
-  - step_id: STEP_WAIT_UNLOCK
-    screen_scene_id: SCENE_LOCKED
-    audio_pack_id: ""
-    actions:
-      - ACTION_TRACE_STEP
-    apps:
-      - APP_LA
-      - APP_SCREEN
-      - APP_GATE
-    mp3_gate_open: false
-    transitions:
-      - trigger: on_event
-        event_type: unlock
-        event_name: UNLOCK
-        target_step_id: STEP_WIN
-        after_ms: 0
-        priority: 100
-  - step_id: STEP_WIN
-    screen_scene_id: SCENE_REWARD
-    audio_pack_id: PACK_WIN
-    actions:
-      - ACTION_TRACE_STEP
-    apps:
-      - APP_AUDIO
-      - APP_SCREEN
-      - APP_GATE
-    mp3_gate_open: false
-    transitions: []
-`,
-  SPECTRE_RADIO_LAB: `id: SPECTRE_RADIO_LAB
-version: 2
-initial_step: STEP_WAIT_UNLOCK
-app_bindings:
-  - id: APP_LA
-    app: LA_DETECTOR
-    config:
-      hold_ms: 3000
-      unlock_event: UNLOCK
-      require_listening: true
-  - id: APP_AUDIO
-    app: AUDIO_PACK
-  - id: APP_SCREEN
-    app: SCREEN_SCENE
-  - id: APP_GATE
-    app: MP3_GATE
-steps:
-  - step_id: STEP_WAIT_UNLOCK
-    screen_scene_id: SCENE_LOCKED
-    audio_pack_id: ""
-    actions:
-      - ACTION_TRACE_STEP
-    apps:
-      - APP_LA
-      - APP_SCREEN
-      - APP_GATE
-    mp3_gate_open: false
-    transitions:
-      - trigger: on_event
-        event_type: unlock
-        event_name: UNLOCK
-        target_step_id: STEP_SONAR_SEARCH
-        after_ms: 0
-        priority: 100
-  - step_id: STEP_SONAR_SEARCH
-    screen_scene_id: SCENE_SEARCH
-    audio_pack_id: ""
-    actions:
-      - ACTION_TRACE_STEP
-    apps:
-      - APP_SCREEN
-      - APP_GATE
-    mp3_gate_open: false
-    transitions:
-      - trigger: on_event
-        event_type: action
-        event_name: BTN_NEXT
-        target_step_id: STEP_MORSE_CLUE
-        after_ms: 0
-        priority: 100
-  - step_id: STEP_MORSE_CLUE
-    screen_scene_id: SCENE_BROKEN
-    audio_pack_id: ""
-    actions:
-      - ACTION_TRACE_STEP
-    apps:
-      - APP_SCREEN
-      - APP_GATE
-    mp3_gate_open: false
-    transitions: []
-`,
-  ZACUS_V1_UNLOCK_ETAPE2: `id: ZACUS_V1_UNLOCK_ETAPE2
-version: 2
-initial_step: STEP_BOOT_WAIT
-app_bindings:
-  - id: APP_LA
-    app: LA_DETECTOR
-    config:
-      hold_ms: 3000
-      unlock_event: UNLOCK
-      require_listening: true
-  - id: APP_AUDIO
-    app: AUDIO_PACK
-  - id: APP_SCREEN
-    app: SCREEN_SCENE
-  - id: APP_GATE
-    app: MP3_GATE
-steps:
-  - step_id: STEP_BOOT_WAIT
-    screen_scene_id: SCENE_LOCKED
-    audio_pack_id: ""
-    actions:
-      - ACTION_TRACE_STEP
-    apps:
-      - APP_LA
-      - APP_SCREEN
-      - APP_GATE
-    mp3_gate_open: false
-    transitions:
-      - trigger: on_event
-        event_type: unlock
-        event_name: UNLOCK
-        target_step_id: STEP_BOOT_USON
-        after_ms: 0
-        priority: 100
-  - step_id: STEP_BOOT_USON
-    screen_scene_id: SCENE_LOCKED
-    audio_pack_id: PACK_BOOT_RADIO
-    actions:
-      - ACTION_TRACE_STEP
-    apps:
-      - APP_AUDIO
-      - APP_SCREEN
-      - APP_GATE
-    mp3_gate_open: false
-    transitions: []
-`,
-}
-
-const SCENE_ROTATION = ['SCENE_LOCKED', 'SCENE_SEARCH', 'SCENE_BROKEN', 'SCENE_REWARD', 'SCENE_READY']
-const DEFAULT_ACTIONS_CSV = 'ACTION_TRACE_STEP'
-const DEFAULT_APPS_CSV = 'APP_SCREEN,APP_GATE'
-const DEFAULT_EDGE_TRIGGER = 'on_event'
-const DEFAULT_EDGE_EVENT_TYPE = 'action'
-const DEFAULT_EDGE_AFTER_MS = 0
-const DEFAULT_EDGE_PRIORITY = 100
-
-const makeIdFragment = () => Math.random().toString(36).slice(2, 8)
-
-const normalizeToken = (value: string, fallback: string) => {
-  const normalized = value.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_')
-  return normalized.length > 0 ? normalized : fallback
-}
-
-const ensureInitialNode = (nodes: EditorNode[]) => {
-  if (nodes.length === 0) {
-    return nodes
-  }
-  if (nodes.some((node) => node.isInitial)) {
-    return nodes
-  }
-  return nodes.map((node, index) => ({ ...node, isInitial: index === 0 }))
-}
-
-const tokenizeCsv = (value: string) =>
+const parseCsvTokens = (value: string) =>
   Array.from(
     new Set(
       value
         .split(',')
-        .map((token) => normalizeToken(token, ''))
+        .map((token) => normalizeTokenInput(token))
         .filter((token) => token.length > 0),
     ),
   )
 
-const normalizeTrigger = (value: string) => {
-  const normalized = value.trim().toLowerCase()
-  if (normalized === 'on_event' || normalized === 'after_ms' || normalized === 'immediate') {
-    return normalized
-  }
-  return DEFAULT_EDGE_TRIGGER
-}
+const toCsv = (values: string[]) => values.join(', ')
 
-const inferEventType = (eventName: string) => {
-  const normalizedName = normalizeToken(eventName, 'ACTION')
-  if (normalizedName === 'UNLOCK') {
-    return 'unlock'
-  }
-  if (normalizedName === 'AUDIO_DONE') {
-    return 'audio_done'
-  }
-  if (normalizedName.startsWith('TIMER')) {
-    return 'timer'
-  }
-  if (normalizedName.startsWith('FORCE') || normalizedName === 'SKIP') {
-    return 'serial'
-  }
-  return DEFAULT_EDGE_EVENT_TYPE
-}
+const cloneDocument = (document: StoryGraphDocument): StoryGraphDocument =>
+  JSON.parse(JSON.stringify(document)) as StoryGraphDocument
 
-const normalizeEventType = (value: string, eventName: string) => {
-  const normalized = value.trim().toLowerCase()
-  if (normalized === 'none' || normalized === 'unlock' || normalized === 'audio_done' || normalized === 'timer' || normalized === 'serial' || normalized === 'action') {
-    return normalized
-  }
-  return inferEventType(eventName)
-}
-
-const cloneNodes = (source: EditorNode[]) => source.map((node) => ({ ...node }))
-
-const cloneEdges = (source: EditorEdge[]) => source.map((edge) => ({ ...edge }))
-
-const createNode = (index: number): EditorNode => ({
-  id: `node-${makeIdFragment()}`,
-  stepId: `STEP_NODE_${index}`,
-  screenSceneId: SCENE_ROTATION[(index - 1) % SCENE_ROTATION.length],
-  audioPackId: '',
-  actionsCsv: DEFAULT_ACTIONS_CSV,
-  appsCsv: DEFAULT_APPS_CSV,
-  mp3GateOpen: false,
-  x: 28 + ((index - 1) % 3) * 270,
-  y: 36 + Math.floor((index - 1) / 3) * 250,
-  isInitial: false,
-})
-
-const createDefaultGraph = () => {
-  const start: EditorNode = {
-    id: 'node-start',
-    stepId: 'STEP_START',
-    screenSceneId: 'SCENE_LOCKED',
-    audioPackId: '',
-    actionsCsv: DEFAULT_ACTIONS_CSV,
-    appsCsv: 'APP_LA,APP_SCREEN,APP_GATE',
-    mp3GateOpen: false,
-    x: 32,
-    y: 90,
-    isInitial: true,
-  }
-  const middle: EditorNode = {
-    id: 'node-investigate',
-    stepId: 'STEP_INVESTIGATION',
-    screenSceneId: 'SCENE_SEARCH',
-    audioPackId: 'PACK_BOOT_RADIO',
-    actionsCsv: DEFAULT_ACTIONS_CSV,
-    appsCsv: 'APP_AUDIO,APP_SCREEN,APP_GATE',
-    mp3GateOpen: false,
-    x: 350,
-    y: 280,
-    isInitial: false,
-  }
-  const done: EditorNode = {
-    id: 'node-done',
-    stepId: 'STEP_DONE',
-    screenSceneId: 'SCENE_READY',
-    audioPackId: '',
-    actionsCsv: `${DEFAULT_ACTIONS_CSV},ACTION_REFRESH_SD`,
-    appsCsv: 'APP_SCREEN,APP_GATE',
-    mp3GateOpen: true,
-    x: 680,
-    y: 90,
-    isInitial: false,
-  }
-
-  const edges: EditorEdge[] = [
-    {
-      id: 'edge-start-mid',
-      fromNodeId: start.id,
-      toNodeId: middle.id,
-      trigger: 'on_event',
-      eventType: 'unlock',
-      eventName: 'UNLOCK',
-      afterMs: 0,
-      priority: 100,
-    },
-    {
-      id: 'edge-mid-done',
-      fromNodeId: middle.id,
-      toNodeId: done.id,
-      trigger: 'on_event',
-      eventType: 'action',
-      eventName: 'BTN_NEXT',
-      afterMs: 0,
-      priority: 100,
-    },
-  ]
-
-  return { nodes: [start, middle, done], edges }
-}
-
-const buildStoryYaml = (scenarioId: string, nodes: EditorNode[], edges: EditorEdge[]) => {
-  const normalizedNodes = ensureInitialNode(nodes)
-  if (normalizedNodes.length === 0) {
-    return `id: ${normalizeToken(scenarioId, 'NODAL_STORY')}
-version: 2
-initial_step: STEP_START
-app_bindings:
-  - id: APP_LA
-    app: LA_DETECTOR
-    config:
-      hold_ms: 3000
-      unlock_event: UNLOCK
-      require_listening: true
-  - id: APP_AUDIO
-    app: AUDIO_PACK
-  - id: APP_SCREEN
-    app: SCREEN_SCENE
-  - id: APP_GATE
-    app: MP3_GATE
-steps: []
-`
-  }
-
-  const usedStepIds = new Set<string>()
-  const stepIdByNodeId = new Map<string, string>()
-  normalizedNodes.forEach((node, index) => {
-    const baseId = normalizeToken(node.stepId, `STEP_NODE_${index + 1}`)
-    let candidate = baseId
-    let suffix = 2
-    while (usedStepIds.has(candidate)) {
-      candidate = `${baseId}_${suffix}`
-      suffix += 1
-    }
-    usedStepIds.add(candidate)
-    stepIdByNodeId.set(node.id, candidate)
-  })
-
-  const initialNode = normalizedNodes.find((node) => node.isInitial) ?? normalizedNodes[0]
-  const initialStepId = stepIdByNodeId.get(initialNode.id) ?? 'STEP_START'
-  const lines: string[] = [
-    `id: ${normalizeToken(scenarioId, 'NODAL_STORY')}`,
-    'version: 2',
-    `initial_step: ${initialStepId}`,
-    'app_bindings:',
-    '  - id: APP_LA',
-    '    app: LA_DETECTOR',
-    '    config:',
-    '      hold_ms: 3000',
-    '      unlock_event: UNLOCK',
-    '      require_listening: true',
-    '  - id: APP_AUDIO',
-    '    app: AUDIO_PACK',
-    '  - id: APP_SCREEN',
-    '    app: SCREEN_SCENE',
-    '  - id: APP_GATE',
-    '    app: MP3_GATE',
-    'steps:',
-  ]
-
-  normalizedNodes.forEach((node, index) => {
-    const stepId = stepIdByNodeId.get(node.id) ?? `STEP_NODE_${index + 1}`
-    const screenSceneId = normalizeToken(node.screenSceneId, 'SCENE_LOCKED')
-    const audioPackId = node.audioPackId.trim().length > 0 ? normalizeToken(node.audioPackId, '') : '""'
-    const actions = tokenizeCsv(node.actionsCsv)
-    const apps = tokenizeCsv(node.appsCsv)
-    const outgoingEdges = edges.filter((edge) => edge.fromNodeId === node.id && stepIdByNodeId.has(edge.toNodeId))
-
-    lines.push(`  - step_id: ${stepId}`)
-    lines.push(`    screen_scene_id: ${screenSceneId}`)
-    lines.push(`    audio_pack_id: ${audioPackId}`)
-    lines.push('    actions:')
-    ;(actions.length > 0 ? actions : [normalizeToken(DEFAULT_ACTIONS_CSV, 'ACTION_TRACE_STEP')]).forEach((action) =>
-      lines.push(`      - ${action}`),
-    )
-    lines.push('    apps:')
-    ;(apps.length > 0 ? apps : tokenizeCsv(DEFAULT_APPS_CSV)).forEach((appId) => lines.push(`      - ${appId}`))
-    lines.push(`    mp3_gate_open: ${node.mp3GateOpen ? 'true' : 'false'}`)
-    if (outgoingEdges.length > 0) {
-      lines.push('    transitions:')
-      outgoingEdges.forEach((edge) => {
-        const targetStepId = stepIdByNodeId.get(edge.toNodeId)
-        if (!targetStepId) {
-          return
-        }
-        const eventName = normalizeToken(edge.eventName, 'BTN_NEXT')
-        lines.push(`      - trigger: ${normalizeTrigger(edge.trigger)}`)
-        lines.push(`        event_type: ${normalizeEventType(edge.eventType, eventName)}`)
-        lines.push(`        event_name: ${eventName}`)
-        lines.push(`        target_step_id: ${targetStepId}`)
-        lines.push(`        after_ms: ${Number.isFinite(edge.afterMs) ? Math.max(0, Math.trunc(edge.afterMs)) : 0}`)
-        lines.push(`        priority: ${Number.isFinite(edge.priority) ? Math.max(0, Math.min(255, Math.trunc(edge.priority))) : 100}`)
-      })
-    } else {
-      lines.push('    transitions: []')
-    }
-  })
-
-  return `${lines.join('\n')}\n`
-}
-
-const autoLayoutNodes = (nodes: EditorNode[], edges: EditorEdge[]) => {
-  const normalizedNodes = ensureInitialNode(nodes)
-  if (normalizedNodes.length === 0) {
-    return normalizedNodes
-  }
-
-  const nodeById = new Map(normalizedNodes.map((node) => [node.id, node]))
-  const adjacency = new Map<string, string[]>()
-  normalizedNodes.forEach((node) => adjacency.set(node.id, []))
-  edges.forEach((edge) => {
-    if (!nodeById.has(edge.fromNodeId) || !nodeById.has(edge.toNodeId)) {
-      return
-    }
-    const current = adjacency.get(edge.fromNodeId) ?? []
-    current.push(edge.toNodeId)
-    adjacency.set(edge.fromNodeId, current)
-  })
-
-  const startNode = normalizedNodes.find((node) => node.isInitial) ?? normalizedNodes[0]
-  const levelByNode = new Map<string, number>()
-  const queue: string[] = [startNode.id]
-  levelByNode.set(startNode.id, 0)
-
-  while (queue.length > 0) {
-    const currentId = queue.shift()
-    if (!currentId) {
-      continue
-    }
-    const currentLevel = levelByNode.get(currentId) ?? 0
-    ;(adjacency.get(currentId) ?? []).forEach((nextId) => {
-      if (levelByNode.has(nextId)) {
-        return
-      }
-      levelByNode.set(nextId, currentLevel + 1)
-      queue.push(nextId)
+const createFallbackDocument = (): StoryGraphDocument => {
+  const imported = importStoryYamlToGraph(STORY_TEMPLATE_LIBRARY.DEFAULT)
+  if (imported.document) {
+    return autoLayoutStoryGraph(imported.document, {
+      direction: 'LR',
+      nodeWidth: NODE_WIDTH,
+      nodeHeight: NODE_HEIGHT,
     })
   }
 
-  const assignedLevels = Array.from(levelByNode.values())
-  let maxLevel = assignedLevels.length > 0 ? Math.max(...assignedLevels) : 0
-  normalizedNodes.forEach((node) => {
-    if (levelByNode.has(node.id)) {
-      return
-    }
-    maxLevel += 1
-    levelByNode.set(node.id, maxLevel)
-  })
-
-  const rowsByLevel = new Map<number, string[]>()
-  normalizedNodes.forEach((node) => {
-    const level = levelByNode.get(node.id) ?? 0
-    const current = rowsByLevel.get(level) ?? []
-    current.push(node.id)
-    rowsByLevel.set(level, current)
-  })
-
-  return normalizedNodes.map((node) => {
-    const level = levelByNode.get(node.id) ?? 0
-    const levelRows = rowsByLevel.get(level) ?? [node.id]
-    const rowIndex = Math.max(0, levelRows.indexOf(node.id))
-    return {
-      ...node,
-      x: 32 + level * NODE_HORIZONTAL_GAP,
-      y: 40 + rowIndex * NODE_VERTICAL_GAP,
-    }
-  })
+  return {
+    scenarioId: DEFAULT_SCENARIO_ID,
+    version: DEFAULT_SCENARIO_VERSION,
+    initialStep: `${DEFAULT_STEP_ID}_1`,
+    appBindings: [
+      {
+        id: 'APP_SCREEN',
+        app: 'SCREEN_SCENE',
+      },
+    ],
+    nodes: [
+      {
+        id: 'node-1',
+        stepId: `${DEFAULT_STEP_ID}_1`,
+        screenSceneId: DEFAULT_SCENE_ID,
+        audioPackId: '',
+        actions: ['ACTION_TRACE_STEP'],
+        apps: [...DEFAULT_NODE_APPS],
+        mp3GateOpen: false,
+        x: 80,
+        y: 80,
+        isInitial: true,
+      },
+    ],
+    edges: [],
+  }
 }
 
+const loadInitialDraft = () => {
+  const stored = localStorage.getItem('story-draft')
+  if (stored && stored.trim().length > 0) {
+    return stored
+  }
+  return STORY_TEMPLATE_LIBRARY.DEFAULT
+}
+
+const loadInitialDocument = (): StoryGraphDocument => {
+  const stored = localStorage.getItem('story-graph-document')
+  if (stored) {
+    try {
+      const parsed = JSON.parse(stored) as StoryGraphDocument
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        Array.isArray(parsed.nodes) &&
+        Array.isArray(parsed.edges) &&
+        Array.isArray(parsed.appBindings)
+      ) {
+        return parsed
+      }
+    } catch {
+      // Fallback below.
+    }
+  }
+
+  const draft = loadInitialDraft()
+  const imported = importStoryYamlToGraph(draft)
+  if (imported.document) {
+    return autoLayoutStoryGraph(imported.document, {
+      direction: 'LR',
+      nodeWidth: NODE_WIDTH,
+      nodeHeight: NODE_HEIGHT,
+    })
+  }
+
+  return createFallbackDocument()
+}
+
+const nextNodeId = (document: StoryGraphDocument) => {
+  const ids = new Set(document.nodes.map((node) => node.id))
+  let index = document.nodes.length + 1
+  let candidate = `node-${index}`
+  while (ids.has(candidate)) {
+    index += 1
+    candidate = `node-${index}`
+  }
+  return candidate
+}
+
+const nextStepId = (document: StoryGraphDocument) => {
+  const ids = new Set(document.nodes.map((node) => normalizeTokenInput(node.stepId)))
+  let index = document.nodes.length + 1
+  let candidate = `${DEFAULT_STEP_ID}_${index}`
+  while (ids.has(candidate)) {
+    index += 1
+    candidate = `${DEFAULT_STEP_ID}_${index}`
+  }
+  return candidate
+}
+
+const nextBindingId = (document: StoryGraphDocument) => {
+  const ids = new Set(document.appBindings.map((binding) => normalizeTokenInput(binding.id)))
+  let index = document.appBindings.length + 1
+  let candidate = `APP_CUSTOM_${index}`
+  while (ids.has(candidate)) {
+    index += 1
+    candidate = `APP_CUSTOM_${index}`
+  }
+  return candidate
+}
+
+const nodeCardClass =
+  'rounded-2xl border bg-white/95 px-3 py-2 shadow-[0_8px_24px_rgba(15,23,42,0.14)] backdrop-blur-sm min-w-[220px]'
+
+const StoryFlowNode = ({ data, selected }: NodeProps<StoryCanvasNode>) => (
+  <div className={`${nodeCardClass} ${selected ? 'border-[var(--accent-700)]' : 'border-[var(--mist-400)]'}`}>
+    <Handle type="target" id="in" position={Position.Left} />
+    <Handle type="source" id="out" position={Position.Right} />
+    <div className="flex items-center justify-between gap-2">
+      <p className="text-xs font-semibold text-[var(--ink-900)]">{data.stepId}</p>
+      {data.isInitial ? <Badge tone="success">Initial</Badge> : null}
+    </div>
+    <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[var(--ink-500)]">{data.screenSceneId}</p>
+    <p className="mt-1 text-[11px] text-[var(--ink-500)]">
+      {data.audioPackId ? `Audio: ${data.audioPackId}` : 'Audio: aucun'}
+    </p>
+  </div>
+)
+
+const flowNodeTypes = { storyNode: StoryFlowNode }
+
 const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryDesignerProps) => {
-  const [draft, setDraft] = useState<string>(() => localStorage.getItem('story-draft') ?? TEMPLATE_LIBRARY.DEFAULT)
+  const [draft, setDraft] = useState<string>(loadInitialDraft)
+  const [document, setDocument] = useState<StoryGraphDocument>(loadInitialDocument)
   const [status, setStatus] = useState('')
+  const [statusTone, setStatusTone] = useState<StatusTone>('info')
   const [errors, setErrors] = useState<string[]>([])
-  const [busy, setBusy] = useState(false)
+  const [importWarnings, setImportWarnings] = useState<string[]>([])
   const [selectedTemplate, setSelectedTemplate] = useState('')
-  const [graphScenarioId, setGraphScenarioId] = useState('NODAL_STORY')
-  const [nodes, setNodes] = useState<EditorNode[]>(() => createDefaultGraph().nodes)
-  const [edges, setEdges] = useState<EditorEdge[]>(() => createDefaultGraph().edges)
-  const [linkSourceId, setLinkSourceId] = useState<string | null>(null)
-  const [linkEventName, setLinkEventName] = useState('BTN_NEXT')
-  const [linkEventType, setLinkEventType] = useState('action')
-  const [historyPast, setHistoryPast] = useState<GraphSnapshot[]>([])
-  const [historyFuture, setHistoryFuture] = useState<GraphSnapshot[]>([])
-  const [dragState, setDragState] = useState<DragState | null>(null)
-  const canvasRef = useRef<HTMLDivElement | null>(null)
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<TabKey>('graph')
+  const [linkEventName, setLinkEventName] = useState(DEFAULT_EVENT_NAME)
+  const [linkEventType, setLinkEventType] = useState<EventType>(DEFAULT_EVENT_TYPE)
+  const [historyPast, setHistoryPast] = useState<StoryGraphDocument[]>([])
+  const [historyFuture, setHistoryFuture] = useState<StoryGraphDocument[]>([])
+  const [busyAction, setBusyAction] = useState<'validate' | 'deploy' | 'test' | null>(null)
 
   const validateEnabled = capabilities.canValidate
   const deployEnabled = capabilities.canDeploy
   const testRunEnabled = capabilities.canDeploy && capabilities.canSelectScenario && capabilities.canStart
 
-  const nodeMap = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes])
+  const documentRef = useRef(document)
 
-  const outgoingEdgeMap = useMemo(() => {
-    const map = new Map<string, EditorEdge[]>()
-    edges.forEach((edge) => {
-      const current = map.get(edge.fromNodeId) ?? []
-      current.push(edge)
-      map.set(edge.fromNodeId, current)
-    })
-    return map
-  }, [edges])
+  useEffect(() => {
+    documentRef.current = document
+  }, [document])
 
-  const renderedEdges = useMemo(
-    () =>
-      edges
-        .map((edge) => {
-          const from = nodeMap.get(edge.fromNodeId)
-          const to = nodeMap.get(edge.toNodeId)
-          if (!from || !to) {
-            return null
-          }
-          const x1 = from.x + NODE_WIDTH
-          const y1 = from.y + 54
-          const x2 = to.x
-          const y2 = to.y + 54
-          const controlGap = Math.max(Math.abs(x2 - x1) * 0.4, 60)
-          const path = `M ${x1} ${y1} C ${x1 + controlGap} ${y1}, ${x2 - controlGap} ${y2}, ${x2} ${y2}`
-          return {
-            id: edge.id,
-            path,
-            labelX: (x1 + x2) / 2,
-            labelY: (y1 + y2) / 2 - 6,
-            eventLabel: `${normalizeEventType(edge.eventType, edge.eventName)}:${edge.eventName}`,
-          }
-        })
-        .filter((edge): edge is { id: string; path: string; labelX: number; labelY: number; eventLabel: string } => edge !== null),
-    [edges, nodeMap],
-  )
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      localStorage.setItem('story-draft', draft)
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [draft])
 
-  const graphBounds = useMemo(() => {
-    const bounds = nodes.reduce(
-      (acc, node) => ({
-        width: Math.max(acc.width, node.x + NODE_WIDTH + 40),
-        height: Math.max(acc.height, node.y + NODE_HEIGHT + 40),
-      }),
-      { width: 980, height: CANVAS_HEIGHT },
-    )
-    return {
-      width: bounds.width,
-      height: Math.max(bounds.height, CANVAS_HEIGHT),
-    }
-  }, [nodes])
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      localStorage.setItem('story-graph-document', JSON.stringify(document))
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [document])
 
-  const graphHealth = useMemo(() => {
-    const nodeIds = new Set(nodes.map((node) => node.id))
-    const incomingByNode = new Map<string, number>()
-    const outgoingByNode = new Map<string, number>()
-    nodes.forEach((node) => {
-      incomingByNode.set(node.id, 0)
-      outgoingByNode.set(node.id, 0)
-    })
-
-    edges.forEach((edge) => {
-      if (!nodeIds.has(edge.fromNodeId) || !nodeIds.has(edge.toNodeId)) {
-        return
-      }
-      incomingByNode.set(edge.toNodeId, (incomingByNode.get(edge.toNodeId) ?? 0) + 1)
-      outgoingByNode.set(edge.fromNodeId, (outgoingByNode.get(edge.fromNodeId) ?? 0) + 1)
-    })
-
-    const initialNodes = nodes.filter((node) => node.isInitial)
-    const selectedInitial = initialNodes[0] ?? null
-    const isolatedNodes = nodes.filter(
-      (node) => (incomingByNode.get(node.id) ?? 0) === 0 && (outgoingByNode.get(node.id) ?? 0) === 0,
-    )
-    const danglingNodes = nodes.filter(
-      (node) =>
-        !node.isInitial &&
-        (incomingByNode.get(node.id) ?? 0) === 0 &&
-        (outgoingByNode.get(node.id) ?? 0) > 0,
-    )
-    const terminalNodes = nodes.filter((node) => (outgoingByNode.get(node.id) ?? 0) === 0)
-
-    const warnings: string[] = []
-    if (initialNodes.length === 0) {
-      warnings.push('No initial node selected.')
-    } else if (initialNodes.length > 1) {
-      warnings.push('Multiple initial nodes detected; only one should remain active.')
-    }
-    if (isolatedNodes.length > 0) {
-      warnings.push(`${isolatedNodes.length} isolated node(s) without any transition.`)
-    }
-    if (danglingNodes.length > 0) {
-      warnings.push(`${danglingNodes.length} node(s) cannot be reached from another node.`)
-    }
-    if (terminalNodes.length === 0 && nodes.length > 0) {
-      warnings.push('No terminal node detected (all nodes loop to another node).')
-    }
-
-    return {
-      nodeCount: nodes.length,
-      edgeCount: edges.length,
-      terminalCount: terminalNodes.length,
-      selectedInitial,
-      warnings,
-    }
-  }, [edges, nodes])
-
-  const snapshotGraph = useCallback(
-    (): GraphSnapshot => ({
-      nodes: cloneNodes(nodes),
-      edges: cloneEdges(edges),
-      linkSourceId,
-      linkEventName,
-      linkEventType,
-    }),
-    [edges, linkEventName, linkEventType, linkSourceId, nodes],
-  )
-
-  const applyGraphSnapshot = useCallback((snapshot: GraphSnapshot) => {
-    setNodes(cloneNodes(snapshot.nodes))
-    setEdges(cloneEdges(snapshot.edges))
-    setLinkSourceId(snapshot.linkSourceId)
-    setLinkEventName(snapshot.linkEventName)
-    setLinkEventType(snapshot.linkEventType)
-  }, [])
-
-  const pushHistory = useCallback(() => {
-    const snapshot = snapshotGraph()
+  const pushHistorySnapshot = useCallback(() => {
+    const snapshot = cloneDocument(documentRef.current)
     setHistoryPast((previous) => {
+      const last = previous[previous.length - 1]
+      if (last && JSON.stringify(last) === JSON.stringify(snapshot)) {
+        return previous
+      }
       const next = [...previous, snapshot]
       return next.length > 80 ? next.slice(next.length - 80) : next
     })
     setHistoryFuture([])
-  }, [snapshotGraph])
+  }, [])
+
+  const applyDocumentWithHistory = useCallback(
+    (nextDocument: StoryGraphDocument, message: string, tone: StatusTone = 'success') => {
+      pushHistorySnapshot()
+      setDocument(nextDocument)
+      setStatus(message)
+      setStatusTone(tone)
+      setErrors([])
+    },
+    [pushHistorySnapshot],
+  )
 
   const canUndo = historyPast.length > 0
   const canRedo = historyFuture.length > 0
@@ -798,60 +299,35 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
     if (!previous) {
       return
     }
-    const current = snapshotGraph()
+    const current = cloneDocument(documentRef.current)
     setHistoryPast((past) => past.slice(0, -1))
     setHistoryFuture((future) => {
       const next = [...future, current]
       return next.length > 80 ? next.slice(next.length - 80) : next
     })
-    applyGraphSnapshot(previous)
-    setStatus('Undo applied.')
-  }, [applyGraphSnapshot, canUndo, historyPast, snapshotGraph])
+    setDocument(previous)
+    setStatus('Annulation appliquée.')
+    setStatusTone('info')
+  }, [canUndo, historyPast])
 
   const handleRedo = useCallback(() => {
     if (!canRedo) {
       return
     }
-    const next = historyFuture[historyFuture.length - 1]
-    if (!next) {
+    const nextState = historyFuture[historyFuture.length - 1]
+    if (!nextState) {
       return
     }
-    const current = snapshotGraph()
+    const current = cloneDocument(documentRef.current)
     setHistoryFuture((future) => future.slice(0, -1))
     setHistoryPast((past) => {
-      const updated = [...past, current]
-      return updated.length > 80 ? updated.slice(updated.length - 80) : updated
+      const next = [...past, current]
+      return next.length > 80 ? next.slice(next.length - 80) : next
     })
-    applyGraphSnapshot(next)
-    setStatus('Redo applied.')
-  }, [applyGraphSnapshot, canRedo, historyFuture, snapshotGraph])
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      localStorage.setItem('story-draft', draft)
-    }, 500)
-
-    return () => window.clearTimeout(timer)
-  }, [draft])
-
-  useEffect(() => {
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (draft.trim().length === 0) {
-        return
-      }
-      event.preventDefault()
-      event.returnValue = ''
-    }
-
-    window.addEventListener('beforeunload', handleBeforeUnload)
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [draft])
-
-  useEffect(() => {
-    const clearDrag = () => setDragState(null)
-    window.addEventListener('mouseup', clearDrag)
-    return () => window.removeEventListener('mouseup', clearDrag)
-  }, [])
+    setDocument(nextState)
+    setStatus('Rétablissement appliqué.')
+    setStatusTone('info')
+  }, [canRedo, historyFuture])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -879,832 +355,1146 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [handleRedo, handleUndo])
 
-  const updateNode = useCallback((nodeId: string, patch: Partial<EditorNode>) => {
-    setNodes((previous) =>
-      previous.map((node) => {
-        if (node.id !== nodeId) {
-          return node
-        }
-        return { ...node, ...patch }
-      }),
-    )
-  }, [])
+  const graphValidation = useMemo(() => validateStoryGraph(document), [document])
 
-  const setInitialNode = useCallback((nodeId: string) => {
-    pushHistory()
-    setNodes((previous) =>
-      previous.map((node) => ({
-        ...node,
-        isInitial: node.id === nodeId,
-      })),
-    )
-  }, [pushHistory])
-
-  const handleTemplateChange = (value: string) => {
-    setSelectedTemplate(value)
-    if (value && TEMPLATE_LIBRARY[value]) {
-      setDraft(TEMPLATE_LIBRARY[value])
-      setStatus('Template loaded. Review and adjust resources before deploy.')
-      setErrors([])
-    }
-  }
-
-  const createAndAddNode = useCallback(
-    (options?: { x?: number; y?: number }) => {
-      const nextNode = createNode(nodes.length + 1)
-      if (typeof options?.x === 'number') {
-        nextNode.x = Math.max(10, options.x)
-      }
-      if (typeof options?.y === 'number') {
-        nextNode.y = Math.max(10, options.y)
-      }
-      if (nodes.length === 0) {
-        nextNode.isInitial = true
-      }
-      setNodes((previous) => [...previous, nextNode])
-      return nextNode
-    },
-    [nodes.length],
+  const selectedNode = useMemo(
+    () => document.nodes.find((node) => node.id === selectedNodeId) ?? null,
+    [document.nodes, selectedNodeId],
   )
+
+  const selectedEdge = useMemo(
+    () => document.edges.find((edge) => edge.id === selectedEdgeId) ?? null,
+    [document.edges, selectedEdgeId],
+  )
+
+  const flowNodes = useMemo<StoryCanvasNode[]>(
+    () =>
+      document.nodes.map((node) => ({
+        id: node.id,
+        type: 'storyNode',
+        position: { x: node.x, y: node.y },
+        data: {
+          stepId: node.stepId,
+          screenSceneId: node.screenSceneId,
+          audioPackId: node.audioPackId,
+          isInitial: node.isInitial,
+        },
+      })),
+    [document.nodes],
+  )
+
+  const flowEdges = useMemo<FlowEdge[]>(
+    () =>
+      document.edges.map((edge) => ({
+        id: edge.id,
+        source: edge.fromNodeId,
+        target: edge.toNodeId,
+        label: `${edge.eventType}:${edge.eventName}`,
+        markerEnd: { type: MarkerType.ArrowClosed },
+      })),
+    [document.edges],
+  )
+
+  const handleTemplateChange = useCallback(
+    (templateKey: string) => {
+      setSelectedTemplate(templateKey)
+      if (!templateKey || !STORY_TEMPLATE_LIBRARY[templateKey]) {
+        return
+      }
+      const templateYaml = STORY_TEMPLATE_LIBRARY[templateKey]
+      setDraft(templateYaml)
+      const imported = importStoryYamlToGraph(templateYaml)
+      setImportWarnings(imported.warnings)
+      if (!imported.document || imported.errors.length > 0) {
+        setErrors(imported.errors.length > 0 ? imported.errors : ['Impossible de charger le template.'])
+        setStatus('Template chargé dans le YAML, mais import graphe incomplet.')
+        setStatusTone('warning')
+        return
+      }
+      const nextDocument = autoLayoutStoryGraph(imported.document, {
+        direction: 'LR',
+        nodeWidth: NODE_WIDTH,
+        nodeHeight: NODE_HEIGHT,
+      })
+      applyDocumentWithHistory(nextDocument, `Template ${templateKey} chargé.`, 'success')
+      setSelectedNodeId(null)
+      setSelectedEdgeId(null)
+    },
+    [applyDocumentWithHistory],
+  )
+
+  const handleImportFromYaml = useCallback(() => {
+    const imported = importStoryYamlToGraph(draft)
+    setImportWarnings(imported.warnings)
+    if (!imported.document || imported.errors.length > 0) {
+      setErrors(imported.errors.length > 0 ? imported.errors : ['Import YAML invalide.'])
+      setStatus('Import YAML échoué.')
+      setStatusTone('error')
+      return
+    }
+    const nextDocument = autoLayoutStoryGraph(imported.document, {
+      direction: 'LR',
+      nodeWidth: NODE_WIDTH,
+      nodeHeight: NODE_HEIGHT,
+    })
+    applyDocumentWithHistory(nextDocument, 'YAML importé dans le graphe.', 'success')
+    setSelectedNodeId(null)
+    setSelectedEdgeId(null)
+  }, [applyDocumentWithHistory, draft])
+
+  const handleGenerateYaml = useCallback(() => {
+    const generated = generateStoryYamlFromGraph(document)
+    setDraft(generated)
+    setErrors([])
+    setStatus('YAML généré depuis le graphe.')
+    setStatusTone('success')
+  }, [document])
 
   const handleAddNode = useCallback(() => {
-    pushHistory()
-    createAndAddNode()
-    setStatus('Node added.')
-    setErrors([])
-  }, [createAndAddNode, pushHistory])
+    const current = cloneDocument(documentRef.current)
+    const node: StoryNode = {
+      id: nextNodeId(current),
+      stepId: nextStepId(current),
+      screenSceneId: DEFAULT_SCENE_ID,
+      audioPackId: '',
+      actions: ['ACTION_TRACE_STEP'],
+      apps: [...DEFAULT_NODE_APPS],
+      mp3GateOpen: false,
+      x: 80 + (current.nodes.length % 3) * 300,
+      y: 80 + Math.floor(current.nodes.length / 3) * 220,
+      isInitial: current.nodes.length === 0,
+    }
+    current.nodes.push(node)
+    applyDocumentWithHistory(current, 'Node ajouté.', 'success')
+    setSelectedNodeId(node.id)
+    setSelectedEdgeId(null)
+  }, [applyDocumentWithHistory])
 
-  const handleAddChildNode = useCallback(
-    (sourceNodeId: string) => {
-      const sourceNode = nodeMap.get(sourceNodeId)
-      if (!sourceNode) {
-        return
-      }
-      pushHistory()
-      const newNode = createAndAddNode({
-        x: sourceNode.x + NODE_HORIZONTAL_GAP,
-        y: sourceNode.y,
-      })
-      if (!newNode) {
-        return
-      }
-      setEdges((previous) => [
-        ...previous,
-        {
-          id: `edge-${makeIdFragment()}`,
-          fromNodeId: sourceNodeId,
-          toNodeId: newNode.id,
-          trigger: DEFAULT_EDGE_TRIGGER,
-          eventType: normalizeEventType(linkEventType, linkEventName),
-          eventName: linkEventName.trim() || 'BTN_NEXT',
-          afterMs: DEFAULT_EDGE_AFTER_MS,
-          priority: DEFAULT_EDGE_PRIORITY,
-        },
-      ])
-      setStatus('Child node added and linked.')
-      setErrors([])
-    },
-    [createAndAddNode, linkEventName, linkEventType, nodeMap, pushHistory],
-  )
+  const handleAddChildNode = useCallback(() => {
+    if (!selectedNode) {
+      setStatus('Sélectionne un node pour créer un enfant.')
+      setStatusTone('warning')
+      return
+    }
+    const current = cloneDocument(documentRef.current)
+    const source = current.nodes.find((node) => node.id === selectedNode.id)
+    if (!source) {
+      return
+    }
 
-  const handleCanvasDoubleClick = useCallback(
-    (event: ReactMouseEvent<HTMLDivElement>) => {
-      if (!canvasRef.current) {
-        return
-      }
-      const bounds = canvasRef.current.getBoundingClientRect()
-      const { scrollLeft, scrollTop } = canvasRef.current
-      const x = event.clientX - bounds.left + scrollLeft - NODE_WIDTH / 2
-      const y = event.clientY - bounds.top + scrollTop - 24
-      pushHistory()
-      createAndAddNode({ x, y })
-      setStatus('Node added on canvas.')
-      setErrors([])
-    },
-    [createAndAddNode, pushHistory],
-  )
+    const childNode: StoryNode = {
+      id: nextNodeId(current),
+      stepId: nextStepId(current),
+      screenSceneId: DEFAULT_SCENE_ID,
+      audioPackId: '',
+      actions: ['ACTION_TRACE_STEP'],
+      apps: [...DEFAULT_NODE_APPS],
+      mp3GateOpen: false,
+      x: source.x + 320,
+      y: source.y,
+      isInitial: false,
+    }
+
+    const edge: StoryEdge = {
+      id: `edge-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      fromNodeId: source.id,
+      toNodeId: childNode.id,
+      trigger: DEFAULT_TRIGGER,
+      eventType: linkEventType,
+      eventName: normalizeTokenInput(linkEventName || DEFAULT_EVENT_NAME),
+      afterMs: DEFAULT_AFTER_MS,
+      priority: DEFAULT_PRIORITY,
+    }
+
+    current.nodes.push(childNode)
+    current.edges.push(edge)
+
+    applyDocumentWithHistory(current, 'Node enfant ajouté et lié.', 'success')
+    setSelectedNodeId(childNode.id)
+    setSelectedEdgeId(edge.id)
+  }, [applyDocumentWithHistory, linkEventName, linkEventType, selectedNode])
+
+  const handleAutoLayout = useCallback(() => {
+    const current = cloneDocument(documentRef.current)
+    const laidOut = autoLayoutStoryGraph(current, {
+      direction: 'LR',
+      nodeWidth: NODE_WIDTH,
+      nodeHeight: NODE_HEIGHT,
+    })
+    applyDocumentWithHistory(laidOut, 'Auto-layout appliqué.', 'success')
+  }, [applyDocumentWithHistory])
 
   const handleResetGraph = useCallback(() => {
-    pushHistory()
-    const graph = createDefaultGraph()
-    setNodes(graph.nodes)
-    setEdges(graph.edges)
-    setLinkSourceId(null)
-    setLinkEventName('BTN_NEXT')
-    setLinkEventType('action')
-    setStatus('Node graph reset to default.')
-    setErrors([])
-  }, [pushHistory])
+    const fallback = createFallbackDocument()
+    applyDocumentWithHistory(fallback, 'Graphe réinitialisé.', 'warning')
+    setSelectedNodeId(null)
+    setSelectedEdgeId(null)
+  }, [applyDocumentWithHistory])
 
-  const handleRemoveNode = useCallback((nodeId: string) => {
-    pushHistory()
-    setNodes((previous) => ensureInitialNode(previous.filter((node) => node.id !== nodeId)))
-    setEdges((previous) => previous.filter((edge) => edge.fromNodeId !== nodeId && edge.toNodeId !== nodeId))
-    setLinkSourceId((previous) => (previous === nodeId ? null : previous))
-  }, [pushHistory])
-
-  const handleStartLink = useCallback((nodeId: string) => {
-    setLinkSourceId(nodeId)
-    const nodeLabel = nodeMap.get(nodeId)?.stepId ?? nodeId
-    setStatus(`Link mode: select target node for ${nodeLabel}.`)
-  }, [nodeMap])
-
-  const handleNodeClick = useCallback(
-    (nodeId: string) => {
-      if (!linkSourceId || linkSourceId === nodeId) {
+  const handleConnect = useCallback(
+    (connection: Connection) => {
+      if (!connection.source || !connection.target || connection.source === connection.target) {
         return
       }
-      const trimmedEvent = linkEventName.trim()
-      if (!trimmedEvent) {
-        setStatus('Link event cannot be empty.')
+      const current = cloneDocument(documentRef.current)
+      const existing = current.edges.find(
+        (edge) => edge.fromNodeId === connection.source && edge.toNodeId === connection.target,
+      )
+      if (existing) {
+        existing.eventName = normalizeTokenInput(linkEventName || DEFAULT_EVENT_NAME)
+        existing.eventType = linkEventType
+        existing.trigger = DEFAULT_TRIGGER
+        existing.afterMs = DEFAULT_AFTER_MS
+        applyDocumentWithHistory(current, 'Lien mis à jour.', 'success')
+        setSelectedEdgeId(existing.id)
+        setSelectedNodeId(null)
         return
       }
-
-      pushHistory()
-      setEdges((previous) => {
-        const existing = previous.find(
-          (edge) => edge.fromNodeId === linkSourceId && edge.toNodeId === nodeId,
-        )
-        if (existing) {
-          return previous.map((edge) =>
-            edge.id === existing.id
-              ? {
-                  ...edge,
-                  trigger: DEFAULT_EDGE_TRIGGER,
-                  eventType: normalizeEventType(linkEventType, trimmedEvent),
-                  eventName: trimmedEvent,
-                  afterMs: DEFAULT_EDGE_AFTER_MS,
-                }
-              : edge,
-          )
-        }
-        return [
-          ...previous,
-          {
-            id: `edge-${makeIdFragment()}`,
-            fromNodeId: linkSourceId,
-            toNodeId: nodeId,
-            trigger: DEFAULT_EDGE_TRIGGER,
-            eventType: normalizeEventType(linkEventType, trimmedEvent),
-            eventName: trimmedEvent,
-            afterMs: DEFAULT_EDGE_AFTER_MS,
-            priority: DEFAULT_EDGE_PRIORITY,
-          },
-        ]
-      })
-      setLinkSourceId(null)
-      setStatus('Nodes linked. Edit event directly inside the source node if needed.')
-      setErrors([])
+      const edge: StoryEdge = {
+        id: `edge-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        fromNodeId: connection.source,
+        toNodeId: connection.target,
+        trigger: DEFAULT_TRIGGER,
+        eventType: linkEventType,
+        eventName: normalizeTokenInput(linkEventName || DEFAULT_EVENT_NAME),
+        afterMs: DEFAULT_AFTER_MS,
+        priority: DEFAULT_PRIORITY,
+      }
+      current.edges.push(edge)
+      applyDocumentWithHistory(current, 'Lien créé.', 'success')
+      setSelectedEdgeId(edge.id)
+      setSelectedNodeId(null)
     },
-    [linkEventName, linkEventType, linkSourceId, pushHistory],
+    [applyDocumentWithHistory, linkEventName, linkEventType],
   )
 
-  const handleRemoveEdge = useCallback((edgeId: string) => {
-    pushHistory()
-    setEdges((previous) => previous.filter((edge) => edge.id !== edgeId))
-  }, [pushHistory])
-
-  const handleDragStart = useCallback(
-    (event: ReactMouseEvent<HTMLDivElement>, nodeId: string) => {
-      if (!canvasRef.current) {
-        return
-      }
-      const node = nodeMap.get(nodeId)
+  const handleNodeDragStop = useCallback(
+    (_event: unknown, draggedNode: StoryCanvasNode) => {
+      const current = cloneDocument(documentRef.current)
+      const node = current.nodes.find((entry) => entry.id === draggedNode.id)
       if (!node) {
         return
       }
-      pushHistory()
-      const bounds = canvasRef.current.getBoundingClientRect()
-      const { scrollLeft, scrollTop } = canvasRef.current
-      setDragState({
-        nodeId,
-        offsetX: event.clientX - bounds.left + scrollLeft - node.x,
-        offsetY: event.clientY - bounds.top + scrollTop - node.y,
-      })
-      event.preventDefault()
-      event.stopPropagation()
+      node.x = Math.round(draggedNode.position.x)
+      node.y = Math.round(draggedNode.position.y)
+      applyDocumentWithHistory(current, 'Position du node mise à jour.', 'info')
     },
-    [nodeMap, pushHistory],
+    [applyDocumentWithHistory],
   )
 
-  const handleCanvasMouseMove = useCallback(
-    (event: ReactMouseEvent<HTMLDivElement>) => {
-      if (!dragState || !canvasRef.current) {
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedNode) {
+      const current = cloneDocument(documentRef.current)
+      const deletedWasInitial = selectedNode.isInitial
+      current.nodes = current.nodes.filter((node) => node.id !== selectedNode.id)
+      current.edges = current.edges.filter(
+        (edge) => edge.fromNodeId !== selectedNode.id && edge.toNodeId !== selectedNode.id,
+      )
+      if (current.nodes.length > 0 && !current.nodes.some((node) => node.isInitial)) {
+        current.nodes[0].isInitial = true
+      }
+      if (deletedWasInitial) {
+        current.initialStep = current.nodes.find((node) => node.isInitial)?.stepId ?? ''
+      }
+      applyDocumentWithHistory(current, 'Node supprimé.', 'warning')
+      setSelectedNodeId(null)
+      return
+    }
+
+    if (selectedEdge) {
+      const current = cloneDocument(documentRef.current)
+      current.edges = current.edges.filter((edge) => edge.id !== selectedEdge.id)
+      applyDocumentWithHistory(current, 'Lien supprimé.', 'warning')
+      setSelectedEdgeId(null)
+    }
+  }, [applyDocumentWithHistory, selectedEdge, selectedNode])
+
+  const handleAddBinding = useCallback(() => {
+    const current = cloneDocument(documentRef.current)
+    current.appBindings.push({ id: nextBindingId(current), app: 'SCREEN_SCENE' })
+    applyDocumentWithHistory(current, 'Binding ajouté.', 'success')
+  }, [applyDocumentWithHistory])
+
+  const handleDuplicateBinding = useCallback(
+    (binding: AppBinding) => {
+      const current = cloneDocument(documentRef.current)
+      const nextId = nextBindingId(current)
+      current.appBindings.push({
+        ...binding,
+        id: nextId,
+        config: binding.config ? { ...binding.config } : undefined,
+      })
+      applyDocumentWithHistory(current, 'Binding dupliqué.', 'success')
+    },
+    [applyDocumentWithHistory],
+  )
+
+  const handleDeleteBinding = useCallback(
+    (bindingId: string) => {
+      const current = cloneDocument(documentRef.current)
+      current.appBindings = current.appBindings.filter((binding) => binding.id !== bindingId)
+      current.nodes = current.nodes.map((node) => ({
+        ...node,
+        apps: node.apps.filter((appId) => appId !== bindingId),
+      }))
+      applyDocumentWithHistory(current, 'Binding supprimé.', 'warning')
+    },
+    [applyDocumentWithHistory],
+  )
+
+  const runAsyncAction = useCallback(
+    async (
+      action: 'validate' | 'deploy' | 'test',
+      callback: () => Promise<void>,
+      fallbackError: string,
+      capabilityMessage: string,
+      enabled: boolean,
+    ) => {
+      if (!enabled) {
+        setStatus(capabilityMessage)
+        setStatusTone('warning')
         return
       }
-      const bounds = canvasRef.current.getBoundingClientRect()
-      const { scrollLeft, scrollTop } = canvasRef.current
-      const maxX = Math.max(20, graphBounds.width - NODE_WIDTH - 10)
-      const maxY = Math.max(20, graphBounds.height - NODE_HEIGHT - 10)
-      const nextX = Math.min(maxX, Math.max(10, event.clientX - bounds.left + scrollLeft - dragState.offsetX))
-      const nextY = Math.min(maxY, Math.max(10, event.clientY - bounds.top + scrollTop - dragState.offsetY))
-      updateNode(dragState.nodeId, { x: nextX, y: nextY })
+      setBusyAction(action)
+      setErrors([])
+      try {
+        await callback()
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : fallbackError)
+        setStatusTone('error')
+      } finally {
+        setBusyAction(null)
+      }
     },
-    [dragState, graphBounds.height, graphBounds.width, updateNode],
+    [],
   )
 
-  const handleGenerateFromNodes = useCallback(() => {
-    const generated = buildStoryYaml(graphScenarioId, nodes, edges)
-    setDraft(generated)
-    setStatus('YAML generated from linked nodes.')
-    setErrors([])
-  }, [edges, graphScenarioId, nodes])
+  const handleValidate = useCallback(
+    async () =>
+      runAsyncAction(
+        'validate',
+        async () => {
+          const result = await onValidate(draft)
+          if (result.valid) {
+            setStatus('Validation réussie.')
+            setStatusTone('success')
+            return
+          }
+          const nextErrors = result.errors ?? ['YAML invalide.']
+          setErrors(nextErrors)
+          setStatus('Validation en erreur.')
+          setStatusTone('error')
+        },
+        'Validation impossible.',
+        'Validation indisponible en mode legacy.',
+        validateEnabled,
+      ),
+    [draft, onValidate, runAsyncAction, validateEnabled],
+  )
 
-  const handleAutoLayout = useCallback(() => {
-    pushHistory()
-    setNodes((previous) => autoLayoutNodes(previous, edges))
-    setStatus('Auto layout applied.')
-  }, [edges, pushHistory])
+  const handleDeploy = useCallback(
+    async () =>
+      runAsyncAction(
+        'deploy',
+        async () => {
+          const result = await onDeploy(draft)
+          if (result.status === 'ok') {
+            setStatus(`Déploiement réussi${result.deployed ? ` (${result.deployed})` : ''}.`)
+            setStatusTone('success')
+            return
+          }
+          setStatus(result.message ?? 'Déploiement en erreur.')
+          setStatusTone('error')
+        },
+        'Déploiement impossible.',
+        'Déploiement indisponible en mode legacy.',
+        deployEnabled,
+      ),
+    [deployEnabled, draft, onDeploy, runAsyncAction],
+  )
 
-  const handleValidate = async () => {
-    if (!validateEnabled) {
-      setStatus('Validation is unavailable in legacy mode.')
-      return
-    }
+  const handleTestRun = useCallback(
+    async () =>
+      runAsyncAction(
+        'test',
+        async () => {
+          await onTestRun(draft)
+          setStatus('Test run lancé (30 secondes).')
+          setStatusTone('success')
+        },
+        'Test run impossible.',
+        'Test run disponible uniquement avec les APIs Story V2 select/start/deploy.',
+        testRunEnabled,
+      ),
+    [draft, onTestRun, runAsyncAction, testRunEnabled],
+  )
 
-    setBusy(true)
-    setStatus('')
-    setErrors([])
-    try {
-      const result = await onValidate(draft)
-      if (result.valid) {
-        setStatus('Validation passed.')
-      } else {
-        setStatus('Validation errors found')
-        setErrors(result.errors ?? ['Invalid YAML'])
-      }
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : 'Validation failed')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const handleDeploy = async () => {
-    if (!deployEnabled) {
-      setStatus('Deployment is unavailable in legacy mode.')
-      return
-    }
-
-    setBusy(true)
-    setStatus('')
-    setErrors([])
-    try {
-      const result = await onDeploy(draft)
-      if (result.status === 'ok') {
-        setStatus(`Scenario deployed successfully ${result.deployed ? `(${result.deployed})` : ''}.`)
-      } else {
-        setStatus(result.message ?? 'Deployment failed')
-      }
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : 'Deployment failed')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const handleTestRun = async () => {
-    if (!testRunEnabled) {
-      setStatus('Test run requires Story V2 select/start/deploy APIs.')
-      return
-    }
-
-    setBusy(true)
-    setStatus('')
-    setErrors([])
-    try {
-      await onTestRun(draft)
-      setStatus('Test run started. Returning to selector after 30 seconds.')
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : 'Test run failed')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const editorExtensions = useMemo(() => [yaml()], [])
+  const editorExtensions = useMemo(() => [yamlLanguage()], [])
 
   return (
     <section className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-semibold">Story Designer</h2>
-        <p className="text-sm text-[var(--ink-500)]">
-          Build your story as linked nodes, set parameters in each node, then generate YAML.
-        </p>
+      <SectionHeader
+        title="Designer de story"
+        subtitle="Édite ton scénario en nodal, importe/exporte le YAML et pilote les bindings d'apps."
+        actions={
+          <>
+            <Field label="Template" htmlFor="story-template" className="min-w-[210px]">
+              <select
+                id="story-template"
+                value={selectedTemplate}
+                onChange={(event) => handleTemplateChange(event.target.value)}
+                className="focus-ring mt-2 min-h-[42px] w-full rounded-xl border border-[var(--mist-400)] bg-white/80 px-3 text-sm"
+              >
+                <option value="">Choisir un template</option>
+                {Object.keys(STORY_TEMPLATE_LIBRARY).map((templateKey) => (
+                  <option key={templateKey} value={templateKey}>
+                    {templateKey}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Button variant="outline" onClick={handleImportFromYaml}>
+              Import YAML → Graphe
+            </Button>
+            <Button variant="primary" onClick={handleGenerateYaml}>
+              Export Graphe → YAML
+            </Button>
+          </>
+        }
+      />
+
+      <Panel>
+        <div
+          role="toolbar"
+          aria-label="Actions graphe"
+          className="grid gap-3 md:grid-cols-[minmax(0,1fr)_repeat(7,auto)] md:items-end"
+        >
+          <Field label="Scenario ID" htmlFor="scenario-id">
+            <input
+              id="scenario-id"
+              value={document.scenarioId}
+              onFocus={pushHistorySnapshot}
+              onChange={(event) =>
+                setDocument((current) => ({
+                  ...current,
+                  scenarioId: normalizeTokenInput(event.target.value),
+                }))
+              }
+              className="focus-ring mt-2 min-h-[42px] w-full rounded-xl border border-[var(--mist-400)] bg-white/80 px-3 text-sm"
+            />
+          </Field>
+
+          <Button variant="outline" onClick={handleAddNode}>
+            Ajouter node
+          </Button>
+          <Button variant="outline" onClick={handleAddChildNode}>
+            Ajouter enfant
+          </Button>
+          <Button variant="outline" onClick={handleAutoLayout}>
+            Auto-layout
+          </Button>
+          <Button variant="outline" onClick={handleUndo} disabled={!canUndo}>
+            Annuler
+          </Button>
+          <Button variant="outline" onClick={handleRedo} disabled={!canRedo}>
+            Retablir
+          </Button>
+          <Button variant="outline" onClick={handleDeleteSelected} disabled={!selectedNode && !selectedEdge}>
+            Supprimer sélection
+          </Button>
+          <Button variant="ghost" onClick={handleResetGraph}>
+            Reinitialiser
+          </Button>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <Field label="Event par défaut (nouveau lien)">
+            <input
+              value={linkEventName}
+              onChange={(event) => {
+                const nextName = normalizeTokenInput(event.target.value)
+                setLinkEventName(nextName)
+                setLinkEventType(inferEventTypeFromName(nextName))
+              }}
+              className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white/80 px-3 text-sm"
+            />
+          </Field>
+          <Field label="Event type par défaut">
+            <select
+              value={linkEventType}
+              onChange={(event) => setLinkEventType(event.target.value as EventType)}
+              className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white/80 px-3 text-sm"
+            >
+              <option value="action">action</option>
+              <option value="unlock">unlock</option>
+              <option value="audio_done">audio_done</option>
+              <option value="timer">timer</option>
+              <option value="serial">serial</option>
+              <option value="none">none</option>
+            </select>
+          </Field>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Badge tone="info">Nodes: {document.nodes.length}</Badge>
+          <Badge tone="info">Liens: {document.edges.length}</Badge>
+          <Badge tone="neutral">Initial: {document.initialStep || 'auto'}</Badge>
+          {graphValidation.errors.length > 0 ? <Badge tone="error">Erreurs: {graphValidation.errors.length}</Badge> : null}
+          {graphValidation.warnings.length > 0 ? (
+            <Badge tone="warning">Warnings: {graphValidation.warnings.length}</Badge>
+          ) : null}
+        </div>
+      </Panel>
+
+      <div className="flex gap-2 lg:hidden">
+        <Button variant={activeTab === 'graph' ? 'primary' : 'outline'} onClick={() => setActiveTab('graph')}>
+          Graphe
+        </Button>
+        <Button variant={activeTab === 'bindings' ? 'primary' : 'outline'} onClick={() => setActiveTab('bindings')}>
+          Bindings
+        </Button>
+        <Button variant={activeTab === 'yaml' ? 'primary' : 'outline'} onClick={() => setActiveTab('yaml')}>
+          YAML
+        </Button>
       </div>
 
-      {(!validateEnabled || !deployEnabled) && (
-        <div className="glass-panel rounded-2xl border border-[var(--ink-500)] p-4 text-sm text-[var(--ink-700)]">
-          Story Designer is in read/edit mode. Validate/deploy actions require Story V2 API support.
-        </div>
-      )}
+      <div className="grid gap-6 xl:grid-cols-[1.5fr_1fr]">
+        <Panel className={activeTab !== 'graph' ? 'hidden lg:block' : ''}>
+          <div className="h-[62vh] min-h-[520px] rounded-2xl border border-white/70 bg-white/60">
+            <ReactFlow
+              nodes={flowNodes}
+              edges={flowEdges}
+              nodeTypes={flowNodeTypes}
+              fitView
+              onConnect={handleConnect}
+              onNodeClick={(_, node) => {
+                setSelectedNodeId(node.id)
+                setSelectedEdgeId(null)
+              }}
+              onEdgeClick={(_, edge) => {
+                setSelectedEdgeId(edge.id)
+                setSelectedNodeId(null)
+              }}
+              onPaneClick={() => {
+                setSelectedNodeId(null)
+                setSelectedEdgeId(null)
+              }}
+              onNodeDragStop={handleNodeDragStop}
+              proOptions={{ hideAttribution: true }}
+            >
+              <MiniMap pannable zoomable />
+              <Controls showInteractive={false} />
+              <Background gap={20} size={1.2} />
+            </ReactFlow>
+          </div>
+        </Panel>
 
-      <div className="glass-panel rounded-3xl p-5">
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto_auto_auto] md:items-end">
-          <label className="text-xs uppercase tracking-[0.2em] text-[var(--ink-500)]" htmlFor="graph-scenario-id">
-            Scenario ID
-            <input
-              id="graph-scenario-id"
-              value={graphScenarioId}
-              onChange={(event) => setGraphScenarioId(event.target.value)}
-              className="focus-ring mt-2 min-h-[44px] w-full rounded-xl border border-[var(--ink-500)] bg-white/70 px-3 text-sm text-[var(--ink-900)]"
+        <div className="space-y-6">
+          <Panel className={activeTab !== 'bindings' ? 'hidden lg:block' : ''}>
+            <SectionHeader
+              title="Bindings Apps"
+              subtitle="Édition guidée des app_bindings avec config contextuelle."
+              actions={<Button variant="outline" onClick={handleAddBinding}>Ajouter</Button>}
             />
-          </label>
-          <button
-            type="button"
-            onClick={handleAddNode}
-            className="focus-ring min-h-[44px] rounded-full border border-[var(--ink-700)] px-4 text-sm font-semibold text-[var(--ink-700)]"
-          >
-            Add node
-          </button>
-          <button
-            type="button"
-            onClick={handleGenerateFromNodes}
-            className="focus-ring min-h-[44px] rounded-full bg-[var(--ink-700)] px-4 text-sm font-semibold text-white"
-          >
-            Generate YAML
-          </button>
-          <button
-            type="button"
-            onClick={handleAutoLayout}
-            className="focus-ring min-h-[44px] rounded-full border border-[var(--ink-500)] px-4 text-sm font-semibold text-[var(--ink-700)]"
-          >
-            Auto layout
-          </button>
-          <button
-            type="button"
-            onClick={handleUndo}
-            disabled={!canUndo}
-            className="focus-ring min-h-[44px] rounded-full border border-[var(--ink-500)] px-4 text-sm font-semibold text-[var(--ink-700)] disabled:opacity-60"
-            title="Cmd/Ctrl+Z"
-          >
-            Undo
-          </button>
-          <button
-            type="button"
-            onClick={handleRedo}
-            disabled={!canRedo}
-            className="focus-ring min-h-[44px] rounded-full border border-[var(--ink-500)] px-4 text-sm font-semibold text-[var(--ink-700)] disabled:opacity-60"
-            title="Cmd/Ctrl+Shift+Z"
-          >
-            Redo
-          </button>
-          <button
-            type="button"
-            onClick={handleResetGraph}
-            className="focus-ring min-h-[44px] rounded-full border border-[var(--ink-500)] px-4 text-sm font-semibold text-[var(--ink-500)]"
-          >
-            Reset graph
-          </button>
-        </div>
-        <p className="mt-3 text-xs text-[var(--ink-500)]">
-          Click <span className="font-semibold">Link</span> on a source node, then click a target node to connect them.
-          Use <span className="font-semibold">Add node</span>, <span className="font-semibold">Add child</span>, or
-          double-click the canvas to create nodes quickly.
-        </p>
-        {linkSourceId && (
-          <div className="mt-2 space-y-2 rounded-xl border border-[var(--accent-700)] bg-white/70 px-3 py-2 text-xs text-[var(--accent-700)]">
-            <p>
-              Link mode active from <span className="font-semibold">{nodeMap.get(linkSourceId)?.stepId ?? linkSourceId}</span>.
-              Click a target node.
-            </p>
-            <div className="flex flex-wrap items-end gap-2">
-              <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--accent-700)]" htmlFor="link-event-name">
-                Event
-                <input
-                  id="link-event-name"
-                  value={linkEventName}
-                  onChange={(event) => {
-                    const nextName = event.target.value
-                    setLinkEventName(nextName)
-                    setLinkEventType(inferEventType(nextName))
-                  }}
-                  className="focus-ring mt-1 min-h-[32px] rounded-lg border border-[var(--accent-700)] bg-white px-2 text-xs text-[var(--ink-900)]"
-                />
-              </label>
-              <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--accent-700)]" htmlFor="link-event-type">
-                Event type
-                <select
-                  id="link-event-type"
-                  value={linkEventType}
-                  onChange={(event) => setLinkEventType(event.target.value)}
-                  className="focus-ring mt-1 min-h-[32px] rounded-lg border border-[var(--accent-700)] bg-white px-2 text-xs text-[var(--ink-900)]"
-                >
-                  <option value="action">action</option>
-                  <option value="unlock">unlock</option>
-                  <option value="audio_done">audio_done</option>
-                  <option value="timer">timer</option>
-                  <option value="serial">serial</option>
-                  <option value="none">none</option>
-                </select>
-              </label>
-              <button
-                type="button"
-                onClick={() => setLinkSourceId(null)}
-                className="focus-ring min-h-[32px] rounded-lg border border-[var(--accent-700)] px-3 text-[10px] font-semibold uppercase tracking-[0.15em]"
-              >
-                Cancel link
-              </button>
-            </div>
-          </div>
-        )}
 
-        <div className="mt-3 rounded-xl border border-[var(--mist-400)] bg-white/60 px-3 py-2 text-xs text-[var(--ink-700)]">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full border border-[var(--mist-400)] px-2 py-0.5">
-              Nodes: <span className="font-semibold">{graphHealth.nodeCount}</span>
-            </span>
-            <span className="rounded-full border border-[var(--mist-400)] px-2 py-0.5">
-              Links: <span className="font-semibold">{graphHealth.edgeCount}</span>
-            </span>
-            <span className="rounded-full border border-[var(--mist-400)] px-2 py-0.5">
-              Endings: <span className="font-semibold">{graphHealth.terminalCount}</span>
-            </span>
-            <span className="rounded-full border border-[var(--mist-400)] px-2 py-0.5">
-              Initial: <span className="font-semibold">{graphHealth.selectedInitial?.stepId ?? 'none'}</span>
-            </span>
-          </div>
-          {graphHealth.warnings.length > 0 ? (
-            <div className="mt-2 space-y-1 text-[var(--accent-700)]">
-              {graphHealth.warnings.map((warning) => (
-                <p key={warning}>- {warning}</p>
-              ))}
-            </div>
-          ) : (
-            <p className="mt-2 text-[var(--teal-500)]">Graph structure looks consistent.</p>
-          )}
-        </div>
+            <div className="mt-4 space-y-3">
+              {document.appBindings.map((binding) => (
+                <div key={binding.id} className="rounded-2xl border border-[var(--mist-400)] bg-white/80 p-3">
+                  <div className="grid gap-2 sm:grid-cols-[1fr_180px_auto_auto] sm:items-end">
+                    <Field label="ID">
+                      <input
+                        value={binding.id}
+                        onFocus={pushHistorySnapshot}
+                        onChange={(event) => {
+                          const nextId = normalizeTokenInput(event.target.value)
+                          setDocument((current) => ({
+                            ...current,
+                            appBindings: current.appBindings.map((entry) =>
+                              entry.id === binding.id
+                                ? {
+                                    ...entry,
+                                    id: nextId,
+                                  }
+                                : entry,
+                            ),
+                            nodes: current.nodes.map((node) => ({
+                              ...node,
+                              apps: node.apps.map((appId) => (appId === binding.id ? nextId : appId)),
+                            })),
+                          }))
+                        }}
+                        className="focus-ring mt-2 min-h-[38px] w-full rounded-lg border border-[var(--mist-400)] bg-white px-3 text-sm"
+                      />
+                    </Field>
 
-        <div
-          ref={canvasRef}
-          className="relative mt-4 overflow-auto rounded-2xl border border-white/60 bg-white/40"
-          style={{ height: `${CANVAS_HEIGHT}px` }}
-          onMouseMove={handleCanvasMouseMove}
-          onMouseUp={() => setDragState(null)}
-          onMouseLeave={() => setDragState(null)}
-          onDoubleClick={handleCanvasDoubleClick}
-        >
-          <div
-            className="relative"
-            style={{
-              width: `${graphBounds.width}px`,
-              height: `${graphBounds.height}px`,
-            }}
-          >
-            <svg className="pointer-events-none absolute left-0 top-0" width={graphBounds.width} height={graphBounds.height}>
-              {renderedEdges.map((edge) => (
-                <g key={edge.id}>
-                  <path d={edge.path} fill="none" stroke="rgba(31,42,68,0.55)" strokeWidth={2.5} />
-                  <text x={edge.labelX} y={edge.labelY} textAnchor="middle" fontSize={11} fill="#1f2a44">
-                    {edge.eventLabel}
-                  </text>
-                </g>
-              ))}
-            </svg>
+                    <Field label="App">
+                      <select
+                        value={binding.app}
+                        onFocus={pushHistorySnapshot}
+                        onChange={(event) => {
+                          const nextApp = event.target.value as AppBinding['app']
+                          setDocument((current) => ({
+                            ...current,
+                            appBindings: current.appBindings.map((entry) =>
+                              entry.id === binding.id
+                                ? {
+                                    ...entry,
+                                    app: nextApp,
+                                    config:
+                                      nextApp === 'LA_DETECTOR'
+                                        ? {
+                                            hold_ms: entry.config?.hold_ms ?? 3000,
+                                            unlock_event: entry.config?.unlock_event ?? 'UNLOCK',
+                                            require_listening: entry.config?.require_listening ?? true,
+                                          }
+                                        : undefined,
+                                  }
+                                : entry,
+                            ),
+                          }))
+                        }}
+                        className="focus-ring mt-2 min-h-[38px] w-full rounded-lg border border-[var(--mist-400)] bg-white px-3 text-sm"
+                      >
+                        <option value="LA_DETECTOR">LA_DETECTOR</option>
+                        <option value="AUDIO_PACK">AUDIO_PACK</option>
+                        <option value="SCREEN_SCENE">SCREEN_SCENE</option>
+                        <option value="MP3_GATE">MP3_GATE</option>
+                        <option value="WIFI_STACK">WIFI_STACK</option>
+                        <option value="ESPNOW_STACK">ESPNOW_STACK</option>
+                      </select>
+                    </Field>
 
-            {nodes.map((node) => {
-              const outgoing = outgoingEdgeMap.get(node.id) ?? []
-              return (
-                <div
-                  key={node.id}
-                  className={`absolute rounded-2xl border bg-white/90 p-3 shadow-lg ${
-                    linkSourceId === node.id ? 'border-[var(--accent-700)]' : 'border-[var(--mist-400)]'
-                  }`}
-                  style={{ left: `${node.x}px`, top: `${node.y}px`, width: `${NODE_WIDTH}px`, minHeight: `${NODE_HEIGHT}px` }}
-                  onClick={() => handleNodeClick(node.id)}
-                  onDoubleClick={(event) => event.stopPropagation()}
-                >
-                  <div
-                    className="mb-2 flex cursor-move items-center justify-between rounded-xl bg-[var(--mist-200)] px-2 py-1 text-xs font-semibold text-[var(--ink-700)]"
-                    onMouseDown={(event) => handleDragStart(event, node.id)}
-                  >
-                    <span>{node.stepId || 'STEP_NODE'}</span>
-                    <div className="flex gap-1">
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          handleAddChildNode(node.id)
-                        }}
-                        className="rounded-md border border-[var(--teal-500)] px-2 py-1 text-[10px] text-[var(--teal-500)]"
-                      >
-                        +Child
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          handleStartLink(node.id)
-                        }}
-                        className="rounded-md border border-[var(--ink-500)] px-2 py-1 text-[10px]"
-                      >
-                        Link
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          handleRemoveNode(node.id)
-                        }}
-                        className="rounded-md border border-[var(--accent-700)] px-2 py-1 text-[10px] text-[var(--accent-700)]"
-                      >
-                        Del
-                      </button>
-                    </div>
+                    <Button variant="outline" onClick={() => handleDuplicateBinding(binding)}>
+                      Dupliquer
+                    </Button>
+                    <Button variant="danger" onClick={() => handleDeleteBinding(binding.id)}>
+                      Supprimer
+                    </Button>
                   </div>
 
-                  <label className="block text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">
-                    Step ID
-                    <input
-                      value={node.stepId}
-                      onChange={(event) => updateNode(node.id, { stepId: event.target.value })}
-                      onFocus={pushHistory}
-                      onClick={(event) => event.stopPropagation()}
-                      className="focus-ring mt-1 min-h-[32px] w-full rounded-lg border border-[var(--mist-400)] px-2 text-xs text-[var(--ink-900)]"
-                    />
-                  </label>
-                  <label className="mt-2 block text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">
-                    Screen
-                    <input
-                      value={node.screenSceneId}
-                      onChange={(event) => updateNode(node.id, { screenSceneId: event.target.value })}
-                      onFocus={pushHistory}
-                      onClick={(event) => event.stopPropagation()}
-                      className="focus-ring mt-1 min-h-[32px] w-full rounded-lg border border-[var(--mist-400)] px-2 text-xs text-[var(--ink-900)]"
-                    />
-                  </label>
-                  <label className="mt-2 block text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">
-                    Audio pack
-                    <input
-                      value={node.audioPackId}
-                      onChange={(event) => updateNode(node.id, { audioPackId: event.target.value })}
-                      onFocus={pushHistory}
-                      onClick={(event) => event.stopPropagation()}
-                      placeholder="PACK_BOOT_RADIO"
-                      className="focus-ring mt-1 min-h-[32px] w-full rounded-lg border border-[var(--mist-400)] px-2 text-xs text-[var(--ink-900)]"
-                    />
-                  </label>
-                  <label className="mt-2 block text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">
-                    Actions (comma)
-                    <input
-                      value={node.actionsCsv}
-                      onChange={(event) => updateNode(node.id, { actionsCsv: event.target.value })}
-                      onFocus={pushHistory}
-                      onClick={(event) => event.stopPropagation()}
-                      placeholder="ACTION_TRACE_STEP"
-                      className="focus-ring mt-1 min-h-[32px] w-full rounded-lg border border-[var(--mist-400)] px-2 text-xs text-[var(--ink-900)]"
-                    />
-                  </label>
-                  <label className="mt-2 block text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">
-                    Apps (comma)
-                    <input
-                      value={node.appsCsv}
-                      onChange={(event) => updateNode(node.id, { appsCsv: event.target.value })}
-                      onFocus={pushHistory}
-                      onClick={(event) => event.stopPropagation()}
-                      placeholder="APP_SCREEN,APP_GATE"
-                      className="focus-ring mt-1 min-h-[32px] w-full rounded-lg border border-[var(--mist-400)] px-2 text-xs text-[var(--ink-900)]"
-                    />
-                  </label>
-                  <label className="mt-2 flex items-center justify-between rounded-lg border border-[var(--mist-400)] px-2 py-1 text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">
-                    MP3 gate open
+                  {binding.app === 'LA_DETECTOR' ? (
+                    <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                      <Field label="hold_ms">
+                        <input
+                          type="number"
+                          min={100}
+                          max={60000}
+                          value={binding.config?.hold_ms ?? 3000}
+                          onFocus={pushHistorySnapshot}
+                          onChange={(event) => {
+                            const nextValue = Number.parseInt(event.target.value || '3000', 10)
+                            setDocument((current) => ({
+                              ...current,
+                              appBindings: current.appBindings.map((entry) =>
+                                entry.id === binding.id
+                                  ? {
+                                      ...entry,
+                                      config: {
+                                        hold_ms: Number.isFinite(nextValue)
+                                          ? Math.max(100, Math.min(60000, nextValue))
+                                          : 3000,
+                                        unlock_event: entry.config?.unlock_event ?? 'UNLOCK',
+                                        require_listening: entry.config?.require_listening ?? true,
+                                      },
+                                    }
+                                  : entry,
+                              ),
+                            }))
+                          }}
+                          className="focus-ring mt-2 min-h-[38px] w-full rounded-lg border border-[var(--mist-400)] bg-white px-3 text-sm"
+                        />
+                      </Field>
+
+                      <Field label="unlock_event">
+                        <input
+                          value={binding.config?.unlock_event ?? 'UNLOCK'}
+                          onFocus={pushHistorySnapshot}
+                          onChange={(event) => {
+                            const unlockEvent = normalizeTokenInput(event.target.value)
+                            setDocument((current) => ({
+                              ...current,
+                              appBindings: current.appBindings.map((entry) =>
+                                entry.id === binding.id
+                                  ? {
+                                      ...entry,
+                                      config: {
+                                        hold_ms: entry.config?.hold_ms ?? 3000,
+                                        unlock_event: unlockEvent,
+                                        require_listening: entry.config?.require_listening ?? true,
+                                      },
+                                    }
+                                  : entry,
+                              ),
+                            }))
+                          }}
+                          className="focus-ring mt-2 min-h-[38px] w-full rounded-lg border border-[var(--mist-400)] bg-white px-3 text-sm"
+                        />
+                      </Field>
+
+                      <Field label="require_listening">
+                        <label className="mt-2 flex min-h-[38px] items-center gap-2 rounded-lg border border-[var(--mist-400)] bg-white px-3 text-sm text-[var(--ink-700)]">
+                          <input
+                            type="checkbox"
+                            checked={binding.config?.require_listening ?? true}
+                            onFocus={pushHistorySnapshot}
+                            onChange={(event) => {
+                              const nextChecked = event.target.checked
+                              setDocument((current) => ({
+                                ...current,
+                                appBindings: current.appBindings.map((entry) =>
+                                  entry.id === binding.id
+                                    ? {
+                                        ...entry,
+                                        config: {
+                                          hold_ms: entry.config?.hold_ms ?? 3000,
+                                          unlock_event: entry.config?.unlock_event ?? 'UNLOCK',
+                                          require_listening: nextChecked,
+                                        },
+                                      }
+                                    : entry,
+                                ),
+                              }))
+                            }}
+                            className="h-4 w-4 accent-[var(--teal-500)]"
+                          />
+                          <span>{binding.config?.require_listening ?? true ? 'true' : 'false'}</span>
+                        </label>
+                      </Field>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </Panel>
+
+          <Panel>
+            <SectionHeader
+              title="Édition sélection"
+              subtitle="Édite un node ou un lien sélectionné dans le graphe."
+            />
+
+            {selectedNode ? (
+              <div className="mt-4 space-y-3">
+                <Field label="Step ID">
+                  <input
+                    value={selectedNode.stepId}
+                    onFocus={pushHistorySnapshot}
+                    onChange={(event) => {
+                      const nextStep = normalizeTokenInput(event.target.value)
+                      setDocument((current) => ({
+                        ...current,
+                        initialStep: current.initialStep === selectedNode.stepId ? nextStep : current.initialStep,
+                        nodes: current.nodes.map((node) =>
+                          node.id === selectedNode.id
+                            ? {
+                                ...node,
+                                stepId: nextStep,
+                              }
+                            : node,
+                        ),
+                      }))
+                    }}
+                    className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white px-3 text-sm"
+                  />
+                </Field>
+
+                <Field label="Scene">
+                  <input
+                    value={selectedNode.screenSceneId}
+                    onFocus={pushHistorySnapshot}
+                    onChange={(event) => {
+                      const nextScene = normalizeTokenInput(event.target.value)
+                      setDocument((current) => ({
+                        ...current,
+                        nodes: current.nodes.map((node) =>
+                          node.id === selectedNode.id
+                            ? {
+                                ...node,
+                                screenSceneId: nextScene,
+                              }
+                            : node,
+                        ),
+                      }))
+                    }}
+                    className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white px-3 text-sm"
+                  />
+                </Field>
+
+                <Field label="Audio pack">
+                  <input
+                    value={selectedNode.audioPackId}
+                    onFocus={pushHistorySnapshot}
+                    onChange={(event) => {
+                      const nextAudio = normalizeTokenInput(event.target.value)
+                      setDocument((current) => ({
+                        ...current,
+                        nodes: current.nodes.map((node) =>
+                          node.id === selectedNode.id
+                            ? {
+                                ...node,
+                                audioPackId: nextAudio,
+                              }
+                            : node,
+                        ),
+                      }))
+                    }}
+                    className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white px-3 text-sm"
+                  />
+                </Field>
+
+                <Field label="Actions (CSV)">
+                  <input
+                    value={toCsv(selectedNode.actions)}
+                    onFocus={pushHistorySnapshot}
+                    onChange={(event) => {
+                      const actions = parseCsvTokens(event.target.value)
+                      setDocument((current) => ({
+                        ...current,
+                        nodes: current.nodes.map((node) =>
+                          node.id === selectedNode.id
+                            ? {
+                                ...node,
+                                actions,
+                              }
+                            : node,
+                        ),
+                      }))
+                    }}
+                    className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white px-3 text-sm"
+                  />
+                </Field>
+
+                <div className="space-y-2 rounded-2xl border border-[var(--mist-400)] bg-white/70 p-3">
+                  <p className="text-xs uppercase tracking-[0.16em] text-[var(--ink-500)]">Apps liées</p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {document.appBindings.map((binding) => {
+                      const checked = selectedNode.apps.includes(binding.id)
+                      return (
+                        <label key={binding.id} className="flex items-center gap-2 text-sm text-[var(--ink-700)]">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onFocus={pushHistorySnapshot}
+                            onChange={(event) => {
+                              const nextChecked = event.target.checked
+                              setDocument((current) => ({
+                                ...current,
+                                nodes: current.nodes.map((node) => {
+                                  if (node.id !== selectedNode.id) {
+                                    return node
+                                  }
+                                  const existing = new Set(node.apps)
+                                  if (nextChecked) {
+                                    existing.add(binding.id)
+                                  } else {
+                                    existing.delete(binding.id)
+                                  }
+                                  return {
+                                    ...node,
+                                    apps: Array.from(existing),
+                                  }
+                                }),
+                              }))
+                            }}
+                            className="h-4 w-4 accent-[var(--teal-500)]"
+                          />
+                          <span>{binding.id}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant={selectedNode.isInitial ? 'primary' : 'outline'}
+                    onClick={() => {
+                      pushHistorySnapshot()
+                      setDocument((current) => ({
+                        ...current,
+                        initialStep: selectedNode.stepId,
+                        nodes: current.nodes.map((node) => ({
+                          ...node,
+                          isInitial: node.id === selectedNode.id,
+                        })),
+                      }))
+                    }}
+                  >
+                    {selectedNode.isInitial ? 'Node initial' : 'Définir initial'}
+                  </Button>
+
+                  <label className="inline-flex items-center gap-2 rounded-full border border-[var(--mist-400)] px-3 text-sm text-[var(--ink-700)]">
                     <input
                       type="checkbox"
-                      checked={node.mp3GateOpen}
-                      onChange={(event) => updateNode(node.id, { mp3GateOpen: event.target.checked })}
-                      onFocus={pushHistory}
-                      onClick={(event) => event.stopPropagation()}
+                      checked={selectedNode.mp3GateOpen}
+                      onFocus={pushHistorySnapshot}
+                      onChange={(event) => {
+                        const nextChecked = event.target.checked
+                        setDocument((current) => ({
+                          ...current,
+                          nodes: current.nodes.map((node) =>
+                            node.id === selectedNode.id
+                              ? {
+                                  ...node,
+                                  mp3GateOpen: nextChecked,
+                                }
+                              : node,
+                          ),
+                        }))
+                      }}
                       className="h-4 w-4 accent-[var(--teal-500)]"
                     />
+                    MP3 gate open
                   </label>
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      setInitialNode(node.id)
-                    }}
-                    className={`mt-2 min-h-[30px] w-full rounded-lg border px-2 text-[10px] uppercase tracking-[0.15em] ${
-                      node.isInitial
-                        ? 'border-[var(--teal-500)] bg-[var(--teal-500)] text-white'
-                        : 'border-[var(--ink-500)] text-[var(--ink-700)]'
-                    }`}
-                  >
-                    {node.isInitial ? 'Initial node' : 'Set initial'}
-                  </button>
-
-                  {outgoing.length > 0 && (
-                    <div className="mt-2 space-y-1 rounded-lg border border-[var(--mist-400)] p-2">
-                      <p className="text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">Transitions</p>
-                      {outgoing.map((edge) => (
-                        <div key={edge.id} className="space-y-1">
-                          <div className="text-[10px] text-[var(--ink-500)]">
-                            to {nodeMap.get(edge.toNodeId)?.stepId ?? 'Unknown'}
-                          </div>
-                          <div className="flex gap-1">
-                            <input
-                              value={edge.eventName}
-                              onFocus={pushHistory}
-                              onClick={(event) => event.stopPropagation()}
-                              onChange={(event) =>
-                                setEdges((previous) =>
-                                  previous.map((candidate) =>
-                                    candidate.id === edge.id
-                                      ? {
-                                          ...candidate,
-                                          eventName: event.target.value,
-                                          eventType: inferEventType(event.target.value),
-                                        }
-                                      : candidate,
-                                  ),
-                                )
-                              }
-                              className="focus-ring min-h-[28px] flex-1 rounded-md border border-[var(--mist-400)] px-2 text-[10px] text-[var(--ink-900)]"
-                            />
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                handleRemoveEdge(edge.id)
-                              }}
-                              className="rounded-md border border-[var(--accent-700)] px-2 text-[10px] text-[var(--accent-700)]"
-                            >
-                              x
-                            </button>
-                          </div>
-                          <div className="grid grid-cols-2 gap-1">
-                            <select
-                              value={edge.eventType}
-                              onFocus={pushHistory}
-                              onClick={(event) => event.stopPropagation()}
-                              onChange={(event) =>
-                                setEdges((previous) =>
-                                  previous.map((candidate) =>
-                                    candidate.id === edge.id
-                                      ? {
-                                          ...candidate,
-                                          eventType: event.target.value,
-                                        }
-                                      : candidate,
-                                  ),
-                                )
-                              }
-                              className="focus-ring min-h-[26px] rounded-md border border-[var(--mist-400)] px-2 text-[10px] text-[var(--ink-900)]"
-                            >
-                              <option value="action">action</option>
-                              <option value="unlock">unlock</option>
-                              <option value="audio_done">audio_done</option>
-                              <option value="timer">timer</option>
-                              <option value="serial">serial</option>
-                              <option value="none">none</option>
-                            </select>
-                            <select
-                              value={edge.trigger}
-                              onFocus={pushHistory}
-                              onClick={(event) => event.stopPropagation()}
-                              onChange={(event) =>
-                                setEdges((previous) =>
-                                  previous.map((candidate) =>
-                                    candidate.id === edge.id
-                                      ? {
-                                          ...candidate,
-                                          trigger: event.target.value,
-                                        }
-                                      : candidate,
-                                  ),
-                                )
-                              }
-                              className="focus-ring min-h-[26px] rounded-md border border-[var(--mist-400)] px-2 text-[10px] text-[var(--ink-900)]"
-                            >
-                              <option value="on_event">on_event</option>
-                              <option value="after_ms">after_ms</option>
-                              <option value="immediate">immediate</option>
-                            </select>
-                            <input
-                              type="number"
-                              value={edge.afterMs}
-                              min={0}
-                              onFocus={pushHistory}
-                              onClick={(event) => event.stopPropagation()}
-                              onChange={(event) =>
-                                setEdges((previous) =>
-                                  previous.map((candidate) =>
-                                    candidate.id === edge.id
-                                      ? {
-                                          ...candidate,
-                                          afterMs: Number.parseInt(event.target.value || '0', 10) || 0,
-                                        }
-                                      : candidate,
-                                  ),
-                                )
-                              }
-                              className="focus-ring min-h-[26px] rounded-md border border-[var(--mist-400)] px-2 text-[10px] text-[var(--ink-900)]"
-                            />
-                            <input
-                              type="number"
-                              value={edge.priority}
-                              min={0}
-                              max={255}
-                              onFocus={pushHistory}
-                              onClick={(event) => event.stopPropagation()}
-                              onChange={(event) =>
-                                setEdges((previous) =>
-                                  previous.map((candidate) =>
-                                    candidate.id === edge.id
-                                      ? {
-                                          ...candidate,
-                                          priority: Number.parseInt(event.target.value || '0', 10) || 0,
-                                        }
-                                      : candidate,
-                                  ),
-                                )
-                              }
-                              className="focus-ring min-h-[26px] rounded-md border border-[var(--mist-400)] px-2 text-[10px] text-[var(--ink-900)]"
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
-              )
-            })}
-          </div>
-        </div>
-      </div>
+              </div>
+            ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-        <div className="glass-panel rounded-3xl p-4">
-          <CodeMirror
-            value={draft}
-            height="60vh"
-            extensions={editorExtensions}
-            onChange={setDraft}
-            basicSetup={{ lineNumbers: true, foldGutter: false }}
-          />
-        </div>
-        <div className="glass-panel flex flex-col gap-4 rounded-3xl p-6">
-          <div className="space-y-2">
-            <label className="text-xs uppercase tracking-[0.2em] text-[var(--ink-500)]" htmlFor="template">
-              Load template
-            </label>
-            <select
-              id="template"
-              value={selectedTemplate}
-              onChange={(event) => handleTemplateChange(event.target.value)}
-              className="focus-ring min-h-[44px] rounded-xl border border-[var(--ink-500)] bg-white/70 px-3 text-sm"
-            >
-              <option value="">Select a template</option>
-              {Object.keys(TEMPLATE_LIBRARY).map((key) => (
-                <option key={key} value={key}>
-                  {key}
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-[var(--ink-500)]">
-              You can still switch to template mode and manually adjust YAML.
-            </p>
-          </div>
+            {!selectedNode && selectedEdge ? (
+              <div className="mt-4 space-y-3">
+                <Field label="trigger">
+                  <select
+                    value={selectedEdge.trigger}
+                    onFocus={pushHistorySnapshot}
+                    onChange={(event) => {
+                      const trigger = event.target.value as StoryEdge['trigger']
+                      setDocument((current) => ({
+                        ...current,
+                        edges: current.edges.map((edge) =>
+                          edge.id === selectedEdge.id
+                            ? {
+                                ...edge,
+                                trigger,
+                              }
+                            : edge,
+                        ),
+                      }))
+                    }}
+                    className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white px-3 text-sm"
+                  >
+                    <option value="on_event">on_event</option>
+                    <option value="after_ms">after_ms</option>
+                    <option value="immediate">immediate</option>
+                  </select>
+                </Field>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <button
-              type="button"
-              onClick={handleValidate}
-              disabled={busy || !validateEnabled}
-              className="focus-ring min-h-[44px] rounded-full border border-[var(--ink-700)] px-4 text-sm font-semibold text-[var(--ink-700)] disabled:opacity-70"
-            >
-              Validate
-            </button>
-            <button
-              type="button"
-              onClick={handleDeploy}
-              disabled={busy || !deployEnabled}
-              className="focus-ring min-h-[44px] rounded-full bg-[var(--accent-500)] px-4 text-sm font-semibold text-white disabled:opacity-70"
-            >
-              Deploy
-            </button>
-            <button
-              type="button"
-              onClick={handleTestRun}
-              disabled={busy || !testRunEnabled}
-              className="focus-ring min-h-[44px] rounded-full border border-[var(--ink-500)] px-4 text-sm font-semibold text-[var(--ink-500)] disabled:opacity-70 sm:col-span-2"
-            >
-              Test Run (30 sec)
-            </button>
-          </div>
+                <Field label="event_type">
+                  <select
+                    value={selectedEdge.eventType}
+                    onFocus={pushHistorySnapshot}
+                    onChange={(event) => {
+                      const eventType = event.target.value as StoryEdge['eventType']
+                      setDocument((current) => ({
+                        ...current,
+                        edges: current.edges.map((edge) =>
+                          edge.id === selectedEdge.id
+                            ? {
+                                ...edge,
+                                eventType,
+                              }
+                            : edge,
+                        ),
+                      }))
+                    }}
+                    className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white px-3 text-sm"
+                  >
+                    <option value="none">none</option>
+                    <option value="unlock">unlock</option>
+                    <option value="audio_done">audio_done</option>
+                    <option value="timer">timer</option>
+                    <option value="serial">serial</option>
+                    <option value="action">action</option>
+                  </select>
+                </Field>
 
-          {status && (
-            <div className="rounded-2xl border border-white/60 bg-white/70 p-4 text-sm text-[var(--ink-700)]">
-              {status}
+                <Field label="event_name">
+                  <input
+                    value={selectedEdge.eventName}
+                    onFocus={pushHistorySnapshot}
+                    onChange={(event) => {
+                      const eventName = normalizeTokenInput(event.target.value)
+                      setDocument((current) => ({
+                        ...current,
+                        edges: current.edges.map((edge) =>
+                          edge.id === selectedEdge.id
+                            ? {
+                                ...edge,
+                                eventName,
+                              }
+                            : edge,
+                        ),
+                      }))
+                    }}
+                    className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white px-3 text-sm"
+                  />
+                </Field>
+
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Field label="after_ms">
+                    <input
+                      type="number"
+                      min={0}
+                      value={selectedEdge.afterMs}
+                      onFocus={pushHistorySnapshot}
+                      onChange={(event) => {
+                        const nextValue = Number.parseInt(event.target.value || '0', 10)
+                        setDocument((current) => ({
+                          ...current,
+                          edges: current.edges.map((edge) =>
+                            edge.id === selectedEdge.id
+                              ? {
+                                  ...edge,
+                                  afterMs: Number.isFinite(nextValue) ? Math.max(0, nextValue) : 0,
+                                }
+                              : edge,
+                          ),
+                        }))
+                      }}
+                      className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white px-3 text-sm"
+                    />
+                  </Field>
+
+                  <Field label="priority">
+                    <input
+                      type="number"
+                      min={0}
+                      max={255}
+                      value={selectedEdge.priority}
+                      onFocus={pushHistorySnapshot}
+                      onChange={(event) => {
+                        const nextValue = Number.parseInt(event.target.value || '100', 10)
+                        setDocument((current) => ({
+                          ...current,
+                          edges: current.edges.map((edge) =>
+                            edge.id === selectedEdge.id
+                              ? {
+                                  ...edge,
+                                  priority: Number.isFinite(nextValue)
+                                    ? Math.max(0, Math.min(255, nextValue))
+                                    : 100,
+                                }
+                              : edge,
+                          ),
+                        }))
+                      }}
+                      className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white px-3 text-sm"
+                    />
+                  </Field>
+                </div>
+              </div>
+            ) : null}
+
+            {!selectedNode && !selectedEdge ? (
+              <InlineNotice className="mt-4" tone="info">
+                Sélectionne un node ou un lien dans le graphe pour éditer ses paramètres.
+              </InlineNotice>
+            ) : null}
+          </Panel>
+
+          <Panel className={activeTab !== 'yaml' ? 'hidden lg:block' : ''}>
+            <SectionHeader
+              title="YAML"
+              subtitle="Source de vérité éditable puis importable dans le graphe."
+              actions={
+                <>
+                  <Button variant="outline" onClick={handleImportFromYaml}>
+                    Importer vers graphe
+                  </Button>
+                  <Button variant="outline" onClick={handleGenerateYaml}>
+                    Générer depuis graphe
+                  </Button>
+                </>
+              }
+            />
+            <div className="mt-4">
+              <CodeMirror
+                value={draft}
+                height="40vh"
+                extensions={editorExtensions}
+                onChange={setDraft}
+                basicSetup={{ lineNumbers: true, foldGutter: false }}
+              />
             </div>
-          )}
+          </Panel>
 
-          {errors.length > 0 && (
-            <div className="rounded-2xl border border-[var(--accent-700)] bg-white/70 p-4 text-xs text-[var(--accent-700)]">
-              {errors.map((error) => (
-                <p key={error}>{error}</p>
-              ))}
+          <Panel>
+            <SectionHeader title="Validation & déploiement" subtitle="Actions Story V2 avec fallback explicite en legacy." />
+
+            {!validateEnabled || !deployEnabled ? (
+              <InlineNotice className="mt-4" tone="info">
+                Mode lecture/edition: validate/deploy requierent les APIs Story V2.
+              </InlineNotice>
+            ) : null}
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  void handleValidate()
+                }}
+                disabled={busyAction !== null || !validateEnabled}
+              >
+                Valider
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  void handleDeploy()
+                }}
+                disabled={busyAction !== null || !deployEnabled}
+              >
+                Déployer
+              </Button>
+              <Button
+                variant="outline"
+                className="sm:col-span-2"
+                onClick={() => {
+                  void handleTestRun()
+                }}
+                disabled={busyAction !== null || !testRunEnabled}
+              >
+                Test run (30s)
+              </Button>
             </div>
-          )}
+
+            {status ? (
+              <InlineNotice className="mt-4" tone={statusTone}>
+                {status}
+              </InlineNotice>
+            ) : null}
+
+            {errors.length > 0 ? (
+              <InlineNotice className="mt-3" tone="error">
+                {errors.map((error) => (
+                  <p key={error}>- {error}</p>
+                ))}
+              </InlineNotice>
+            ) : null}
+
+            {importWarnings.length > 0 ? (
+              <InlineNotice className="mt-3" tone="warning">
+                {importWarnings.map((warning) => (
+                  <p key={warning}>- {warning}</p>
+                ))}
+              </InlineNotice>
+            ) : null}
+
+            {graphValidation.warnings.length > 0 ? (
+              <InlineNotice className="mt-3" tone="warning">
+                {graphValidation.warnings.map((warning) => (
+                  <p key={warning}>- {warning}</p>
+                ))}
+              </InlineNotice>
+            ) : null}
+
+            {graphValidation.errors.length > 0 ? (
+              <InlineNotice className="mt-3" tone="error">
+                {graphValidation.errors.map((error) => (
+                  <p key={error}>- {error}</p>
+                ))}
+              </InlineNotice>
+            ) : null}
+          </Panel>
         </div>
       </div>
     </section>

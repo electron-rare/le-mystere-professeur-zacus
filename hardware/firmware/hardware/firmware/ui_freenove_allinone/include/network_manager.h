@@ -28,9 +28,13 @@ class NetworkManager {
     uint32_t espnow_tx_ok = 0U;
     uint32_t espnow_tx_fail = 0U;
     uint32_t espnow_drop_packets = 0U;
+    uint32_t espnow_last_seq = 0U;
+    bool espnow_last_ack = false;
     char last_peer[18] = {0};
     char last_rx_peer[18] = {0};
-    char last_payload[128] = {0};
+    char last_msg_id[32] = {0};
+    char last_type[24] = {0};
+    char last_payload[192] = {0};
   };
 
   bool begin(const char* hostname);
@@ -61,7 +65,13 @@ class NetworkManager {
   bool consumeEspNowMessage(char* out_payload,
                             size_t payload_capacity,
                             char* out_peer,
-                            size_t peer_capacity);
+                            size_t peer_capacity,
+                            char* out_msg_id = nullptr,
+                            size_t msg_id_capacity = 0U,
+                            uint32_t* out_seq = nullptr,
+                            char* out_type = nullptr,
+                            size_t type_capacity = 0U,
+                            bool* out_ack_requested = nullptr);
 
  private:
   static void onEspNowRecv(const uint8_t* mac_addr, const uint8_t* data, int data_len);
@@ -86,14 +96,20 @@ class NetworkManager {
   bool removeEspNowPeerInternal(const uint8_t mac[6]);
   void cachePeer(const uint8_t mac[6]);
   void forgetPeer(const uint8_t mac[6]);
-  bool queueEspNowMessage(const char* payload, const char* peer);
+  bool queueEspNowMessage(const char* payload,
+                          const char* peer,
+                          const char* msg_id,
+                          uint32_t seq,
+                          const char* type,
+                          bool ack_requested);
   void refreshSnapshot();
   void handleEspNowRecv(const uint8_t* mac_addr, const uint8_t* data, int data_len);
   void handleEspNowSend(const uint8_t* mac_addr, esp_now_send_status_t status);
 
   static constexpr uint8_t kMaxPeerCache = 16U;
   static constexpr uint8_t kRxQueueSize = 6U;
-  static constexpr size_t kPayloadCapacity = 128U;
+  static constexpr size_t kPayloadCapacity = 192U;
+  static constexpr size_t kEspNowFrameCapacity = 240U;
   static constexpr uint32_t kStaConnectTimeoutMs = 12000U;
 
   bool started_ = false;
@@ -111,6 +127,7 @@ class NetworkManager {
   uint32_t espnow_tx_ok_ = 0U;
   uint32_t espnow_tx_fail_ = 0U;
   uint32_t espnow_drop_packets_ = 0U;
+  uint32_t espnow_tx_seq_ = 0U;
   uint32_t local_retry_ms_ = 15000U;
 
   char local_target_ssid_[33] = "Les cils";
@@ -124,6 +141,10 @@ class NetworkManager {
   struct EspNowMessage {
     char payload[kPayloadCapacity] = {0};
     char peer[18] = {0};
+    char msg_id[32] = {0};
+    char type[24] = {0};
+    uint32_t seq = 0U;
+    bool ack_requested = false;
   };
   EspNowMessage rx_queue_[kRxQueueSize];
   uint8_t rx_queue_head_ = 0U;

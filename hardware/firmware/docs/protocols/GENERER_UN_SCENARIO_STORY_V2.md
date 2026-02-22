@@ -2,12 +2,16 @@
 
 Ce guide explique **comment créer/modifier un scénario** pour le firmware ESP32 sans toucher au moteur C++.
 
+Important:
+- **V2** ici = modèle de scénario + moteur runtime.
+- Le pilotage série recommandé pour l'automatisation est le protocole JSON-lines **V3** (`story.*`).
+
 ## Prérequis
 
 Depuis ce dossier:
 
 ```bash
-cd hardware/firmware/esp32_audio
+cd hardware/firmware
 ```
 
 ## 1) Créer (ou dupliquer) un scénario YAML
@@ -46,7 +50,7 @@ Règle pratique:
 ## 3) Valider le scénario
 
 ```bash
-make story-validate
+./tools/dev/story-gen validate
 ```
 
 Cette commande vérifie:
@@ -61,15 +65,15 @@ Corrige les erreurs jusqu’à obtenir une validation propre.
 ## 4) Générer le code C++
 
 ```bash
-make story-gen
+./tools/dev/story-gen generate-cpp
 ```
 
 Le générateur produit les fichiers utilisés par le runtime V2:
 
-- `src/story/generated/scenarios_gen.h`
-- `src/story/generated/scenarios_gen.cpp`
-- `src/story/generated/apps_gen.h`
-- `src/story/generated/apps_gen.cpp`
+- `hardware/libs/story/src/generated/scenarios_gen.h`
+- `hardware/libs/story/src/generated/scenarios_gen.cpp`
+- `hardware/libs/story/src/generated/apps_gen.h`
+- `hardware/libs/story/src/generated/apps_gen.cpp`
 
 ## 5) Compiler et flasher
 
@@ -85,21 +89,24 @@ pio run -e esp32dev -t upload --upload-port /dev/ttyUSB0
 
 ## 6) Tester côté série
 
-Dans le moniteur série, commandes utiles:
+Dans le moniteur série, commandes utiles (JSON-lines V3):
 
-- `STORY_V2_ENABLE ON`
-- `STORY_V2_LIST`
-- `STORY_V2_SCENARIO <id>`
-- `STORY_V2_STATUS`
-- `STORY_V2_EVENT <name>`
-- `STORY_V2_VALIDATE`
+- `{"cmd":"story.status"}`
+- `{"cmd":"story.list"}`
+- `{"cmd":"story.load","data":{"scenario":"DEFAULT"}}`
+- `{"cmd":"story.event","data":{"event":"UNLOCK"}}`
+- `{"cmd":"story.step","data":{"step":"STEP_WAIT_UNLOCK"}}`
+- `{"cmd":"story.validate"}`
+
+Référence protocole série:
+- `docs/protocols/story_v3_serial.md`
 
 ## Workflow court (copier-coller)
 
 ```bash
-cd hardware/firmware/esp32_audio
-make story-validate
-make story-gen
+cd hardware/firmware
+./tools/dev/story-gen validate
+./tools/dev/story-gen generate-cpp
 pio run -e esp32dev
 ```
 
@@ -107,5 +114,5 @@ pio run -e esp32dev
 
 - Commence simple: 3 à 4 étapes max au début.
 - N’ajoute qu’un seul nouveau type d’événement à la fois.
-- Teste chaque transition clé au moniteur série (`STORY_V2_EVENT ...`).
+- Teste chaque transition clé au moniteur série (`{"cmd":"story.event","data":{"event":"..."}}`).
 - Garde un scénario « de secours » valide dans `docs/protocols/story_specs/scenarios/`.

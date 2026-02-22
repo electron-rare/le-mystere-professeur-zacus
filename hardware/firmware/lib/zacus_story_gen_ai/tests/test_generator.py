@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from zacus_story_gen_ai.generator import StoryPaths, run_generate_bundle, run_generate_cpp, run_validate
@@ -18,6 +19,7 @@ def _paths(tmp_path: Path) -> StoryPaths:
         repo_root=repo,
         game_scenarios_dir=repo / "game" / "scenarios",
         story_specs_dir=fw / "docs" / "protocols" / "story_specs" / "scenarios",
+        story_data_dir=fw / "data" / "story",
         generated_cpp_dir=fw / "hardware" / "libs" / "story" / "src" / "generated",
         bundle_root=fw / "artifacts" / "story_fs" / "deploy",
     )
@@ -110,3 +112,111 @@ def test_generate_cpp_and_bundle(tmp_path: Path) -> None:
     assert (paths.bundle_root / "story" / "scenarios" / "DEFAULT.json").exists()
     assert (paths.bundle_root / "story" / "manifest.sha256").exists()
     assert bundle["scenario_count"] == 1
+
+
+def test_generate_bundle_uses_resource_payloads(tmp_path: Path) -> None:
+    paths = _seed(tmp_path)
+    _write(paths.story_data_dir / "screens" / "SCENE_LOCKED.json", '{"id":"SCENE_LOCKED","title":"Custom Locked"}')
+    _write(
+        paths.story_data_dir / "apps" / "APP_SCREEN.json",
+        '{"id":"APP_SCREEN","app":"SCREEN_SCENE","config":{"show_title":true,"fps":30}}',
+    )
+    _write(
+        paths.story_data_dir / "actions" / "ACTION_TRACE_STEP.json",
+        '{"id":"ACTION_TRACE_STEP","type":"trace_step","config":{"serial_log":false}}',
+    )
+
+    run_generate_bundle(paths)
+
+    screen_payload = json.loads((paths.bundle_root / "story" / "screens" / "SCENE_LOCKED.json").read_text())
+    app_payload = json.loads((paths.bundle_root / "story" / "apps" / "APP_SCREEN.json").read_text())
+    action_payload = json.loads((paths.bundle_root / "story" / "actions" / "ACTION_TRACE_STEP.json").read_text())
+
+    assert screen_payload["title"] == "Custom Locked"
+    assert app_payload["app"] == "SCREEN_SCENE"
+    assert app_payload["config"]["show_title"] is True
+    assert app_payload["config"]["fps"] == 30
+    assert action_payload["config"]["serial_log"] is False
+
+
+def test_generate_bundle_normalizes_screen_timeline_and_transition(tmp_path: Path) -> None:
+    paths = _seed(tmp_path)
+    _write(paths.story_data_dir / "screens" / "SCENE_READY.json", '{"id":"SCENE_READY","title":"Ready Lite"}')
+
+    run_generate_bundle(paths)
+
+    payload = json.loads((paths.bundle_root / "story" / "screens" / "SCENE_READY.json").read_text())
+    assert payload["id"] == "SCENE_READY"
+    assert payload["title"] == "Ready Lite"
+    assert isinstance(payload["transition"], dict)
+    assert payload["transition"]["effect"]
+    assert payload["transition"]["duration_ms"] > 0
+    assert isinstance(payload["timeline"], dict)
+    assert isinstance(payload["timeline"]["keyframes"], list)
+    assert len(payload["timeline"]["keyframes"]) >= 2
+    assert payload["timeline"]["keyframes"][0]["at_ms"] == 0
+    assert isinstance(payload["text"], dict)
+    assert isinstance(payload["framing"], dict)
+    assert isinstance(payload["scroll"], dict)
+    assert isinstance(payload["demo"], dict)
+
+
+def test_generate_bundle_normalizes_palette_options(tmp_path: Path) -> None:
+    paths = _seed(tmp_path)
+    _write(
+        paths.story_data_dir / "screens" / "SCENE_READY.json",
+        """
+{
+  "id": "SCENE_READY",
+  "title": "Ready custom",
+  "effect": "reward",
+  "text": {
+    "show_title": "1",
+    "show_subtitle": "true",
+    "title_case": "lower",
+    "subtitle_align": "center"
+  },
+  "framing": {
+    "preset": "split",
+    "x_offset": 120,
+    "scale_pct": 20
+  },
+  "scroll": {
+    "mode": "ticker",
+    "speed_ms": 120,
+    "pause_ms": 12000,
+    "loop": "0"
+  },
+  "demo": {
+    "mode": "arcade",
+    "particle_count": 9,
+    "strobe_level": 180
+  },
+  "transition": {
+    "effect": "crossfade",
+    "duration_ms": 0
+  }
+}
+""".strip(),
+    )
+
+    run_generate_bundle(paths)
+
+    payload = json.loads((paths.bundle_root / "story" / "screens" / "SCENE_READY.json").read_text())
+    assert payload["effect"] == "celebrate"
+    assert payload["text"]["show_title"] is True
+    assert payload["text"]["show_subtitle"] is True
+    assert payload["text"]["title_case"] == "lower"
+    assert payload["text"]["subtitle_align"] == "center"
+    assert payload["framing"]["preset"] == "split"
+    assert payload["framing"]["x_offset"] == 80
+    assert payload["framing"]["scale_pct"] == 60
+    assert payload["scroll"]["mode"] == "marquee"
+    assert payload["scroll"]["speed_ms"] == 600
+    assert payload["scroll"]["pause_ms"] == 10000
+    assert payload["scroll"]["loop"] is False
+    assert payload["demo"]["mode"] == "arcade"
+    assert payload["demo"]["particle_count"] == 4
+    assert payload["demo"]["strobe_level"] == 100
+    assert payload["transition"]["effect"] == "fade"
+    assert payload["transition"]["duration_ms"] > 0

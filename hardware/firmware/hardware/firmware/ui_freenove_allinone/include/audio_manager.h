@@ -28,14 +28,34 @@ class AudioManager {
   void setAudioDoneCallback(AudioDoneCallback cb, void* ctx);
 
  private:
+  struct AudioChannel {
+    class AudioGenerator* decoder = nullptr;
+    class AudioFileSource* source = nullptr;
+    class AudioOutputMixerStub* stub = nullptr;
+    String track;
+  };
+
   bool ensureOutput();
   void applyOutputProfile();
-  void stopDecoder();
-  void finishPlaybackAndNotify();
+  bool playOnChannel(uint8_t channel_index, class AudioFileSource* source, class AudioGenerator* decoder, const char* track);
+  void stopChannel(uint8_t channel_index);
+  bool anyChannelRunning() const;
+  uint8_t selectTargetChannel() const;
+  void applyChannelGains();
+  void startCrossfade(uint8_t from_channel, uint8_t to_channel);
+  void stopCrossfade();
+  void stopAllChannels();
+  void finishPlaybackAndNotify(const char* track);
 
-  class AudioGenerator* decoder_ = nullptr;
-  class AudioFileSource* source_ = nullptr;
   class AudioOutputI2S* output_ = nullptr;
+  class AudioOutputMixer* mixer_ = nullptr;
+  AudioChannel channels_[2];
+  uint8_t active_channel_ = 0U;
+  bool crossfade_active_ = false;
+  uint8_t crossfade_from_ = 0U;
+  uint8_t crossfade_to_ = 0U;
+  uint32_t crossfade_started_ms_ = 0U;
+  uint16_t crossfade_duration_ms_ = 750U;
 
   bool playing_ = false;
   bool using_diagnostic_tone_ = false;

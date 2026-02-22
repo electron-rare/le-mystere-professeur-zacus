@@ -3,6 +3,7 @@
 
 #include <ArduinoJson.h>
 #include <TFT_eSPI.h>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 
@@ -88,8 +89,8 @@ uint32_t toLvKey(uint8_t key, bool long_press) {
   }
 }
 
-bool parseHexColor(const char* text, lv_color_t* out_color) {
-  if (text == nullptr || text[0] == '\0' || out_color == nullptr) {
+bool parseHexRgb(const char* text, uint32_t* out_rgb) {
+  if (text == nullptr || text[0] == '\0' || out_rgb == nullptr) {
     return false;
   }
   const char* begin = text;
@@ -101,8 +102,25 @@ bool parseHexColor(const char* text, lv_color_t* out_color) {
   if (end == begin || *end != '\0' || value > 0xFFFFFFUL) {
     return false;
   }
-  *out_color = lv_color_hex(static_cast<uint32_t>(value));
+  *out_rgb = static_cast<uint32_t>(value);
   return true;
+}
+
+uint32_t lerpRgb(uint32_t from_rgb, uint32_t to_rgb, uint16_t progress_per_mille) {
+  if (progress_per_mille >= 1000U) {
+    return to_rgb;
+  }
+  const uint32_t from_r = (from_rgb >> 16) & 0xFFU;
+  const uint32_t from_g = (from_rgb >> 8) & 0xFFU;
+  const uint32_t from_b = from_rgb & 0xFFU;
+  const uint32_t to_r = (to_rgb >> 16) & 0xFFU;
+  const uint32_t to_g = (to_rgb >> 8) & 0xFFU;
+  const uint32_t to_b = to_rgb & 0xFFU;
+
+  const uint32_t out_r = from_r + ((to_r - from_r) * progress_per_mille) / 1000U;
+  const uint32_t out_g = from_g + ((to_g - from_g) * progress_per_mille) / 1000U;
+  const uint32_t out_b = from_b + ((to_b - from_b) * progress_per_mille) / 1000U;
+  return (out_r << 16) | (out_g << 8) | out_b;
 }
 
 const char* mapSymbolToken(const char* symbol) {
@@ -204,63 +222,198 @@ void UiManager::renderScene(const ScenarioDef* scenario,
 
   const char* scenario_id = (scenario != nullptr && scenario->id != nullptr) ? scenario->id : "N/A";
   const char* scene_id = (screen_scene_id != nullptr && screen_scene_id[0] != '\0') ? screen_scene_id : "SCENE_READY";
+  const bool scene_changed = (std::strcmp(last_scene_id_, scene_id) != 0);
+  const bool has_previous_scene = (last_scene_id_[0] != '\0');
+
+  auto parseEffectToken = [](const char* token, SceneEffect fallback) -> SceneEffect {
+    if (token == nullptr || token[0] == '\0') {
+      return fallback;
+    }
+    char normalized[24] = {0};
+    std::strncpy(normalized, token, sizeof(normalized) - 1U);
+    for (size_t index = 0U; normalized[index] != '\0'; ++index) {
+      normalized[index] = static_cast<char>(std::tolower(static_cast<unsigned char>(normalized[index])));
+    }
+    if (std::strcmp(normalized, "none") == 0 || std::strcmp(normalized, "steady") == 0) {
+      return SceneEffect::kNone;
+    }
+    if (std::strcmp(normalized, "pulse") == 0) {
+      return SceneEffect::kPulse;
+    }
+    if (std::strcmp(normalized, "scan") == 0) {
+      return SceneEffect::kScan;
+    }
+    if (std::strcmp(normalized, "blink") == 0 || std::strcmp(normalized, "glitch") == 0) {
+      return SceneEffect::kBlink;
+    }
+    if (std::strcmp(normalized, "celebrate") == 0 || std::strcmp(normalized, "reward") == 0) {
+      return SceneEffect::kCelebrate;
+    }
+    return fallback;
+  };
+
+  auto parseTransitionToken = [](const char* token, SceneTransition fallback) -> SceneTransition {
+    if (token == nullptr || token[0] == '\0') {
+      return fallback;
+    }
+    char normalized[28] = {0};
+    std::strncpy(normalized, token, sizeof(normalized) - 1U);
+    for (size_t index = 0U; normalized[index] != '\0'; ++index) {
+      normalized[index] = static_cast<char>(std::tolower(static_cast<unsigned char>(normalized[index])));
+      if (normalized[index] == '-') {
+        normalized[index] = '_';
+      }
+    }
+    if (std::strcmp(normalized, "none") == 0 || std::strcmp(normalized, "off") == 0) {
+      return SceneTransition::kNone;
+    }
+    if (std::strcmp(normalized, "fade") == 0 || std::strcmp(normalized, "crossfade") == 0) {
+      return SceneTransition::kFade;
+    }
+    if (std::strcmp(normalized, "slide_left") == 0 || std::strcmp(normalized, "left") == 0) {
+      return SceneTransition::kSlideLeft;
+    }
+    if (std::strcmp(normalized, "slide_right") == 0 || std::strcmp(normalized, "right") == 0) {
+      return SceneTransition::kSlideRight;
+    }
+    if (std::strcmp(normalized, "slide_up") == 0 || std::strcmp(normalized, "up") == 0) {
+      return SceneTransition::kSlideUp;
+    }
+    if (std::strcmp(normalized, "slide_down") == 0 || std::strcmp(normalized, "down") == 0) {
+      return SceneTransition::kSlideDown;
+    }
+    if (std::strcmp(normalized, "zoom") == 0 || std::strcmp(normalized, "zoom_in") == 0) {
+      return SceneTransition::kZoom;
+    }
+    if (std::strcmp(normalized, "glitch") == 0 || std::strcmp(normalized, "flash") == 0) {
+      return SceneTransition::kGlitch;
+    }
+    return fallback;
+  };
+
+  auto parseAlignToken = [](const char* token, SceneTextAlign fallback) -> SceneTextAlign {
+    if (token == nullptr || token[0] == '\0') {
+      return fallback;
+    }
+    char normalized[20] = {0};
+    std::strncpy(normalized, token, sizeof(normalized) - 1U);
+    for (size_t index = 0U; normalized[index] != '\0'; ++index) {
+      normalized[index] = static_cast<char>(std::tolower(static_cast<unsigned char>(normalized[index])));
+    }
+    if (std::strcmp(normalized, "top") == 0) {
+      return SceneTextAlign::kTop;
+    }
+    if (std::strcmp(normalized, "center") == 0 || std::strcmp(normalized, "middle") == 0) {
+      return SceneTextAlign::kCenter;
+    }
+    if (std::strcmp(normalized, "bottom") == 0) {
+      return SceneTextAlign::kBottom;
+    }
+    return fallback;
+  };
+
+  auto applyTextCase = [](const char* mode, String value) -> String {
+    if (mode == nullptr || mode[0] == '\0') {
+      return value;
+    }
+    char normalized[16] = {0};
+    std::strncpy(normalized, mode, sizeof(normalized) - 1U);
+    for (size_t index = 0U; normalized[index] != '\0'; ++index) {
+      normalized[index] = static_cast<char>(std::tolower(static_cast<unsigned char>(normalized[index])));
+    }
+    if (std::strcmp(normalized, "upper") == 0) {
+      value.toUpperCase();
+    } else if (std::strcmp(normalized, "lower") == 0) {
+      value.toLowerCase();
+    }
+    return value;
+  };
 
   String title = "MISSION";
+  String subtitle;
   String symbol = "RUN";
   bool show_title = false;
+  bool show_subtitle = true;
   bool show_symbol = true;
   SceneEffect effect = SceneEffect::kPulse;
   uint16_t effect_speed_ms = 0U;
-  lv_color_t bg = lv_color_hex(0x07132A);
-  lv_color_t accent = lv_color_hex(0x2A76FF);
-  lv_color_t secondary = lv_color_hex(0xE8F1FF);
+  SceneTransition transition = SceneTransition::kFade;
+  uint16_t transition_ms = 240U;
+  SceneTextAlign title_align = SceneTextAlign::kTop;
+  SceneTextAlign subtitle_align = SceneTextAlign::kBottom;
+  int16_t frame_dx = 0;
+  int16_t frame_dy = 0;
+  uint8_t frame_scale_pct = 100U;
+  bool frame_split_layout = false;
+  SceneScrollMode subtitle_scroll_mode = SceneScrollMode::kNone;
+  uint16_t subtitle_scroll_speed_ms = 4200U;
+  uint16_t subtitle_scroll_pause_ms = 900U;
+  bool subtitle_scroll_loop = true;
+  String demo_mode = "standard";
+  uint8_t demo_particle_count = 4U;
+  uint8_t demo_strobe_level = 65U;
+  uint32_t bg_rgb = 0x07132AUL;
+  uint32_t accent_rgb = 0x2A76FFUL;
+  uint32_t text_rgb = 0xE8F1FFUL;
 
   if (std::strcmp(scene_id, "SCENE_LOCKED") == 0) {
     title = "VERROUILLE";
+    subtitle = "Attente de debloquage";
     symbol = "LOCK";
     effect = SceneEffect::kPulse;
-    bg = lv_color_hex(0x08152D);
-    accent = lv_color_hex(0x3E8DFF);
-    secondary = lv_color_hex(0xDBE8FF);
+    bg_rgb = 0x08152DUL;
+    accent_rgb = 0x3E8DFFUL;
+    text_rgb = 0xDBE8FFUL;
   } else if (std::strcmp(scene_id, "SCENE_BROKEN") == 0) {
     title = "PROTO U-SON";
+    subtitle = "Signal brouille";
     symbol = "ALERT";
     effect = SceneEffect::kBlink;
-    bg = lv_color_hex(0x2A0508);
-    accent = lv_color_hex(0xFF4A45);
-    secondary = lv_color_hex(0xFFD5D1);
+    bg_rgb = 0x2A0508UL;
+    accent_rgb = 0xFF4A45UL;
+    text_rgb = 0xFFD5D1UL;
   } else if (std::strcmp(scene_id, "SCENE_LA_DETECT") == 0 || std::strcmp(scene_id, "SCENE_SEARCH") == 0) {
     title = "DETECTION";
+    subtitle = "Balayage en cours";
     symbol = "SCAN";
     effect = SceneEffect::kScan;
-    bg = lv_color_hex(0x041F1B);
-    accent = lv_color_hex(0x2CE5A6);
-    secondary = lv_color_hex(0xD9FFF0);
+    bg_rgb = 0x041F1BUL;
+    accent_rgb = 0x2CE5A6UL;
+    text_rgb = 0xD9FFF0UL;
   } else if (std::strcmp(scene_id, "SCENE_WIN") == 0 || std::strcmp(scene_id, "SCENE_REWARD") == 0) {
     title = "VICTOIRE";
+    subtitle = "Etape validee";
     symbol = "WIN";
     effect = SceneEffect::kCelebrate;
-    bg = lv_color_hex(0x231038);
-    accent = lv_color_hex(0xF4CB4A);
-    secondary = lv_color_hex(0xFFF6C7);
+    bg_rgb = 0x231038UL;
+    accent_rgb = 0xF4CB4AUL;
+    text_rgb = 0xFFF6C7UL;
   } else if (std::strcmp(scene_id, "SCENE_READY") == 0) {
     title = "PRET";
+    subtitle = "Scenario termine";
     symbol = "READY";
     effect = SceneEffect::kPulse;
-    bg = lv_color_hex(0x0F2A12);
-    accent = lv_color_hex(0x6CD96B);
-    secondary = lv_color_hex(0xE8FFE7);
+    bg_rgb = 0x0F2A12UL;
+    accent_rgb = 0x6CD96BUL;
+    text_rgb = 0xE8FFE7UL;
   }
 
+  resetSceneTimeline();
+
   if (screen_payload_json != nullptr && screen_payload_json[0] != '\0') {
-    StaticJsonDocument<1024> document;
+    StaticJsonDocument<1536> document;
     const DeserializationError error = deserializeJson(document, screen_payload_json);
     if (!error) {
       const char* payload_title = document["title"] | document["content"]["title"] | document["visual"]["title"] | "";
+      const char* payload_subtitle =
+          document["subtitle"] | document["content"]["subtitle"] | document["visual"]["subtitle"] | "";
       const char* payload_symbol = document["symbol"] | document["content"]["symbol"] | document["visual"]["symbol"] | "";
       const char* payload_effect = document["effect"] | document["visual"]["effect"] | document["content"]["effect"] | "";
       if (payload_title[0] != '\0') {
         title = payload_title;
+      }
+      if (payload_subtitle[0] != '\0') {
+        subtitle = payload_subtitle;
       }
       if (payload_symbol[0] != '\0') {
         symbol = payload_symbol;
@@ -272,6 +425,16 @@ void UiManager::renderScene(const ScenarioDef* scenario,
       } else if (document["content"]["show_title"].is<bool>()) {
         show_title = document["content"]["show_title"].as<bool>();
       }
+      if (document["text"]["show_title"].is<bool>()) {
+        show_title = document["text"]["show_title"].as<bool>();
+      }
+      if (document["show_subtitle"].is<bool>()) {
+        show_subtitle = document["show_subtitle"].as<bool>();
+      } else if (document["visual"]["show_subtitle"].is<bool>()) {
+        show_subtitle = document["visual"]["show_subtitle"].as<bool>();
+      } else if (document["text"]["show_subtitle"].is<bool>()) {
+        show_subtitle = document["text"]["show_subtitle"].as<bool>();
+      }
       if (document["show_symbol"].is<bool>()) {
         show_symbol = document["show_symbol"].as<bool>();
       } else if (document["visual"]["show_symbol"].is<bool>()) {
@@ -279,31 +442,212 @@ void UiManager::renderScene(const ScenarioDef* scenario,
       } else if (document["content"]["show_symbol"].is<bool>()) {
         show_symbol = document["content"]["show_symbol"].as<bool>();
       }
-      if (std::strcmp(payload_effect, "none") == 0 || std::strcmp(payload_effect, "steady") == 0) {
-        effect = SceneEffect::kNone;
-      } else if (std::strcmp(payload_effect, "pulse") == 0) {
-        effect = SceneEffect::kPulse;
-      } else if (std::strcmp(payload_effect, "scan") == 0) {
-        effect = SceneEffect::kScan;
-      } else if (std::strcmp(payload_effect, "blink") == 0 || std::strcmp(payload_effect, "glitch") == 0) {
-        effect = SceneEffect::kBlink;
-      } else if (std::strcmp(payload_effect, "celebrate") == 0) {
-        effect = SceneEffect::kCelebrate;
+      if (document["text"]["show_symbol"].is<bool>()) {
+        show_symbol = document["text"]["show_symbol"].as<bool>();
       }
+
+      const char* title_case = document["text"]["title_case"] | "";
+      const char* subtitle_case = document["text"]["subtitle_case"] | "";
+      title = applyTextCase(title_case, title);
+      subtitle = applyTextCase(subtitle_case, subtitle);
+      title_align = parseAlignToken(document["text"]["title_align"] | "", title_align);
+      subtitle_align = parseAlignToken(document["text"]["subtitle_align"] | "", subtitle_align);
+
+      effect = parseEffectToken(payload_effect, effect);
 
       const char* payload_bg = document["theme"]["bg"] | document["visual"]["theme"]["bg"] | document["bg"] | "";
       const char* payload_accent =
           document["theme"]["accent"] | document["visual"]["theme"]["accent"] | document["accent"] | "";
       const char* payload_secondary =
           document["theme"]["text"] | document["visual"]["theme"]["text"] | document["text"] | "";
-      parseHexColor(payload_bg, &bg);
-      parseHexColor(payload_accent, &accent);
-      parseHexColor(payload_secondary, &secondary);
+      parseHexRgb(payload_bg, &bg_rgb);
+      parseHexRgb(payload_accent, &accent_rgb);
+      parseHexRgb(payload_secondary, &text_rgb);
 
       if (document["effect_speed_ms"].is<unsigned int>()) {
         effect_speed_ms = static_cast<uint16_t>(document["effect_speed_ms"].as<unsigned int>());
       } else if (document["visual"]["effect_speed_ms"].is<unsigned int>()) {
         effect_speed_ms = static_cast<uint16_t>(document["visual"]["effect_speed_ms"].as<unsigned int>());
+      }
+
+      const char* transition_token =
+          document["transition"]["effect"] | document["transition"]["type"] | document["visual"]["transition"] | "";
+      transition = parseTransitionToken(transition_token, transition);
+      if (document["transition"]["duration_ms"].is<unsigned int>()) {
+        transition_ms = static_cast<uint16_t>(document["transition"]["duration_ms"].as<unsigned int>());
+      } else if (document["transition"]["ms"].is<unsigned int>()) {
+        transition_ms = static_cast<uint16_t>(document["transition"]["ms"].as<unsigned int>());
+      } else if (document["visual"]["transition_ms"].is<unsigned int>()) {
+        transition_ms = static_cast<uint16_t>(document["visual"]["transition_ms"].as<unsigned int>());
+      }
+
+      const char* framing_preset = document["framing"]["preset"] | "";
+      if (std::strcmp(framing_preset, "focus_top") == 0) {
+        frame_dy -= 18;
+      } else if (std::strcmp(framing_preset, "focus_bottom") == 0) {
+        frame_dy += 20;
+      } else if (std::strcmp(framing_preset, "split") == 0) {
+        frame_split_layout = true;
+      }
+      if (document["framing"]["x_offset"].is<int>()) {
+        frame_dx = static_cast<int16_t>(document["framing"]["x_offset"].as<int>());
+      }
+      if (document["framing"]["y_offset"].is<int>()) {
+        frame_dy = static_cast<int16_t>(frame_dy + document["framing"]["y_offset"].as<int>());
+      }
+      if (document["framing"]["scale_pct"].is<unsigned int>()) {
+        frame_scale_pct = static_cast<uint8_t>(document["framing"]["scale_pct"].as<unsigned int>());
+      }
+      if (frame_scale_pct < 60U) {
+        frame_scale_pct = 60U;
+      } else if (frame_scale_pct > 140U) {
+        frame_scale_pct = 140U;
+      }
+
+      const char* scroll_mode = document["scroll"]["mode"] | "";
+      if (std::strcmp(scroll_mode, "marquee") == 0 || std::strcmp(scroll_mode, "ticker") == 0 ||
+          std::strcmp(scroll_mode, "crawl") == 0) {
+        subtitle_scroll_mode = SceneScrollMode::kMarquee;
+      } else {
+        subtitle_scroll_mode = SceneScrollMode::kNone;
+      }
+      if (document["scroll"]["speed_ms"].is<unsigned int>()) {
+        subtitle_scroll_speed_ms = static_cast<uint16_t>(document["scroll"]["speed_ms"].as<unsigned int>());
+      }
+      if (subtitle_scroll_speed_ms < 600U) {
+        subtitle_scroll_speed_ms = 600U;
+      }
+      if (document["scroll"]["pause_ms"].is<unsigned int>()) {
+        subtitle_scroll_pause_ms = static_cast<uint16_t>(document["scroll"]["pause_ms"].as<unsigned int>());
+      }
+      if (document["scroll"]["loop"].is<bool>()) {
+        subtitle_scroll_loop = document["scroll"]["loop"].as<bool>();
+      }
+
+      if (document["demo"]["particle_count"].is<unsigned int>()) {
+        demo_particle_count = static_cast<uint8_t>(document["demo"]["particle_count"].as<unsigned int>());
+      }
+      if (demo_particle_count > 4U) {
+        demo_particle_count = 4U;
+      }
+      const char* parsed_demo_mode = document["demo"]["mode"] | "";
+      if (parsed_demo_mode[0] != '\0') {
+        demo_mode = parsed_demo_mode;
+        demo_mode.toLowerCase();
+      }
+      if (document["demo"]["strobe_level"].is<unsigned int>()) {
+        demo_strobe_level = static_cast<uint8_t>(document["demo"]["strobe_level"].as<unsigned int>());
+      }
+      if (demo_strobe_level > 100U) {
+        demo_strobe_level = 100U;
+      }
+
+      JsonArrayConst timeline_nodes;
+      bool timeline_loop = true;
+      uint16_t timeline_duration_override = 0U;
+      if (document["timeline"].is<JsonArrayConst>()) {
+        timeline_nodes = document["timeline"].as<JsonArrayConst>();
+      } else if (document["timeline"].is<JsonObjectConst>()) {
+        JsonObjectConst timeline_obj = document["timeline"].as<JsonObjectConst>();
+        if (timeline_obj["keyframes"].is<JsonArrayConst>()) {
+          timeline_nodes = timeline_obj["keyframes"].as<JsonArrayConst>();
+        } else if (timeline_obj["frames"].is<JsonArrayConst>()) {
+          timeline_nodes = timeline_obj["frames"].as<JsonArrayConst>();
+        }
+        if (timeline_obj["loop"].is<bool>()) {
+          timeline_loop = timeline_obj["loop"].as<bool>();
+        }
+        if (timeline_obj["duration_ms"].is<unsigned int>()) {
+          timeline_duration_override = static_cast<uint16_t>(timeline_obj["duration_ms"].as<unsigned int>());
+        }
+      } else if (document["visual"]["timeline"].is<JsonArrayConst>()) {
+        timeline_nodes = document["visual"]["timeline"].as<JsonArrayConst>();
+      } else if (document["visual"]["timeline"].is<JsonObjectConst>()) {
+        JsonObjectConst timeline_obj = document["visual"]["timeline"].as<JsonObjectConst>();
+        if (timeline_obj["keyframes"].is<JsonArrayConst>()) {
+          timeline_nodes = timeline_obj["keyframes"].as<JsonArrayConst>();
+        } else if (timeline_obj["frames"].is<JsonArrayConst>()) {
+          timeline_nodes = timeline_obj["frames"].as<JsonArrayConst>();
+        }
+        if (timeline_obj["loop"].is<bool>()) {
+          timeline_loop = timeline_obj["loop"].as<bool>();
+        }
+        if (timeline_obj["duration_ms"].is<unsigned int>()) {
+          timeline_duration_override = static_cast<uint16_t>(timeline_obj["duration_ms"].as<unsigned int>());
+        }
+      }
+      if (!timeline_nodes.isNull() && timeline_nodes.size() > 0U) {
+        SceneTimelineKeyframe base;
+        base.at_ms = 0U;
+        base.effect = effect;
+        base.speed_ms = effect_speed_ms;
+        base.bg_rgb = bg_rgb;
+        base.accent_rgb = accent_rgb;
+        base.text_rgb = text_rgb;
+        timeline_keyframes_[0] = base;
+        timeline_keyframe_count_ = 1U;
+        SceneTimelineKeyframe previous = base;
+        uint16_t previous_at_ms = 0U;
+
+        for (JsonVariantConst frame_node : timeline_nodes) {
+          if (timeline_keyframe_count_ >= kMaxTimelineKeyframes) {
+            break;
+          }
+          if (!frame_node.is<JsonObjectConst>()) {
+            continue;
+          }
+          JsonObjectConst frame = frame_node.as<JsonObjectConst>();
+          SceneTimelineKeyframe candidate = previous;
+          uint16_t at_ms = static_cast<uint16_t>(previous_at_ms + 420U);
+          if (frame["at_ms"].is<unsigned int>()) {
+            at_ms = static_cast<uint16_t>(frame["at_ms"].as<unsigned int>());
+          } else if (frame["time_ms"].is<unsigned int>()) {
+            at_ms = static_cast<uint16_t>(frame["time_ms"].as<unsigned int>());
+          } else if (frame["t"].is<unsigned int>()) {
+            at_ms = static_cast<uint16_t>(frame["t"].as<unsigned int>());
+          }
+          if (at_ms < previous_at_ms) {
+            at_ms = previous_at_ms;
+          }
+          candidate.at_ms = at_ms;
+          candidate.effect = parseEffectToken(frame["effect"] | frame["fx"] | "", candidate.effect);
+
+          if (frame["speed_ms"].is<unsigned int>()) {
+            candidate.speed_ms = static_cast<uint16_t>(frame["speed_ms"].as<unsigned int>());
+          } else if (frame["effect_speed_ms"].is<unsigned int>()) {
+            candidate.speed_ms = static_cast<uint16_t>(frame["effect_speed_ms"].as<unsigned int>());
+          } else if (frame["speed"].is<unsigned int>()) {
+            candidate.speed_ms = static_cast<uint16_t>(frame["speed"].as<unsigned int>());
+          }
+
+          const char* frame_bg = frame["theme"]["bg"] | frame["bg"] | "";
+          const char* frame_accent = frame["theme"]["accent"] | frame["accent"] | "";
+          const char* frame_text = frame["theme"]["text"] | frame["text"] | "";
+          parseHexRgb(frame_bg, &candidate.bg_rgb);
+          parseHexRgb(frame_accent, &candidate.accent_rgb);
+          parseHexRgb(frame_text, &candidate.text_rgb);
+
+          if (timeline_keyframe_count_ == 1U && candidate.at_ms == 0U) {
+            timeline_keyframes_[0] = candidate;
+          } else {
+            timeline_keyframes_[timeline_keyframe_count_] = candidate;
+            ++timeline_keyframe_count_;
+          }
+          previous = candidate;
+          previous_at_ms = candidate.at_ms;
+        }
+        if (timeline_keyframe_count_ > 1U) {
+          timeline_duration_ms_ = timeline_keyframes_[timeline_keyframe_count_ - 1U].at_ms;
+          if (timeline_duration_override > timeline_duration_ms_) {
+            timeline_duration_ms_ = timeline_duration_override;
+          }
+          if (timeline_duration_ms_ < 100U) {
+            timeline_duration_ms_ = 100U;
+          }
+          timeline_loop_ = timeline_loop;
+        } else {
+          resetSceneTimeline();
+        }
       }
     } else {
       Serial.printf("[UI] invalid scene payload (%s)\n", error.c_str());
@@ -311,18 +655,31 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   }
 
   stopSceneAnimations();
+  demo_particle_count_ = demo_particle_count;
+  demo_strobe_level_ = demo_strobe_level;
+  if (demo_mode == "cinematic") {
+    if (demo_particle_count_ > 2U) {
+      demo_particle_count_ = 2U;
+    }
+    if (transition_ms < 300U) {
+      transition_ms = 300U;
+    }
+  } else if (demo_mode == "arcade") {
+    if (transition_ms < 140U) {
+      transition_ms = 140U;
+    }
+    if (effect_speed_ms < 240U && effect_speed_ms != 0U) {
+      effect_speed_ms = 240U;
+    }
+  }
   current_effect_ = effect;
   effect_speed_ms_ = effect_speed_ms;
-
-  lv_obj_set_style_bg_color(scene_root_, bg, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(scene_core_, accent, LV_PART_MAIN);
-  lv_obj_set_style_border_color(scene_core_, secondary, LV_PART_MAIN);
-  lv_obj_set_style_border_color(scene_ring_outer_, accent, LV_PART_MAIN);
-  lv_obj_set_style_border_color(scene_ring_inner_, secondary, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(scene_fx_bar_, accent, LV_PART_MAIN);
-  lv_obj_set_style_text_color(scene_title_label_, secondary, LV_PART_MAIN);
-  lv_obj_set_style_text_color(scene_symbol_label_, secondary, LV_PART_MAIN);
+  if (effect_speed_ms_ == 0U && demo_mode == "arcade") {
+    effect_speed_ms_ = 240U;
+  }
+  applyThemeColors(bg_rgb, accent_rgb, text_rgb);
   lv_label_set_text(scene_title_label_, title.c_str());
+  lv_label_set_text(scene_subtitle_label_, subtitle.c_str());
   const char* symbol_glyph = mapSymbolToken(symbol.c_str());
   lv_label_set_text(scene_symbol_label_, (symbol_glyph != nullptr) ? symbol_glyph : LV_SYMBOL_PLAY);
   if (show_title) {
@@ -335,21 +692,52 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   } else {
     lv_obj_add_flag(scene_symbol_label_, LV_OBJ_FLAG_HIDDEN);
   }
+  if (show_subtitle && subtitle.length() > 0U) {
+    lv_obj_clear_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_add_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  applyTextLayout(title_align, subtitle_align);
+  applySceneFraming(frame_dx, frame_dy, frame_scale_pct, frame_split_layout);
+  applySubtitleScroll(subtitle_scroll_mode, subtitle_scroll_speed_ms, subtitle_scroll_pause_ms, subtitle_scroll_loop);
   for (lv_obj_t* particle : scene_particles_) {
-    lv_obj_set_style_bg_color(particle, secondary, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(particle, lv_color_hex(text_rgb), LV_PART_MAIN);
   }
 
   lv_obj_set_style_bg_opa(scene_core_, audio_playing ? LV_OPA_COVER : LV_OPA_80, LV_PART_MAIN);
-  applySceneEffect(effect);
+  if (timeline_keyframe_count_ > 1U && timeline_duration_ms_ > 0U) {
+    timeline_effect_index_ = -1;
+    onTimelineTick(0U);
+
+    lv_anim_t timeline_anim;
+    lv_anim_init(&timeline_anim);
+    lv_anim_set_var(&timeline_anim, scene_root_);
+    lv_anim_set_exec_cb(&timeline_anim, animTimelineTickCb);
+    lv_anim_set_values(&timeline_anim, 0, timeline_duration_ms_);
+    lv_anim_set_time(&timeline_anim, timeline_duration_ms_);
+    lv_anim_set_repeat_count(&timeline_anim, timeline_loop_ ? LV_ANIM_REPEAT_INFINITE : 0U);
+    lv_anim_set_playback_time(&timeline_anim, 0);
+    lv_anim_start(&timeline_anim);
+  } else {
+    applySceneEffect(effect);
+  }
+  if (scene_changed && has_previous_scene) {
+    applySceneTransition(transition, transition_ms);
+  }
+  std::strncpy(last_scene_id_, scene_id, sizeof(last_scene_id_) - 1U);
+  last_scene_id_[sizeof(last_scene_id_) - 1U] = '\0';
   updatePageLine();
-  Serial.printf("[UI] scene=%s effect=%u speed=%u title=%u symbol=%u scenario=%s audio=%u\n",
+  Serial.printf("[UI] scene=%s effect=%u speed=%u title=%u symbol=%u scenario=%s audio=%u timeline=%u transition=%u:%u\n",
                 scene_id,
                 static_cast<unsigned int>(effect),
                 static_cast<unsigned int>(effect_speed_ms_),
                 show_title ? 1U : 0U,
                 show_symbol ? 1U : 0U,
                 scenario_id,
-                audio_playing ? 1U : 0U);
+                audio_playing ? 1U : 0U,
+                static_cast<unsigned int>(timeline_keyframe_count_),
+                static_cast<unsigned int>(transition),
+                static_cast<unsigned int>(transition_ms));
 }
 
 void UiManager::handleButton(uint8_t key, bool long_press) {
@@ -425,18 +813,28 @@ void UiManager::createWidgets() {
   lv_obj_set_style_text_color(page_label_, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
 
   scene_title_label_ = lv_label_create(scene_root_);
+  scene_subtitle_label_ = lv_label_create(scene_root_);
   scene_symbol_label_ = lv_label_create(scene_root_);
   lv_obj_set_style_text_color(scene_title_label_, lv_color_hex(0xE8F1FF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(scene_subtitle_label_, lv_color_hex(0xE8F1FF), LV_PART_MAIN);
   lv_obj_set_style_text_color(scene_symbol_label_, lv_color_hex(0xE8F1FF), LV_PART_MAIN);
   lv_obj_set_style_text_font(scene_title_label_, &lv_font_montserrat_14, LV_PART_MAIN);
+  lv_obj_set_style_text_font(scene_subtitle_label_, &lv_font_montserrat_14, LV_PART_MAIN);
   lv_obj_set_style_text_font(scene_symbol_label_, &lv_font_montserrat_18, LV_PART_MAIN);
   lv_obj_set_style_text_opa(scene_title_label_, LV_OPA_80, LV_PART_MAIN);
+  lv_obj_set_style_text_opa(scene_subtitle_label_, LV_OPA_80, LV_PART_MAIN);
   lv_obj_set_style_text_opa(scene_symbol_label_, LV_OPA_90, LV_PART_MAIN);
   lv_obj_align(scene_title_label_, LV_ALIGN_TOP_MID, 0, 10);
+  lv_obj_align(scene_subtitle_label_, LV_ALIGN_BOTTOM_MID, 0, -20);
   lv_obj_align(scene_symbol_label_, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_set_width(scene_subtitle_label_, activeDisplayWidth() - 32);
+  lv_label_set_long_mode(scene_subtitle_label_, LV_LABEL_LONG_DOT);
+  lv_obj_set_style_text_align(scene_subtitle_label_, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   lv_label_set_text(scene_title_label_, "MISSION");
+  lv_label_set_text(scene_subtitle_label_, "");
   lv_label_set_text(scene_symbol_label_, LV_SYMBOL_PLAY);
   lv_obj_add_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
 
   stopSceneAnimations();
 }
@@ -466,6 +864,8 @@ void UiManager::stopSceneAnimations() {
 
   lv_anim_del(scene_root_, nullptr);
   lv_obj_set_style_opa(scene_root_, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_x(scene_root_, 0);
+  lv_obj_set_y(scene_root_, 0);
 
   if (scene_ring_outer_ != nullptr) {
     lv_anim_del(scene_ring_outer_, nullptr);
@@ -520,6 +920,14 @@ void UiManager::stopSceneAnimations() {
     lv_anim_del(scene_symbol_label_, nullptr);
     lv_obj_set_style_opa(scene_symbol_label_, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_align(scene_symbol_label_, LV_ALIGN_CENTER, 0, 0);
+  }
+  if (scene_subtitle_label_ != nullptr) {
+    lv_anim_del(scene_subtitle_label_, nullptr);
+    lv_obj_set_style_opa(scene_subtitle_label_, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_width(scene_subtitle_label_, width - 32);
+    lv_label_set_long_mode(scene_subtitle_label_, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(scene_subtitle_label_, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_align(scene_subtitle_label_, LV_ALIGN_BOTTOM_MID, 0, -20);
   }
 
   for (lv_obj_t* particle : scene_particles_) {
@@ -638,9 +1046,16 @@ void UiManager::applySceneEffect(SceneEffect effect) {
 
   if (effect == SceneEffect::kBlink) {
     const uint16_t blink_ms = resolveAnimMs(170);
+    int32_t low_opa = static_cast<int32_t>(LV_OPA_COVER) - static_cast<int32_t>(demo_strobe_level_) * 2;
+    if (low_opa < 40) {
+      low_opa = 40;
+    }
+    if (low_opa > LV_OPA_COVER) {
+      low_opa = LV_OPA_COVER;
+    }
     lv_anim_set_var(&anim, scene_root_);
     lv_anim_set_exec_cb(&anim, animSetOpa);
-    lv_anim_set_values(&anim, 120, LV_OPA_COVER);
+    lv_anim_set_values(&anim, low_opa, LV_OPA_COVER);
     lv_anim_set_time(&anim, blink_ms);
     lv_anim_set_playback_time(&anim, blink_ms);
     lv_anim_start(&anim);
@@ -649,7 +1064,7 @@ void UiManager::applySceneEffect(SceneEffect effect) {
       lv_anim_init(&symbol_blink);
       lv_anim_set_var(&symbol_blink, scene_symbol_label_);
       lv_anim_set_exec_cb(&symbol_blink, animSetOpa);
-      lv_anim_set_values(&symbol_blink, 80, LV_OPA_COVER);
+      lv_anim_set_values(&symbol_blink, low_opa, LV_OPA_COVER);
       lv_anim_set_time(&symbol_blink, blink_ms);
       lv_anim_set_playback_time(&symbol_blink, blink_ms);
       lv_anim_set_repeat_count(&symbol_blink, LV_ANIM_REPEAT_INFINITE);
@@ -693,9 +1108,14 @@ void UiManager::applySceneEffect(SceneEffect effect) {
 
     const int16_t dx = min_dim / 5;
     const int16_t dy = min_dim / 7;
+    const uint8_t max_particles = (demo_particle_count_ > 4U) ? 4U : demo_particle_count_;
     for (uint8_t index = 0; index < 4U; ++index) {
       lv_obj_t* particle = scene_particles_[index];
       if (particle == nullptr) {
+        continue;
+      }
+      if (index >= max_particles) {
+        lv_obj_add_flag(particle, LV_OBJ_FLAG_HIDDEN);
         continue;
       }
       const int16_t x_offset = ((index % 2U) == 0U) ? -dx : dx;
@@ -728,11 +1148,375 @@ void UiManager::applySceneEffect(SceneEffect effect) {
   }
 }
 
+void UiManager::applySceneTransition(SceneTransition transition, uint16_t duration_ms) {
+  if (scene_root_ == nullptr || transition == SceneTransition::kNone) {
+    return;
+  }
+  if (duration_ms < 90U) {
+    duration_ms = 90U;
+  }
+  if (duration_ms > 2200U) {
+    duration_ms = 2200U;
+  }
+
+  lv_anim_t anim;
+  lv_anim_init(&anim);
+  lv_anim_set_repeat_count(&anim, 0U);
+  lv_anim_set_playback_time(&anim, 0U);
+
+  if (transition == SceneTransition::kFade || transition == SceneTransition::kGlitch) {
+    const lv_opa_t start_opa = (transition == SceneTransition::kGlitch) ? static_cast<lv_opa_t>(80) : LV_OPA_TRANSP;
+    lv_obj_set_style_opa(scene_root_, start_opa, LV_PART_MAIN);
+    lv_anim_set_var(&anim, scene_root_);
+    lv_anim_set_exec_cb(&anim, animSetOpa);
+    lv_anim_set_values(&anim, start_opa, LV_OPA_COVER);
+    lv_anim_set_time(&anim, duration_ms);
+    lv_anim_start(&anim);
+    return;
+  }
+
+  if (transition == SceneTransition::kZoom && scene_core_ != nullptr) {
+    const int32_t target_size = lv_obj_get_width(scene_core_);
+    int32_t start_size = (target_size * 72) / 100;
+    if (start_size < 24) {
+      start_size = 24;
+    }
+    lv_obj_set_size(scene_core_, start_size, start_size);
+    lv_obj_set_style_opa(scene_root_, LV_OPA_70, LV_PART_MAIN);
+
+    lv_anim_t core_anim;
+    lv_anim_init(&core_anim);
+    lv_anim_set_var(&core_anim, scene_core_);
+    lv_anim_set_exec_cb(&core_anim, animSetSize);
+    lv_anim_set_values(&core_anim, start_size, target_size);
+    lv_anim_set_time(&core_anim, duration_ms);
+    lv_anim_start(&core_anim);
+
+    lv_anim_t opa_anim;
+    lv_anim_init(&opa_anim);
+    lv_anim_set_var(&opa_anim, scene_root_);
+    lv_anim_set_exec_cb(&opa_anim, animSetOpa);
+    lv_anim_set_values(&opa_anim, LV_OPA_70, LV_OPA_COVER);
+    lv_anim_set_time(&opa_anim, duration_ms);
+    lv_anim_start(&opa_anim);
+    return;
+  }
+
+  const int16_t dx = (activeDisplayWidth() > 240) ? 24 : 18;
+  const int16_t dy = (activeDisplayHeight() > 240) ? 20 : 14;
+  int16_t start_x = 0;
+  int16_t start_y = 0;
+  if (transition == SceneTransition::kSlideLeft) {
+    start_x = dx;
+  } else if (transition == SceneTransition::kSlideRight) {
+    start_x = -dx;
+  } else if (transition == SceneTransition::kSlideUp) {
+    start_y = dy;
+  } else if (transition == SceneTransition::kSlideDown) {
+    start_y = -dy;
+  }
+
+  if (start_x != 0) {
+    lv_obj_set_x(scene_root_, start_x);
+    lv_anim_set_var(&anim, scene_root_);
+    lv_anim_set_exec_cb(&anim, animSetX);
+    lv_anim_set_values(&anim, start_x, 0);
+    lv_anim_set_time(&anim, duration_ms);
+    lv_anim_start(&anim);
+  } else if (start_y != 0) {
+    lv_obj_set_y(scene_root_, start_y);
+    lv_anim_set_var(&anim, scene_root_);
+    lv_anim_set_exec_cb(&anim, animSetY);
+    lv_anim_set_values(&anim, start_y, 0);
+    lv_anim_set_time(&anim, duration_ms);
+    lv_anim_start(&anim);
+  }
+
+  lv_obj_set_style_opa(scene_root_, static_cast<lv_opa_t>(120), LV_PART_MAIN);
+  lv_anim_t opa_anim;
+  lv_anim_init(&opa_anim);
+  lv_anim_set_var(&opa_anim, scene_root_);
+  lv_anim_set_exec_cb(&opa_anim, animSetOpa);
+  lv_anim_set_values(&opa_anim, 120, LV_OPA_COVER);
+  lv_anim_set_time(&opa_anim, duration_ms);
+  lv_anim_start(&opa_anim);
+}
+
+void UiManager::applySceneFraming(int16_t frame_dx, int16_t frame_dy, uint8_t frame_scale_pct, bool split_layout) {
+  auto scaleSquare = [frame_scale_pct](lv_obj_t* obj, int16_t min_size) {
+    if (obj == nullptr) {
+      return;
+    }
+    int32_t width = lv_obj_get_width(obj);
+    if (width < min_size) {
+      width = min_size;
+    }
+    width = (width * frame_scale_pct) / 100;
+    if (width < min_size) {
+      width = min_size;
+    }
+    lv_obj_set_size(obj, width, width);
+  };
+  auto scaleWidth = [frame_scale_pct](lv_obj_t* obj, int16_t min_width) {
+    if (obj == nullptr) {
+      return;
+    }
+    int32_t width = lv_obj_get_width(obj);
+    if (width < min_width) {
+      width = min_width;
+    }
+    width = (width * frame_scale_pct) / 100;
+    if (width < min_width) {
+      width = min_width;
+    }
+    lv_obj_set_width(obj, width);
+  };
+  auto offset = [frame_dx, frame_dy](lv_obj_t* obj) {
+    if (obj == nullptr) {
+      return;
+    }
+    lv_obj_set_pos(obj, lv_obj_get_x(obj) + frame_dx, lv_obj_get_y(obj) + frame_dy);
+  };
+
+  if (frame_scale_pct != 100U) {
+    scaleSquare(scene_ring_outer_, 80);
+    scaleSquare(scene_ring_inner_, 58);
+    scaleSquare(scene_core_, 44);
+    scaleWidth(scene_fx_bar_, 72);
+  }
+
+  if (split_layout) {
+    if (scene_core_ != nullptr) {
+      lv_obj_set_x(scene_core_, lv_obj_get_x(scene_core_) - 28);
+    }
+    if (scene_ring_inner_ != nullptr) {
+      lv_obj_set_x(scene_ring_inner_, lv_obj_get_x(scene_ring_inner_) - 16);
+    }
+    if (scene_ring_outer_ != nullptr) {
+      lv_obj_set_x(scene_ring_outer_, lv_obj_get_x(scene_ring_outer_) - 10);
+    }
+    if (scene_symbol_label_ != nullptr) {
+      lv_obj_set_x(scene_symbol_label_, lv_obj_get_x(scene_symbol_label_) + 52);
+    }
+    if (scene_title_label_ != nullptr) {
+      lv_obj_set_x(scene_title_label_, lv_obj_get_x(scene_title_label_) - 18);
+    }
+    if (scene_subtitle_label_ != nullptr) {
+      lv_obj_set_x(scene_subtitle_label_, lv_obj_get_x(scene_subtitle_label_) - 18);
+    }
+  }
+
+  if (frame_dx != 0 || frame_dy != 0) {
+    offset(scene_ring_outer_);
+    offset(scene_ring_inner_);
+    offset(scene_core_);
+    offset(scene_fx_bar_);
+    offset(scene_title_label_);
+    offset(scene_subtitle_label_);
+    offset(scene_symbol_label_);
+    for (lv_obj_t* particle : scene_particles_) {
+      offset(particle);
+    }
+  }
+}
+
+void UiManager::applyTextLayout(SceneTextAlign title_align, SceneTextAlign subtitle_align) {
+  if (scene_title_label_ != nullptr) {
+    if (title_align == SceneTextAlign::kCenter) {
+      lv_obj_align(scene_title_label_, LV_ALIGN_CENTER, 0, -56);
+    } else if (title_align == SceneTextAlign::kBottom) {
+      lv_obj_align(scene_title_label_, LV_ALIGN_BOTTOM_MID, 0, -76);
+    } else {
+      lv_obj_align(scene_title_label_, LV_ALIGN_TOP_MID, 0, 10);
+    }
+  }
+
+  if (scene_subtitle_label_ != nullptr) {
+    if (subtitle_align == SceneTextAlign::kTop) {
+      lv_obj_align(scene_subtitle_label_, LV_ALIGN_TOP_MID, 0, 34);
+    } else if (subtitle_align == SceneTextAlign::kCenter) {
+      lv_obj_align(scene_subtitle_label_, LV_ALIGN_CENTER, 0, 58);
+    } else {
+      lv_obj_align(scene_subtitle_label_, LV_ALIGN_BOTTOM_MID, 0, -20);
+    }
+  }
+}
+
+void UiManager::applySubtitleScroll(SceneScrollMode mode, uint16_t speed_ms, uint16_t pause_ms, bool loop) {
+  if (scene_subtitle_label_ == nullptr) {
+    return;
+  }
+  lv_anim_del(scene_subtitle_label_, nullptr);
+
+  int16_t label_width = activeDisplayWidth() - 32;
+  if (label_width < 80) {
+    label_width = 80;
+  }
+  lv_obj_set_width(scene_subtitle_label_, label_width);
+
+  if (lv_obj_has_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN)) {
+    return;
+  }
+
+  if (mode == SceneScrollMode::kNone) {
+    lv_label_set_long_mode(scene_subtitle_label_, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(scene_subtitle_label_, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    return;
+  }
+
+  const char* subtitle_text = lv_label_get_text(scene_subtitle_label_);
+  if (subtitle_text == nullptr || subtitle_text[0] == '\0') {
+    return;
+  }
+
+  const lv_font_t* font = lv_obj_get_style_text_font(scene_subtitle_label_, LV_PART_MAIN);
+  if (font == nullptr) {
+    return;
+  }
+
+  lv_point_t text_size = {0, 0};
+  lv_txt_get_size(&text_size,
+                  subtitle_text,
+                  font,
+                  lv_obj_get_style_text_letter_space(scene_subtitle_label_, LV_PART_MAIN),
+                  lv_obj_get_style_text_line_space(scene_subtitle_label_, LV_PART_MAIN),
+                  LV_COORD_MAX,
+                  LV_TEXT_FLAG_NONE);
+
+  const int16_t overflow = static_cast<int16_t>(text_size.x - label_width);
+  if (overflow <= 4) {
+    lv_label_set_long_mode(scene_subtitle_label_, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(scene_subtitle_label_, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    return;
+  }
+
+  if (speed_ms < 600U) {
+    speed_ms = 600U;
+  }
+  if (pause_ms > 8000U) {
+    pause_ms = 8000U;
+  }
+
+  lv_label_set_long_mode(scene_subtitle_label_, LV_LABEL_LONG_CLIP);
+  lv_obj_set_style_text_align(scene_subtitle_label_, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
+  const int32_t start_x = lv_obj_get_x(scene_subtitle_label_);
+  const int32_t end_x = start_x - overflow - 14;
+
+  lv_anim_t scroll_anim;
+  lv_anim_init(&scroll_anim);
+  lv_anim_set_var(&scroll_anim, scene_subtitle_label_);
+  lv_anim_set_exec_cb(&scroll_anim, animSetX);
+  lv_anim_set_values(&scroll_anim, start_x, end_x);
+  lv_anim_set_time(&scroll_anim, speed_ms);
+  lv_anim_set_delay(&scroll_anim, pause_ms);
+  lv_anim_set_repeat_delay(&scroll_anim, pause_ms);
+  lv_anim_set_repeat_count(&scroll_anim, loop ? LV_ANIM_REPEAT_INFINITE : 0U);
+  lv_anim_set_playback_time(&scroll_anim, loop ? speed_ms : 0U);
+  lv_anim_start(&scroll_anim);
+}
+
+void UiManager::applyThemeColors(uint32_t bg_rgb, uint32_t accent_rgb, uint32_t text_rgb) {
+  const lv_color_t bg = lv_color_hex(bg_rgb);
+  const lv_color_t accent = lv_color_hex(accent_rgb);
+  const lv_color_t text = lv_color_hex(text_rgb);
+
+  lv_obj_set_style_bg_color(scene_root_, bg, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(scene_core_, accent, LV_PART_MAIN);
+  lv_obj_set_style_border_color(scene_core_, text, LV_PART_MAIN);
+  lv_obj_set_style_border_color(scene_ring_outer_, accent, LV_PART_MAIN);
+  lv_obj_set_style_border_color(scene_ring_inner_, text, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(scene_fx_bar_, accent, LV_PART_MAIN);
+  lv_obj_set_style_text_color(scene_title_label_, text, LV_PART_MAIN);
+  lv_obj_set_style_text_color(scene_subtitle_label_, text, LV_PART_MAIN);
+  lv_obj_set_style_text_color(scene_symbol_label_, text, LV_PART_MAIN);
+  for (lv_obj_t* particle : scene_particles_) {
+    if (particle == nullptr) {
+      continue;
+    }
+    lv_obj_set_style_bg_color(particle, text, LV_PART_MAIN);
+  }
+}
+
+void UiManager::resetSceneTimeline() {
+  timeline_keyframe_count_ = 0U;
+  timeline_duration_ms_ = 0U;
+  timeline_loop_ = true;
+  timeline_effect_index_ = -1;
+}
+
+void UiManager::onTimelineTick(uint16_t elapsed_ms) {
+  if (timeline_keyframe_count_ == 0U) {
+    return;
+  }
+  if (timeline_keyframe_count_ == 1U || timeline_duration_ms_ == 0U) {
+    const SceneTimelineKeyframe& only = timeline_keyframes_[0];
+    applyThemeColors(only.bg_rgb, only.accent_rgb, only.text_rgb);
+    if (timeline_effect_index_ != 0) {
+      stopSceneAnimations();
+      effect_speed_ms_ = only.speed_ms;
+      applySceneEffect(only.effect);
+      timeline_effect_index_ = 0;
+    }
+    return;
+  }
+
+  if (timeline_loop_ && elapsed_ms >= timeline_duration_ms_) {
+    elapsed_ms = static_cast<uint16_t>(elapsed_ms % timeline_duration_ms_);
+  } else if (!timeline_loop_ && elapsed_ms > timeline_duration_ms_) {
+    elapsed_ms = timeline_duration_ms_;
+  }
+
+  uint8_t segment_index = 0U;
+  for (uint8_t index = 0U; (index + 1U) < timeline_keyframe_count_; ++index) {
+    if (elapsed_ms < timeline_keyframes_[index + 1U].at_ms) {
+      segment_index = index;
+      break;
+    }
+    segment_index = index + 1U;
+  }
+  if (segment_index >= timeline_keyframe_count_) {
+    segment_index = timeline_keyframe_count_ - 1U;
+  }
+
+  const SceneTimelineKeyframe& from = timeline_keyframes_[segment_index];
+  const SceneTimelineKeyframe& to =
+      (segment_index + 1U < timeline_keyframe_count_) ? timeline_keyframes_[segment_index + 1U] : from;
+
+  if (timeline_effect_index_ != static_cast<int8_t>(segment_index)) {
+    stopSceneAnimations();
+    effect_speed_ms_ = from.speed_ms;
+    applySceneEffect(from.effect);
+    timeline_effect_index_ = static_cast<int8_t>(segment_index);
+  }
+
+  uint16_t progress = 1000U;
+  if (to.at_ms > from.at_ms) {
+    const uint16_t span = static_cast<uint16_t>(to.at_ms - from.at_ms);
+    const uint16_t offset = (elapsed_ms > from.at_ms) ? static_cast<uint16_t>(elapsed_ms - from.at_ms) : 0U;
+    progress = static_cast<uint16_t>((static_cast<uint32_t>(offset) * 1000U) / span);
+    if (progress > 1000U) {
+      progress = 1000U;
+    }
+  }
+
+  const uint32_t bg_rgb = lerpRgb(from.bg_rgb, to.bg_rgb, progress);
+  const uint32_t accent_rgb = lerpRgb(from.accent_rgb, to.accent_rgb, progress);
+  const uint32_t text_rgb = lerpRgb(from.text_rgb, to.text_rgb, progress);
+  applyThemeColors(bg_rgb, accent_rgb, text_rgb);
+}
+
 void UiManager::animSetY(void* obj, int32_t value) {
   if (obj == nullptr) {
     return;
   }
   lv_obj_set_y(static_cast<lv_obj_t*>(obj), value);
+}
+
+void UiManager::animSetX(void* obj, int32_t value) {
+  if (obj == nullptr) {
+    return;
+  }
+  lv_obj_set_x(static_cast<lv_obj_t*>(obj), value);
 }
 
 void UiManager::animSetOpa(void* obj, int32_t value) {
@@ -760,6 +1544,14 @@ void UiManager::animSetWidth(void* obj, int32_t value) {
     value = 16;
   }
   lv_obj_set_width(static_cast<lv_obj_t*>(obj), value);
+}
+
+void UiManager::animTimelineTickCb(void* obj, int32_t value) {
+  (void)obj;
+  if (g_instance == nullptr || value < 0) {
+    return;
+  }
+  g_instance->onTimelineTick(static_cast<uint16_t>(value));
 }
 
 void UiManager::displayFlushCb(lv_disp_drv_t* disp, const lv_area_t* area, lv_color_t* color_p) {

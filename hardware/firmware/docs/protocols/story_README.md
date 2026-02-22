@@ -86,12 +86,12 @@ Host:
 
 - pipeline guide: docs/protocols/STORY_V2_PIPELINE.md
 
-Depuis `hardware/firmware/esp32_audio`:
+Depuis `hardware/firmware`:
 
 ```bash
-make story-validate
-make story-gen
-python3 tools/story_gen/story_gen.py deploy --strict
+./tools/dev/story-gen validate
+./tools/dev/story-gen generate-cpp
+./tools/dev/story-gen generate-bundle
 make qa-story-v2
 ```
 
@@ -107,9 +107,31 @@ Generation:
 
 - deterministe (sort par `scenario.id`)
 - ajoute une banniere `spec_hash` dans les fichiers generes pour tracer la version spec en review
-- genere les 4 fichiers `src/story/generated/*`
+- genere les 4 fichiers `hardware/libs/story/src/generated/*`
+- pour les ressources ecran (`story/screens/*.json`), normalise automatiquement:
+  - `timeline.keyframes[]` (`at_ms`, `effect`, `speed_ms`, `theme`)
+  - `transition` (`effect`, `duration_ms`)
+  - palette `text` / `framing` / `scroll` / `demo`
+- reference palette et triggers: `docs/protocols/story_screen_palette_v2.md`
 
-## Commandes serie STORY V2
+## Commandes serie recommandees (JSON-lines V3)
+
+- `{"cmd":"story.status"}`
+- `{"cmd":"story.list"}`
+- `{"cmd":"story.load","data":{"scenario":"DEFAULT"}}`
+- `{"cmd":"story.step","data":{"step":"STEP_WAIT_UNLOCK"}}`
+- `{"cmd":"story.validate"}`
+- `{"cmd":"story.event","data":{"event":"UNLOCK"}}`
+
+Diagnostic:
+
+- `story.status` retourne un snapshot runtime court (scenario/step/error/source)
+- `story.validate` valide le wiring du scenario actif
+- protocole de reference: `docs/protocols/story_v3_serial.md`
+
+### Legacy STORY_V2_* (debug/historique)
+
+Les commandes `STORY_V2_*` peuvent subsister pour debug manuel/anciens scripts, mais l'automatisation doit utiliser `story.*`.
 
 - `STORY_V2_ENABLE [STATUS|ON|OFF]`
 - `STORY_V2_TRACE [ON|OFF|STATUS]`
@@ -124,14 +146,7 @@ Generation:
 - `STORY_V2_STEP <id>`
 - `STORY_V2_SCENARIO <id>`
 
-Diagnostic:
-
-- `STORY_V2_HEALTH` retourne un snapshot court (`OK|BUSY|ERROR|OUT_OF_CONTEXT`)
-- `STORY_V2_TRACE ON` active les logs transitions/events pour debug live
-- `STORY_V2_TRACE_LEVEL` ajuste la verbosite (`OFF/ERR/INFO/DEBUG`)
-- `STORY_V2_METRICS` expose les compteurs events/transitions/queue drops/storm drops
-
-Compat legacy conservee pendant PR1 via feature flag:
+Compat legacy runtime V2 (feature flag):
 
 - default compile-time: `config::kStoryV2EnabledDefault = true`
 - rollback runtime: `STORY_V2_ENABLE OFF`
@@ -142,8 +157,8 @@ Compat legacy conservee pendant PR1 via feature flag:
 1. copier `docs/protocols/story_specs/templates/scenario.template.yaml`
 2. renseigner steps/transitions/apps
 3. optionnel: creer le prompt auteur associe dans `docs/protocols/story_specs/prompts/*.prompt.md`
-4. `make story-validate`
-5. `make story-gen`
+4. `./tools/dev/story-gen validate`
+5. `./tools/dev/story-gen generate-cpp`
 6. `make qa-story-v2`
 7. `pio run -e esp32dev`
 

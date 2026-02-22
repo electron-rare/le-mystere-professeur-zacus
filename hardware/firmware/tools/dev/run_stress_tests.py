@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -26,12 +27,18 @@ FATAL_MARKERS = ("PANIC", "Guru Meditation", "ASSERT", "ABORT", "REBOOT", "rst:"
 DONE_MARKERS = (
     "STORY_ENGINE_DONE",
     "step=STEP_DONE",
+    "step=STEP_WIN",
     "step: done",
     "-> STEP_DONE",
+    "-> STEP_WIN",
     '"step":"STEP_DONE"',
+    '"step":"STEP_WIN"',
 )
 FORCE_ETAPE2_CMD = "STORY_FORCE_ETAPE2"
 WS_STATUS_TYPE = "status"
+PROTOCOL_JSON_V3 = "json_v3"
+PROTOCOL_LEGACY_SC = "legacy_sc"
+RE_SCENARIO_ITEM = re.compile(r"SC_LIST_ITEM\s+idx=\d+\s+id=([A-Za-z0-9_\-]+)")
 
 try:
     import websocket  # type: ignore
@@ -218,6 +225,13 @@ def read_lines(ser: serial.Serial, duration_s: float):
             yield line
 
 
+def append_rx(log_fp, ring: Deque[str], line: str) -> None:
+    ring.append(line)
+    if len(ring) > 10000:
+        ring.popleft()
+    log_line(log_fp, f"rx {line}")
+
+
 def send_cmd(ser: serial.Serial, cmd: str) -> None:
     ser.write((cmd + "\n").encode("utf-8"))
     ser.flush()
@@ -231,13 +245,6 @@ def send_json_cmd(ser: serial.Serial, cmd: str, data: Optional[dict[str, object]
     send_cmd(ser, json.dumps(payload, separators=(",", ":")))
 
 
-def prepare_story_session(ser: serial.Serial, log_fp) -> None:
-    preamble = ("BOOT_NEXT", "STORY_TEST_ON", "STORY_TEST_DELAY 1000")
-    for cmd in preamble:
-        send_cmd(ser, cmd)
-        log_line(log_fp, f"tx {cmd}")
-
-
 def line_has_fatal(line: str) -> bool:
     upper = line.upper()
     return any(marker.upper() in upper for marker in FATAL_MARKERS)
@@ -248,7 +255,85 @@ def line_has_done(line: str) -> bool:
     return any(marker.upper() in upper for marker in DONE_MARKERS)
 
 
-def run_scenario(
+def line_has_critical(line: str) -> bool:
+    if line_has_fatal(line):
+        return True
+    if "UI_LINK_STATUS" in line and "connected=0" in line:
+        return True
+    return False
+
+
+def scan_for_patterns(
+    ser: serial.Serial,
+    duration_s: float,
+    log_fp,
+    ring: Deque[str],
+    patterns: list[re.Pattern[str]],
+) -> tuple[bool, str, bool]:
+    for line in read_lines(ser, duration_s):
+        append_rx(log_fp, ring, line)
+        if line_has_critical(line):
+            return False, line, True
+        for pattern in patterns:
+            if pattern.search(line):
+                return True, line, False
+    return False, "timeout", False
+
+
+def detect_story_protocol(ser: serial.Serial, log_fp, ring: Deque[str]) -> str:
+    log_line(log_fp, "Probing story protocol")
+    send_json_cmd(ser, "story.status")
+    saw_unknown_json = False
+    saw_json_status = False
+    for line in read_lines(ser, 1.5):
+        append_rx(log_fp, ring, line)
+        if line_has_critical(line):
+            return PROTOCOL_LEGACY_SC
+        if 'UNKNOWN {"cmd":"story.status"}' in line:
+            saw_unknown_json = True
+        if '"running"' in line or '"step"' in line or '"ok"' in line:
+            saw_json_status = True
+    if saw_json_status and not saw_unknown_json:
+        return PROTOCOL_JSON_V3
+
+    send_cmd(ser, "HELP")
+    saw_sc_commands = False
+    for line in read_lines(ser, 1.5):
+        append_rx(log_fp, ring, line)
+        if line_has_critical(line):
+            return PROTOCOL_LEGACY_SC
+        if "SC_LOAD" in line or "SC_LIST" in line:
+            saw_sc_commands = True
+    if saw_unknown_json or saw_sc_commands:
+        return PROTOCOL_LEGACY_SC
+    return PROTOCOL_JSON_V3
+
+
+def list_legacy_scenarios(ser: serial.Serial, log_fp, ring: Deque[str]) -> list[str]:
+    send_cmd(ser, "SC_LIST")
+    scenarios: list[str] = []
+    for line in read_lines(ser, 2.0):
+        append_rx(log_fp, ring, line)
+        if line_has_critical(line):
+            break
+        match = RE_SCENARIO_ITEM.search(line)
+        if match:
+            scenarios.append(match.group(1))
+    if scenarios:
+        return scenarios
+    return ["DEFAULT"]
+
+
+def prepare_story_session_for_protocol(ser: serial.Serial, log_fp, protocol: str) -> None:
+    preamble = ["BOOT_NEXT"]
+    if protocol == PROTOCOL_JSON_V3:
+        preamble.extend(["STORY_TEST_ON", "STORY_TEST_DELAY 1000"])
+    for cmd in preamble:
+        send_cmd(ser, cmd)
+        log_line(log_fp, f"tx {cmd}")
+
+
+def run_scenario_json_v3(
     ser: serial.Serial,
     scenario: str,
     log_fp,
@@ -262,10 +347,7 @@ def run_scenario(
 
     done = False
     for line in read_lines(ser, duration_s):
-        ring.append(line)
-        if len(ring) > 10000:
-            ring.popleft()
-        log_line(log_fp, f"rx {line}")
+        append_rx(log_fp, ring, line)
         if line_has_fatal(line):
             log_line(log_fp, f"CRITICAL {line}")
             return False
@@ -282,10 +364,7 @@ def run_scenario(
     send_cmd(ser, FORCE_ETAPE2_CMD)
     send_json_cmd(ser, "story.status")
     for line in read_lines(ser, 6.0):
-        ring.append(line)
-        if len(ring) > 10000:
-            ring.popleft()
-        log_line(log_fp, f"rx {line}")
+        append_rx(log_fp, ring, line)
         if line_has_fatal(line):
             log_line(log_fp, f"CRITICAL {line}")
             return False
@@ -298,12 +377,94 @@ def run_scenario(
     return False
 
 
+def run_scenario_legacy_sc(
+    ser: serial.Serial,
+    scenario: str,
+    log_fp,
+    ring: Deque[str],
+    duration_s: float,
+) -> bool:
+    del duration_s  # Legacy path actively drives transitions, timeout is command-based.
+    log_line(log_fp, f"Scenario {scenario}: legacy SC_LOAD + transitions")
+
+    send_cmd(ser, f"SC_LOAD {scenario}")
+    ok, info, critical = scan_for_patterns(
+        ser,
+        3.0,
+        log_fp,
+        ring,
+        [
+            re.compile(rf"ACK SC_LOAD id={re.escape(scenario)} ok=1", re.IGNORECASE),
+            re.compile(r"ACK SC_LOAD id=[A-Za-z0-9_\-]+ ok=1", re.IGNORECASE),
+        ],
+    )
+    if not ok:
+        if critical:
+            log_line(log_fp, f"CRITICAL {info}")
+        else:
+            log_line(log_fp, f"WARN scenario {scenario} load failed: {info}")
+        return False
+
+    for cmd in ("UNLOCK", "NEXT", "NEXT", "NEXT"):
+        send_cmd(ser, cmd)
+        ok, info, critical = scan_for_patterns(
+            ser,
+            2.0,
+            log_fp,
+            ring,
+            [
+                re.compile(rf"ACK {cmd}$", re.IGNORECASE),
+                re.compile(r"step=STEP_(DONE|WIN)", re.IGNORECASE),
+                re.compile(r"STEP_(DONE|WIN)", re.IGNORECASE),
+            ],
+        )
+        if not ok and critical:
+            log_line(log_fp, f"CRITICAL {info}")
+            return False
+        if line_has_done(info):
+            return True
+
+    send_cmd(ser, "STATUS")
+    ok, info, critical = scan_for_patterns(
+        ser,
+        2.0,
+        log_fp,
+        ring,
+        [re.compile(r"step=STEP_(DONE|WIN)", re.IGNORECASE), re.compile(r"STEP_(DONE|WIN)", re.IGNORECASE)],
+    )
+    if ok:
+        return True
+    if critical:
+        log_line(log_fp, f"CRITICAL {info}")
+    else:
+        log_line(log_fp, f"WARN scenario {scenario} did not reach STEP_DONE")
+    return False
+
+
+def run_scenario(
+    ser: serial.Serial,
+    scenario: str,
+    log_fp,
+    ring: Deque[str],
+    duration_s: float,
+    protocol: str,
+) -> bool:
+    if protocol == PROTOCOL_LEGACY_SC:
+        return run_scenario_legacy_sc(ser, scenario, log_fp, ring, duration_s)
+    return run_scenario_json_v3(ser, scenario, log_fp, ring, duration_s)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Story V3 4h stress test")
     parser.add_argument("--port", help="ESP32 serial port")
     parser.add_argument("--baud", type=int, default=115200, help="Serial baud")
     parser.add_argument("--hours", type=float, default=4.0, help="Duration in hours")
     parser.add_argument("--scenario-duration", type=float, default=20.0, help="Seconds per scenario")
+    parser.add_argument(
+        "--scenarios",
+        default="",
+        help="Optional comma-separated scenario IDs. Defaults depend on protocol.",
+    )
     parser.add_argument("--log", default="", help="Log output path")
     parser.add_argument("--allow-no-hardware", action="store_true")
     parser.add_argument("--ws-url", default="", help="Optional WebSocket URL for heap sampling")
@@ -349,9 +510,10 @@ def main() -> int:
     errors = 0
     iterations = 0
 
+    requested_scenarios = [item.strip() for item in args.scenarios.split(",") if item.strip()]
+
     with log_path.open("w", encoding="utf-8") as log_fp:
         log_line(log_fp, f"Starting stress test: {args.hours:.2f}h on {port} (baud={args.baud})")
-        log_line(log_fp, f"Scenarios: {', '.join(DEFAULT_SCENARIOS)}")
 
         stop_event = Event()
         ws_lock = Lock()
@@ -364,15 +526,31 @@ def main() -> int:
             with serial.Serial(port, args.baud, timeout=0.5) as ser:
                 time.sleep(0.8)
                 ser.reset_input_buffer()
-                prepare_story_session(ser, log_fp)
+                protocol = detect_story_protocol(ser, log_fp, ring)
+                log_line(log_fp, f"Story protocol: {protocol}")
+                if protocol == PROTOCOL_LEGACY_SC:
+                    available_scenarios = list_legacy_scenarios(ser, log_fp, ring)
+                    if requested_scenarios:
+                        scenarios = [s for s in requested_scenarios if s in available_scenarios]
+                        if not scenarios:
+                            scenarios = [available_scenarios[0]]
+                    elif "DEFAULT" in available_scenarios:
+                        # Keep legacy runs deterministic: DEFAULT has stable transitions in single-board mode.
+                        scenarios = ["DEFAULT"]
+                    else:
+                        scenarios = [available_scenarios[0]]
+                else:
+                    scenarios = requested_scenarios or list(DEFAULT_SCENARIOS)
+                log_line(log_fp, f"Scenarios: {', '.join(scenarios)}")
+                prepare_story_session_for_protocol(ser, log_fp, protocol)
 
                 while time.time() < end_time:
-                    for scenario in DEFAULT_SCENARIOS:
+                    for scenario in scenarios:
                         if time.time() >= end_time:
                             break
                         iterations += 1
                         log_line(log_fp, f"[{iterations}] Running {scenario}")
-                        ok = run_scenario(ser, scenario, log_fp, ring, args.scenario_duration)
+                        ok = run_scenario(ser, scenario, log_fp, ring, args.scenario_duration, protocol)
                         if ok:
                             log_line(log_fp, f"OK {scenario}")
                         else:

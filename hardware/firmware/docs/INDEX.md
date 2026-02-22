@@ -232,11 +232,10 @@ La phase WebUI utilisateur (portail captif, configuration WiFi, diagnostic rése
 
 Pour contribuer à la documentation :
 
-1. Fork le repo
-2. Créer une branche `docs/<sujet>`
-3. Éditer les fichiers Markdown
-4. Commit avec message clair : `docs(firmware): update <sujet>`
-5. PR vers `main`
+1. Se synchroniser sur `main`
+2. Éditer les fichiers Markdown concernés
+3. Commit avec message clair : `docs(firmware): update <sujet>`
+4. Pousser sur `main` (ou ouvrir une branche de secours + PR si `main` est protégé)
 
 ---
 

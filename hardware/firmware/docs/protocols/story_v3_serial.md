@@ -1,5 +1,10 @@
 # Story Serial Protocol V3
 
+## Scope
+
+- V3 couvre uniquement l'interface série/API de commande.
+- Le modèle de scénario, la génération, et le moteur runtime restent en **Story V2**.
+
 ## Transport
 
 - Line-based serial protocol.

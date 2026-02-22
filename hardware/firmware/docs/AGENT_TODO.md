@@ -506,3 +506,109 @@
 - [x] `tools/test/resolve_ports.py` now honors `--need-esp32` and `--need-esp8266` explicitly via required roles, while still emitting both `esp32` and `esp8266` fields in JSON output.
 [20260218-020041] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260218-020041, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260218-020041/summary.md
 [20260218-021042] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260218-021042, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260218-021042/summary.md
+[20260221-222358] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260221-222358, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260221-222358/summary.md
+[20260221-223450] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260221-223450, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260221-223450/summary.md
+
+## [2026-02-22] Freenove story modular + SD + ESP-NOW v1 envelope + WebUI push
+
+- [x] Story storage rendu modulaire avec fallback intégré:
+  - bundle Story par défaut provisionné automatiquement en LittleFS (`/story/{scenarios,screens,audio,apps,actions}`),
+  - support SD_MMC Freenove activé (`/sd/story/...`) avec sync SD -> LittleFS au boot et via commande.
+- [x] Commandes/runtime ajoutés pour opérabilité story:
+  - serial: `STORY_SD_STATUS`, `STORY_REFRESH_SD`,
+  - WebUI/API: bouton + endpoint `POST /api/story/refresh-sd`.
+- [x] Timeline JSON enrichie sur les scènes Story (`data/story/screens/SCENE_*.json`) avec keyframes `at_ms/effect/speed_ms/theme`.
+- [x] Audio crossfade consolidé:
+  - correction callback fin de piste (track réel reporté),
+  - lecture des packs audio depuis LittleFS **ou SD** (`/sd/...`).
+- [x] ESP-NOW aligné avec `docs/espnow_api_v1.md`:
+  - enveloppe v1 supportée (`msg_id`, `seq`, `type`, `payload`, `ack`),
+  - extraction metadata + statut exposé,
+  - trames `type=command` exécutées côté runtime et réponse corrélée `type=ack` renvoyée si `ack=true`.
+- [x] WebUI passée en push temps réel:
+  - endpoint SSE `GET /api/stream` (statut Story/WiFi/ESP-NOW),
+  - fallback refresh conservé côté front.
+- [x] Générateur Story (`zacus_story_gen_ai`) amélioré:
+  - bundle Story injecte désormais le contenu réel des ressources JSON (`data/story/*`) au lieu de placeholders minimalistes.
+
+### Vérifications exécutées
+
+- `pio run -e freenove_esp32s3` ✅
+- `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅
+- `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- Vérification série post-flash (`STORY_SD_STATUS`, `WIFI_STATUS`, `ESPNOW_STATUS_JSON`) ✅, IP observée: `192.168.0.91`
+- `ZACUS_ENV=freenove_esp32s3 ZACUS_PORT_ESP32=/dev/cu.usbmodem5AB90753301 ZACUS_REQUIRE_HW=1 ZACUS_NO_COUNTDOWN=1 ./tools/dev/run_matrix_and_smoke.sh` ✅
+- `./tools/dev/story-gen validate` ✅
+- `./tools/dev/story-gen generate-bundle --out-dir /tmp/story_bundle_test` ✅
+- `.venv/bin/python3 -m pytest lib/zacus_story_gen_ai/tests/test_generator.py` ✅
+- `curl http://192.168.0.91/api/status` + `curl http://192.168.0.91/api/stream` ✅ (payloads UTF-8 validés après fix snapshot JSON)
+- Frontend dev UI: `npm run build` ✅ (fix TS no-return sur `src/lib/deviceApi.ts` pour débloquer le flux front)
+[20260221-234147] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260221-234147, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260221-234147/summary.md
+[20260221-235139] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260221-235139, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260221-235139/summary.md
+[20260222-000305] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260222-000305, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260222-000305/summary.md
+
+## [2026-02-22] Suite autonome — installations + vérifications complètes
+
+- [x] Préflight sécurité refait avant action:
+  - branch/diff/status affichés,
+  - checkpoint enregistré: `/tmp/zacus_checkpoint/20260222-005615_wip.patch` et `/tmp/zacus_checkpoint/20260222-005615_status.txt`,
+  - scan artefacts trackés (`.pio`, `.platformio`, `logs`, `dist`, `build`, `node_modules`, `.venv`) = aucun trouvé.
+- [x] Installations/outillage:
+  - `./tools/dev/bootstrap_local.sh` exécuté (venv + dépendances Python + `zacus_story_gen_ai` editable),
+  - validation outillage: `pio --version`, `python3 -m serial.tools.list_ports -v`,
+  - `tools/dev/check_env.sh` durci pour fallback `pip3` et dépendances optionnelles en `WARN` (exécution validée).
+- [x] Vérifications story/content:
+  - `.venv/bin/python3 tools/scenario/validate_scenario.py game/scenarios/zacus_v1.yaml` ✅
+  - `.venv/bin/python3 tools/audio/validate_manifest.py audio/manifests/zacus_v1_audio.yaml` ✅
+  - `.venv/bin/python3 tools/printables/validate_manifest.py printables/manifests/zacus_v1_printables.yaml` ✅
+  - `./tools/dev/story-gen validate` ✅
+  - `.venv/bin/python3 -m pytest lib/zacus_story_gen_ai/tests/test_generator.py` ✅
+- [x] Vérifications firmware/hardware Freenove USB modem:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `ZACUS_ENV=freenove_esp32s3 ZACUS_PORT_ESP32=/dev/cu.usbmodem5AB90753301 ZACUS_REQUIRE_HW=1 ZACUS_NO_COUNTDOWN=1 ./tools/dev/run_matrix_and_smoke.sh` ✅ (`UI_LINK_STATUS=SKIP` justifié combined board).
+- [x] Gates build contractuels:
+  - `pio run -e esp32dev -e esp32_release -e esp8266_oled -e ui_rp2040_ili9488 -e ui_rp2040_ili9486` ✅ (5/5).
+- [x] Cohérence doc/registry:
+  - `.venv/bin/python3 tools/dev/gen_cockpit_docs.py` ✅
+  - `.venv/bin/python3 tools/test/audit_coherence.py` ✅ (`RESULT=PASS`).
+- [x] Statut réseau et API runtime Freenove:
+  - série `WIFI_STATUS`/`ESPNOW_STATUS_JSON`/`STORY_SD_STATUS` ✅,
+  - IP actuelle observée: `192.168.0.91`,
+  - `curl /api/status` et `curl /api/stream` ✅ (payloads Story/WiFi/ESP-NOW valides).
+
+## [2026-02-22] Clarification doc Story V2 vs protocole série V3
+
+- [x] Alignement documentaire réalisé pour éviter l'ambiguïté "V2/V3":
+  - `docs/protocols/GENERER_UN_SCENARIO_STORY_V2.md`: V2 explicitée (moteur/spec), commandes de test série basculées en JSON-lines V3 (`story.*`), chemins outillage alignés (`./tools/dev/story-gen`).
+  - `docs/protocols/story_v3_serial.md`: section `Scope` ajoutée (V3 = interface série, V2 = génération/runtime).
+  - `docs/protocols/story_README.md`: section commandes réorganisée avec recommandation V3 et rappel legacy `STORY_V2_*` pour debug uniquement.
+
+## [2026-02-22] Story UI — génération écrans/effets/transitions (suite)
+
+- [x] Générateur `zacus_story_gen_ai` renforcé pour les ressources écran:
+  - normalisation automatique d'un profil écran (fallback par `SCENE_*`),
+  - timeline normalisée en objet `timeline = {loop, duration_ms, keyframes[]}`,
+  - keyframes consolidées (`at_ms`, `effect`, `speed_ms`, `theme`) avec garde-fous (ordre, bornes, minimum 2 keyframes),
+  - transition normalisée (`transition.effect`, `transition.duration_ms`).
+- [x] Runtime UI Freenove enrichi:
+  - parse `timeline.keyframes` (et compat ancien format array),
+  - support `timeline.loop` + `timeline.duration_ms`,
+  - transitions de scène ajoutées (`fade`, `slide_left/right/up/down`, `zoom`, `glitch`) avec durée pilotable.
+- [x] Données Story alignées:
+  - `data/story/screens/SCENE_*.json` migrés vers format timeline keyframes + transition,
+  - fallback embarqué (`storage_manager.cpp`) synchronisé sur le même contrat JSON.
+- [x] Vérifications exécutées:
+  - `.venv/bin/python3 -m pytest lib/zacus_story_gen_ai/tests/test_generator.py` ✅ (4 tests),
+  - `./tools/dev/story-gen validate` ✅,
+  - `./tools/dev/story-gen generate-bundle --out-dir /tmp/story_bundle_fx_<ts>` ✅ (payloads écran keyframes+transition vérifiés),
+  - `pio run -e freenove_esp32s3` ✅,
+  - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅,
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅,
+  - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅,
+  - `ZACUS_ENV=freenove_esp32s3 ... ./tools/dev/run_matrix_and_smoke.sh` ✅ (artefact: `artifacts/rc_live/freenove_esp32s3_20260222-002556/`),
+  - validation série live (`SC_LOAD/SC_EVENT`) avec logs UI montrant `transition=<type>:<ms>` sur changements de scène.
+[20260222-002556] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260222-002556, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260222-002556/summary.md

@@ -20,6 +20,8 @@ S'applique aux scripts et helpers dans `hardware/firmware/tools/dev/**`.
 - Ecrire les logs dans `hardware/firmware/logs/` avec des noms horodates.
 - Garder une sortie CLI courte et grep-friendly (`[step]`, `[ok]`, `[fail]`).
 - Documenter et maintenir `tools/dev/plan_runner.sh` pour permettre d’exécuter automatiquement les sections `## Plan d’action` des briefs.
+- En mode carte combinee (`ZACUS_ENV=freenove_esp32s3`), les gates UI link/story screen doivent etre sorties en `SKIP` avec justification explicite `not needed for combined board`.
+- `run_stress_tests.py` doit rester compatible protocoles story JSON + serial legacy (`SC_*`) et permettre la cible `DEFAULT` en single-board.
 - Les changements structurels d'outillage sont autorises, mais doivent etre reflites dans la doc/onboarding.
 
 ## Interdit

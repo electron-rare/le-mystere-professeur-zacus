@@ -1,6 +1,7 @@
 // network_manager.cpp - WiFi + ESP-NOW runtime helpers for Freenove all-in-one.
 #include "network_manager.h"
 
+#include <ArduinoJson.h>
 #include <WiFi.h>
 #include <esp_now.h>
 
@@ -25,6 +26,30 @@ bool isBroadcastMac(const uint8_t mac[6]) {
     }
   }
   return true;
+}
+
+const char* inferEnvelopeType(const char* payload) {
+  if (payload == nullptr || payload[0] == '\0') {
+    return "empty";
+  }
+  if (std::strncmp(payload, "SC_EVENT", 8U) == 0 || std::strncmp(payload, "SERIAL:", 7U) == 0 ||
+      std::strncmp(payload, "TIMER:", 6U) == 0 || std::strncmp(payload, "ACTION:", 7U) == 0 ||
+      std::strcmp(payload, "UNLOCK") == 0 || std::strcmp(payload, "AUDIO_DONE") == 0) {
+    return "story_event";
+  }
+  if (payload[0] == '{' || payload[0] == '[') {
+    return "json";
+  }
+  return "text";
+}
+
+bool looksLikeEspNowEnvelope(JsonVariantConst root) {
+  if (!root.is<JsonObjectConst>()) {
+    return false;
+  }
+  JsonObjectConst object = root.as<JsonObjectConst>();
+  return object["msg_id"].is<const char*>() && object["seq"].is<uint32_t>() && object["type"].is<const char*>() &&
+         object.containsKey("payload") && object["ack"].is<bool>();
 }
 
 }  // namespace
@@ -420,6 +445,11 @@ bool NetworkManager::sendEspNowText(const uint8_t mac[6], const char* text) {
   if (mac == nullptr || text == nullptr || text[0] == '\0') {
     return false;
   }
+  const size_t payload_len = std::strlen(text);
+  if (payload_len == 0U || payload_len > kEspNowFrameCapacity) {
+    Serial.printf("[NET] ESP-NOW payload too large: %u bytes\n", static_cast<unsigned int>(payload_len));
+    return false;
+  }
 
   if (!isBroadcastMac(mac)) {
     if (!addEspNowPeerInternal(mac)) {
@@ -441,13 +471,13 @@ bool NetworkManager::sendEspNowText(const uint8_t mac[6], const char* text) {
 
   esp_err_t err = esp_now_send(mac,
                                reinterpret_cast<const uint8_t*>(text),
-                               static_cast<size_t>(std::strlen(text)));
+                               payload_len);
   if (err == ESP_ERR_ESPNOW_NOT_INIT) {
     // WiFi mode switches can deinit ESP-NOW internally: recover once, then retry the same payload.
     espnow_enabled_ = false;
     if (enableEspNow()) {
       addEspNowPeerInternal(mac);
-      err = esp_now_send(mac, reinterpret_cast<const uint8_t*>(text), static_cast<size_t>(std::strlen(text)));
+      err = esp_now_send(mac, reinterpret_cast<const uint8_t*>(text), payload_len);
     }
   }
   if (err != ESP_OK) {
@@ -481,15 +511,50 @@ bool NetworkManager::sendEspNowTarget(const char* target, const char* text) {
   if (target == nullptr || target[0] == '\0') {
     return false;
   }
+  if (text == nullptr || text[0] == '\0') {
+    return false;
+  }
+
+  String frame = text;
+  frame.trim();
+  if (frame.isEmpty()) {
+    return false;
+  }
+
+  bool is_envelope = false;
+  if (frame.startsWith("{")) {
+    StaticJsonDocument<512> document;
+    if (!deserializeJson(document, frame) && looksLikeEspNowEnvelope(document.as<JsonVariantConst>())) {
+      is_envelope = true;
+    }
+  }
+  if (!is_envelope) {
+    StaticJsonDocument<512> envelope;
+    ++espnow_tx_seq_;
+    char msg_id[32] = {0};
+    snprintf(msg_id,
+             sizeof(msg_id),
+             "M%08lX%06lu",
+             static_cast<unsigned long>(millis()),
+             static_cast<unsigned long>(espnow_tx_seq_));
+    envelope["msg_id"] = msg_id;
+    envelope["seq"] = espnow_tx_seq_;
+    envelope["type"] = inferEnvelopeType(frame.c_str());
+    envelope["payload"] = frame;
+    envelope["ack"] = false;
+    frame.remove(0);
+    serializeJson(envelope, frame);
+  }
+
   if (equalsIgnoreCase(target, "broadcast")) {
     const uint8_t broadcast_mac[6] = {0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU};
-    return sendEspNowText(broadcast_mac, text);
+    return sendEspNowText(broadcast_mac, frame.c_str());
   }
   uint8_t mac[6] = {0};
   if (!parseMac(target, mac)) {
     return false;
   }
-  return sendEspNowText(mac, text);
+  return sendEspNowText(mac, frame.c_str());
 }
 
 NetworkManager::Snapshot NetworkManager::snapshot() const {
@@ -499,7 +564,13 @@ NetworkManager::Snapshot NetworkManager::snapshot() const {
 bool NetworkManager::consumeEspNowMessage(char* out_payload,
                                           size_t payload_capacity,
                                           char* out_peer,
-                                          size_t peer_capacity) {
+                                          size_t peer_capacity,
+                                          char* out_msg_id,
+                                          size_t msg_id_capacity,
+                                          uint32_t* out_seq,
+                                          char* out_type,
+                                          size_t type_capacity,
+                                          bool* out_ack_requested) {
   if (rx_queue_count_ == 0U) {
     return false;
   }
@@ -510,6 +581,18 @@ bool NetworkManager::consumeEspNowMessage(char* out_payload,
   }
   if (out_peer != nullptr && peer_capacity > 0U) {
     copyText(out_peer, peer_capacity, entry.peer);
+  }
+  if (out_msg_id != nullptr && msg_id_capacity > 0U) {
+    copyText(out_msg_id, msg_id_capacity, entry.msg_id);
+  }
+  if (out_seq != nullptr) {
+    *out_seq = entry.seq;
+  }
+  if (out_type != nullptr && type_capacity > 0U) {
+    copyText(out_type, type_capacity, entry.type);
+  }
+  if (out_ack_requested != nullptr) {
+    *out_ack_requested = entry.ack_requested;
   }
   rx_queue_head_ = static_cast<uint8_t>((rx_queue_head_ + 1U) % kRxQueueSize);
   --rx_queue_count_;
@@ -703,7 +786,12 @@ void NetworkManager::forgetPeer(const uint8_t mac[6]) {
   }
 }
 
-bool NetworkManager::queueEspNowMessage(const char* payload, const char* peer) {
+bool NetworkManager::queueEspNowMessage(const char* payload,
+                                        const char* peer,
+                                        const char* msg_id,
+                                        uint32_t seq,
+                                        const char* type,
+                                        bool ack_requested) {
   if (payload == nullptr || payload[0] == '\0') {
     return false;
   }
@@ -715,6 +803,10 @@ bool NetworkManager::queueEspNowMessage(const char* payload, const char* peer) {
   EspNowMessage& slot = rx_queue_[rx_queue_tail_];
   copyText(slot.payload, sizeof(slot.payload), payload);
   copyText(slot.peer, sizeof(slot.peer), peer);
+  copyText(slot.msg_id, sizeof(slot.msg_id), msg_id);
+  copyText(slot.type, sizeof(slot.type), type);
+  slot.seq = seq;
+  slot.ack_requested = ack_requested;
   rx_queue_tail_ = static_cast<uint8_t>((rx_queue_tail_ + 1U) % kRxQueueSize);
   ++rx_queue_count_;
   return true;
@@ -785,9 +877,51 @@ void NetworkManager::handleEspNowRecv(const uint8_t* mac_addr, const uint8_t* da
     std::memcpy(payload, data, copy_len);
   }
   payload[copy_len] = '\0';
+  String payload_text = payload;
+  bool is_envelope = false;
+  bool envelope_ack = false;
+  uint32_t envelope_seq = 0U;
+  char envelope_msg_id[sizeof(snapshot_.last_msg_id)] = {0};
+  char envelope_type[sizeof(snapshot_.last_type)] = {0};
 
-  copyText(snapshot_.last_payload, sizeof(snapshot_.last_payload), payload);
-  queueEspNowMessage(payload, peer_text);
+  if (payload[0] == '{') {
+    StaticJsonDocument<512> document;
+    if (!deserializeJson(document, payload) && looksLikeEspNowEnvelope(document.as<JsonVariantConst>())) {
+      JsonVariantConst root = document.as<JsonVariantConst>();
+      copyText(envelope_msg_id, sizeof(envelope_msg_id), root["msg_id"] | "");
+      copyText(envelope_type, sizeof(envelope_type), root["type"] | "");
+      envelope_seq = root["seq"] | 0U;
+      envelope_ack = root["ack"] | false;
+      payload_text.remove(0);
+      if (root["payload"].is<const char*>()) {
+        payload_text = root["payload"].as<const char*>();
+      } else if (!root["payload"].isNull()) {
+        serializeJson(root["payload"], payload_text);
+      }
+      is_envelope = true;
+    }
+  }
+
+  snapshot_.espnow_last_seq = envelope_seq;
+  snapshot_.espnow_last_ack = envelope_ack;
+  copyText(snapshot_.last_msg_id, sizeof(snapshot_.last_msg_id), envelope_msg_id);
+  if (envelope_type[0] == '\0') {
+    copyText(envelope_type, sizeof(envelope_type), inferEnvelopeType(payload_text.c_str()));
+  }
+  copyText(snapshot_.last_type, sizeof(snapshot_.last_type), envelope_type);
+  copyText(snapshot_.last_payload, sizeof(snapshot_.last_payload), payload_text.c_str());
+
+  const bool ack_response = is_envelope && envelope_ack && std::strcmp(envelope_type, "ack") == 0;
+  const bool ack_requested = is_envelope && envelope_ack && !ack_response;
+  if (ack_response) {
+    return;
+  }
+  queueEspNowMessage(payload_text.c_str(),
+                     peer_text,
+                     envelope_msg_id,
+                     envelope_seq,
+                     envelope_type,
+                     ack_requested);
 }
 
 void NetworkManager::handleEspNowSend(const uint8_t* mac_addr, esp_now_send_status_t status) {

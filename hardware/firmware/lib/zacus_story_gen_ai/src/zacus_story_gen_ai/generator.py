@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import tarfile
@@ -52,6 +53,249 @@ APP_CPP = {
     "ESPNOW_STACK": "StoryAppType::kEspNowStack",
 }
 
+DEFAULT_SCENE_PROFILE: dict[str, Any] = {
+    "title": "MISSION",
+    "subtitle": "",
+    "symbol": "RUN",
+    "effect": "pulse",
+    "effect_speed_ms": 680,
+    "theme": {"bg": "#07132A", "accent": "#2A76FF", "text": "#E8F1FF"},
+    "transition": {"effect": "fade", "duration_ms": 240},
+    "timeline": [
+        {
+            "at_ms": 0,
+            "effect": "pulse",
+            "speed_ms": 680,
+            "theme": {"bg": "#07132A", "accent": "#2A76FF", "text": "#E8F1FF"},
+        },
+        {
+            "at_ms": 1400,
+            "effect": "blink",
+            "speed_ms": 360,
+            "theme": {"bg": "#0B1F3C", "accent": "#5A99FF", "text": "#F1F7FF"},
+        },
+    ],
+}
+
+SCENE_PROFILES: dict[str, dict[str, Any]] = {
+    "SCENE_LOCKED": {
+        "title": "VERROUILLE",
+        "subtitle": "Attente de debloquage",
+        "symbol": "LOCK",
+        "effect": "pulse",
+        "effect_speed_ms": 680,
+        "theme": {"bg": "#08152D", "accent": "#3E8DFF", "text": "#F5F8FF"},
+        "transition": {"effect": "fade", "duration_ms": 260},
+        "timeline": [
+            {
+                "at_ms": 0,
+                "effect": "pulse",
+                "speed_ms": 680,
+                "theme": {"bg": "#08152D", "accent": "#3E8DFF", "text": "#F5F8FF"},
+            },
+            {
+                "at_ms": 1400,
+                "effect": "blink",
+                "speed_ms": 420,
+                "theme": {"bg": "#0A1E3A", "accent": "#74B0FF", "text": "#F8FBFF"},
+            },
+        ],
+    },
+    "SCENE_BROKEN": {
+        "title": "PROTO U-SON",
+        "subtitle": "Signal brouille",
+        "symbol": "ALERT",
+        "effect": "blink",
+        "effect_speed_ms": 180,
+        "theme": {"bg": "#2A0508", "accent": "#FF4A45", "text": "#FFF1F1"},
+        "transition": {"effect": "glitch", "duration_ms": 160},
+        "timeline": [
+            {
+                "at_ms": 0,
+                "effect": "blink",
+                "speed_ms": 180,
+                "theme": {"bg": "#2A0508", "accent": "#FF4A45", "text": "#FFF1F1"},
+            },
+            {
+                "at_ms": 760,
+                "effect": "blink",
+                "speed_ms": 140,
+                "theme": {"bg": "#33070C", "accent": "#FF7A75", "text": "#FFF6F5"},
+            },
+        ],
+    },
+    "SCENE_LA_DETECT": {
+        "title": "DETECTION",
+        "subtitle": "Balayage en cours",
+        "symbol": "SCAN",
+        "effect": "scan",
+        "effect_speed_ms": 960,
+        "theme": {"bg": "#041F1B", "accent": "#2CE5A6", "text": "#EFFFF8"},
+        "transition": {"effect": "slide_up", "duration_ms": 220},
+        "timeline": [
+            {
+                "at_ms": 0,
+                "effect": "scan",
+                "speed_ms": 960,
+                "theme": {"bg": "#041F1B", "accent": "#2CE5A6", "text": "#EFFFF8"},
+            },
+            {
+                "at_ms": 1500,
+                "effect": "pulse",
+                "speed_ms": 620,
+                "theme": {"bg": "#062923", "accent": "#63F0C3", "text": "#F3FFFB"},
+            },
+        ],
+    },
+    "SCENE_SEARCH": {
+        "title": "RECHERCHE",
+        "subtitle": "Analyse des indices",
+        "symbol": "SCAN",
+        "effect": "scan",
+        "effect_speed_ms": 920,
+        "theme": {"bg": "#05261F", "accent": "#35E7B0", "text": "#EFFFF8"},
+        "transition": {"effect": "slide_left", "duration_ms": 230},
+        "timeline": [
+            {
+                "at_ms": 0,
+                "effect": "scan",
+                "speed_ms": 920,
+                "theme": {"bg": "#05261F", "accent": "#35E7B0", "text": "#EFFFF8"},
+            },
+            {
+                "at_ms": 1600,
+                "effect": "pulse",
+                "speed_ms": 600,
+                "theme": {"bg": "#07322A", "accent": "#67F0C4", "text": "#F2FFF9"},
+            },
+            {
+                "at_ms": 3000,
+                "effect": "scan",
+                "speed_ms": 820,
+                "theme": {"bg": "#05261F", "accent": "#35E7B0", "text": "#EFFFF8"},
+            },
+        ],
+    },
+    "SCENE_WIN": {
+        "title": "VICTOIRE",
+        "subtitle": "Etape validee",
+        "symbol": "WIN",
+        "effect": "celebrate",
+        "effect_speed_ms": 420,
+        "theme": {"bg": "#231038", "accent": "#F4CB4A", "text": "#FFF8E2"},
+        "transition": {"effect": "zoom", "duration_ms": 280},
+        "timeline": [
+            {
+                "at_ms": 0,
+                "effect": "celebrate",
+                "speed_ms": 420,
+                "theme": {"bg": "#231038", "accent": "#F4CB4A", "text": "#FFF8E2"},
+            },
+            {
+                "at_ms": 1000,
+                "effect": "blink",
+                "speed_ms": 240,
+                "theme": {"bg": "#341A4D", "accent": "#FFE083", "text": "#FFFDF3"},
+            },
+        ],
+    },
+    "SCENE_REWARD": {
+        "title": "RECOMPENSE",
+        "subtitle": "Indice debloque",
+        "symbol": "WIN",
+        "effect": "celebrate",
+        "effect_speed_ms": 420,
+        "theme": {"bg": "#2A103E", "accent": "#F9D860", "text": "#FFF9E6"},
+        "transition": {"effect": "zoom", "duration_ms": 300},
+        "timeline": [
+            {
+                "at_ms": 0,
+                "effect": "celebrate",
+                "speed_ms": 420,
+                "theme": {"bg": "#2A103E", "accent": "#F9D860", "text": "#FFF9E6"},
+            },
+            {
+                "at_ms": 1200,
+                "effect": "pulse",
+                "speed_ms": 280,
+                "theme": {"bg": "#3E1A52", "accent": "#FFD97D", "text": "#FFFDF2"},
+            },
+        ],
+    },
+    "SCENE_READY": {
+        "title": "PRET",
+        "subtitle": "Scenario termine",
+        "symbol": "READY",
+        "effect": "pulse",
+        "effect_speed_ms": 620,
+        "theme": {"bg": "#0F2A12", "accent": "#6CD96B", "text": "#EDFFED"},
+        "transition": {"effect": "fade", "duration_ms": 220},
+        "timeline": [
+            {
+                "at_ms": 0,
+                "effect": "pulse",
+                "speed_ms": 620,
+                "theme": {"bg": "#0F2A12", "accent": "#6CD96B", "text": "#EDFFED"},
+            },
+            {
+                "at_ms": 1500,
+                "effect": "none",
+                "speed_ms": 620,
+                "theme": {"bg": "#133117", "accent": "#8CE28B", "text": "#F2FFF2"},
+            },
+        ],
+    },
+}
+
+DEFAULT_TEXT_OPTIONS: dict[str, Any] = {
+    "show_title": False,
+    "show_subtitle": True,
+    "show_symbol": True,
+    "title_case": "upper",
+    "subtitle_case": "raw",
+    "title_align": "top",
+    "subtitle_align": "bottom",
+}
+
+DEFAULT_FRAMING_OPTIONS: dict[str, Any] = {
+    "preset": "center",
+    "x_offset": 0,
+    "y_offset": 0,
+    "scale_pct": 100,
+}
+
+DEFAULT_SCROLL_OPTIONS: dict[str, Any] = {
+    "mode": "none",
+    "speed_ms": 4200,
+    "pause_ms": 900,
+    "loop": True,
+}
+
+DEFAULT_DEMO_OPTIONS: dict[str, Any] = {
+    "mode": "standard",
+    "particle_count": 4,
+    "strobe_level": 65,
+}
+
+SCREEN_EFFECT_CHOICES = {"none", "pulse", "scan", "blink", "celebrate"}
+SCREEN_EFFECT_ALIASES = {"steady": "none", "glitch": "blink", "reward": "celebrate"}
+TRANSITION_EFFECT_CHOICES = {"none", "fade", "slide_left", "slide_right", "slide_up", "slide_down", "zoom", "glitch"}
+TRANSITION_EFFECT_ALIASES = {
+    "crossfade": "fade",
+    "left": "slide_left",
+    "right": "slide_right",
+    "up": "slide_up",
+    "down": "slide_down",
+    "zoom_in": "zoom",
+    "flash": "glitch",
+}
+TEXT_CASE_CHOICES = {"raw", "upper", "lower"}
+TEXT_ALIGN_CHOICES = {"top", "center", "bottom"}
+FRAMING_PRESET_CHOICES = {"center", "focus_top", "focus_bottom", "split"}
+SCROLL_MODE_CHOICES = {"none", "marquee"}
+SCROLL_MODE_ALIASES = {"ticker": "marquee", "crawl": "marquee"}
+DEMO_MODE_CHOICES = {"standard", "cinematic", "arcade"}
+
 
 class StoryGenerationError(RuntimeError):
     """Raised when validation or generation fails."""
@@ -63,6 +307,7 @@ class StoryPaths:
     repo_root: Path
     game_scenarios_dir: Path
     story_specs_dir: Path
+    story_data_dir: Path
     generated_cpp_dir: Path
     bundle_root: Path
 
@@ -108,6 +353,7 @@ def default_paths() -> StoryPaths:
         repo_root=repo_root,
         game_scenarios_dir=repo_root / "game" / "scenarios",
         story_specs_dir=fw_root / "docs" / "protocols" / "story_specs" / "scenarios",
+        story_data_dir=fw_root / "data" / "story",
         generated_cpp_dir=fw_root / "hardware" / "libs" / "story" / "src" / "generated",
         bundle_root=fw_root / "artifacts" / "story_fs" / "deploy",
     )
@@ -477,7 +723,409 @@ def _write_json_with_checksum(root: Path, rel_path: str, payload: dict[str, Any]
     (out_path.with_suffix(".sha256")).write_text(_sha_hex(blob) + "\n", encoding="utf-8")
 
 
-def generate_bundle_files(scenarios: list[dict[str, Any]], out_dir: Path, spec_hash: str) -> None:
+def _resource_slug(resource_id: str, prefix: str) -> str:
+    slug = resource_id
+    if slug.startswith(prefix):
+        slug = slug[len(prefix) :]
+    return slug.lower()
+
+
+def _resource_candidates(resource_root: Path, resource_type: str, resource_id: str) -> list[Path]:
+    candidates: list[Path] = []
+    base = resource_root / resource_type
+    candidates.append(base / f"{resource_id}.json")
+    candidates.append(base / f"{resource_id.lower()}.json")
+
+    if resource_type == "screens":
+        slug = _resource_slug(resource_id, "SCENE_")
+        candidates.append(base / f"{slug}.json")
+    elif resource_type == "audio":
+        slug = _resource_slug(resource_id, "PACK_")
+        candidates.append(base / f"{slug}.json")
+
+    # de-duplicate while preserving order
+    dedup: list[Path] = []
+    seen: set[str] = set()
+    for path in candidates:
+        marker = str(path)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        dedup.append(path)
+    return dedup
+
+
+def _load_resource_payload(resource_root: Path | None, resource_type: str, resource_id: str) -> dict[str, Any] | None:
+    if resource_root is None:
+        return None
+    for path in _resource_candidates(resource_root, resource_type, resource_id):
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise StoryGenerationError(f"Invalid JSON resource {path}: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise StoryGenerationError(f"Invalid resource type in {path}: expected object")
+        return payload
+    return None
+
+
+def _merge_app_payload(source_payload: dict[str, Any] | None, binding: dict[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = dict(source_payload or {})
+    merged["id"] = binding["id"]
+    merged["app"] = binding["app"]
+
+    binding_config = binding.get("config")
+    if binding_config is not None:
+        existing_config = merged.get("config")
+        if isinstance(existing_config, dict):
+            config = dict(existing_config)
+        else:
+            config = {}
+        config.update(binding_config)
+        merged["config"] = config
+    return merged
+
+
+def _with_resource_id(payload: dict[str, Any] | None, resource_id: str) -> dict[str, Any]:
+    result = dict(payload or {})
+    result["id"] = resource_id
+    return result
+
+
+def _scene_profile(scene_id: str) -> dict[str, Any]:
+    profile = SCENE_PROFILES.get(scene_id, DEFAULT_SCENE_PROFILE)
+    return copy.deepcopy(profile)
+
+
+def _as_positive_int(value: Any, default_value: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default_value
+    if parsed < 0:
+        return 0
+    return parsed
+
+
+def _as_int_in_range(value: Any, default_value: int, min_value: int, max_value: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default_value
+    if parsed < min_value:
+        return min_value
+    if parsed > max_value:
+        return max_value
+    return parsed
+
+
+def _as_bool(value: Any, default_value: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default_value
+
+
+def _as_choice(value: Any, allowed: set[str], default_value: str) -> str:
+    if isinstance(value, str):
+        normalized = value.strip().lower().replace("-", "_")
+        if normalized in allowed:
+            return normalized
+    return default_value
+
+
+def _normalize_screen_effect(value: Any, default_value: str) -> str:
+    if isinstance(value, str):
+        normalized = value.strip().lower().replace("-", "_")
+        normalized = SCREEN_EFFECT_ALIASES.get(normalized, normalized)
+        if normalized in SCREEN_EFFECT_CHOICES:
+            return normalized
+    return _as_choice(default_value, SCREEN_EFFECT_CHOICES, "pulse")
+
+
+def _normalize_transition_effect(value: Any, default_value: str) -> str:
+    if isinstance(value, str):
+        normalized = value.strip().lower().replace("-", "_")
+        normalized = TRANSITION_EFFECT_ALIASES.get(normalized, normalized)
+        if normalized in TRANSITION_EFFECT_CHOICES:
+            return normalized
+    return _as_choice(default_value, TRANSITION_EFFECT_CHOICES, "fade")
+
+
+def _normalize_theme(theme_payload: Any, fallback_theme: dict[str, str]) -> dict[str, str]:
+    theme: dict[str, str] = {
+        "bg": fallback_theme["bg"],
+        "accent": fallback_theme["accent"],
+        "text": fallback_theme["text"],
+    }
+    if isinstance(theme_payload, dict):
+        for key in ("bg", "accent", "text"):
+            value = theme_payload.get(key)
+            if isinstance(value, str) and value.strip():
+                theme[key] = value.strip()
+    return theme
+
+
+def _normalize_text_options(payload: Any, profile: dict[str, Any]) -> dict[str, Any]:
+    base = dict(DEFAULT_TEXT_OPTIONS)
+    profile_options = profile.get("text")
+    if isinstance(profile_options, dict):
+        base.update(profile_options)
+    src = payload if isinstance(payload, dict) else {}
+
+    return {
+        "show_title": _as_bool(src.get("show_title"), _as_bool(base.get("show_title"), False)),
+        "show_subtitle": _as_bool(src.get("show_subtitle"), _as_bool(base.get("show_subtitle"), True)),
+        "show_symbol": _as_bool(src.get("show_symbol"), _as_bool(base.get("show_symbol"), True)),
+        "title_case": _as_choice(
+            src.get("title_case"),
+            TEXT_CASE_CHOICES,
+            _as_choice(base.get("title_case"), TEXT_CASE_CHOICES, "upper"),
+        ),
+        "subtitle_case": _as_choice(
+            src.get("subtitle_case"),
+            TEXT_CASE_CHOICES,
+            _as_choice(base.get("subtitle_case"), TEXT_CASE_CHOICES, "raw"),
+        ),
+        "title_align": _as_choice(
+            src.get("title_align"),
+            TEXT_ALIGN_CHOICES,
+            _as_choice(base.get("title_align"), TEXT_ALIGN_CHOICES, "top"),
+        ),
+        "subtitle_align": _as_choice(
+            src.get("subtitle_align"),
+            TEXT_ALIGN_CHOICES,
+            _as_choice(base.get("subtitle_align"), TEXT_ALIGN_CHOICES, "bottom"),
+        ),
+    }
+
+
+def _normalize_framing_options(payload: Any, profile: dict[str, Any]) -> dict[str, Any]:
+    base = dict(DEFAULT_FRAMING_OPTIONS)
+    profile_options = profile.get("framing")
+    if isinstance(profile_options, dict):
+        base.update(profile_options)
+    src = payload if isinstance(payload, dict) else {}
+
+    return {
+        "preset": _as_choice(
+            src.get("preset"),
+            FRAMING_PRESET_CHOICES,
+            _as_choice(base.get("preset"), FRAMING_PRESET_CHOICES, "center"),
+        ),
+        "x_offset": _as_int_in_range(src.get("x_offset"), int(base.get("x_offset", 0)), -80, 80),
+        "y_offset": _as_int_in_range(src.get("y_offset"), int(base.get("y_offset", 0)), -80, 80),
+        "scale_pct": _as_int_in_range(src.get("scale_pct"), int(base.get("scale_pct", 100)), 60, 140),
+    }
+
+
+def _normalize_scroll_options(payload: Any, profile: dict[str, Any]) -> dict[str, Any]:
+    base = dict(DEFAULT_SCROLL_OPTIONS)
+    profile_options = profile.get("scroll")
+    if isinstance(profile_options, dict):
+        base.update(profile_options)
+    src = payload if isinstance(payload, dict) else {}
+
+    mode_value = src.get("mode")
+    if isinstance(mode_value, str):
+        normalized_mode = mode_value.strip().lower().replace("-", "_")
+        mode_value = SCROLL_MODE_ALIASES.get(normalized_mode, normalized_mode)
+    mode = _as_choice(mode_value, SCROLL_MODE_CHOICES, _as_choice(base.get("mode"), SCROLL_MODE_CHOICES, "none"))
+    return {
+        "mode": mode,
+        "speed_ms": _as_int_in_range(src.get("speed_ms"), int(base.get("speed_ms", 4200)), 600, 20000),
+        "pause_ms": _as_int_in_range(src.get("pause_ms"), int(base.get("pause_ms", 900)), 0, 10000),
+        "loop": _as_bool(src.get("loop"), _as_bool(base.get("loop"), True)),
+    }
+
+
+def _normalize_demo_options(payload: Any, profile: dict[str, Any]) -> dict[str, Any]:
+    base = dict(DEFAULT_DEMO_OPTIONS)
+    profile_options = profile.get("demo")
+    if isinstance(profile_options, dict):
+        base.update(profile_options)
+    src = payload if isinstance(payload, dict) else {}
+
+    return {
+        "mode": _as_choice(
+            src.get("mode"),
+            DEMO_MODE_CHOICES,
+            _as_choice(base.get("mode"), DEMO_MODE_CHOICES, "standard"),
+        ),
+        "particle_count": _as_int_in_range(src.get("particle_count"), int(base.get("particle_count", 4)), 0, 4),
+        "strobe_level": _as_int_in_range(src.get("strobe_level"), int(base.get("strobe_level", 65)), 0, 100),
+    }
+
+
+def _normalize_screen_timeline(payload: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
+    timeline_source = payload.get("timeline")
+    visual_source = payload.get("visual")
+    timeline_obj: dict[str, Any] | None = None
+    if isinstance(timeline_source, dict):
+        timeline_obj = timeline_source
+    elif isinstance(visual_source, dict) and isinstance(visual_source.get("timeline"), dict):
+        timeline_obj = visual_source.get("timeline")
+
+    timeline_nodes: list[Any] = []
+    if isinstance(timeline_source, list):
+        timeline_nodes = list(timeline_source)
+    elif isinstance(timeline_obj, dict):
+        keyframes = timeline_obj.get("keyframes")
+        if isinstance(keyframes, list):
+            timeline_nodes = list(keyframes)
+        elif isinstance(timeline_obj.get("frames"), list):
+            timeline_nodes = list(timeline_obj.get("frames"))
+    elif isinstance(visual_source, dict) and isinstance(visual_source.get("timeline"), list):
+        timeline_nodes = list(visual_source.get("timeline"))
+
+    default_frames = profile["timeline"]
+    base_theme = _normalize_theme(payload.get("theme"), profile["theme"])
+    base_effect = _normalize_screen_effect(payload.get("effect"), str(profile["effect"]))
+    visual = payload.get("visual")
+    if isinstance(visual, dict):
+        base_speed = _as_positive_int(visual.get("effect_speed_ms"), profile["effect_speed_ms"])
+    else:
+        base_speed = profile["effect_speed_ms"]
+    base_speed = _as_positive_int(payload.get("effect_speed_ms"), base_speed)
+    if base_speed <= 0:
+        base_speed = profile["effect_speed_ms"]
+
+    normalized_frames: list[dict[str, Any]] = []
+    if not timeline_nodes:
+        timeline_nodes = copy.deepcopy(default_frames)
+
+    prev_at = 0
+    prev_effect = base_effect
+    prev_speed = base_speed
+    prev_theme = dict(base_theme)
+    for frame in timeline_nodes:
+        if not isinstance(frame, dict):
+            continue
+        at_value = frame.get("at_ms", frame.get("time_ms", frame.get("t", prev_at)))
+        at_ms = _as_positive_int(at_value, prev_at)
+        if at_ms < prev_at:
+            at_ms = prev_at
+
+        effect = _normalize_screen_effect(frame.get("effect", frame.get("fx", prev_effect)), prev_effect)
+
+        speed_value = frame.get("speed_ms", frame.get("effect_speed_ms", frame.get("speed", prev_speed)))
+        speed_ms = _as_positive_int(speed_value, prev_speed)
+        if speed_ms <= 0:
+            speed_ms = prev_speed
+
+        theme_payload = frame.get("theme")
+        if not isinstance(theme_payload, dict):
+            theme_payload = {
+                "bg": frame.get("bg"),
+                "accent": frame.get("accent"),
+                "text": frame.get("text"),
+            }
+        theme = _normalize_theme(theme_payload, prev_theme)
+
+        normalized_frames.append(
+            {
+                "at_ms": at_ms,
+                "effect": effect,
+                "speed_ms": speed_ms,
+                "theme": theme,
+            }
+        )
+        prev_at = at_ms
+        prev_effect = effect
+        prev_speed = speed_ms
+        prev_theme = dict(theme)
+
+    if not normalized_frames:
+        normalized_frames = copy.deepcopy(default_frames)
+
+    if normalized_frames[0]["at_ms"] != 0:
+        first = copy.deepcopy(normalized_frames[0])
+        first["at_ms"] = 0
+        normalized_frames.insert(0, first)
+
+    if len(normalized_frames) == 1:
+        extra = copy.deepcopy(normalized_frames[0])
+        extra["at_ms"] = max(1000, normalized_frames[0]["at_ms"] + 1000)
+        normalized_frames.append(extra)
+
+    duration_ms = normalized_frames[-1]["at_ms"]
+    if timeline_obj is not None:
+        duration_ms = max(duration_ms, _as_positive_int(timeline_obj.get("duration_ms"), duration_ms))
+    if duration_ms < 100:
+        duration_ms = 100
+
+    loop = True
+    if timeline_obj is not None and isinstance(timeline_obj.get("loop"), bool):
+        loop = bool(timeline_obj.get("loop"))
+
+    return {
+        "loop": loop,
+        "duration_ms": duration_ms,
+        "keyframes": normalized_frames,
+    }
+
+
+def _normalize_screen_payload(source_payload: dict[str, Any] | None, scene_id: str) -> dict[str, Any]:
+    payload: dict[str, Any] = dict(source_payload or {})
+    payload["id"] = scene_id
+
+    profile = _scene_profile(scene_id)
+
+    for text_field in ("title", "subtitle", "symbol", "effect"):
+        value = payload.get(text_field)
+        if not isinstance(value, str) or not value.strip():
+            payload[text_field] = profile[text_field]
+    payload["effect"] = _normalize_screen_effect(payload.get("effect"), str(profile["effect"]))
+
+    text_options = _normalize_text_options(payload.get("text"), profile)
+    payload["text"] = text_options
+
+    visual = payload.get("visual")
+    if not isinstance(visual, dict):
+        visual = {}
+    visual["show_title"] = text_options["show_title"]
+    visual["show_subtitle"] = text_options["show_subtitle"]
+    visual["show_symbol"] = text_options["show_symbol"]
+    visual["effect_speed_ms"] = _as_positive_int(visual.get("effect_speed_ms"), profile["effect_speed_ms"])
+    if visual["effect_speed_ms"] <= 0:
+        visual["effect_speed_ms"] = profile["effect_speed_ms"]
+    payload["visual"] = visual
+
+    payload["theme"] = _normalize_theme(payload.get("theme"), profile["theme"])
+    payload["framing"] = _normalize_framing_options(payload.get("framing"), profile)
+    payload["scroll"] = _normalize_scroll_options(payload.get("scroll"), profile)
+    payload["demo"] = _normalize_demo_options(payload.get("demo"), profile)
+
+    transition = payload.get("transition")
+    if isinstance(transition, str):
+        transition = {"effect": transition}
+    if not isinstance(transition, dict):
+        transition = {}
+    default_transition = profile["transition"]
+    effect = transition.get("effect", transition.get("type", default_transition["effect"]))
+    transition["effect"] = _normalize_transition_effect(effect, str(default_transition["effect"]))
+    transition["duration_ms"] = _as_positive_int(transition.get("duration_ms"), default_transition["duration_ms"])
+    if transition["duration_ms"] <= 0:
+        transition["duration_ms"] = default_transition["duration_ms"]
+    payload["transition"] = transition
+
+    payload["timeline"] = _normalize_screen_timeline(payload, profile)
+    return payload
+
+
+def generate_bundle_files(
+    scenarios: list[dict[str, Any]],
+    out_dir: Path,
+    spec_hash: str,
+    resource_root: Path | None = None,
+) -> None:
     resources: dict[str, set[str]] = {
         "screens": set(),
         "audio": set(),
@@ -514,13 +1162,25 @@ def generate_bundle_files(scenarios: list[dict[str, Any]], out_dir: Path, spec_h
                 resources["actions"].add(action)
 
     for app_id in sorted(resources["apps"]):
-        _write_json_with_checksum(out_dir, f"story/apps/{app_id}.json", bindings[app_id])
+        binding = bindings[app_id]
+        source_payload = _load_resource_payload(resource_root, "apps", app_id)
+        app_payload = _merge_app_payload(source_payload, binding)
+        _write_json_with_checksum(out_dir, f"story/apps/{app_id}.json", app_payload)
+
     for screen_id in sorted(resources["screens"]):
-        _write_json_with_checksum(out_dir, f"story/screens/{screen_id}.json", {"id": screen_id})
+        source_payload = _load_resource_payload(resource_root, "screens", screen_id)
+        payload = _normalize_screen_payload(source_payload, screen_id)
+        _write_json_with_checksum(out_dir, f"story/screens/{screen_id}.json", payload)
+
     for audio_id in sorted(resources["audio"]):
-        _write_json_with_checksum(out_dir, f"story/audio/{audio_id}.json", {"id": audio_id})
+        source_payload = _load_resource_payload(resource_root, "audio", audio_id)
+        payload = _with_resource_id(source_payload, audio_id)
+        _write_json_with_checksum(out_dir, f"story/audio/{audio_id}.json", payload)
+
     for action_id in sorted(resources["actions"]):
-        _write_json_with_checksum(out_dir, f"story/actions/{action_id}.json", {"id": action_id})
+        source_payload = _load_resource_payload(resource_root, "actions", action_id)
+        payload = _with_resource_id(source_payload, action_id)
+        _write_json_with_checksum(out_dir, f"story/actions/{action_id}.json", payload)
 
     manifest = {
         "spec_hash": spec_hash,
@@ -597,7 +1257,8 @@ def run_generate_bundle(
             if file_path.is_file():
                 file_path.unlink()
 
-    generate_bundle_files(scenarios, bundle_out, spec_hash)
+    resource_root = paths.story_data_dir if paths.story_data_dir.exists() else None
+    generate_bundle_files(scenarios, bundle_out, spec_hash, resource_root=resource_root)
 
     archive_path = archive
     if archive_path is not None:

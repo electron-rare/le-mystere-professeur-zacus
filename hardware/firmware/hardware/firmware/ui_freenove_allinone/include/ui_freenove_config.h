@@ -100,3 +100,113 @@
 #define FREENOVE_I2S_IN_SCK 3
 #define FREENOVE_I2S_IN_WS 14
 #define FREENOVE_I2S_IN_DIN 46
+
+// WS2812 + battery defaults for Freenove ESP32-S3.
+#ifndef FREENOVE_WS2812_PIN
+#define FREENOVE_WS2812_PIN 48
+#endif
+
+#ifndef FREENOVE_WS2812_COUNT
+#if FREENOVE_LCD_VARIANT_FNK0102B
+#define FREENOVE_WS2812_COUNT 4
+#else
+#define FREENOVE_WS2812_COUNT 1
+#endif
+#endif
+
+#ifndef FREENOVE_WS2812_BRIGHTNESS
+#define FREENOVE_WS2812_BRIGHTNESS 36
+#endif
+
+#ifndef FREENOVE_BAT_ADC_PIN
+#define FREENOVE_BAT_ADC_PIN 20
+#endif
+
+#ifndef FREENOVE_BAT_VOLT_MULTIPLIER
+#define FREENOVE_BAT_VOLT_MULTIPLIER 2.5f
+#endif
+
+#ifndef FREENOVE_BAT_VOLT_OFFSET_MV
+#define FREENOVE_BAT_VOLT_OFFSET_MV -3300.0f
+#endif
+
+#ifndef FREENOVE_BAT_VOLTAGE_MIN
+#define FREENOVE_BAT_VOLTAGE_MIN 3.20f
+#endif
+
+#ifndef FREENOVE_BAT_VOLTAGE_MAX
+#define FREENOVE_BAT_VOLTAGE_MAX 4.20f
+#endif
+
+#ifndef FREENOVE_BAT_CHARGE_PIN
+#define FREENOVE_BAT_CHARGE_PIN -1
+#endif
+
+// Camera wiring from Freenove FNK0102 (ESP32S3_EYE profile).
+#ifndef FREENOVE_CAM_ENABLE
+#define FREENOVE_CAM_ENABLE 1
+#endif
+
+#ifndef FREENOVE_CAM_XCLK
+#define FREENOVE_CAM_XCLK 15
+#endif
+
+#ifndef FREENOVE_CAM_SIOD
+#define FREENOVE_CAM_SIOD 4
+#endif
+
+#ifndef FREENOVE_CAM_SIOC
+#define FREENOVE_CAM_SIOC 5
+#endif
+
+#ifndef FREENOVE_CAM_Y2
+#define FREENOVE_CAM_Y2 11
+#endif
+
+#ifndef FREENOVE_CAM_Y3
+#define FREENOVE_CAM_Y3 9
+#endif
+
+#ifndef FREENOVE_CAM_Y4
+#define FREENOVE_CAM_Y4 8
+#endif
+
+#ifndef FREENOVE_CAM_Y5
+#define FREENOVE_CAM_Y5 10
+#endif
+
+#ifndef FREENOVE_CAM_Y6
+#define FREENOVE_CAM_Y6 12
+#endif
+
+#ifndef FREENOVE_CAM_Y7
+#define FREENOVE_CAM_Y7 18
+#endif
+
+#ifndef FREENOVE_CAM_Y8
+#define FREENOVE_CAM_Y8 17
+#endif
+
+#ifndef FREENOVE_CAM_Y9
+#define FREENOVE_CAM_Y9 16
+#endif
+
+#ifndef FREENOVE_CAM_VSYNC
+#define FREENOVE_CAM_VSYNC 6
+#endif
+
+#ifndef FREENOVE_CAM_HREF
+#define FREENOVE_CAM_HREF 7
+#endif
+
+#ifndef FREENOVE_CAM_PCLK
+#define FREENOVE_CAM_PCLK 13
+#endif
+
+#ifndef FREENOVE_CAM_PWDN
+#define FREENOVE_CAM_PWDN -1
+#endif
+
+#ifndef FREENOVE_CAM_RESET
+#define FREENOVE_CAM_RESET -1
+#endif

@@ -583,6 +583,240 @@ bool normalizeEspNowPayloadToScenarioEvent(const char* payload_text, char* out_e
   return normalizeEventTokenFromText(normalized, out_event, out_capacity);
 }
 
+bool dispatchScenarioEventByType(StoryEventType type, const char* event_name, uint32_t now_ms);
+bool dispatchScenarioEventByName(const char* event_name, uint32_t now_ms);
+void refreshSceneIfNeeded(bool force_render);
+void startPendingAudioIfAny();
+void webFillWifiStatus(JsonObject out, const NetworkManager::Snapshot& net);
+void webFillEspNowStatus(JsonObject out, const NetworkManager::Snapshot& net);
+bool webReconnectLocalWifi();
+bool refreshStoryFromSd();
+
+struct EspNowCommandResult {
+  bool handled = false;
+  bool ok = false;
+  String code;
+  String error;
+  String data_json;
+};
+
+void appendCompactRuntimeStatus(JsonObject out) {
+  const NetworkManager::Snapshot net = g_network.snapshot();
+  const ScenarioSnapshot scenario = g_scenario.snapshot();
+  out["state"] = net.state;
+  out["mode"] = net.mode;
+  out["ip"] = net.ip;
+  out["sta_connected"] = net.sta_connected;
+  out["espnow_enabled"] = net.espnow_enabled;
+  out["scenario"] = scenarioIdFromSnapshot(scenario);
+  out["step"] = stepIdFromSnapshot(scenario);
+  out["screen"] = (scenario.screen_scene_id != nullptr) ? scenario.screen_scene_id : "";
+  out["audio_pack"] = (scenario.audio_pack_id != nullptr) ? scenario.audio_pack_id : "";
+  out["audio_playing"] = g_audio.isPlaying();
+}
+
+bool executeEspNowCommandPayload(const char* payload_text, uint32_t now_ms, EspNowCommandResult* out_result) {
+  if (payload_text == nullptr || out_result == nullptr) {
+    return false;
+  }
+  out_result->handled = false;
+  out_result->ok = false;
+  out_result->code.remove(0);
+  out_result->error.remove(0);
+  out_result->data_json.remove(0);
+
+  String command;
+  String trailing_arg;
+  StaticJsonDocument<768> payload_document;
+  JsonVariantConst args = JsonVariantConst();
+
+  if (payload_text[0] == '{') {
+    const DeserializationError error = deserializeJson(payload_document, payload_text);
+    if (!error) {
+      JsonVariantConst root = payload_document.as<JsonVariantConst>();
+      const char* cmd = root["cmd"] | root["command"] | root["action"] | "";
+      if ((cmd == nullptr || cmd[0] == '\0') && root["payload"].is<JsonObjectConst>()) {
+        JsonVariantConst nested = root["payload"];
+        cmd = nested["cmd"] | nested["command"] | nested["action"] | "";
+        if (nested["args"].is<JsonVariantConst>()) {
+          args = nested["args"];
+        }
+      }
+      if (cmd != nullptr && cmd[0] != '\0') {
+        command = cmd;
+        if (args.isNull()) {
+          if (root["args"].is<JsonVariantConst>()) {
+            args = root["args"];
+          } else if (root["payload"].is<JsonVariantConst>()) {
+            args = root["payload"];
+          }
+        }
+        if (args.is<const char*>()) {
+          trailing_arg = args.as<const char*>();
+          args = JsonVariantConst();
+        }
+      }
+    }
+  }
+
+  if (command.isEmpty()) {
+    command = payload_text;
+    command.trim();
+    const int sep = command.indexOf(' ');
+    if (sep > 0) {
+      trailing_arg = command.substring(static_cast<unsigned int>(sep + 1));
+      command = command.substring(0, static_cast<unsigned int>(sep));
+    }
+  }
+
+  command.trim();
+  command.toUpperCase();
+  trailing_arg.trim();
+  if (command.isEmpty()) {
+    return false;
+  }
+
+  out_result->handled = true;
+  out_result->code = command;
+
+  if (command == "STATUS") {
+    StaticJsonDocument<512> response;
+    appendCompactRuntimeStatus(response.to<JsonObject>());
+    serializeJson(response, out_result->data_json);
+    out_result->ok = true;
+    return true;
+  }
+  if (command == "WIFI_STATUS") {
+    StaticJsonDocument<384> response;
+    webFillWifiStatus(response.to<JsonObject>(), g_network.snapshot());
+    serializeJson(response, out_result->data_json);
+    out_result->ok = true;
+    return true;
+  }
+  if (command == "ESPNOW_STATUS") {
+    StaticJsonDocument<512> response;
+    webFillEspNowStatus(response.to<JsonObject>(), g_network.snapshot());
+    serializeJson(response, out_result->data_json);
+    out_result->ok = true;
+    return true;
+  }
+  if (command == "UNLOCK") {
+    g_scenario.notifyUnlock(now_ms);
+    out_result->ok = true;
+    return true;
+  }
+  if (command == "NEXT") {
+    g_scenario.notifyButton(5U, false, now_ms);
+    out_result->ok = true;
+    return true;
+  }
+  if (command == "WIFI_DISCONNECT") {
+    g_network.disconnectSta();
+    out_result->ok = true;
+    return true;
+  }
+  if (command == "WIFI_RECONNECT") {
+    out_result->ok = webReconnectLocalWifi();
+    if (!out_result->ok) {
+      out_result->error = "wifi_reconnect_failed";
+    }
+    return true;
+  }
+  if (command == "ESPNOW_ON") {
+    out_result->ok = g_network.enableEspNow();
+    if (!out_result->ok) {
+      out_result->error = "espnow_enable_failed";
+    }
+    return true;
+  }
+  if (command == "ESPNOW_OFF") {
+    g_network.disableEspNow();
+    out_result->ok = true;
+    return true;
+  }
+  if (command == "STORY_REFRESH_SD") {
+    out_result->ok = refreshStoryFromSd();
+    if (!out_result->ok) {
+      out_result->error = "story_refresh_sd_failed";
+    }
+    return true;
+  }
+  if (command == "SC_EVENT") {
+    bool dispatched = false;
+    if (!args.isNull() && args.is<JsonObjectConst>()) {
+      JsonVariantConst args_obj = args;
+      const char* type_text = args_obj["event_type"] | args_obj["type"] | "";
+      const char* name_text = args_obj["event_name"] | args_obj["name"] | "";
+      StoryEventType event_type = StoryEventType::kNone;
+      if (type_text[0] != '\0' && parseEventType(type_text, &event_type)) {
+        dispatched = dispatchScenarioEventByType(event_type, name_text, now_ms);
+      } else {
+        char event_token[kSerialLineCapacity] = {0};
+        if (extractEventTokenFromJsonObject(args_obj, event_token, sizeof(event_token))) {
+          dispatched = dispatchScenarioEventByName(event_token, now_ms);
+        }
+      }
+    }
+    if (!dispatched && !trailing_arg.isEmpty()) {
+      char event_token[kSerialLineCapacity] = {0};
+      if (normalizeEventTokenFromText(trailing_arg.c_str(), event_token, sizeof(event_token))) {
+        dispatched = dispatchScenarioEventByName(event_token, now_ms);
+      }
+    }
+    out_result->ok = dispatched;
+    if (!dispatched) {
+      out_result->error = "invalid_sc_event";
+    }
+    return true;
+  }
+
+  out_result->handled = false;
+  out_result->error = "unsupported_command";
+  return false;
+}
+
+void sendEspNowAck(const char* peer,
+                   const char* msg_id,
+                   uint32_t seq,
+                   const EspNowCommandResult& result,
+                   bool ack_requested) {
+  if (!ack_requested || peer == nullptr || peer[0] == '\0') {
+    return;
+  }
+
+  StaticJsonDocument<768> response;
+  char fallback_msg_id[32] = {0};
+  if (msg_id == nullptr || msg_id[0] == '\0') {
+    snprintf(fallback_msg_id, sizeof(fallback_msg_id), "ack-%08lX", static_cast<unsigned long>(millis()));
+    msg_id = fallback_msg_id;
+  }
+  response["msg_id"] = msg_id;
+  response["seq"] = seq;
+  response["type"] = "ack";
+  response["ack"] = true;
+  JsonObject payload = response["payload"].to<JsonObject>();
+  payload["ok"] = result.ok;
+  payload["code"] = result.code;
+  payload["error"] = result.error;
+  if (!result.data_json.isEmpty()) {
+    StaticJsonDocument<512> data_doc;
+    if (!deserializeJson(data_doc, result.data_json)) {
+      payload["data"] = data_doc.as<JsonVariantConst>();
+    } else {
+      payload["data_raw"] = result.data_json;
+    }
+  }
+
+  String frame;
+  serializeJson(response, frame);
+  if (!g_network.sendEspNowTarget(peer, frame.c_str())) {
+    Serial.printf("[NET] ESPNOW ACK send failed peer=%s msg_id=%s code=%s\n",
+                  peer,
+                  msg_id,
+                  result.code.c_str());
+  }
+}
+
 void printScenarioList() {
   const char* default_id = storyScenarioV2IdAt(0U);
   Serial.printf("SC_LIST count=%u default=%s\n",
@@ -623,7 +857,7 @@ void printNetworkStatus() {
   const NetworkManager::Snapshot net = g_network.snapshot();
   Serial.printf("NET_STATUS state=%s mode=%s sta=%u connecting=%u ap=%u fallback_ap=%u espnow=%u ip=%s sta_ssid=%s "
                 "ap_ssid=%s ap_clients=%u local_target=%s local_match=%u local_retry_paused=%u rssi=%ld peers=%u rx=%lu "
-                "tx_ok=%lu tx_fail=%lu drop=%lu\n",
+                "tx_ok=%lu tx_fail=%lu drop=%lu last_msg=%s seq=%lu type=%s ack=%u\n",
                 net.state,
                 net.mode,
                 net.sta_connected ? 1U : 0U,
@@ -643,7 +877,11 @@ void printNetworkStatus() {
                 static_cast<unsigned long>(net.espnow_rx_packets),
                 static_cast<unsigned long>(net.espnow_tx_ok),
                 static_cast<unsigned long>(net.espnow_tx_fail),
-                static_cast<unsigned long>(net.espnow_drop_packets));
+                static_cast<unsigned long>(net.espnow_drop_packets),
+                net.last_msg_id[0] != '\0' ? net.last_msg_id : "n/a",
+                static_cast<unsigned long>(net.espnow_last_seq),
+                net.last_type[0] != '\0' ? net.last_type : "n/a",
+                net.espnow_last_ack ? 1U : 0U);
   for (uint8_t index = 0U; index < g_network.espNowPeerCount(); ++index) {
     char peer[18] = {0};
     if (!g_network.espNowPeerAt(index, peer, sizeof(peer))) {
@@ -667,6 +905,11 @@ void printEspNowStatusJson() {
   document["tx_fail"] = net.espnow_tx_fail;
   document["rx_count"] = net.espnow_rx_packets;
   document["last_rx_mac"] = net.last_rx_peer;
+  document["last_msg_id"] = net.last_msg_id;
+  document["last_seq"] = net.espnow_last_seq;
+  document["last_type"] = net.last_type;
+  document["last_ack"] = net.espnow_last_ack;
+  document["last_payload"] = net.last_payload;
   JsonArray peers = document["peers"].to<JsonArray>();
   for (uint8_t index = 0U; index < g_network.espNowPeerCount(); ++index) {
     char peer[18] = {0};
@@ -719,9 +962,6 @@ void printRuntimeStatus() {
                 g_buttons.lastAnalogMilliVolts());
 }
 
-bool dispatchScenarioEventByType(StoryEventType type, const char* event_name, uint32_t now_ms);
-bool dispatchScenarioEventByName(const char* event_name, uint32_t now_ms);
-
 constexpr const char* kWebUiIndex = R"HTML(
 <!doctype html>
 <html>
@@ -742,6 +982,7 @@ constexpr const char* kWebUiIndex = R"HTML(
   <div class="card">
     <button onclick="unlock()">UNLOCK</button>
     <button onclick="nextStep()">NEXT</button>
+    <button onclick="storyRefreshSd()">STORY_REFRESH_SD</button>
     <button onclick="wifiDisc()">WIFI_DISCONNECT</button>
     <button onclick="wifiReconn()">WIFI_RECONNECT</button>
     <button onclick="refreshStatus()">Refresh</button>
@@ -762,6 +1003,11 @@ constexpr const char* kWebUiIndex = R"HTML(
     <pre id="status">loading...</pre>
   </div>
   <script>
+    let stream;
+    let reconnectTimer;
+    function showStatus(json) {
+      document.getElementById("status").textContent = JSON.stringify(json, null, 2);
+    }
     async function post(path, params) {
       const body = new URLSearchParams(params || {});
       await fetch(path, { method: "POST", body });
@@ -770,10 +1016,40 @@ constexpr const char* kWebUiIndex = R"HTML(
     async function refreshStatus() {
       const res = await fetch("/api/status");
       const json = await res.json();
-      document.getElementById("status").textContent = JSON.stringify(json, null, 2);
+      showStatus(json);
+    }
+    function connectStream() {
+      if (typeof EventSource === "undefined") {
+        setInterval(refreshStatus, 3000);
+        return;
+      }
+      if (stream) {
+        stream.close();
+      }
+      stream = new EventSource("/api/stream");
+      stream.addEventListener("status", (evt) => {
+        try {
+          showStatus(JSON.parse(evt.data));
+        } catch (err) {
+          console.warn("status parse failed", err);
+        }
+      });
+      stream.addEventListener("done", () => {
+        stream.close();
+        clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(connectStream, 400);
+      });
+      stream.onerror = () => {
+        if (stream) {
+          stream.close();
+        }
+        clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(connectStream, 1000);
+      };
     }
     function unlock() { return post("/api/scenario/unlock"); }
     function nextStep() { return post("/api/scenario/next"); }
+    function storyRefreshSd() { return post("/api/story/refresh-sd"); }
     function wifiDisc() { return post("/api/wifi/disconnect"); }
     function wifiReconn() { return post("/api/network/wifi/reconnect"); }
     function wifiConn() {
@@ -791,7 +1067,7 @@ constexpr const char* kWebUiIndex = R"HTML(
       });
     }
     refreshStatus();
-    setInterval(refreshStatus, 3000);
+    connectStream();
   </script>
 </body>
 </html>
@@ -830,7 +1106,12 @@ void webFillEspNowStatus(JsonObject out, const NetworkManager::Snapshot& net) {
   out["tx_ok"] = net.espnow_tx_ok;
   out["tx_fail"] = net.espnow_tx_fail;
   out["rx_count"] = net.espnow_rx_packets;
-  out["last_rx_mac"] = net.last_rx_peer;
+  out["last_rx_mac"] = String(net.last_rx_peer);
+  out["last_msg_id"] = String(net.last_msg_id);
+  out["last_seq"] = net.espnow_last_seq;
+  out["last_type"] = String(net.last_type);
+  out["last_ack"] = net.espnow_last_ack;
+  out["last_payload"] = String(net.last_payload);
   JsonArray peers = out["peers"].to<JsonArray>();
   for (uint8_t index = 0U; index < g_network.espNowPeerCount(); ++index) {
     char peer[18] = {0};
@@ -844,16 +1125,16 @@ void webFillEspNowStatus(JsonObject out, const NetworkManager::Snapshot& net) {
 void webFillWifiStatus(JsonObject out, const NetworkManager::Snapshot& net) {
   out["connected"] = net.sta_connected;
   out["has_credentials"] = (g_network_cfg.local_ssid[0] != '\0');
-  out["ssid"] = net.sta_ssid;
-  out["ip"] = net.sta_connected ? net.ip : "";
+  out["ssid"] = String(net.sta_ssid);
+  out["ip"] = net.sta_connected ? String(net.ip) : String("");
   out["rssi"] = net.rssi;
-  out["state"] = net.state;
+  out["state"] = String(net.state);
   out["ap_active"] = net.ap_enabled;
-  out["ap_ssid"] = net.ap_ssid;
-  out["ap_ip"] = (!net.sta_connected && net.ap_enabled) ? net.ip : "";
+  out["ap_ssid"] = String(net.ap_ssid);
+  out["ap_ip"] = (!net.sta_connected && net.ap_enabled) ? String(net.ip) : String("");
   out["ap_clients"] = net.ap_clients;
   out["local_retry_paused"] = net.local_retry_paused;
-  out["mode"] = net.mode;
+  out["mode"] = String(net.mode);
 }
 
 void webSendWifiStatus() {
@@ -895,6 +1176,22 @@ void webScheduleStaDisconnect() {
   g_web_disconnect_sta_at_ms = millis() + 250U;
 }
 
+bool refreshStoryFromSd() {
+  const bool synced_tree = g_storage.syncStoryTreeFromSd();
+  const bool synced_default = g_storage.syncStoryFileFromSd(kDefaultScenarioFile);
+  const bool synced = synced_tree || synced_default;
+  if (!synced) {
+    return false;
+  }
+  const bool reloaded = g_scenario.begin(kDefaultScenarioFile);
+  if (reloaded) {
+    refreshSceneIfNeeded(true);
+    startPendingAudioIfAny();
+  }
+  Serial.printf("[SCENARIO] refresh from sd synced=%u reload=%u\n", synced ? 1U : 0U, reloaded ? 1U : 0U);
+  return reloaded;
+}
+
 bool webDispatchAction(const String& action_raw) {
   String action = action_raw;
   action.trim();
@@ -909,6 +1206,9 @@ bool webDispatchAction(const String& action_raw) {
   if (action.equalsIgnoreCase("NEXT")) {
     g_scenario.notifyButton(5U, false, millis());
     return true;
+  }
+  if (action.equalsIgnoreCase("STORY_REFRESH_SD")) {
+    return refreshStoryFromSd();
   }
   if (action.equalsIgnoreCase("WIFI_DISCONNECT")) {
     webScheduleStaDisconnect();
@@ -981,44 +1281,68 @@ bool webDispatchAction(const String& action_raw) {
   return false;
 }
 
-void webSendStatus() {
+void webBuildStatusDocument(StaticJsonDocument<1536>* out_document) {
+  if (out_document == nullptr) {
+    return;
+  }
   const NetworkManager::Snapshot net = g_network.snapshot();
   const ScenarioSnapshot scenario = g_scenario.snapshot();
 
-  StaticJsonDocument<1536> document;
-  JsonObject network = document["network"].to<JsonObject>();
-  network["state"] = net.state;
-  network["mode"] = net.mode;
+  out_document->clear();
+  JsonObject network = (*out_document)["network"].to<JsonObject>();
+  network["state"] = String(net.state);
+  network["mode"] = String(net.mode);
   network["sta_connected"] = net.sta_connected;
   network["sta_connecting"] = net.sta_connecting;
   network["fallback_ap"] = net.fallback_ap_active;
-  network["sta_ssid"] = net.sta_ssid;
-  network["ap_ssid"] = net.ap_ssid;
-  network["local_target"] = net.local_target;
+  network["sta_ssid"] = String(net.sta_ssid);
+  network["ap_ssid"] = String(net.ap_ssid);
+  network["local_target"] = String(net.local_target);
   network["local_match"] = net.local_match;
   network["ap_clients"] = net.ap_clients;
   network["local_retry_paused"] = net.local_retry_paused;
-  network["ip"] = net.ip;
+  network["ip"] = String(net.ip);
   network["rssi"] = net.rssi;
 
-  JsonObject wifi = document["wifi"].to<JsonObject>();
+  JsonObject wifi = (*out_document)["wifi"].to<JsonObject>();
   webFillWifiStatus(wifi, net);
 
-  JsonObject espnow = document["espnow"].to<JsonObject>();
+  JsonObject espnow = (*out_document)["espnow"].to<JsonObject>();
   webFillEspNowStatus(espnow, net);
 
-  JsonObject story = document["story"].to<JsonObject>();
+  JsonObject story = (*out_document)["story"].to<JsonObject>();
   story["scenario"] = scenarioIdFromSnapshot(scenario);
   story["step"] = stepIdFromSnapshot(scenario);
   story["screen"] = (scenario.screen_scene_id != nullptr) ? scenario.screen_scene_id : "";
   story["audio_pack"] = (scenario.audio_pack_id != nullptr) ? scenario.audio_pack_id : "";
 
-  JsonObject audio = document["audio"].to<JsonObject>();
+  JsonObject audio = (*out_document)["audio"].to<JsonObject>();
   audio["playing"] = g_audio.isPlaying();
   audio["track"] = g_audio.currentTrack();
   audio["volume"] = g_audio.volume();
+}
 
+void webSendStatus() {
+  StaticJsonDocument<1536> document;
+  webBuildStatusDocument(&document);
   webSendJsonDocument(document);
+}
+
+void webSendStatusSse() {
+  StaticJsonDocument<1536> document;
+  webBuildStatusDocument(&document);
+  String payload;
+  serializeJson(document, payload);
+
+  g_web_server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  g_web_server.sendHeader("Cache-Control", "no-cache");
+  g_web_server.sendHeader("Connection", "close");
+  g_web_server.send(200, "text/event-stream", "");
+  g_web_server.sendContent("event: status\n");
+  g_web_server.sendContent("data: ");
+  g_web_server.sendContent(payload);
+  g_web_server.sendContent("\n\n");
+  g_web_server.sendContent("event: done\ndata: 1\n\n");
 }
 
 void setupWebUi() {
@@ -1028,6 +1352,10 @@ void setupWebUi() {
 
   g_web_server.on("/api/status", HTTP_GET, []() {
     webSendStatus();
+  });
+
+  g_web_server.on("/api/stream", HTTP_GET, []() {
+    webSendStatusSse();
   });
 
   g_web_server.on("/api/network/wifi", HTTP_GET, []() {
@@ -1191,6 +1519,11 @@ void setupWebUi() {
     }
     const bool ok = !mac.isEmpty() && g_network.removeEspNowPeer(mac.c_str());
     webSendResult("ESPNOW_PEER_DEL", ok);
+  });
+
+  g_web_server.on("/api/story/refresh-sd", HTTP_POST, []() {
+    const bool ok = refreshStoryFromSd();
+    webSendResult("STORY_REFRESH_SD", ok);
   });
 
   g_web_server.on("/api/scenario/unlock", HTTP_POST, []() {
@@ -1529,6 +1862,7 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
     Serial.println(
         "CMDS PING STATUS BTN_READ NEXT UNLOCK RESET "
         "SC_LIST SC_LOAD <id> SC_COVERAGE SC_REVALIDATE SC_REVALIDATE_ALL SC_EVENT <type> [name] SC_EVENT_RAW <name> "
+        "STORY_REFRESH_SD STORY_SD_STATUS "
         "NET_STATUS WIFI_STATUS WIFI_TEST WIFI_STA <ssid> <pass> WIFI_CONNECT <ssid> <pass> WIFI_DISCONNECT "
         "WIFI_AP_ON [ssid] [pass] WIFI_AP_OFF "
         "ESPNOW_ON ESPNOW_OFF ESPNOW_STATUS ESPNOW_STATUS_JSON ESPNOW_PEER_ADD <mac> ESPNOW_PEER_DEL <mac> ESPNOW_PEER_LIST "
@@ -1577,6 +1911,15 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
       refreshSceneIfNeeded(true);
       startPendingAudioIfAny();
     }
+    return;
+  }
+  if (std::strcmp(command, "STORY_REFRESH_SD") == 0) {
+    const bool ok = refreshStoryFromSd();
+    Serial.printf("ACK STORY_REFRESH_SD ok=%u\n", ok ? 1U : 0U);
+    return;
+  }
+  if (std::strcmp(command, "STORY_SD_STATUS") == 0) {
+    Serial.printf("STORY_SD_STATUS ready=%u\n", g_storage.hasSdCard() ? 1U : 0U);
     return;
   }
   if (std::strcmp(command, "SC_COVERAGE") == 0) {
@@ -1892,10 +2235,18 @@ void setup() {
   g_storage.ensurePath("/music");
   g_storage.ensurePath("/audio");
   g_storage.ensurePath("/recorder");
+  g_storage.ensureDefaultStoryBundle();
+  if (g_storage.hasSdCard()) {
+    g_storage.syncStoryTreeFromSd();
+  }
   g_storage.ensureDefaultScenarioFile(kDefaultScenarioFile);
+  if (g_storage.hasSdCard()) {
+    g_storage.syncStoryFileFromSd(kDefaultScenarioFile);
+  }
   loadRuntimeNetworkConfig();
   Serial.printf("[MAIN] default scenario checksum=%lu\n",
                 static_cast<unsigned long>(g_storage.checksum(kDefaultScenarioFile)));
+  Serial.printf("[MAIN] story storage sd=%u\n", g_storage.hasSdCard() ? 1U : 0U);
 
   g_buttons.begin();
   g_touch.begin();
@@ -1965,29 +2316,67 @@ void loop() {
   }
 
   g_network.update(now_ms);
-  char net_payload[128] = {0};
+  char net_payload[192] = {0};
   char net_peer[18] = {0};
-  while (g_network.consumeEspNowMessage(net_payload, sizeof(net_payload), net_peer, sizeof(net_peer))) {
-    if (!g_network_cfg.espnow_bridge_to_story_event) {
-      Serial.printf("[NET] ESPNOW peer=%s payload=%s bridge=off\n",
+  char net_msg_id[32] = {0};
+  char net_type[24] = {0};
+  uint32_t net_seq = 0U;
+  bool net_ack_requested = false;
+  while (g_network.consumeEspNowMessage(net_payload,
+                                        sizeof(net_payload),
+                                        net_peer,
+                                        sizeof(net_peer),
+                                        net_msg_id,
+                                        sizeof(net_msg_id),
+                                        &net_seq,
+                                        net_type,
+                                        sizeof(net_type),
+                                        &net_ack_requested)) {
+    EspNowCommandResult command_result;
+    bool handled_as_command = false;
+    if (net_type[0] != '\0' && std::strcmp(net_type, "command") == 0) {
+      handled_as_command = executeEspNowCommandPayload(net_payload, now_ms, &command_result);
+      if (!command_result.handled) {
+        command_result.handled = true;
+        command_result.ok = false;
+        command_result.code = "command";
+        command_result.error = "unsupported_command";
+      }
+      sendEspNowAck(net_peer, net_msg_id, net_seq, command_result, net_ack_requested);
+      Serial.printf("[NET] ESPNOW command peer=%s msg_id=%s seq=%lu ok=%u code=%s err=%s\n",
                     net_peer[0] != '\0' ? net_peer : "n/a",
-                    net_payload);
+                    net_msg_id[0] != '\0' ? net_msg_id : "n/a",
+                    static_cast<unsigned long>(net_seq),
+                    command_result.ok ? 1U : 0U,
+                    command_result.code.c_str(),
+                    command_result.error.c_str());
+      if (handled_as_command) {
+        continue;
+      }
+    }
+    if (!g_network_cfg.espnow_bridge_to_story_event) {
+      Serial.printf("[NET] ESPNOW peer=%s payload=%s type=%s bridge=off\n",
+                    net_peer[0] != '\0' ? net_peer : "n/a",
+                    net_payload,
+                    net_type[0] != '\0' ? net_type : "legacy");
       continue;
     }
     char event_token[kSerialLineCapacity] = {0};
     if (!normalizeEspNowPayloadToScenarioEvent(net_payload, event_token, sizeof(event_token))) {
-      Serial.printf("[NET] ESPNOW peer=%s payload=%s ignored=unsupported\n",
+      Serial.printf("[NET] ESPNOW peer=%s payload=%s type=%s ignored=unsupported\n",
                     net_peer[0] != '\0' ? net_peer : "n/a",
-                    net_payload);
+                    net_payload,
+                    net_type[0] != '\0' ? net_type : "legacy");
       continue;
     }
     const ScenarioSnapshot before = g_scenario.snapshot();
     const bool dispatched = dispatchScenarioEventByName(event_token, now_ms);
     const ScenarioSnapshot after = g_scenario.snapshot();
     const bool changed = std::strcmp(stepIdFromSnapshot(before), stepIdFromSnapshot(after)) != 0;
-    Serial.printf("[NET] ESPNOW peer=%s payload=%s event=%s dispatched=%u changed=%u step=%s\n",
+    Serial.printf("[NET] ESPNOW peer=%s payload=%s type=%s event=%s dispatched=%u changed=%u step=%s\n",
                   net_peer[0] != '\0' ? net_peer : "n/a",
                   net_payload,
+                  net_type[0] != '\0' ? net_type : "legacy",
                   event_token,
                   dispatched ? 1U : 0U,
                   changed ? 1U : 0U,

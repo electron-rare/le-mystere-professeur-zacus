@@ -1,7 +1,7 @@
 # Architecture UML du Firmware
 
 Date: 15 février 2026  
-Branche: `hardware/firmware`  
+Branche de référence: `main`  
 Version: v1.0.0-draft
 
 NOTE: A more readable, split UML documentation lives in docs/uml/INDEX.md.

@@ -13,5 +13,35 @@
     "bg": "#08152D",
     "accent": "#3E8DFF",
     "text": "#F5F8FF"
+  },
+  "timeline": {
+    "loop": true,
+    "duration_ms": 1400,
+    "keyframes": [
+      {
+        "at_ms": 0,
+        "effect": "pulse",
+        "speed_ms": 680,
+        "theme": {
+          "bg": "#08152D",
+          "accent": "#3E8DFF",
+          "text": "#F5F8FF"
+        }
+      },
+      {
+        "at_ms": 1400,
+        "effect": "blink",
+        "speed_ms": 420,
+        "theme": {
+          "bg": "#0A1E3A",
+          "accent": "#74B0FF",
+          "text": "#F8FBFF"
+        }
+      }
+    ]
+  },
+  "transition": {
+    "effect": "fade",
+    "duration_ms": 260
   }
 }

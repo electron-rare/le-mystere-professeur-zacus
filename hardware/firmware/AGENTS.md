@@ -93,6 +93,7 @@ Logs/artifacts:
 
 - **UI link verdict** :
 	- Le verdict de connexion UI (`UI_LINK_STATUS connected==1`) doit être strictement vérifié dans tous les scripts de test/smoke.
+	- Exception explicite en mode carte combinée (`ZACUS_ENV=freenove_esp32s3`) : la gate UI link peut être `SKIP` uniquement avec la justification `not needed for combined board`.
 	- Toute évolution du protocole UI link doit être documentée et testée (voir `UI_LINK_DEBUG_REPORT.md`).
 
 - **Scénario par défaut LittleFS** :

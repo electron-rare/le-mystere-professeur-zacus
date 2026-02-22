@@ -279,11 +279,13 @@ const nextBindingId = (document: StoryGraphDocument) => {
 const nextEdgeId = () => `edge-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
 
 const clampContextPosition = (x: number, y: number) => {
+  const safeX = Number.isFinite(x) ? x : typeof window !== 'undefined' ? window.innerWidth * 0.5 : 120
+  const safeY = Number.isFinite(y) ? y : typeof window !== 'undefined' ? window.innerHeight * 0.5 : 120
   const maxX = typeof window !== 'undefined' ? window.innerWidth - 270 : x
   const maxY = typeof window !== 'undefined' ? window.innerHeight - 320 : y
   return {
-    x: Math.max(12, Math.min(x, maxX)),
-    y: Math.max(12, Math.min(y, maxY)),
+    x: Math.max(12, Math.min(safeX, maxX)),
+    y: Math.max(12, Math.min(safeY, maxY)),
   }
 }
 
@@ -887,10 +889,12 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
   const handlePaneContextMenu = useCallback((event: ReactMouseEvent | MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
-    const position = clampContextPosition(event.clientX, event.clientY)
+    const screenX = Number.isFinite(event.clientX) ? event.clientX : window.innerWidth * 0.5
+    const screenY = Number.isFinite(event.clientY) ? event.clientY : window.innerHeight * 0.5
+    const position = clampContextPosition(screenX, screenY)
     const flowPosition = flowInstanceRef.current?.screenToFlowPosition({
-      x: event.clientX,
-      y: event.clientY,
+      x: screenX,
+      y: screenY,
     })
     setContextMenu({
       kind: 'pane',
@@ -1983,6 +1987,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                   variant="outline"
                   size="sm"
                   fullWidth
+                  data-testid="story-context-canvas-add-node"
                   onClick={() => {
                     addNodeAtPosition(
                       {
@@ -2000,6 +2005,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                   variant="outline"
                   size="sm"
                   fullWidth
+                  data-testid="story-context-canvas-layout"
                   onClick={() => {
                     handleAutoLayout()
                     setContextMenu(null)
@@ -2027,6 +2033,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                   variant="outline"
                   size="sm"
                   fullWidth
+                  data-testid="story-context-node-select"
                   onClick={() => {
                     setSelectedNodeId(contextNode.id)
                     setSelectedEdgeId(null)
@@ -2039,6 +2046,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                   variant="outline"
                   size="sm"
                   fullWidth
+                  data-testid="story-context-node-add-child"
                   onClick={() => {
                     addChildNodeFrom(contextNode.id)
                     setContextMenu(null)
@@ -2050,6 +2058,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                   variant="outline"
                   size="sm"
                   fullWidth
+                  data-testid="story-context-node-link"
                   onClick={() => {
                     setPendingLinkSourceId(contextNode.id)
                     setStatus(`Liaison armée depuis ${contextNode.stepId}. Clique un node cible.`)
@@ -2063,6 +2072,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                   variant="ghost"
                   size="sm"
                   fullWidth
+                  data-testid="story-context-node-initial"
                   onClick={() => {
                     pushHistorySnapshot()
                     setDocument((current) => ({
@@ -2084,6 +2094,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                   variant="danger"
                   size="sm"
                   fullWidth
+                  data-testid="story-context-node-delete"
                   onClick={() => {
                     handleDeleteNodeById(contextNode.id)
                     setContextMenu(null)
@@ -2101,6 +2112,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                   variant="outline"
                   size="sm"
                   fullWidth
+                  data-testid="story-context-edge-select"
                   onClick={() => {
                     setSelectedEdgeId(contextEdge.id)
                     setSelectedNodeId(null)
@@ -2113,6 +2125,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                   variant="outline"
                   size="sm"
                   fullWidth
+                  data-testid="story-context-edge-reverse"
                   onClick={() => {
                     handleReverseEdgeDirection(contextEdge.id)
                     setContextMenu(null)
@@ -2124,6 +2137,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                   variant="danger"
                   size="sm"
                   fullWidth
+                  data-testid="story-context-edge-delete"
                   onClick={() => {
                     handleDeleteEdgeById(contextEdge.id)
                     setContextMenu(null)

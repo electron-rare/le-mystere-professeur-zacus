@@ -94,10 +94,18 @@ test('@mock story designer supports right click node linking and pane actions', 
 
   await page.locator('.react-flow__node:has-text("STEP_B")').first().click({ button: 'right' })
   await expect(page.getByTestId('story-context-menu')).toBeVisible()
-  await page
-    .getByTestId('story-context-menu')
-    .getByRole('button', { name: 'Démarrer liaison' })
-    .click({ force: true })
+  await page.getByTestId('story-context-node-link').click()
   await page.locator('.react-flow__node:has-text("STEP_A")').first().click()
   await expect(page.getByText('Liens: 2')).toBeVisible()
+
+  await page.locator('.react-flow__pane').dispatchEvent('contextmenu', {
+    button: 2,
+    bubbles: true,
+    cancelable: true,
+    clientX: 260,
+    clientY: 240,
+  })
+  await expect(page.getByTestId('story-context-menu')).toBeVisible()
+  await page.getByTestId('story-context-canvas-add-node').click({ force: true })
+  await expect(page.getByText('Nodes: 3')).toBeVisible()
 })

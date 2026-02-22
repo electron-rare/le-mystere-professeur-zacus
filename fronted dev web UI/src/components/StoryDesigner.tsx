@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { yaml as yamlLanguage } from '@codemirror/lang-yaml'
 import {
@@ -9,6 +9,7 @@ import {
   MiniMap,
   Position,
   ReactFlow,
+  type ReactFlowInstance,
   type Connection,
   type Edge as FlowEdge,
   type Node as FlowNode,
@@ -72,6 +73,17 @@ type StoryCanvasNode = FlowNode<FlowNodeData, 'storyNode'>
 
 type StatusTone = 'info' | 'success' | 'warning' | 'error'
 type BindingFieldType = 'text' | 'number' | 'boolean'
+type ContextMenuKind = 'pane' | 'node' | 'edge'
+
+type ContextMenuState = {
+  kind: ContextMenuKind
+  x: number
+  y: number
+  nodeId?: string
+  edgeId?: string
+  flowX?: number
+  flowY?: number
+}
 
 type BindingField = {
   key: string
@@ -264,6 +276,17 @@ const nextBindingId = (document: StoryGraphDocument) => {
   return candidate
 }
 
+const nextEdgeId = () => `edge-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+
+const clampContextPosition = (x: number, y: number) => {
+  const maxX = typeof window !== 'undefined' ? window.innerWidth - 270 : x
+  const maxY = typeof window !== 'undefined' ? window.innerHeight - 320 : y
+  return {
+    x: Math.max(12, Math.min(x, maxX)),
+    y: Math.max(12, Math.min(y, maxY)),
+  }
+}
+
 const nodeCardClass =
   'rounded-2xl border bg-white/95 px-3 py-2 shadow-[0_8px_24px_rgba(15,23,42,0.14)] backdrop-blur-sm min-w-[220px]'
 
@@ -300,13 +323,15 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
   const [historyPast, setHistoryPast] = useState<StoryGraphDocument[]>([])
   const [historyFuture, setHistoryFuture] = useState<StoryGraphDocument[]>([])
   const [busyAction, setBusyAction] = useState<'validate' | 'deploy' | 'test' | null>(null)
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const [pendingLinkSourceId, setPendingLinkSourceId] = useState<string | null>(null)
 
   const validateEnabled = capabilities.canValidate
   const deployEnabled = capabilities.canDeploy
   const testRunEnabled = capabilities.canDeploy && capabilities.canSelectScenario && capabilities.canStart
 
   const documentRef = useRef(document)
-  const yamlUploadRef = useRef<HTMLInputElement | null>(null)
+  const flowInstanceRef = useRef<ReactFlowInstance<StoryCanvasNode, FlowEdge> | null>(null)
 
   useEffect(() => {
     documentRef.current = document
@@ -417,6 +442,30 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [handleRedo, handleUndo])
 
+  useEffect(() => {
+    if (!pendingLinkSourceId) {
+      return
+    }
+    if (!document.nodes.some((node) => node.id === pendingLinkSourceId)) {
+      setPendingLinkSourceId(null)
+    }
+  }, [document.nodes, pendingLinkSourceId])
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setContextMenu(null)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [contextMenu])
+
   const graphValidation = useMemo(() => validateStoryGraph(document), [document])
 
   const selectedNode = useMemo(
@@ -427,6 +476,18 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
   const selectedEdge = useMemo(
     () => document.edges.find((edge) => edge.id === selectedEdgeId) ?? null,
     [document.edges, selectedEdgeId],
+  )
+
+  const nodeLookup = useMemo(() => new Map(document.nodes.map((node) => [node.id, node])), [document.nodes])
+
+  const selectedNodeOutgoingEdges = useMemo(
+    () => (selectedNode ? document.edges.filter((edge) => edge.fromNodeId === selectedNode.id) : []),
+    [document.edges, selectedNode],
+  )
+
+  const pendingLinkSource = useMemo(
+    () => (pendingLinkSourceId ? document.nodes.find((node) => node.id === pendingLinkSourceId) ?? null : null),
+    [document.nodes, pendingLinkSourceId],
   )
 
   const flowNodes = useMemo<StoryCanvasNode[]>(
@@ -501,30 +562,6 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
     importYamlTextToGraph(draft, 'YAML importé dans le graphe.')
   }, [draft, importYamlTextToGraph])
 
-  const handleUploadYamlFile = useCallback(
-    async (event: ChangeEvent<HTMLInputElement>) => {
-      const selectedFile = event.target.files?.[0]
-      if (!selectedFile) {
-        return
-      }
-      try {
-        const yamlText = await selectedFile.text()
-        setDraft(yamlText)
-        const imported = importYamlTextToGraph(yamlText, `Fichier ${selectedFile.name} importé.`)
-        if (!imported) {
-          setStatus(`Fichier ${selectedFile.name} chargé dans l'éditeur YAML, mais import graphe échoué.`)
-          setStatusTone('warning')
-        }
-      } catch {
-        setStatus(`Lecture impossible du fichier ${selectedFile.name}.`)
-        setStatusTone('error')
-      } finally {
-        event.target.value = ''
-      }
-    },
-    [importYamlTextToGraph],
-  )
-
   const handleGenerateYaml = useCallback(() => {
     const generated = generateStoryYamlFromGraph(document)
     setDraft(generated)
@@ -533,25 +570,132 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
     setStatusTone('success')
   }, [document])
 
+  const linkNodes = useCallback(
+    (sourceNodeId: string, targetNodeId: string, defaultMessage = 'Lien créé.') => {
+      if (!sourceNodeId || !targetNodeId) {
+        return false
+      }
+      if (sourceNodeId === targetNodeId) {
+        setStatus('Un lien doit pointer vers un node différent.')
+        setStatusTone('warning')
+        return false
+      }
+
+      const current = cloneDocument(documentRef.current)
+      const sourceExists = current.nodes.some((node) => node.id === sourceNodeId)
+      const targetExists = current.nodes.some((node) => node.id === targetNodeId)
+      if (!sourceExists || !targetExists) {
+        setStatus('Source ou cible introuvable pour créer le lien.')
+        setStatusTone('error')
+        return false
+      }
+
+      const existing = current.edges.find((edge) => edge.fromNodeId === sourceNodeId && edge.toNodeId === targetNodeId)
+      if (existing) {
+        existing.eventName = normalizeTokenInput(linkEventName || DEFAULT_EVENT_NAME)
+        existing.eventType = linkEventType
+        existing.trigger = DEFAULT_TRIGGER
+        existing.afterMs = DEFAULT_AFTER_MS
+        existing.priority = DEFAULT_PRIORITY
+        applyDocumentWithHistory(current, 'Lien mis à jour.', 'success')
+        setSelectedEdgeId(existing.id)
+        setSelectedNodeId(null)
+        return true
+      }
+
+      const edge: StoryEdge = {
+        id: nextEdgeId(),
+        fromNodeId: sourceNodeId,
+        toNodeId: targetNodeId,
+        trigger: DEFAULT_TRIGGER,
+        eventType: linkEventType,
+        eventName: normalizeTokenInput(linkEventName || DEFAULT_EVENT_NAME),
+        afterMs: DEFAULT_AFTER_MS,
+        priority: DEFAULT_PRIORITY,
+      }
+      current.edges.push(edge)
+      applyDocumentWithHistory(current, defaultMessage, 'success')
+      setSelectedEdgeId(edge.id)
+      setSelectedNodeId(null)
+      return true
+    },
+    [applyDocumentWithHistory, linkEventName, linkEventType],
+  )
+
+  const addNodeAtPosition = useCallback(
+    (position?: { x: number; y: number }, message = 'Node ajouté.') => {
+      const current = cloneDocument(documentRef.current)
+      const node: StoryNode = {
+        id: nextNodeId(current),
+        stepId: nextStepId(current),
+        screenSceneId: DEFAULT_SCENE_ID,
+        audioPackId: '',
+        actions: ['ACTION_TRACE_STEP'],
+        apps: [...DEFAULT_NODE_APPS],
+        mp3GateOpen: false,
+        x: position ? Math.round(position.x) : 80 + (current.nodes.length % 3) * 300,
+        y: position ? Math.round(position.y) : 80 + Math.floor(current.nodes.length / 3) * 220,
+        isInitial: current.nodes.length === 0,
+      }
+      current.nodes.push(node)
+      if (node.isInitial) {
+        current.initialStep = node.stepId
+      }
+      applyDocumentWithHistory(current, message, 'success')
+      setSelectedNodeId(node.id)
+      setSelectedEdgeId(null)
+      return node.id
+    },
+    [applyDocumentWithHistory],
+  )
+
   const handleAddNode = useCallback(() => {
-    const current = cloneDocument(documentRef.current)
-    const node: StoryNode = {
-      id: nextNodeId(current),
-      stepId: nextStepId(current),
-      screenSceneId: DEFAULT_SCENE_ID,
-      audioPackId: '',
-      actions: ['ACTION_TRACE_STEP'],
-      apps: [...DEFAULT_NODE_APPS],
-      mp3GateOpen: false,
-      x: 80 + (current.nodes.length % 3) * 300,
-      y: 80 + Math.floor(current.nodes.length / 3) * 220,
-      isInitial: current.nodes.length === 0,
-    }
-    current.nodes.push(node)
-    applyDocumentWithHistory(current, 'Node ajouté.', 'success')
-    setSelectedNodeId(node.id)
-    setSelectedEdgeId(null)
-  }, [applyDocumentWithHistory])
+    addNodeAtPosition()
+  }, [addNodeAtPosition])
+
+  const addChildNodeFrom = useCallback(
+    (sourceNodeId: string) => {
+      const current = cloneDocument(documentRef.current)
+      const source = current.nodes.find((node) => node.id === sourceNodeId)
+      if (!source) {
+        setStatus('Node source introuvable.')
+        setStatusTone('error')
+        return false
+      }
+
+      const childNode: StoryNode = {
+        id: nextNodeId(current),
+        stepId: nextStepId(current),
+        screenSceneId: source.screenSceneId || DEFAULT_SCENE_ID,
+        audioPackId: source.audioPackId || '',
+        actions: source.actions.length > 0 ? [...source.actions] : ['ACTION_TRACE_STEP'],
+        apps: source.apps.length > 0 ? [...source.apps] : [...DEFAULT_NODE_APPS],
+        mp3GateOpen: source.mp3GateOpen,
+        x: source.x + 320,
+        y: source.y,
+        isInitial: false,
+      }
+
+      const edge: StoryEdge = {
+        id: nextEdgeId(),
+        fromNodeId: source.id,
+        toNodeId: childNode.id,
+        trigger: DEFAULT_TRIGGER,
+        eventType: linkEventType,
+        eventName: normalizeTokenInput(linkEventName || DEFAULT_EVENT_NAME),
+        afterMs: DEFAULT_AFTER_MS,
+        priority: DEFAULT_PRIORITY,
+      }
+
+      current.nodes.push(childNode)
+      current.edges.push(edge)
+      applyDocumentWithHistory(current, 'Node enfant ajouté et lié.', 'success')
+      setSelectedNodeId(childNode.id)
+      setSelectedEdgeId(edge.id)
+      return true
+    },
+    [applyDocumentWithHistory, linkEventName, linkEventType],
+  )
 
   const handleAddChildNode = useCallback(() => {
     if (!selectedNode) {
@@ -559,43 +703,8 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
       setStatusTone('warning')
       return
     }
-    const current = cloneDocument(documentRef.current)
-    const source = current.nodes.find((node) => node.id === selectedNode.id)
-    if (!source) {
-      return
-    }
-
-    const childNode: StoryNode = {
-      id: nextNodeId(current),
-      stepId: nextStepId(current),
-      screenSceneId: DEFAULT_SCENE_ID,
-      audioPackId: '',
-      actions: ['ACTION_TRACE_STEP'],
-      apps: [...DEFAULT_NODE_APPS],
-      mp3GateOpen: false,
-      x: source.x + 320,
-      y: source.y,
-      isInitial: false,
-    }
-
-    const edge: StoryEdge = {
-      id: `edge-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-      fromNodeId: source.id,
-      toNodeId: childNode.id,
-      trigger: DEFAULT_TRIGGER,
-      eventType: linkEventType,
-      eventName: normalizeTokenInput(linkEventName || DEFAULT_EVENT_NAME),
-      afterMs: DEFAULT_AFTER_MS,
-      priority: DEFAULT_PRIORITY,
-    }
-
-    current.nodes.push(childNode)
-    current.edges.push(edge)
-
-    applyDocumentWithHistory(current, 'Node enfant ajouté et lié.', 'success')
-    setSelectedNodeId(childNode.id)
-    setSelectedEdgeId(edge.id)
-  }, [applyDocumentWithHistory, linkEventName, linkEventType, selectedNode])
+    addChildNodeFrom(selectedNode.id)
+  }, [addChildNodeFrom, selectedNode])
 
   const handleAutoLayout = useCallback(() => {
     const current = cloneDocument(documentRef.current)
@@ -612,6 +721,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
     applyDocumentWithHistory(fallback, 'Graphe réinitialisé.', 'warning')
     setSelectedNodeId(null)
     setSelectedEdgeId(null)
+    setPendingLinkSourceId(null)
   }, [applyDocumentWithHistory])
 
   const handleConnect = useCallback(
@@ -619,36 +729,12 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
       if (!connection.source || !connection.target || connection.source === connection.target) {
         return
       }
-      const current = cloneDocument(documentRef.current)
-      const existing = current.edges.find(
-        (edge) => edge.fromNodeId === connection.source && edge.toNodeId === connection.target,
-      )
-      if (existing) {
-        existing.eventName = normalizeTokenInput(linkEventName || DEFAULT_EVENT_NAME)
-        existing.eventType = linkEventType
-        existing.trigger = DEFAULT_TRIGGER
-        existing.afterMs = DEFAULT_AFTER_MS
-        applyDocumentWithHistory(current, 'Lien mis à jour.', 'success')
-        setSelectedEdgeId(existing.id)
-        setSelectedNodeId(null)
-        return
+      const created = linkNodes(connection.source, connection.target)
+      if (created) {
+        setPendingLinkSourceId(null)
       }
-      const edge: StoryEdge = {
-        id: `edge-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-        fromNodeId: connection.source,
-        toNodeId: connection.target,
-        trigger: DEFAULT_TRIGGER,
-        eventType: linkEventType,
-        eventName: normalizeTokenInput(linkEventName || DEFAULT_EVENT_NAME),
-        afterMs: DEFAULT_AFTER_MS,
-        priority: DEFAULT_PRIORITY,
-      }
-      current.edges.push(edge)
-      applyDocumentWithHistory(current, 'Lien créé.', 'success')
-      setSelectedEdgeId(edge.id)
-      setSelectedNodeId(null)
     },
-    [applyDocumentWithHistory, linkEventName, linkEventType],
+    [linkNodes],
   )
 
   const handleNodeDragStop = useCallback(
@@ -665,32 +751,155 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
     [applyDocumentWithHistory],
   )
 
-  const handleDeleteSelected = useCallback(() => {
-    if (selectedNode) {
+  const handleDeleteEdgeById = useCallback(
+    (edgeId: string) => {
       const current = cloneDocument(documentRef.current)
-      const deletedWasInitial = selectedNode.isInitial
-      current.nodes = current.nodes.filter((node) => node.id !== selectedNode.id)
-      current.edges = current.edges.filter(
-        (edge) => edge.fromNodeId !== selectedNode.id && edge.toNodeId !== selectedNode.id,
+      const exists = current.edges.some((edge) => edge.id === edgeId)
+      if (!exists) {
+        return false
+      }
+      current.edges = current.edges.filter((edge) => edge.id !== edgeId)
+      applyDocumentWithHistory(current, 'Lien supprimé.', 'warning')
+      setSelectedEdgeId(null)
+      return true
+    },
+    [applyDocumentWithHistory],
+  )
+
+  const handleReverseEdgeDirection = useCallback(
+    (edgeId: string) => {
+      const current = cloneDocument(documentRef.current)
+      const edge = current.edges.find((entry) => entry.id === edgeId)
+      if (!edge) {
+        return false
+      }
+
+      const hasReverse = current.edges.some(
+        (entry) => entry.id !== edgeId && entry.fromNodeId === edge.toNodeId && entry.toNodeId === edge.fromNodeId,
       )
-      if (current.nodes.length > 0 && !current.nodes.some((node) => node.isInitial)) {
+      if (hasReverse) {
+        setStatus('Un lien inverse existe deja entre ces nodes.')
+        setStatusTone('warning')
+        return false
+      }
+
+      const previousSource = edge.fromNodeId
+      edge.fromNodeId = edge.toNodeId
+      edge.toNodeId = previousSource
+      applyDocumentWithHistory(current, 'Direction du lien inversée.', 'success')
+      setSelectedEdgeId(edgeId)
+      setSelectedNodeId(null)
+      return true
+    },
+    [applyDocumentWithHistory],
+  )
+
+  const handleDeleteNodeById = useCallback(
+    (nodeId: string) => {
+      const current = cloneDocument(documentRef.current)
+      const node = current.nodes.find((entry) => entry.id === nodeId)
+      if (!node) {
+        return false
+      }
+      const deletedWasInitial = node.isInitial
+      current.nodes = current.nodes.filter((entry) => entry.id !== nodeId)
+      current.edges = current.edges.filter((edge) => edge.fromNodeId !== nodeId && edge.toNodeId !== nodeId)
+      if (current.nodes.length > 0 && !current.nodes.some((entry) => entry.isInitial)) {
         current.nodes[0].isInitial = true
       }
       if (deletedWasInitial) {
-        current.initialStep = current.nodes.find((node) => node.isInitial)?.stepId ?? ''
+        current.initialStep = current.nodes.find((entry) => entry.isInitial)?.stepId ?? ''
       }
       applyDocumentWithHistory(current, 'Node supprimé.', 'warning')
+      if (pendingLinkSourceId === nodeId) {
+        setPendingLinkSourceId(null)
+      }
       setSelectedNodeId(null)
+      return true
+    },
+    [applyDocumentWithHistory, pendingLinkSourceId],
+  )
+
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedNode) {
+      handleDeleteNodeById(selectedNode.id)
       return
     }
 
     if (selectedEdge) {
-      const current = cloneDocument(documentRef.current)
-      current.edges = current.edges.filter((edge) => edge.id !== selectedEdge.id)
-      applyDocumentWithHistory(current, 'Lien supprimé.', 'warning')
-      setSelectedEdgeId(null)
+      handleDeleteEdgeById(selectedEdge.id)
     }
-  }, [applyDocumentWithHistory, selectedEdge, selectedNode])
+  }, [handleDeleteEdgeById, handleDeleteNodeById, selectedEdge, selectedNode])
+
+  const handleNodeClick = useCallback(
+    (_event: ReactMouseEvent, node: StoryCanvasNode) => {
+      setContextMenu(null)
+      if (pendingLinkSourceId) {
+        const linked = linkNodes(pendingLinkSourceId, node.id)
+        if (linked) {
+          setPendingLinkSourceId(null)
+        }
+        return
+      }
+      setSelectedNodeId(node.id)
+      setSelectedEdgeId(null)
+    },
+    [linkNodes, pendingLinkSourceId],
+  )
+
+  const handleEdgeClick = useCallback((_event: ReactMouseEvent, edge: FlowEdge) => {
+    setContextMenu(null)
+    setSelectedEdgeId(edge.id)
+    setSelectedNodeId(null)
+  }, [])
+
+  const handleNodeContextMenu = useCallback(
+    (event: ReactMouseEvent, node: StoryCanvasNode) => {
+      event.preventDefault()
+      event.stopPropagation()
+      const position = clampContextPosition(event.clientX, event.clientY)
+      setSelectedNodeId(node.id)
+      setSelectedEdgeId(null)
+      setContextMenu({
+        kind: 'node',
+        x: position.x,
+        y: position.y,
+        nodeId: node.id,
+      })
+    },
+    [],
+  )
+
+  const handleEdgeContextMenu = useCallback((event: ReactMouseEvent, edge: FlowEdge) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const position = clampContextPosition(event.clientX, event.clientY)
+    setSelectedNodeId(null)
+    setSelectedEdgeId(edge.id)
+    setContextMenu({
+      kind: 'edge',
+      x: position.x,
+      y: position.y,
+      edgeId: edge.id,
+    })
+  }, [])
+
+  const handlePaneContextMenu = useCallback((event: ReactMouseEvent | MouseEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const position = clampContextPosition(event.clientX, event.clientY)
+    const flowPosition = flowInstanceRef.current?.screenToFlowPosition({
+      x: event.clientX,
+      y: event.clientY,
+    })
+    setContextMenu({
+      kind: 'pane',
+      x: position.x,
+      y: position.y,
+      flowX: flowPosition?.x ?? 120,
+      flowY: flowPosition?.y ?? 120,
+    })
+  }, [])
 
   const handleAddBinding = useCallback(() => {
     const current = cloneDocument(documentRef.current)
@@ -830,12 +1039,20 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
   )
 
   const editorExtensions = useMemo(() => [yamlLanguage()], [])
+  const contextNode = useMemo(
+    () => (contextMenu?.kind === 'node' && contextMenu.nodeId ? nodeLookup.get(contextMenu.nodeId) ?? null : null),
+    [contextMenu, nodeLookup],
+  )
+  const contextEdge = useMemo(
+    () => (contextMenu?.kind === 'edge' && contextMenu.edgeId ? document.edges.find((edge) => edge.id === contextMenu.edgeId) ?? null : null),
+    [contextMenu, document.edges],
+  )
 
   return (
     <section className="space-y-6">
       <SectionHeader
         title="Designer de story"
-        subtitle="Édite ton scénario en nodal, importe/exporte le YAML et pilote les bindings d'apps."
+        subtitle="Édite ton scénario en nodal, puis synchronise le graphe via l'éditeur YAML."
         actions={
           <>
             <Field label="Template" htmlFor="story-template" className="min-w-[210px]">
@@ -843,7 +1060,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                 id="story-template"
                 value={selectedTemplate}
                 onChange={(event) => handleTemplateChange(event.target.value)}
-                className="focus-ring mt-2 min-h-[42px] w-full rounded-xl border border-[var(--mist-400)] bg-white/80 px-3 text-sm"
+                className="story-input mt-2"
               >
                 <option value="">Choisir un template</option>
                 {Object.keys(STORY_TEMPLATE_LIBRARY).map((templateKey) => (
@@ -853,41 +1070,22 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                 ))}
               </select>
             </Field>
-            <Button
-              variant="outline"
-              onClick={() => {
-                yamlUploadRef.current?.click()
-              }}
-            >
-              Upload YAML
-            </Button>
-            <Button variant="outline" onClick={handleImportFromYaml}>
+            <Button variant="outline" size="sm" onClick={handleImportFromYaml}>
               Import YAML → Graphe
             </Button>
-            <Button variant="primary" onClick={handleGenerateYaml}>
+            <Button variant="primary" size="sm" onClick={handleGenerateYaml}>
               Export Graphe → YAML
             </Button>
           </>
         }
       />
-      <input
-        ref={yamlUploadRef}
-        type="file"
-        accept=".yaml,.yml,text/yaml,text/x-yaml,application/yaml"
-        onChange={(event) => {
-          void handleUploadYamlFile(event)
-        }}
-        className="hidden"
-        aria-hidden="true"
-        tabIndex={-1}
-      />
+
+      <InlineNotice tone="info">
+        Import YAML se fait depuis l'éditeur YAML (copier-coller), puis bouton <strong>Import YAML → Graphe</strong>.
+      </InlineNotice>
 
       <Panel>
-        <div
-          role="toolbar"
-          aria-label="Actions graphe"
-          className="grid gap-3 md:grid-cols-[minmax(0,1fr)_repeat(7,auto)] md:items-end"
-        >
+        <div role="toolbar" aria-label="Actions graphe" className="grid gap-3 md:grid-cols-[minmax(0,1fr)_repeat(8,auto)] md:items-end">
           <Field label="Scenario ID" htmlFor="scenario-id">
             <input
               id="scenario-id"
@@ -899,7 +1097,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                   scenarioId: normalizeTokenInput(event.target.value),
                 }))
               }
-              className="focus-ring mt-2 min-h-[42px] w-full rounded-xl border border-[var(--mist-400)] bg-white/80 px-3 text-sm"
+              className="story-input mt-2"
             />
           </Field>
 
@@ -921,6 +1119,9 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
           <Button variant="outline" onClick={handleDeleteSelected} disabled={!selectedNode && !selectedEdge}>
             Supprimer sélection
           </Button>
+          <Button variant="outline" onClick={() => setPendingLinkSourceId(null)} disabled={!pendingLinkSourceId}>
+            Annuler liaison
+          </Button>
           <Button variant="ghost" onClick={handleResetGraph}>
             Reinitialiser
           </Button>
@@ -935,14 +1136,14 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                 setLinkEventName(nextName)
                 setLinkEventType(inferEventTypeFromName(nextName))
               }}
-              className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white/80 px-3 text-sm"
+              className="story-input mt-2 min-h-[40px]"
             />
           </Field>
           <Field label="Event type par défaut">
             <select
               value={linkEventType}
               onChange={(event) => setLinkEventType(event.target.value as EventType)}
-              className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white/80 px-3 text-sm"
+              className="story-input mt-2 min-h-[40px]"
             >
               <option value="action">action</option>
               <option value="unlock">unlock</option>
@@ -963,6 +1164,19 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
             <Badge tone="warning">Avertissements: {graphValidation.warnings.length}</Badge>
           ) : null}
         </div>
+
+        {pendingLinkSource ? (
+          <InlineNotice className="mt-3" tone="warning">
+            Liaison en attente depuis <strong>{pendingLinkSource.stepId}</strong>. Clique un node cible ou utilise clic
+            droit pour finaliser.
+          </InlineNotice>
+        ) : null}
+
+        {graphValidation.errors.length === 0 && graphValidation.warnings.length === 0 ? (
+          <InlineNotice className="mt-3" tone="success">
+            Graphe sain: aucune incohérence détectée.
+          </InlineNotice>
+        ) : null}
       </Panel>
 
       <div className="flex gap-2 lg:hidden">
@@ -977,24 +1191,34 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
         </Button>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1.5fr_1fr]">
+      <div className="grid gap-6 xl:grid-cols-[1.45fr_1fr]">
         <Panel className={activeTab !== 'graph' ? 'hidden lg:block' : ''}>
+          <div className="mb-3 flex flex-wrap gap-2">
+            <Badge tone="neutral">Drag & drop: nodes</Badge>
+            <Badge tone="neutral">Click edge: edition transition</Badge>
+            <Badge tone="neutral">Cmd/Ctrl+Z: undo</Badge>
+          </div>
           <div className="h-[62vh] min-h-[520px] rounded-2xl border border-white/70 bg-white/60">
             <ReactFlow
+              className="story-flow"
               nodes={flowNodes}
               edges={flowEdges}
               nodeTypes={flowNodeTypes}
               fitView
+              onInit={(instance) => {
+                flowInstanceRef.current = instance
+              }}
               onConnect={handleConnect}
-              onNodeClick={(_, node) => {
-                setSelectedNodeId(node.id)
-                setSelectedEdgeId(null)
-              }}
-              onEdgeClick={(_, edge) => {
-                setSelectedEdgeId(edge.id)
-                setSelectedNodeId(null)
-              }}
+              onNodeClick={handleNodeClick}
+              onEdgeClick={handleEdgeClick}
+              onNodeContextMenu={handleNodeContextMenu}
+              onEdgeContextMenu={handleEdgeContextMenu}
+              onPaneContextMenu={handlePaneContextMenu}
               onPaneClick={() => {
+                setContextMenu(null)
+                if (pendingLinkSourceId) {
+                  setPendingLinkSourceId(null)
+                }
                 setSelectedNodeId(null)
                 setSelectedEdgeId(null)
               }}
@@ -1013,10 +1237,14 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
             <SectionHeader
               title="Bindings Apps"
               subtitle="Édition guidée des app_bindings avec config contextuelle."
-              actions={<Button variant="outline" onClick={handleAddBinding}>Ajouter</Button>}
+              actions={
+                <Button variant="outline" size="sm" onClick={handleAddBinding}>
+                  Ajouter
+                </Button>
+              }
             />
 
-            <div className="mt-4 space-y-3">
+            <div className="soft-scrollbar mt-4 max-h-[58vh] space-y-3 overflow-y-auto pr-1">
               {document.appBindings.map((binding) => (
                 <div key={binding.id} className="rounded-2xl border border-[var(--mist-400)] bg-white/80 p-3">
                   <div className="grid gap-2 sm:grid-cols-[1fr_180px_auto_auto] sm:items-end">
@@ -1042,7 +1270,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                             })),
                           }))
                         }}
-                        className="focus-ring mt-2 min-h-[38px] w-full rounded-lg border border-[var(--mist-400)] bg-white px-3 text-sm"
+                        className="story-input mt-2 min-h-[38px]"
                       />
                     </Field>
 
@@ -1073,7 +1301,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                             ),
                           }))
                         }}
-                        className="focus-ring mt-2 min-h-[38px] w-full rounded-lg border border-[var(--mist-400)] bg-white px-3 text-sm"
+                        className="story-input mt-2 min-h-[38px]"
                       >
                         <option value="LA_DETECTOR">LA_DETECTOR</option>
                         <option value="AUDIO_PACK">AUDIO_PACK</option>
@@ -1084,10 +1312,10 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                       </select>
                     </Field>
 
-                    <Button variant="outline" onClick={() => handleDuplicateBinding(binding)}>
+                    <Button variant="outline" size="sm" onClick={() => handleDuplicateBinding(binding)}>
                       Dupliquer
                     </Button>
-                    <Button variant="danger" onClick={() => handleDeleteBinding(binding.id)}>
+                    <Button variant="danger" size="sm" onClick={() => handleDeleteBinding(binding.id)}>
                       Supprimer
                     </Button>
                   </div>
@@ -1109,7 +1337,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                               Number.isFinite(nextValue) ? Math.max(100, Math.min(60000, nextValue)) : 3000,
                             )
                           }}
-                          className="focus-ring mt-2 min-h-[38px] w-full rounded-lg border border-[var(--mist-400)] bg-white px-3 text-sm"
+                          className="story-input mt-2 min-h-[38px]"
                         />
                       </Field>
 
@@ -1120,7 +1348,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                           onChange={(event) => {
                             updateBindingConfig(binding.id, 'unlock_event', normalizeTokenInput(event.target.value))
                           }}
-                          className="focus-ring mt-2 min-h-[38px] w-full rounded-lg border border-[var(--mist-400)] bg-white px-3 text-sm"
+                          className="story-input mt-2 min-h-[38px]"
                         />
                       </Field>
 
@@ -1191,7 +1419,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                                       : Number(field.defaultValue)
                                     updateBindingConfig(binding.id, field.key, clamped)
                                   }}
-                                  className="focus-ring mt-2 min-h-[38px] w-full rounded-lg border border-[var(--mist-400)] bg-white px-3 text-sm"
+                                  className="story-input mt-2 min-h-[38px]"
                                 />
                               </Field>
                             )
@@ -1206,7 +1434,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                                   const nextValue = event.target.value.trim()
                                   updateBindingConfig(binding.id, field.key, nextValue || String(field.defaultValue))
                                 }}
-                                className="focus-ring mt-2 min-h-[38px] w-full rounded-lg border border-[var(--mist-400)] bg-white px-3 text-sm"
+                                className="story-input mt-2 min-h-[38px]"
                               />
                             </Field>
                           )
@@ -1231,6 +1459,10 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
 
             {selectedNode ? (
               <div className="mt-4 space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  <Badge tone="success">Node sélectionné</Badge>
+                  <Badge tone="neutral">{selectedNode.id}</Badge>
+                </div>
                 <Field label="Step ID">
                   <input
                     value={selectedNode.stepId}
@@ -1250,7 +1482,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                         ),
                       }))
                     }}
-                    className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white px-3 text-sm"
+                    className="story-input mt-2 min-h-[40px]"
                   />
                 </Field>
 
@@ -1272,7 +1504,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                         ),
                       }))
                     }}
-                    className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white px-3 text-sm"
+                    className="story-input mt-2 min-h-[40px]"
                   />
                 </Field>
 
@@ -1294,7 +1526,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                         ),
                       }))
                     }}
-                    className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white px-3 text-sm"
+                    className="story-input mt-2 min-h-[40px]"
                   />
                 </Field>
 
@@ -1316,7 +1548,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                         ),
                       }))
                     }}
-                    className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white px-3 text-sm"
+                    className="story-input mt-2 min-h-[40px]"
                   />
                 </Field>
 
@@ -1359,6 +1591,61 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                       )
                     })}
                   </div>
+                </div>
+
+                <div className="space-y-2 rounded-2xl border border-[var(--mist-400)] bg-white/70 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs uppercase tracking-[0.16em] text-[var(--ink-500)]">Liens sortants</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setPendingLinkSourceId(selectedNode.id)
+                        setStatus(`Liaison armée depuis ${selectedNode.stepId}. Clique un node cible.`)
+                        setStatusTone('info')
+                      }}
+                    >
+                      Démarrer liaison
+                    </Button>
+                  </div>
+                  {selectedNodeOutgoingEdges.length === 0 ? (
+                    <p className="text-sm text-[var(--ink-500)]">Aucun lien sortant.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {selectedNodeOutgoingEdges.map((edge) => {
+                        const targetNode = nodeLookup.get(edge.toNodeId)
+                        return (
+                          <div
+                            key={edge.id}
+                            className="grid gap-2 rounded-xl border border-[var(--mist-400)] bg-white/80 p-2 sm:grid-cols-[1fr_auto_auto]"
+                          >
+                            <p className="text-xs text-[var(--ink-700)]">
+                              {edge.eventType}:{edge.eventName} → {targetNode?.stepId ?? edge.toNodeId}
+                            </p>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setSelectedNodeId(null)
+                                setSelectedEdgeId(edge.id)
+                              }}
+                            >
+                              Éditer
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              onClick={() => {
+                                handleDeleteEdgeById(edge.id)
+                              }}
+                            >
+                              Supprimer
+                            </Button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap gap-2">
@@ -1408,6 +1695,30 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
 
             {!selectedNode && selectedEdge ? (
               <div className="mt-4 space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  <Badge tone="warning">Lien sélectionné</Badge>
+                  <Badge tone="neutral">{selectedEdge.id}</Badge>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      handleReverseEdgeDirection(selectedEdge.id)
+                    }}
+                  >
+                    Inverser sens
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    onClick={() => {
+                      handleDeleteEdgeById(selectedEdge.id)
+                    }}
+                  >
+                    Supprimer lien
+                  </Button>
+                </div>
                 <Field label="trigger">
                   <select
                     value={selectedEdge.trigger}
@@ -1426,7 +1737,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                         ),
                       }))
                     }}
-                    className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white px-3 text-sm"
+                    className="story-input mt-2 min-h-[40px]"
                   >
                     <option value="on_event">on_event</option>
                     <option value="after_ms">after_ms</option>
@@ -1452,7 +1763,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                         ),
                       }))
                     }}
-                    className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white px-3 text-sm"
+                    className="story-input mt-2 min-h-[40px]"
                   >
                     <option value="none">none</option>
                     <option value="unlock">unlock</option>
@@ -1481,7 +1792,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                         ),
                       }))
                     }}
-                    className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white px-3 text-sm"
+                    className="story-input mt-2 min-h-[40px]"
                   />
                 </Field>
 
@@ -1506,7 +1817,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                           ),
                         }))
                       }}
-                      className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white px-3 text-sm"
+                      className="story-input mt-2 min-h-[40px]"
                     />
                   </Field>
 
@@ -1533,7 +1844,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                           ),
                         }))
                       }}
-                      className="focus-ring mt-2 min-h-[40px] w-full rounded-xl border border-[var(--mist-400)] bg-white px-3 text-sm"
+                      className="story-input mt-2 min-h-[40px]"
                     />
                   </Field>
                 </div>
@@ -1550,22 +1861,25 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
           <Panel className={activeTab !== 'yaml' ? 'hidden lg:block' : ''}>
             <SectionHeader
               title="YAML"
-              subtitle="Source de vérité éditable puis importable dans le graphe."
+              subtitle="Source de vérité éditable; import manuel vers graphe depuis cet éditeur."
               actions={
                 <>
-                  <Button variant="outline" onClick={handleImportFromYaml}>
+                  <Button variant="outline" size="sm" onClick={handleImportFromYaml}>
                     Importer vers graphe
                   </Button>
-                  <Button variant="outline" onClick={handleGenerateYaml}>
+                  <Button variant="outline" size="sm" onClick={handleGenerateYaml}>
                     Générer depuis graphe
                   </Button>
                 </>
               }
             />
+            <InlineNotice className="mt-4" tone="info">
+              Upload de fichier YAML non activé pour l'instant.
+            </InlineNotice>
             <div className="mt-4">
               <CodeMirror
                 value={draft}
-                height="40vh"
+                height="42vh"
                 extensions={editorExtensions}
                 onChange={setDraft}
                 basicSetup={{ lineNumbers: true, foldGutter: false }}
@@ -1653,6 +1967,175 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
           </Panel>
         </div>
       </div>
+
+      {contextMenu ? (
+        <div
+          data-testid="story-context-menu"
+          className="fixed z-40"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <Panel className="w-[250px] rounded-2xl p-3">
+            {contextMenu.kind === 'pane' ? (
+              <div className="space-y-2">
+                <p className="text-xs uppercase tracking-[0.16em] text-[var(--ink-500)]">Canvas</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  fullWidth
+                  onClick={() => {
+                    addNodeAtPosition(
+                      {
+                        x: contextMenu.flowX ?? 120,
+                        y: contextMenu.flowY ?? 120,
+                      },
+                      'Node ajouté à la position du pointeur.',
+                    )
+                    setContextMenu(null)
+                  }}
+                >
+                  Ajouter node ici
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  fullWidth
+                  onClick={() => {
+                    handleAutoLayout()
+                    setContextMenu(null)
+                  }}
+                >
+                  Auto-layout
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  fullWidth
+                  onClick={() => {
+                    setContextMenu(null)
+                  }}
+                >
+                  Fermer
+                </Button>
+              </div>
+            ) : null}
+
+            {contextMenu.kind === 'node' && contextNode ? (
+              <div className="space-y-2">
+                <p className="text-xs uppercase tracking-[0.16em] text-[var(--ink-500)]">Node {contextNode.stepId}</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  fullWidth
+                  onClick={() => {
+                    setSelectedNodeId(contextNode.id)
+                    setSelectedEdgeId(null)
+                    setContextMenu(null)
+                  }}
+                >
+                  Sélectionner
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  fullWidth
+                  onClick={() => {
+                    addChildNodeFrom(contextNode.id)
+                    setContextMenu(null)
+                  }}
+                >
+                  Ajouter enfant lié
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  fullWidth
+                  onClick={() => {
+                    setPendingLinkSourceId(contextNode.id)
+                    setStatus(`Liaison armée depuis ${contextNode.stepId}. Clique un node cible.`)
+                    setStatusTone('info')
+                    setContextMenu(null)
+                  }}
+                >
+                  Démarrer liaison
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  fullWidth
+                  onClick={() => {
+                    pushHistorySnapshot()
+                    setDocument((current) => ({
+                      ...current,
+                      initialStep: contextNode.stepId,
+                      nodes: current.nodes.map((node) => ({
+                        ...node,
+                        isInitial: node.id === contextNode.id,
+                      })),
+                    }))
+                    setStatus(`Node ${contextNode.stepId} défini comme initial.`)
+                    setStatusTone('success')
+                    setContextMenu(null)
+                  }}
+                >
+                  Définir comme initial
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  fullWidth
+                  onClick={() => {
+                    handleDeleteNodeById(contextNode.id)
+                    setContextMenu(null)
+                  }}
+                >
+                  Supprimer node
+                </Button>
+              </div>
+            ) : null}
+
+            {contextMenu.kind === 'edge' && contextEdge ? (
+              <div className="space-y-2">
+                <p className="text-xs uppercase tracking-[0.16em] text-[var(--ink-500)]">Lien {contextEdge.id}</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  fullWidth
+                  onClick={() => {
+                    setSelectedEdgeId(contextEdge.id)
+                    setSelectedNodeId(null)
+                    setContextMenu(null)
+                  }}
+                >
+                  Sélectionner
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  fullWidth
+                  onClick={() => {
+                    handleReverseEdgeDirection(contextEdge.id)
+                    setContextMenu(null)
+                  }}
+                >
+                  Inverser direction
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  fullWidth
+                  onClick={() => {
+                    handleDeleteEdgeById(contextEdge.id)
+                    setContextMenu(null)
+                  }}
+                >
+                  Supprimer lien
+                </Button>
+              </div>
+            ) : null}
+          </Panel>
+        </div>
+      ) : null}
     </section>
   )
 }

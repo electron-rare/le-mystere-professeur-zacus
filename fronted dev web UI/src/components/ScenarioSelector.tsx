@@ -81,9 +81,9 @@ const ScenarioSelector = ({ scenarios, loading, flavor, capabilities, error, onR
       <Panel>
         <SectionHeader
           title="Selection des scenarios"
-          subtitle="Choisis un scenario puis lance-le sur le device connecte."
+          subtitle="Choisis un scenario puis lance-le sur la cible active."
           actions={
-            <Button type="button" variant="outline" onClick={onRetry}>
+            <Button type="button" variant="outline" onClick={onRetry} size="sm">
               Rafraichir
             </Button>
           }
@@ -96,7 +96,7 @@ const ScenarioSelector = ({ scenarios, loading, flavor, capabilities, error, onR
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="ID scenario ou texte"
-              className="focus-ring mt-2 min-h-[42px] w-full rounded-xl border border-[var(--mist-400)] bg-white/80 px-3 text-sm"
+              className="story-input mt-2"
             />
           </Field>
 
@@ -105,7 +105,7 @@ const ScenarioSelector = ({ scenarios, loading, flavor, capabilities, error, onR
               id="scenario-sort"
               value={sortKey}
               onChange={(event) => setSortKey(event.target.value as SortKey)}
-              className="focus-ring mt-2 min-h-[42px] w-full rounded-xl border border-[var(--mist-400)] bg-white/80 px-3 text-sm"
+              className="story-input mt-2"
             >
               <option value="name">Nom</option>
               <option value="duration">Duree</option>
@@ -116,6 +116,7 @@ const ScenarioSelector = ({ scenarios, loading, flavor, capabilities, error, onR
         <div className="mt-4 flex flex-wrap gap-2">
           <Badge tone="info">Flavour: {flavor}</Badge>
           <Badge tone="neutral">Scenarios: {scenarios.length}</Badge>
+          <Badge tone="neutral">Resultats: {filteredScenarios.length}</Badge>
           {legacyMode ? <Badge tone="warning">Mode legacy</Badge> : <Badge tone="success">Mode Story V2</Badge>}
         </div>
       </Panel>
@@ -152,16 +153,22 @@ const ScenarioSelector = ({ scenarios, loading, flavor, capabilities, error, onR
       {!loading && !error && filteredScenarios.length > 0 ? (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {filteredScenarios.map((scenario) => (
-            <Panel key={scenario.id} as="article" className="flex h-full flex-col justify-between gap-4 p-5">
-              <div className="space-y-2">
+            <Panel
+              key={scenario.id}
+              as="article"
+              className="group flex h-full flex-col justify-between gap-4 border border-white/70 p-5 transition duration-200 hover:-translate-y-0.5"
+            >
+              <div className="space-y-3">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-xl font-semibold text-[var(--ink-900)]">{scenario.id}</h3>
-                  {scenario.is_current ? <Badge tone="success">Courant</Badge> : null}
+                  <h3 className="text-lg font-semibold text-[var(--ink-900)]">{scenario.id}</h3>
+                  {scenario.is_current ? <Badge tone="success">Courant</Badge> : <Badge tone="neutral">Disponible</Badge>}
                 </div>
-                <p className="text-xs uppercase tracking-[0.2em] text-[var(--ink-500)]">{formatDuration(scenario)}</p>
-                <p className="text-sm text-[var(--ink-700)]">{scenario.description ?? 'Aucune description fournie.'}</p>
+                <p className="text-xs uppercase tracking-[0.18em] text-[var(--ink-500)]">{formatDuration(scenario)}</p>
+                <p className="text-sm leading-relaxed text-[var(--ink-700)]">
+                  {scenario.description ?? 'Aucune description fournie.'}
+                </p>
                 {scenario.current_step ? (
-                  <p className="text-xs uppercase tracking-[0.2em] text-[var(--ink-500)]">Etape {scenario.current_step}</p>
+                  <p className="text-xs uppercase tracking-[0.16em] text-[var(--ink-500)]">Etape {scenario.current_step}</p>
                 ) : null}
               </div>
 

@@ -67,6 +67,26 @@ const App = () => {
   const [resolvedBase, setResolvedBase] = useState(API_BASE)
   const testRunTimerRef = useRef<number | null>(null)
 
+  const capabilityBadges = useMemo(
+    () => [
+      { key: 'select', label: 'Select', enabled: capabilities.canSelectScenario },
+      { key: 'start', label: 'Start', enabled: capabilities.canStart },
+      { key: 'pause', label: 'Pause', enabled: capabilities.canPause && capabilities.canResume },
+      { key: 'skip', label: 'Skip', enabled: capabilities.canSkip },
+      { key: 'validate', label: 'Validate', enabled: capabilities.canValidate },
+      { key: 'deploy', label: 'Deploy', enabled: capabilities.canDeploy },
+    ],
+    [
+      capabilities.canDeploy,
+      capabilities.canPause,
+      capabilities.canResume,
+      capabilities.canSelectScenario,
+      capabilities.canSkip,
+      capabilities.canStart,
+      capabilities.canValidate,
+    ],
+  )
+
   const loadScenarios = useCallback(async () => {
     setLoading(true)
     setError('')
@@ -246,27 +266,25 @@ const App = () => {
   ])
 
   return (
-    <div className="min-h-screen px-4 py-8 md:px-10">
-      <Panel as="header" className="sticky top-4 z-20 mx-auto max-w-6xl px-6 py-4">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="min-h-screen px-4 py-6 md:px-8 md:py-8">
+      <Panel as="header" className="sticky top-3 z-20 mx-auto max-w-6xl px-5 py-4 md:px-6">
+        <div className="flex flex-wrap items-start justify-between gap-5">
           <div className="space-y-2">
-            <p className="text-xs uppercase tracking-[0.3em] text-[var(--ink-500)]">{FLAVOR_LABELS[apiFlavor]}</p>
-            <h1 className="text-3xl font-semibold">Mission Control Zacus</h1>
-            <p className="text-xs text-[var(--ink-500)]">Cible: {resolvedBase}</p>
-            <div className="flex flex-wrap gap-2">
-              <Badge tone={error ? 'error' : loading ? 'warning' : 'success'}>
-                {error ? 'Hors ligne' : loading ? 'Connexion...' : 'Connecte'}
-              </Badge>
-              <Badge tone="neutral">Stream: {capabilities.streamKind.toUpperCase()}</Badge>
-            </div>
+            <p className="text-[11px] uppercase tracking-[0.24em] text-[var(--ink-500)]">{FLAVOR_LABELS[apiFlavor]}</p>
+            <h1 className="text-2xl font-semibold sm:text-3xl">Mission Control Zacus</h1>
+            <p className="text-xs text-[var(--ink-500)]">Cible active: {resolvedBase}</p>
           </div>
-          <nav className="flex flex-wrap gap-2" aria-label="Navigation principale">
+          <nav
+            className="flex flex-wrap items-center gap-1.5 rounded-full border border-white/70 bg-white/55 p-1"
+            aria-label="Navigation principale"
+          >
             {(Object.keys(VIEW_LABELS) as ViewKey[]).map((key) => (
               <Button
                 key={key}
                 type="button"
                 onClick={() => setView(key)}
-                variant={view === key ? 'primary' : 'outline'}
+                variant={view === key ? 'primary' : 'ghost'}
+                size="sm"
                 aria-current={view === key ? 'page' : undefined}
               >
                 {VIEW_LABELS[key]}
@@ -274,9 +292,32 @@ const App = () => {
             ))}
           </nav>
         </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-[auto_auto_1fr]">
+          <div className="flex flex-wrap gap-2">
+            <Badge tone={error ? 'error' : loading ? 'warning' : 'success'}>
+              {error ? 'Hors ligne' : loading ? 'Connexion...' : 'Connecte'}
+            </Badge>
+            <Badge tone="info">{FLAVOR_LABELS[apiFlavor]}</Badge>
+            <Badge tone="neutral">Stream: {capabilities.streamKind.toUpperCase()}</Badge>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {capabilities.canNetworkControl ? <Badge tone="warning">Réseau control</Badge> : null}
+            {!capabilities.canDeploy ? <Badge tone="neutral">Mode édition local</Badge> : null}
+          </div>
+
+          <div className="flex flex-wrap justify-start gap-1.5 lg:justify-end">
+            {capabilityBadges.map((capability) => (
+              <Badge key={capability.key} tone={capability.enabled ? 'success' : 'neutral'}>
+                {capability.label}
+              </Badge>
+            ))}
+          </div>
+        </div>
       </Panel>
 
-      <main className="mx-auto mt-8 max-w-6xl">
+      <main className="mx-auto mt-6 max-w-6xl">
         <Suspense
           fallback={
             <Panel className="p-6">

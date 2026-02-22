@@ -42,7 +42,7 @@ test('@mock detects story_v2 and opens orchestrator', async ({ page }) => {
 
   await page.goto('/')
 
-  await expect(page.getByText('API Story V2')).toBeVisible()
+  await expect(page.getByText('API Story V2').first()).toBeVisible()
   await expect(page.getByRole('button', { name: 'Lancer' }).first()).toBeVisible()
   await page.getByRole('button', { name: 'Lancer' }).first().click()
   await expect(page.getByRole('heading', { name: 'Orchestrateur live' })).toBeVisible()

@@ -1,5 +1,4 @@
 import { expect, test } from '@playwright/test'
-import { Buffer } from 'node:buffer'
 
 const uploadedYaml = `id: UPLOADED_STORY
 version: 2
@@ -25,7 +24,11 @@ steps:
 `
 
 test('@mock story designer imports yaml, edits bindings and supports undo/redo', async ({ page }) => {
-  await page.addInitScript(() => window.localStorage.clear())
+  await page.addInitScript((yamlText: string) => {
+    window.localStorage.clear()
+    window.localStorage.setItem('story-draft', yamlText)
+    window.localStorage.removeItem('story-graph-document')
+  }, uploadedYaml)
 
   await page.route('**/api/story/list', async (route) => {
     await route.fulfill({
@@ -38,12 +41,8 @@ test('@mock story designer imports yaml, edits bindings and supports undo/redo',
   await page.goto('/')
   await page.getByRole('button', { name: 'Designer' }).click()
 
-  await page.locator('input[type="file"][accept*=".yaml"]').setInputFiles({
-    name: 'uploaded_story.yaml',
-    mimeType: 'text/yaml',
-    buffer: Buffer.from(uploadedYaml),
-  })
-  await expect(page.getByText('Fichier uploaded_story.yaml importé.')).toBeVisible()
+  await expect(page.getByText("Import YAML se fait depuis l'éditeur YAML")).toBeVisible()
+  await page.getByRole('button', { name: 'Import YAML → Graphe' }).click()
   await expect(page.getByText('Nodes: 2')).toBeVisible()
 
   await expect(page.getByText('Nodes: 2')).toBeVisible()
@@ -57,17 +56,48 @@ test('@mock story designer imports yaml, edits bindings and supports undo/redo',
   await page.getByRole('button', { name: 'Ajouter node' }).click()
   await expect(page.getByText('Nodes: 3')).toBeVisible()
 
-  await page.getByRole('button', { name: 'Annuler' }).click()
+  await page.getByRole('button', { name: 'Annuler', exact: true }).click()
   await expect(page.getByText('Nodes: 2')).toBeVisible()
 
   await page.getByRole('button', { name: 'Retablir' }).click()
   await expect(page.getByText('Nodes: 3')).toBeVisible()
 
-  const firstBindingIdInput = page.locator('label:has-text("ID") input').first()
-  await firstBindingIdInput.fill('APP_TEST_BIND')
+  const scenarioIdInput = page.locator('#scenario-id')
+  await scenarioIdInput.fill('APP_TEST_STORY')
 
   await page.getByRole('button', { name: 'Export Graphe → YAML' }).click()
-  await firstBindingIdInput.fill('APP_TEMP_BIND')
+  await scenarioIdInput.fill('APP_TEMP_STORY')
   await page.getByRole('button', { name: 'Import YAML → Graphe' }).click()
-  await expect(firstBindingIdInput).toHaveValue('APP_TEST_BIND')
+  await expect(scenarioIdInput).toHaveValue('APP_TEST_STORY')
+})
+
+test('@mock story designer supports right click node linking and pane actions', async ({ page }) => {
+  await page.addInitScript((yamlText: string) => {
+    window.localStorage.clear()
+    window.localStorage.setItem('story-draft', yamlText)
+    window.localStorage.removeItem('story-graph-document')
+  }, uploadedYaml)
+
+  await page.route('**/api/story/list', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ scenarios: [{ id: 'DEFAULT', estimated_duration_s: 120 }] }),
+    })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Designer' }).click()
+  await page.getByRole('button', { name: 'Import YAML → Graphe' }).click()
+  await expect(page.getByText('Nodes: 2')).toBeVisible()
+  await expect(page.getByText('Liens: 1')).toBeVisible()
+
+  await page.locator('.react-flow__node:has-text("STEP_B")').first().click({ button: 'right' })
+  await expect(page.getByTestId('story-context-menu')).toBeVisible()
+  await page
+    .getByTestId('story-context-menu')
+    .getByRole('button', { name: 'Démarrer liaison' })
+    .click({ force: true })
+  await page.locator('.react-flow__node:has-text("STEP_A")').first().click()
+  await expect(page.getByText('Liens: 2')).toBeVisible()
 })

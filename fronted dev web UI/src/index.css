@@ -8,15 +8,30 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  --ink-950: #050a17;
   --ink-900: #0b1324;
+  --ink-800: #16203a;
   --ink-700: #1f2a44;
+  --ink-600: #293654;
   --ink-500: #3a4b6b;
-  --glass: rgba(255, 255, 255, 0.75);
+  --ink-soft: rgba(206, 218, 249, 0.25);
+  --glass: rgba(255, 255, 255, 0.72);
+  --glass-strong: rgba(255, 255, 255, 0.82);
   --accent-500: #ff7a59;
   --accent-700: #d14e36;
+  --accent-800: #ac3f2b;
+  --accent-soft: rgba(255, 122, 89, 0.12);
   --teal-500: #2fb3a2;
+  --teal-700: #198c7f;
+  --teal-800: #0f6f65;
+  --teal-soft: rgba(47, 179, 162, 0.12);
+  --danger-700: #b13c3c;
+  --danger-800: #8e2a2a;
+  --danger-soft: rgba(177, 60, 60, 0.12);
   --mist-200: #f0f5ff;
   --mist-400: #c6d4f1;
+  --mist-500: #aebfdf;
+  --panel-shadow: 0 20px 55px rgba(15, 23, 42, 0.14);
 }
 
 * {
@@ -26,11 +41,17 @@
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: "Trebuchet MS", "Gill Sans", "Gill Sans MT", sans-serif;
+  font-family:
+    "Inter",
+    "Avenir Next",
+    "Segoe UI",
+    "Trebuchet MS",
+    sans-serif;
   color: var(--ink-900);
   background:
-    radial-gradient(circle at 20% 20%, #fff8f2 0%, #eef2ff 30%, #dae6ff 55%, #c9d9ff 100%),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0));
+    radial-gradient(circle at 8% 10%, rgba(255, 255, 255, 0.95) 0%, rgba(245, 249, 255, 0.9) 30%, rgba(233, 240, 255, 0.4) 54%, rgba(207, 223, 252, 0) 75%),
+    radial-gradient(circle at 92% 6%, rgba(255, 228, 218, 0.7) 0%, rgba(255, 228, 218, 0.2) 42%, rgba(255, 228, 218, 0) 70%),
+    linear-gradient(160deg, #ecf2ff 0%, #dbe6ff 48%, #d0defd 100%);
 }
 
 #root {
@@ -40,22 +61,98 @@ body {
 h1,
 h2,
 h3 {
-  font-family: Georgia, "Times New Roman", serif;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.018em;
 }
 
 .glass-panel {
-  background: var(--glass);
+  background: linear-gradient(160deg, var(--glass-strong), var(--glass));
   box-shadow:
-    0 20px 60px rgba(15, 23, 42, 0.12),
+    var(--panel-shadow),
     inset 0 1px 0 rgba(255, 255, 255, 0.45);
-  border: 1px solid rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(16px);
+}
+
+.glass-panel:hover {
+  box-shadow:
+    0 22px 60px rgba(15, 23, 42, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.48);
 }
 
 .focus-ring:focus-visible {
-  outline: 3px solid var(--accent-500);
-  outline-offset: 3px;
+  outline: 3px solid rgba(255, 122, 89, 0.55);
+  outline-offset: 2px;
+}
+
+.story-input {
+  min-height: 42px;
+  width: 100%;
+  border-radius: 0.9rem;
+  border: 1px solid var(--mist-400);
+  background: rgba(255, 255, 255, 0.82);
+  padding: 0 0.85rem;
+  font-size: 0.9rem;
+  color: var(--ink-800);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
+}
+
+.story-input:hover {
+  border-color: var(--mist-500);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.story-input:focus-visible {
+  outline: 3px solid rgba(255, 122, 89, 0.42);
+  outline-offset: 1px;
+}
+
+.story-flow .react-flow__controls-button {
+  border-radius: 0.6rem;
+  border-color: rgba(198, 212, 241, 0.85);
+}
+
+.story-flow .react-flow__minimap {
+  border-radius: 0.85rem;
+  border: 1px solid rgba(198, 212, 241, 0.9);
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.story-flow .react-flow__edge-path {
+  stroke: rgba(31, 42, 68, 0.65);
+  stroke-width: 2;
+}
+
+.story-flow .react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--accent-700);
+  stroke-width: 2.4;
+}
+
+.story-flow .react-flow__connection-path {
+  stroke: var(--accent-700);
+  stroke-width: 2.2;
+}
+
+.soft-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(107, 128, 165, 0.75) rgba(255, 255, 255, 0.55);
+}
+
+.soft-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.soft-scrollbar::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(107, 128, 165, 0.75);
+}
+
+.soft-scrollbar::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.55);
 }
 
 ::selection {

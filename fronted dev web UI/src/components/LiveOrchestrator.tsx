@@ -67,6 +67,13 @@ const mapStatusFromPayload = (payload: unknown, fallback: RunStatus): RunStatus 
 
 const getDisabledReason = (enabled: boolean, reason: string) => (enabled ? '' : reason)
 
+const FILTER_OPTIONS: { value: FilterKey; label: string }[] = [
+  { value: 'all', label: 'Tous' },
+  { value: 'status', label: 'status' },
+  { value: 'transition', label: 'transition' },
+  { value: 'error', label: 'error' },
+]
+
 const LiveOrchestrator = ({ scenarioId, onSkip, onPause, onResume, onBack, capabilities }: LiveOrchestratorProps) => {
   const [currentStep, setCurrentStep] = useState('Attente du stream...')
   const [progress, setProgress] = useState(0)
@@ -173,9 +180,9 @@ const LiveOrchestrator = ({ scenarioId, onSkip, onPause, onResume, onBack, capab
       <Panel>
         <SectionHeader
           title="Orchestrateur live"
-          subtitle={`Scenario ${scenarioId}`}
+          subtitle={`Scenario ${scenarioId} - supervision temps reel`}
           actions={
-            <Button type="button" variant="outline" onClick={onBack}>
+            <Button type="button" variant="outline" onClick={onBack} size="sm">
               Retour
             </Button>
           }
@@ -191,9 +198,9 @@ const LiveOrchestrator = ({ scenarioId, onSkip, onPause, onResume, onBack, capab
 
       <div className="grid gap-6 xl:grid-cols-[1fr_1fr_1.2fr]">
         <Panel className="space-y-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-[var(--ink-500)]">Runtime</p>
+          <p className="text-xs uppercase tracking-[0.18em] text-[var(--ink-500)]">Runtime</p>
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-[var(--ink-500)]">Etape courante</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-[var(--ink-500)]">Etape courante</p>
             <h3 className="mt-2 text-2xl font-semibold text-[var(--ink-900)]">{currentStep}</h3>
           </div>
 
@@ -213,7 +220,7 @@ const LiveOrchestrator = ({ scenarioId, onSkip, onPause, onResume, onBack, capab
         </Panel>
 
         <Panel className="space-y-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-[var(--ink-500)]">Controles story</p>
+          <p className="text-xs uppercase tracking-[0.18em] text-[var(--ink-500)]">Controles story</p>
 
           <div className="grid gap-3 sm:grid-cols-2">
             <Button
@@ -246,6 +253,8 @@ const LiveOrchestrator = ({ scenarioId, onSkip, onPause, onResume, onBack, capab
           {!capabilities.canPause || !capabilities.canResume || !capabilities.canSkip ? (
             <InlineNotice tone="info">Certaines actions sont desactivees selon les capabilities de la cible.</InlineNotice>
           ) : null}
+
+          {busyAction ? <InlineNotice tone="info">Action en cours: {busyAction}</InlineNotice> : null}
 
           {capabilities.canNetworkControl ? (
             <div className="space-y-3 rounded-2xl border border-[var(--mist-400)] bg-white/60 p-3">
@@ -293,15 +302,27 @@ const LiveOrchestrator = ({ scenarioId, onSkip, onPause, onResume, onBack, capab
             title="Journal d'evenements"
             subtitle="Historique borne a 100 lignes avec filtres."
             actions={
-              <label className="inline-flex items-center gap-2 text-xs text-[var(--ink-500)]">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 accent-[var(--teal-500)]"
-                  checked={autoScroll}
-                  onChange={(event) => setAutoScroll(event.target.checked)}
-                />
-                Auto-scroll
-              </label>
+              <div className="flex items-center gap-2">
+                <Badge tone="neutral">{visibleEvents.length} affiches</Badge>
+                <label className="inline-flex items-center gap-2 text-xs text-[var(--ink-500)]">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-[var(--teal-500)]"
+                    checked={autoScroll}
+                    onChange={(event) => setAutoScroll(event.target.checked)}
+                  />
+                  Auto-scroll
+                </label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setEvents([])
+                  }}
+                >
+                  Vider
+                </Button>
+              </div>
             }
           />
 
@@ -310,20 +331,21 @@ const LiveOrchestrator = ({ scenarioId, onSkip, onPause, onResume, onBack, capab
               id="event-filter"
               value={eventFilter}
               onChange={(event) => setEventFilter(event.target.value as FilterKey)}
-              className="focus-ring mt-2 min-h-[38px] w-full rounded-lg border border-[var(--mist-400)] bg-white px-3 text-sm"
+              className="story-input mt-2 min-h-[38px]"
             >
-              <option value="all">Tous</option>
-              <option value="status">status</option>
-              <option value="transition">transition</option>
-              <option value="error">error</option>
+              {FILTER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </Field>
 
-          <div ref={logRef} className="max-h-[360px] space-y-3 overflow-y-auto pr-1 text-xs">
+          <div ref={logRef} className="soft-scrollbar max-h-[360px] space-y-3 overflow-y-auto pr-1 text-xs">
             {visibleEvents.length === 0 ? <p className="text-[var(--ink-500)]">Aucun evenement pour ce filtre.</p> : null}
 
             {visibleEvents.map((event) => (
-              <div key={event.id} className="rounded-2xl border border-white/60 bg-white/70 p-3">
+              <div key={event.id} className="rounded-2xl border border-white/70 bg-white/75 p-3">
                 <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.2em] text-[var(--ink-500)]">
                   <span>{event.timestamp}</span>
                   <span>{event.type}</span>

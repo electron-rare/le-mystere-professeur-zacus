@@ -43,7 +43,7 @@ test('@mock detects freenove_legacy and limits unsupported actions', async ({ pa
 
   await page.goto('/')
 
-  await expect(page.getByText('API Legacy')).toBeVisible()
+  await expect(page.getByText('API Legacy').first()).toBeVisible()
   await expect(
     page.getByText('Mode legacy detecte: selection/start sont indisponibles.'),
   ).toBeVisible()

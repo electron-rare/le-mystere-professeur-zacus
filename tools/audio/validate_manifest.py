@@ -4,6 +4,7 @@
 import argparse
 import sys
 from pathlib import Path
+from typing import Optional
 
 try:
     import yaml
@@ -11,6 +12,7 @@ except ImportError:  # pragma: no cover
     sys.exit("Missing dependency: install PyYAML (pip install pyyaml) to validate audio manifests.")
 
 REQUIRED_KEYS = ["manifest_id", "version", "scenario_id", "tracks"]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class ValidationError(Exception):
@@ -20,11 +22,36 @@ class ValidationError(Exception):
 def load_yaml(path: Path) -> dict:
     try:
         return yaml.safe_load(path.read_text())
+    except OSError as exc:
+        raise ValidationError(f"Cannot read {path}: {exc}")
     except yaml.YAMLError as exc:
         raise ValidationError(f"Invalid YAML in {path}: {exc}")
 
 
+def resolve_path(raw_path: str, manifest_path: Path) -> Optional[Path]:
+    candidate = Path(raw_path)
+    search_paths: list[Path] = []
+    if candidate.is_absolute():
+        search_paths.append(candidate)
+    else:
+        search_paths.extend(
+            [
+                Path.cwd() / candidate,
+                manifest_path.parent / candidate,
+                REPO_ROOT / candidate,
+            ]
+        )
+
+    for path in search_paths:
+        if path.exists():
+            return path
+    return None
+
+
 def validate_manifest(path: Path) -> None:
+    if not path.exists():
+        raise ValidationError(f"Manifest file not found: {path}")
+
     data = load_yaml(path)
     if not isinstance(data, dict):
         raise ValidationError("Manifest file must be a mapping")
@@ -43,9 +70,10 @@ def validate_manifest(path: Path) -> None:
                 raise ValidationError(f"Track #{idx} is missing `{field}`")
             if not track[field]:
                 raise ValidationError(f"Track #{idx} field `{field}` must be non-empty")
-        source_path = Path(track["source"])
-        if not source_path.exists():
-            raise ValidationError(f"Track #{idx} source file not found: {source_path}")
+        source_value = str(track["source"])
+        source_path = resolve_path(source_value, path)
+        if source_path is None:
+            raise ValidationError(f"Track #{idx} source file not found: {source_value}")
 
     print(f"[audio-validate] ok {path.name} (tracks {len(tracks)})")
 

@@ -649,3 +649,39 @@
   - `.venv/bin/python3 ../../tools/audio/validate_manifest.py ../../audio/manifests/zacus_v1_audio.yaml` ❌ (`game/prompts/audio/intro.md` manquant),
   - `.venv/bin/python3 ../../tools/printables/validate_manifest.py ../../printables/manifests/zacus_v1_printables.yaml` ❌ (prompts `printables/src/prompts/*.md` manquants),
   - aucune validation live `curl /api/*` ou cycle série ACK HW/CAM/MEDIA possible sans carte connectée pendant cette session.
+
+## [2026-02-22] Correctif validateurs contenu + checks intégration API (local/GH/Codex/ChatGPT)
+
+- [x] Correctif robustesse chemins pour exécution depuis `hardware/firmware/` **et** repo root:
+  - `tools/audio/validate_manifest.py`: résolution `source` maintenant tolérante (`cwd`, dossier manifeste, repo root).
+  - `tools/printables/validate_manifest.py`: résolution manifeste/prompt indépendante du `cwd` (fallbacks repo root + dossier manifeste).
+  - `hardware/firmware/tools/dev/check_env.sh`: check env enrichi avec vérifications d'intégration API (`gh` auth, `codex login status`, reachability OpenAI) et diagnostic `MCP_DOCKER` (daemon Docker).
+- [x] Revalidation post-correctif:
+  - depuis `hardware/firmware`:  
+    `.venv/bin/python3 ../../tools/audio/validate_manifest.py ../../audio/manifests/zacus_v1_audio.yaml` ✅  
+    `.venv/bin/python3 ../../tools/printables/validate_manifest.py ../../printables/manifests/zacus_v1_printables.yaml` ✅
+  - depuis repo root:  
+    `hardware/firmware/.venv/bin/python3 tools/audio/validate_manifest.py audio/manifests/zacus_v1_audio.yaml` ✅  
+    `hardware/firmware/.venv/bin/python3 tools/printables/validate_manifest.py printables/manifests/zacus_v1_printables.yaml` ✅
+- [x] Cohérence firmware/story toolchain recheck:
+  - `python ../../tools/scenario/validate_scenario.py ../../game/scenarios/zacus_v1.yaml` ✅
+  - `./tools/dev/story-gen validate` ✅
+  - `./tools/dev/story-gen generate-bundle --out-dir /tmp/story_bundle_api_check_<ts>` ✅
+  - `.venv/bin/python3 -m pytest lib/zacus_story_gen_ai/tests/test_generator.py` ✅ (`5 passed`)
+- [x] Vérification accès API outillage:
+  - GitHub CLI: `gh auth status` ✅ (account `electron-rare`), `gh api user` ✅, `gh api rate_limit` ✅.
+  - Codex CLI: `codex login status` ✅ (`Logged in using ChatGPT`), `codex exec --ephemeral` ✅ (réponse reçue).
+  - OpenAI endpoint reachability: `curl https://api.openai.com/v1/models` => `401 Missing bearer` (connectivité OK, clé API absente côté shell).
+- [!] Point d'intégration à traiter côté poste:
+  - `codex mcp list` signale `MCP_DOCKER` activé mais non opérationnel si daemon Docker arrêté (`Cannot connect to the Docker daemon ...`).
+
+## [2026-02-22] Réparation workspace — déplacement involontaire `esp8266_oled/src`
+
+- [x] Analyse de l'anomalie:
+  - suppressions trackées massives sous `hardware/firmware/ui/esp8266_oled/src/**`,
+  - dossier non tracké détecté: `hardware/firmware/ui/esp8266_oled/src 2/`.
+- [x] Correctif appliqué:
+  - restauration de l'arborescence par renommage du dossier `src 2` vers `src`.
+  - résultat: suppressions annulées, structure source ESP8266 OLED rétablie.
+- [x] Validation:
+  - `pio run -e esp8266_oled` ✅ (build complet OK après réparation).

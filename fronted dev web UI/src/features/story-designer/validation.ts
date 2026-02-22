@@ -6,6 +6,8 @@ type ValidationResult = {
 }
 
 const isToken = (value: string) => /^[A-Z0-9_]+$/.test(value)
+const isConfigPrimitive = (value: unknown) =>
+  typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
 
 export const validateStoryGraph = (document: StoryGraphDocument): ValidationResult => {
   const errors: string[] = []
@@ -60,6 +62,27 @@ export const validateStoryGraph = (document: StoryGraphDocument): ValidationResu
     if (bindingIds.has(normalized)) {
       errors.push(`app_binding duplique: ${normalized}.`)
     }
+
+    if (binding.config && typeof binding.config === 'object') {
+      Object.entries(binding.config).forEach(([key, rawValue]) => {
+        if (rawValue === undefined) {
+          return
+        }
+        if (!isConfigPrimitive(rawValue)) {
+          warnings.push(`app_binding ${binding.id}: config.${key} ignore (type non supporte).`)
+        }
+      })
+    }
+
+    if (binding.app === 'LA_DETECTOR') {
+      if (!Number.isFinite(binding.config?.hold_ms) || (binding.config?.hold_ms ?? 0) < 100) {
+        warnings.push(`app_binding ${binding.id}: hold_ms devrait etre >= 100.`)
+      }
+      if (!binding.config?.unlock_event || !isToken(binding.config.unlock_event.toUpperCase())) {
+        warnings.push(`app_binding ${binding.id}: unlock_event devrait etre un token (A-Z0-9_).`)
+      }
+    }
+
     bindingIds.add(normalized)
   })
 
@@ -96,4 +119,3 @@ export const validateStoryGraph = (document: StoryGraphDocument): ValidationResu
 
   return { errors, warnings }
 }
-

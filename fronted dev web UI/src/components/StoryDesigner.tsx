@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { yaml as yamlLanguage } from '@codemirror/lang-yaml'
 import {
@@ -71,9 +71,45 @@ type FlowNodeData = {
 type StoryCanvasNode = FlowNode<FlowNodeData, 'storyNode'>
 
 type StatusTone = 'info' | 'success' | 'warning' | 'error'
+type BindingFieldType = 'text' | 'number' | 'boolean'
+
+type BindingField = {
+  key: string
+  label: string
+  type: BindingFieldType
+  min?: number
+  max?: number
+  defaultValue: string | number | boolean
+}
 
 const NODE_WIDTH = 260
 const NODE_HEIGHT = 300
+
+const LA_CONFIG_KEYS = ['hold_ms', 'unlock_event', 'require_listening']
+
+const SIMPLE_BINDING_FIELDS: Partial<Record<AppBinding['app'], BindingField[]>> = {
+  AUDIO_PACK: [
+    { key: 'volume_pct', label: 'volume_pct', type: 'number', min: 0, max: 100, defaultValue: 85 },
+    { key: 'ducking', label: 'ducking', type: 'boolean', defaultValue: false },
+    { key: 'output', label: 'output', type: 'text', defaultValue: 'AUTO' },
+  ],
+  SCREEN_SCENE: [
+    { key: 'theme', label: 'theme', type: 'text', defaultValue: 'GLASS' },
+    { key: 'timeout_ms', label: 'timeout_ms', type: 'number', min: 0, max: 120000, defaultValue: 0 },
+  ],
+  MP3_GATE: [
+    { key: 'open_event', label: 'open_event', type: 'text', defaultValue: 'AUDIO_DONE' },
+    { key: 'debounce_ms', label: 'debounce_ms', type: 'number', min: 0, max: 10000, defaultValue: 200 },
+  ],
+  WIFI_STACK: [
+    { key: 'ssid_profile', label: 'ssid_profile', type: 'text', defaultValue: 'DEFAULT' },
+    { key: 'reconnect_ms', label: 'reconnect_ms', type: 'number', min: 0, max: 120000, defaultValue: 5000 },
+  ],
+  ESPNOW_STACK: [
+    { key: 'channel', label: 'channel', type: 'number', min: 1, max: 14, defaultValue: 1 },
+    { key: 'peer_group', label: 'peer_group', type: 'text', defaultValue: 'DEFAULT' },
+  ],
+}
 
 const normalizeTokenInput = (value: string) => value.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_')
 
@@ -88,6 +124,31 @@ const parseCsvTokens = (value: string) =>
   )
 
 const toCsv = (values: string[]) => values.join(', ')
+
+const stripLaDetectorConfig = (config?: AppBinding['config']) => {
+  if (!config) {
+    return undefined
+  }
+  const next = { ...config }
+  LA_CONFIG_KEYS.forEach((key) => {
+    delete next[key]
+  })
+  return Object.keys(next).length > 0 ? next : undefined
+}
+
+const withConfigValue = (
+  config: AppBinding['config'] | undefined,
+  key: string,
+  value: string | number | boolean | undefined,
+): AppBinding['config'] | undefined => {
+  const next = { ...(config ?? {}) }
+  if (value === undefined) {
+    delete next[key]
+  } else {
+    next[key] = value
+  }
+  return Object.keys(next).length > 0 ? next : undefined
+}
 
 const cloneDocument = (document: StoryGraphDocument): StoryGraphDocument =>
   JSON.parse(JSON.stringify(document)) as StoryGraphDocument
@@ -245,6 +306,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
   const testRunEnabled = capabilities.canDeploy && capabilities.canSelectScenario && capabilities.canStart
 
   const documentRef = useRef(document)
+  const yamlUploadRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     documentRef.current = document
@@ -395,6 +457,29 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
     [document.edges],
   )
 
+  const importYamlTextToGraph = useCallback(
+    (yamlText: string, successMessage: string) => {
+      const imported = importStoryYamlToGraph(yamlText)
+      setImportWarnings(imported.warnings)
+      if (!imported.document || imported.errors.length > 0) {
+        setErrors(imported.errors.length > 0 ? imported.errors : ['Import YAML invalide.'])
+        setStatus('Import YAML échoué.')
+        setStatusTone('error')
+        return false
+      }
+      const nextDocument = autoLayoutStoryGraph(imported.document, {
+        direction: 'LR',
+        nodeWidth: NODE_WIDTH,
+        nodeHeight: NODE_HEIGHT,
+      })
+      applyDocumentWithHistory(nextDocument, successMessage, 'success')
+      setSelectedNodeId(null)
+      setSelectedEdgeId(null)
+      return true
+    },
+    [applyDocumentWithHistory],
+  )
+
   const handleTemplateChange = useCallback(
     (templateKey: string) => {
       setSelectedTemplate(templateKey)
@@ -403,44 +488,42 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
       }
       const templateYaml = STORY_TEMPLATE_LIBRARY[templateKey]
       setDraft(templateYaml)
-      const imported = importStoryYamlToGraph(templateYaml)
-      setImportWarnings(imported.warnings)
-      if (!imported.document || imported.errors.length > 0) {
-        setErrors(imported.errors.length > 0 ? imported.errors : ['Impossible de charger le template.'])
+      const imported = importYamlTextToGraph(templateYaml, `Template ${templateKey} chargé.`)
+      if (!imported) {
         setStatus('Template chargé dans le YAML, mais import graphe incomplet.')
         setStatusTone('warning')
-        return
       }
-      const nextDocument = autoLayoutStoryGraph(imported.document, {
-        direction: 'LR',
-        nodeWidth: NODE_WIDTH,
-        nodeHeight: NODE_HEIGHT,
-      })
-      applyDocumentWithHistory(nextDocument, `Template ${templateKey} chargé.`, 'success')
-      setSelectedNodeId(null)
-      setSelectedEdgeId(null)
     },
-    [applyDocumentWithHistory],
+    [importYamlTextToGraph],
   )
 
   const handleImportFromYaml = useCallback(() => {
-    const imported = importStoryYamlToGraph(draft)
-    setImportWarnings(imported.warnings)
-    if (!imported.document || imported.errors.length > 0) {
-      setErrors(imported.errors.length > 0 ? imported.errors : ['Import YAML invalide.'])
-      setStatus('Import YAML échoué.')
-      setStatusTone('error')
-      return
-    }
-    const nextDocument = autoLayoutStoryGraph(imported.document, {
-      direction: 'LR',
-      nodeWidth: NODE_WIDTH,
-      nodeHeight: NODE_HEIGHT,
-    })
-    applyDocumentWithHistory(nextDocument, 'YAML importé dans le graphe.', 'success')
-    setSelectedNodeId(null)
-    setSelectedEdgeId(null)
-  }, [applyDocumentWithHistory, draft])
+    importYamlTextToGraph(draft, 'YAML importé dans le graphe.')
+  }, [draft, importYamlTextToGraph])
+
+  const handleUploadYamlFile = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const selectedFile = event.target.files?.[0]
+      if (!selectedFile) {
+        return
+      }
+      try {
+        const yamlText = await selectedFile.text()
+        setDraft(yamlText)
+        const imported = importYamlTextToGraph(yamlText, `Fichier ${selectedFile.name} importé.`)
+        if (!imported) {
+          setStatus(`Fichier ${selectedFile.name} chargé dans l'éditeur YAML, mais import graphe échoué.`)
+          setStatusTone('warning')
+        }
+      } catch {
+        setStatus(`Lecture impossible du fichier ${selectedFile.name}.`)
+        setStatusTone('error')
+      } finally {
+        event.target.value = ''
+      }
+    },
+    [importYamlTextToGraph],
+  )
 
   const handleGenerateYaml = useCallback(() => {
     const generated = generateStoryYamlFromGraph(document)
@@ -642,6 +725,23 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
     [applyDocumentWithHistory],
   )
 
+  const updateBindingConfig = useCallback(
+    (bindingId: string, key: string, value: string | number | boolean | undefined) => {
+      setDocument((current) => ({
+        ...current,
+        appBindings: current.appBindings.map((entry) =>
+          entry.id === bindingId
+            ? {
+                ...entry,
+                config: withConfigValue(entry.config, key, value),
+              }
+            : entry,
+        ),
+      }))
+    },
+    [],
+  )
+
   const runAsyncAction = useCallback(
     async (
       action: 'validate' | 'deploy' | 'test',
@@ -753,6 +853,14 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                 ))}
               </select>
             </Field>
+            <Button
+              variant="outline"
+              onClick={() => {
+                yamlUploadRef.current?.click()
+              }}
+            >
+              Upload YAML
+            </Button>
             <Button variant="outline" onClick={handleImportFromYaml}>
               Import YAML → Graphe
             </Button>
@@ -761,6 +869,17 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
             </Button>
           </>
         }
+      />
+      <input
+        ref={yamlUploadRef}
+        type="file"
+        accept=".yaml,.yml,text/yaml,text/x-yaml,application/yaml"
+        onChange={(event) => {
+          void handleUploadYamlFile(event)
+        }}
+        className="hidden"
+        aria-hidden="true"
+        tabIndex={-1}
       />
 
       <Panel>
@@ -841,7 +960,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
           <Badge tone="neutral">Initial: {document.initialStep || 'auto'}</Badge>
           {graphValidation.errors.length > 0 ? <Badge tone="error">Erreurs: {graphValidation.errors.length}</Badge> : null}
           {graphValidation.warnings.length > 0 ? (
-            <Badge tone="warning">Warnings: {graphValidation.warnings.length}</Badge>
+            <Badge tone="warning">Avertissements: {graphValidation.warnings.length}</Badge>
           ) : null}
         </div>
       </Panel>
@@ -943,11 +1062,12 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                                     config:
                                       nextApp === 'LA_DETECTOR'
                                         ? {
+                                            ...(entry.config ?? {}),
                                             hold_ms: entry.config?.hold_ms ?? 3000,
                                             unlock_event: entry.config?.unlock_event ?? 'UNLOCK',
                                             require_listening: entry.config?.require_listening ?? true,
                                           }
-                                        : undefined,
+                                        : stripLaDetectorConfig(entry.config),
                                   }
                                 : entry,
                             ),
@@ -983,23 +1103,11 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                           onFocus={pushHistorySnapshot}
                           onChange={(event) => {
                             const nextValue = Number.parseInt(event.target.value || '3000', 10)
-                            setDocument((current) => ({
-                              ...current,
-                              appBindings: current.appBindings.map((entry) =>
-                                entry.id === binding.id
-                                  ? {
-                                      ...entry,
-                                      config: {
-                                        hold_ms: Number.isFinite(nextValue)
-                                          ? Math.max(100, Math.min(60000, nextValue))
-                                          : 3000,
-                                        unlock_event: entry.config?.unlock_event ?? 'UNLOCK',
-                                        require_listening: entry.config?.require_listening ?? true,
-                                      },
-                                    }
-                                  : entry,
-                              ),
-                            }))
+                            updateBindingConfig(
+                              binding.id,
+                              'hold_ms',
+                              Number.isFinite(nextValue) ? Math.max(100, Math.min(60000, nextValue)) : 3000,
+                            )
                           }}
                           className="focus-ring mt-2 min-h-[38px] w-full rounded-lg border border-[var(--mist-400)] bg-white px-3 text-sm"
                         />
@@ -1010,22 +1118,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                           value={binding.config?.unlock_event ?? 'UNLOCK'}
                           onFocus={pushHistorySnapshot}
                           onChange={(event) => {
-                            const unlockEvent = normalizeTokenInput(event.target.value)
-                            setDocument((current) => ({
-                              ...current,
-                              appBindings: current.appBindings.map((entry) =>
-                                entry.id === binding.id
-                                  ? {
-                                      ...entry,
-                                      config: {
-                                        hold_ms: entry.config?.hold_ms ?? 3000,
-                                        unlock_event: unlockEvent,
-                                        require_listening: entry.config?.require_listening ?? true,
-                                      },
-                                    }
-                                  : entry,
-                              ),
-                            }))
+                            updateBindingConfig(binding.id, 'unlock_event', normalizeTokenInput(event.target.value))
                           }}
                           className="focus-ring mt-2 min-h-[38px] w-full rounded-lg border border-[var(--mist-400)] bg-white px-3 text-sm"
                         />
@@ -1038,22 +1131,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                             checked={binding.config?.require_listening ?? true}
                             onFocus={pushHistorySnapshot}
                             onChange={(event) => {
-                              const nextChecked = event.target.checked
-                              setDocument((current) => ({
-                                ...current,
-                                appBindings: current.appBindings.map((entry) =>
-                                  entry.id === binding.id
-                                    ? {
-                                        ...entry,
-                                        config: {
-                                          hold_ms: entry.config?.hold_ms ?? 3000,
-                                          unlock_event: entry.config?.unlock_event ?? 'UNLOCK',
-                                          require_listening: nextChecked,
-                                        },
-                                      }
-                                    : entry,
-                                ),
-                              }))
+                              updateBindingConfig(binding.id, 'require_listening', event.target.checked)
                             }}
                             className="h-4 w-4 accent-[var(--teal-500)]"
                           />
@@ -1061,7 +1139,85 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                         </label>
                       </Field>
                     </div>
-                  ) : null}
+                  ) : (SIMPLE_BINDING_FIELDS[binding.app] ?? []).length > 0 ? (
+                    <div className="mt-3 rounded-2xl border border-[var(--mist-400)] bg-white/70 p-3">
+                      <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--ink-500)]">
+                        Config simple ({binding.app})
+                      </p>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                        {(SIMPLE_BINDING_FIELDS[binding.app] ?? []).map((field) => {
+                          if (field.type === 'boolean') {
+                            const checked = Boolean(binding.config?.[field.key] ?? field.defaultValue)
+                            return (
+                              <Field key={field.key} label={field.label}>
+                                <label className="mt-2 flex min-h-[38px] items-center gap-2 rounded-lg border border-[var(--mist-400)] bg-white px-3 text-sm text-[var(--ink-700)]">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onFocus={pushHistorySnapshot}
+                                    onChange={(event) => {
+                                      updateBindingConfig(binding.id, field.key, event.target.checked)
+                                    }}
+                                    className="h-4 w-4 accent-[var(--teal-500)]"
+                                  />
+                                  <span>{checked ? 'true' : 'false'}</span>
+                                </label>
+                              </Field>
+                            )
+                          }
+
+                          if (field.type === 'number') {
+                            const currentValue = binding.config?.[field.key]
+                            const normalizedValue =
+                              typeof currentValue === 'number'
+                                ? currentValue
+                                : typeof currentValue === 'string'
+                                  ? Number.parseInt(currentValue, 10)
+                                  : Number(field.defaultValue)
+                            return (
+                              <Field key={field.key} label={field.label}>
+                                <input
+                                  type="number"
+                                  min={field.min}
+                                  max={field.max}
+                                  value={Number.isFinite(normalizedValue) ? normalizedValue : Number(field.defaultValue)}
+                                  onFocus={pushHistorySnapshot}
+                                  onChange={(event) => {
+                                    const parsed = Number.parseInt(event.target.value || `${field.defaultValue}`, 10)
+                                    const min = field.min ?? Number.MIN_SAFE_INTEGER
+                                    const max = field.max ?? Number.MAX_SAFE_INTEGER
+                                    const clamped = Number.isFinite(parsed)
+                                      ? Math.max(min, Math.min(max, parsed))
+                                      : Number(field.defaultValue)
+                                    updateBindingConfig(binding.id, field.key, clamped)
+                                  }}
+                                  className="focus-ring mt-2 min-h-[38px] w-full rounded-lg border border-[var(--mist-400)] bg-white px-3 text-sm"
+                                />
+                              </Field>
+                            )
+                          }
+
+                          return (
+                            <Field key={field.key} label={field.label}>
+                              <input
+                                value={String(binding.config?.[field.key] ?? field.defaultValue)}
+                                onFocus={pushHistorySnapshot}
+                                onChange={(event) => {
+                                  const nextValue = event.target.value.trim()
+                                  updateBindingConfig(binding.id, field.key, nextValue || String(field.defaultValue))
+                                }}
+                                className="focus-ring mt-2 min-h-[38px] w-full rounded-lg border border-[var(--mist-400)] bg-white px-3 text-sm"
+                              />
+                            </Field>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <InlineNotice className="mt-3" tone="info">
+                      Cette app ne nécessite pas de configuration guidée avancée.
+                    </InlineNotice>
+                  )}
                 </div>
               ))}
             </div>

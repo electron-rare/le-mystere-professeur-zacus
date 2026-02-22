@@ -125,6 +125,41 @@ steps:
     })
   })
 
+  it('preserve les configs simples hors LA_DETECTOR', () => {
+    const yamlWithSimpleConfig = `id: CFG_SIMPLE
+version: 2
+initial_step: STEP_A
+app_bindings:
+  - id: APP_AUDIO
+    app: AUDIO_PACK
+    config:
+      volume_pct: 70
+      ducking: true
+      output: SPEAKER
+steps:
+  - step_id: STEP_A
+    apps: [APP_AUDIO]
+    transitions: []
+`
+
+    const imported = importStoryYamlToGraph(yamlWithSimpleConfig)
+    expect(imported.errors).toEqual([])
+    expect(imported.document?.appBindings[0]?.config).toMatchObject({
+      volume_pct: 70,
+      ducking: true,
+      output: 'SPEAKER',
+    })
+
+    const exported = generateStoryYamlFromGraph(imported.document as StoryGraphDocument)
+    const reimported = importStoryYamlToGraph(exported)
+    expect(reimported.errors).toEqual([])
+    expect(reimported.document?.appBindings[0]?.config).toMatchObject({
+      volume_pct: 70,
+      ducking: true,
+      output: 'SPEAKER',
+    })
+  })
+
   it('retourne une erreur claire si le YAML est invalide', () => {
     const result = importStoryYamlToGraph('id: BAD\nsteps: [')
 

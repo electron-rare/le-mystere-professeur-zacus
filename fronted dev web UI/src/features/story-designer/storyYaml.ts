@@ -14,7 +14,18 @@ import {
   DEFAULT_STEP_ID,
   DEFAULT_TRIGGER,
 } from './constants'
-import { APP_KINDS, EVENT_TYPES, TRANSITION_TRIGGERS, type AppBinding, type EventType, type ImportResult, type StoryEdge, type StoryGraphDocument, type StoryNode } from './types'
+import {
+  APP_KINDS,
+  EVENT_TYPES,
+  TRANSITION_TRIGGERS,
+  type AppBinding,
+  type AppBindingConfig,
+  type EventType,
+  type ImportResult,
+  type StoryEdge,
+  type StoryGraphDocument,
+  type StoryNode,
+} from './types'
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
@@ -71,6 +82,38 @@ const toNumber = (value: unknown, fallback: number) => {
 }
 
 const clampInteger = (value: number, min: number, max: number) => Math.min(max, Math.max(min, Math.trunc(value)))
+
+const isConfigPrimitive = (value: unknown): value is string | number | boolean =>
+  typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+
+const sanitizeBindingConfig = (
+  value: unknown,
+  warnings: string[],
+  context: string,
+): AppBindingConfig | undefined => {
+  if (!isRecord(value)) {
+    return undefined
+  }
+
+  const sanitized: AppBindingConfig = {}
+  Object.entries(value).forEach(([rawKey, rawValue]) => {
+    const key = rawKey.trim()
+    if (!key) {
+      return
+    }
+    if (isConfigPrimitive(rawValue)) {
+      if (typeof rawValue === 'number' && !Number.isFinite(rawValue)) {
+        warnings.push(`${context}: config.${key} ignore (number invalide).`)
+        return
+      }
+      sanitized[key] = typeof rawValue === 'string' ? rawValue.trim() : rawValue
+      return
+    }
+    warnings.push(`${context}: config.${key} ignore (type non supporte).`)
+  })
+
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined
+}
 
 export const inferEventTypeFromName = (eventName: string): EventType => {
   const normalized = normalizeToken(eventName, DEFAULT_EVENT_NAME)
@@ -184,13 +227,17 @@ export const importStoryYamlToGraph = (yamlText: string): ImportResult => {
     const id = ensureUniqueToken(binding.id, `APP_UNKNOWN_${index + 1}`, bindingIds, warnings, `app_bindings[${index}]`)
     const app = coerceAppKind(binding.app)
     const nextBinding: AppBinding = { id, app }
+    const baseConfig = sanitizeBindingConfig(binding.config, warnings, `app_bindings[${index}]`)
     if (app === 'LA_DETECTOR') {
       const config = isRecord(binding.config) ? binding.config : {}
       nextBinding.config = {
+        ...(baseConfig ?? {}),
         hold_ms: clampInteger(toNumber(config.hold_ms, 3000), 100, 60000),
         unlock_event: normalizeToken(config.unlock_event, 'UNLOCK'),
         require_listening: typeof config.require_listening === 'boolean' ? config.require_listening : true,
       }
+    } else if (baseConfig) {
+      nextBinding.config = baseConfig
     }
     appBindings.push(nextBinding)
   })
@@ -348,13 +395,17 @@ export const generateStoryYamlFromGraph = (document: StoryGraphDocument): string
     const id = ensureUniqueToken(binding.id, `APP_UNKNOWN_${index + 1}`, bindingIds, warnings, 'app_bindings')
     const app = coerceAppKind(binding.app)
     const next: AppBinding = { id, app }
+    const baseConfig = sanitizeBindingConfig(binding.config, warnings, `app_bindings[${index}]`)
     if (app === 'LA_DETECTOR') {
       next.config = {
+        ...(baseConfig ?? {}),
         hold_ms: clampInteger(toNumber(binding.config?.hold_ms, 3000), 100, 60000),
         unlock_event: normalizeToken(binding.config?.unlock_event, 'UNLOCK'),
         require_listening:
           typeof binding.config?.require_listening === 'boolean' ? binding.config.require_listening : true,
       }
+    } else if (baseConfig) {
+      next.config = baseConfig
     }
     return next
   })
@@ -403,20 +454,27 @@ export const generateStoryYamlFromGraph = (document: StoryGraphDocument): string
     id: normalizeToken(document.scenarioId, DEFAULT_SCENARIO_ID),
     version: clampInteger(toNumber(document.version, DEFAULT_SCENARIO_VERSION), 1, 99),
     initial_step: initialStep,
-    app_bindings: appBindings.map((binding) => ({
-      id: binding.id,
-      app: binding.app,
-      ...(binding.app === 'LA_DETECTOR' && binding.config
-        ? {
-            config: {
-              hold_ms: clampInteger(toNumber(binding.config.hold_ms, 3000), 100, 60000),
-              unlock_event: normalizeToken(binding.config.unlock_event, 'UNLOCK'),
-              require_listening:
-                typeof binding.config.require_listening === 'boolean' ? binding.config.require_listening : true,
-            },
-          }
-        : {}),
-    })),
+    app_bindings: appBindings.map((binding, index) => {
+      const serializedConfig = sanitizeBindingConfig(binding.config, warnings, `app_bindings[${index}]`)
+      if (binding.app === 'LA_DETECTOR') {
+        return {
+          id: binding.id,
+          app: binding.app,
+          config: {
+            ...(serializedConfig ?? {}),
+            hold_ms: clampInteger(toNumber(binding.config?.hold_ms, 3000), 100, 60000),
+            unlock_event: normalizeToken(binding.config?.unlock_event, 'UNLOCK'),
+            require_listening:
+              typeof binding.config?.require_listening === 'boolean' ? binding.config.require_listening : true,
+          },
+        }
+      }
+      return {
+        id: binding.id,
+        app: binding.app,
+        ...(serializedConfig ? { config: serializedConfig } : {}),
+      }
+    }),
     steps: sortedNodes.map((node, index) => {
       const stepId = stepIdByNodeId.get(node.id) ?? `${DEFAULT_STEP_ID}_${index + 1}`
       const transitions =
@@ -464,4 +522,3 @@ export const generateStoryYamlFromGraph = (document: StoryGraphDocument): string
   const yaml = stringify(root, { lineWidth: 0 })
   return yaml.endsWith('\n') ? yaml : `${yaml}\n`
 }
-

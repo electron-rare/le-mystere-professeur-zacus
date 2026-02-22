@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import LiveOrchestrator from './components/LiveOrchestrator'
 import ScenarioSelector from './components/ScenarioSelector'
-import StoryDesigner from './components/StoryDesigner'
 import { Badge, Button, Panel } from './components/ui'
 import {
   API_BASE,
@@ -19,6 +18,8 @@ import {
   validateStory,
 } from './lib/api'
 import type { ScenarioMeta } from './types/story'
+
+const StoryDesigner = lazy(() => import('./components/StoryDesigner'))
 
 type ViewKey = 'selector' | 'orchestrator' | 'designer'
 
@@ -275,7 +276,17 @@ const App = () => {
         </div>
       </Panel>
 
-      <main className="mx-auto mt-8 max-w-6xl">{pageContent}</main>
+      <main className="mx-auto mt-8 max-w-6xl">
+        <Suspense
+          fallback={
+            <Panel className="p-6">
+              <p className="text-sm text-[var(--ink-500)]">Chargement de l'interface...</p>
+            </Panel>
+          }
+        >
+          {pageContent}
+        </Suspense>
+      </main>
     </div>
   )
 }

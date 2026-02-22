@@ -15,14 +15,19 @@ export type AppKind = (typeof APP_KINDS)[number]
 export type TransitionTrigger = (typeof TRANSITION_TRIGGERS)[number]
 export type EventType = (typeof EVENT_TYPES)[number]
 
+export type AppBindingConfigValue = string | number | boolean
+
+export type AppBindingConfig = {
+  hold_ms?: number
+  unlock_event?: string
+  require_listening?: boolean
+  [key: string]: AppBindingConfigValue | undefined
+}
+
 export type AppBinding = {
   id: string
   app: AppKind
-  config?: {
-    hold_ms?: number
-    unlock_event?: string
-    require_listening?: boolean
-  }
+  config?: AppBindingConfig
 }
 
 export type StoryNode = {
@@ -63,4 +68,3 @@ export type ImportResult = {
   errors: string[]
   warnings: string[]
 }
-

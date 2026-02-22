@@ -26,6 +26,9 @@ type EditorNode = {
   stepId: string
   screenSceneId: string
   audioPackId: string
+  actionsCsv: string
+  appsCsv: string
+  mp3GateOpen: boolean
   x: number
   y: number
   isInitial: boolean
@@ -35,7 +38,19 @@ type EditorEdge = {
   id: string
   fromNodeId: string
   toNodeId: string
+  trigger: string
+  eventType: string
   eventName: string
+  afterMs: number
+  priority: number
+}
+
+type GraphSnapshot = {
+  nodes: EditorNode[]
+  edges: EditorEdge[]
+  linkSourceId: string | null
+  linkEventName: string
+  linkEventType: string
 }
 
 type DragState = {
@@ -45,7 +60,7 @@ type DragState = {
 }
 
 const NODE_WIDTH = 250
-const NODE_HEIGHT = 260
+const NODE_HEIGHT = 360
 const CANVAS_HEIGHT = 560
 const NODE_HORIZONTAL_GAP = 300
 const NODE_VERTICAL_GAP = 220
@@ -53,58 +68,258 @@ const NODE_VERTICAL_GAP = 220
 const TEMPLATE_LIBRARY: Record<string, string> = {
   DEFAULT: `id: DEFAULT
 version: 2
-initial_step_id: STEP_WAIT_UNLOCK
+initial_step: STEP_WAIT_UNLOCK
+app_bindings:
+  - id: APP_LA
+    app: LA_DETECTOR
+    config:
+      hold_ms: 3000
+      unlock_event: UNLOCK
+      require_listening: true
+  - id: APP_AUDIO
+    app: AUDIO_PACK
+  - id: APP_SCREEN
+    app: SCREEN_SCENE
+  - id: APP_GATE
+    app: MP3_GATE
 steps:
-  - id: STEP_WAIT_UNLOCK
+  - step_id: STEP_WAIT_UNLOCK
     screen_scene_id: SCENE_LOCKED
-  - id: STEP_U_SON_PROTO
+    audio_pack_id: ""
+    actions:
+      - ACTION_TRACE_STEP
+    apps:
+      - APP_LA
+      - APP_SCREEN
+      - APP_GATE
+    mp3_gate_open: false
+    transitions:
+      - trigger: on_event
+        event_type: unlock
+        event_name: UNLOCK
+        target_step_id: STEP_U_SON_PROTO
+        after_ms: 0
+        priority: 100
+  - step_id: STEP_U_SON_PROTO
     screen_scene_id: SCENE_BROKEN
     audio_pack_id: PACK_BOOT_RADIO
+    actions:
+      - ACTION_TRACE_STEP
+    apps:
+      - APP_AUDIO
+      - APP_SCREEN
+      - APP_GATE
+    mp3_gate_open: false
+    transitions: []
 `,
   EXAMPLE_UNLOCK_EXPRESS: `id: EXAMPLE_UNLOCK_EXPRESS
 version: 2
-initial_step_id: STEP_WAIT_UNLOCK
+initial_step: STEP_WAIT_UNLOCK
+app_bindings:
+  - id: APP_LA
+    app: LA_DETECTOR
+    config:
+      hold_ms: 3000
+      unlock_event: UNLOCK
+      require_listening: true
+  - id: APP_AUDIO
+    app: AUDIO_PACK
+  - id: APP_SCREEN
+    app: SCREEN_SCENE
+  - id: APP_GATE
+    app: MP3_GATE
 steps:
-  - id: STEP_WAIT_UNLOCK
+  - step_id: STEP_WAIT_UNLOCK
     screen_scene_id: SCENE_LOCKED
-  - id: STEP_WIN
+    audio_pack_id: ""
+    actions:
+      - ACTION_TRACE_STEP
+    apps:
+      - APP_LA
+      - APP_SCREEN
+      - APP_GATE
+    mp3_gate_open: false
+    transitions:
+      - trigger: on_event
+        event_type: unlock
+        event_name: UNLOCK
+        target_step_id: STEP_WIN
+        after_ms: 0
+        priority: 100
+  - step_id: STEP_WIN
     screen_scene_id: SCENE_REWARD
     audio_pack_id: PACK_WIN
+    actions:
+      - ACTION_TRACE_STEP
+    apps:
+      - APP_AUDIO
+      - APP_SCREEN
+      - APP_GATE
+    mp3_gate_open: false
+    transitions: []
 `,
   EXEMPLE_UNLOCK_EXPRESS_DONE: `id: EXEMPLE_UNLOCK_EXPRESS_DONE
 version: 2
-initial_step_id: STEP_WAIT_UNLOCK
+initial_step: STEP_WAIT_UNLOCK
+app_bindings:
+  - id: APP_LA
+    app: LA_DETECTOR
+    config:
+      hold_ms: 3000
+      unlock_event: UNLOCK
+      require_listening: true
+  - id: APP_AUDIO
+    app: AUDIO_PACK
+  - id: APP_SCREEN
+    app: SCREEN_SCENE
+  - id: APP_GATE
+    app: MP3_GATE
 steps:
-  - id: STEP_WAIT_UNLOCK
+  - step_id: STEP_WAIT_UNLOCK
     screen_scene_id: SCENE_LOCKED
-  - id: STEP_WIN
+    audio_pack_id: ""
+    actions:
+      - ACTION_TRACE_STEP
+    apps:
+      - APP_LA
+      - APP_SCREEN
+      - APP_GATE
+    mp3_gate_open: false
+    transitions:
+      - trigger: on_event
+        event_type: unlock
+        event_name: UNLOCK
+        target_step_id: STEP_WIN
+        after_ms: 0
+        priority: 100
+  - step_id: STEP_WIN
     screen_scene_id: SCENE_REWARD
     audio_pack_id: PACK_WIN
+    actions:
+      - ACTION_TRACE_STEP
+    apps:
+      - APP_AUDIO
+      - APP_SCREEN
+      - APP_GATE
+    mp3_gate_open: false
+    transitions: []
 `,
   SPECTRE_RADIO_LAB: `id: SPECTRE_RADIO_LAB
 version: 2
-initial_step_id: STEP_WAIT_UNLOCK
+initial_step: STEP_WAIT_UNLOCK
+app_bindings:
+  - id: APP_LA
+    app: LA_DETECTOR
+    config:
+      hold_ms: 3000
+      unlock_event: UNLOCK
+      require_listening: true
+  - id: APP_AUDIO
+    app: AUDIO_PACK
+  - id: APP_SCREEN
+    app: SCREEN_SCENE
+  - id: APP_GATE
+    app: MP3_GATE
 steps:
-  - id: STEP_WAIT_UNLOCK
+  - step_id: STEP_WAIT_UNLOCK
     screen_scene_id: SCENE_LOCKED
-  - id: STEP_SONAR_SEARCH
+    audio_pack_id: ""
+    actions:
+      - ACTION_TRACE_STEP
+    apps:
+      - APP_LA
+      - APP_SCREEN
+      - APP_GATE
+    mp3_gate_open: false
+    transitions:
+      - trigger: on_event
+        event_type: unlock
+        event_name: UNLOCK
+        target_step_id: STEP_SONAR_SEARCH
+        after_ms: 0
+        priority: 100
+  - step_id: STEP_SONAR_SEARCH
     screen_scene_id: SCENE_SEARCH
-  - id: STEP_MORSE_CLUE
+    audio_pack_id: ""
+    actions:
+      - ACTION_TRACE_STEP
+    apps:
+      - APP_SCREEN
+      - APP_GATE
+    mp3_gate_open: false
+    transitions:
+      - trigger: on_event
+        event_type: action
+        event_name: BTN_NEXT
+        target_step_id: STEP_MORSE_CLUE
+        after_ms: 0
+        priority: 100
+  - step_id: STEP_MORSE_CLUE
     screen_scene_id: SCENE_BROKEN
+    audio_pack_id: ""
+    actions:
+      - ACTION_TRACE_STEP
+    apps:
+      - APP_SCREEN
+      - APP_GATE
+    mp3_gate_open: false
+    transitions: []
 `,
   ZACUS_V1_UNLOCK_ETAPE2: `id: ZACUS_V1_UNLOCK_ETAPE2
 version: 2
-initial_step_id: STEP_BOOT_WAIT
+initial_step: STEP_BOOT_WAIT
+app_bindings:
+  - id: APP_LA
+    app: LA_DETECTOR
+    config:
+      hold_ms: 3000
+      unlock_event: UNLOCK
+      require_listening: true
+  - id: APP_AUDIO
+    app: AUDIO_PACK
+  - id: APP_SCREEN
+    app: SCREEN_SCENE
+  - id: APP_GATE
+    app: MP3_GATE
 steps:
-  - id: STEP_BOOT_WAIT
+  - step_id: STEP_BOOT_WAIT
     screen_scene_id: SCENE_LOCKED
-  - id: STEP_BOOT_USON
+    audio_pack_id: ""
+    actions:
+      - ACTION_TRACE_STEP
+    apps:
+      - APP_LA
+      - APP_SCREEN
+      - APP_GATE
+    mp3_gate_open: false
+    transitions:
+      - trigger: on_event
+        event_type: unlock
+        event_name: UNLOCK
+        target_step_id: STEP_BOOT_USON
+        after_ms: 0
+        priority: 100
+  - step_id: STEP_BOOT_USON
     screen_scene_id: SCENE_LOCKED
     audio_pack_id: PACK_BOOT_RADIO
+    actions:
+      - ACTION_TRACE_STEP
+    apps:
+      - APP_AUDIO
+      - APP_SCREEN
+      - APP_GATE
+    mp3_gate_open: false
+    transitions: []
 `,
 }
 
 const SCENE_ROTATION = ['SCENE_LOCKED', 'SCENE_SEARCH', 'SCENE_BROKEN', 'SCENE_REWARD', 'SCENE_READY']
+const DEFAULT_ACTIONS_CSV = 'ACTION_TRACE_STEP'
+const DEFAULT_APPS_CSV = 'APP_SCREEN,APP_GATE'
+const DEFAULT_EDGE_TRIGGER = 'on_event'
+const DEFAULT_EDGE_EVENT_TYPE = 'action'
+const DEFAULT_EDGE_AFTER_MS = 0
+const DEFAULT_EDGE_PRIORITY = 100
 
 const makeIdFragment = () => Math.random().toString(36).slice(2, 8)
 
@@ -123,11 +338,61 @@ const ensureInitialNode = (nodes: EditorNode[]) => {
   return nodes.map((node, index) => ({ ...node, isInitial: index === 0 }))
 }
 
+const tokenizeCsv = (value: string) =>
+  Array.from(
+    new Set(
+      value
+        .split(',')
+        .map((token) => normalizeToken(token, ''))
+        .filter((token) => token.length > 0),
+    ),
+  )
+
+const normalizeTrigger = (value: string) => {
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'on_event' || normalized === 'after_ms' || normalized === 'immediate') {
+    return normalized
+  }
+  return DEFAULT_EDGE_TRIGGER
+}
+
+const inferEventType = (eventName: string) => {
+  const normalizedName = normalizeToken(eventName, 'ACTION')
+  if (normalizedName === 'UNLOCK') {
+    return 'unlock'
+  }
+  if (normalizedName === 'AUDIO_DONE') {
+    return 'audio_done'
+  }
+  if (normalizedName.startsWith('TIMER')) {
+    return 'timer'
+  }
+  if (normalizedName.startsWith('FORCE') || normalizedName === 'SKIP') {
+    return 'serial'
+  }
+  return DEFAULT_EDGE_EVENT_TYPE
+}
+
+const normalizeEventType = (value: string, eventName: string) => {
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'none' || normalized === 'unlock' || normalized === 'audio_done' || normalized === 'timer' || normalized === 'serial' || normalized === 'action') {
+    return normalized
+  }
+  return inferEventType(eventName)
+}
+
+const cloneNodes = (source: EditorNode[]) => source.map((node) => ({ ...node }))
+
+const cloneEdges = (source: EditorEdge[]) => source.map((edge) => ({ ...edge }))
+
 const createNode = (index: number): EditorNode => ({
   id: `node-${makeIdFragment()}`,
   stepId: `STEP_NODE_${index}`,
   screenSceneId: SCENE_ROTATION[(index - 1) % SCENE_ROTATION.length],
   audioPackId: '',
+  actionsCsv: DEFAULT_ACTIONS_CSV,
+  appsCsv: DEFAULT_APPS_CSV,
+  mp3GateOpen: false,
   x: 28 + ((index - 1) % 3) * 270,
   y: 36 + Math.floor((index - 1) / 3) * 250,
   isInitial: false,
@@ -139,6 +404,9 @@ const createDefaultGraph = () => {
     stepId: 'STEP_START',
     screenSceneId: 'SCENE_LOCKED',
     audioPackId: '',
+    actionsCsv: DEFAULT_ACTIONS_CSV,
+    appsCsv: 'APP_LA,APP_SCREEN,APP_GATE',
+    mp3GateOpen: false,
     x: 32,
     y: 90,
     isInitial: true,
@@ -148,6 +416,9 @@ const createDefaultGraph = () => {
     stepId: 'STEP_INVESTIGATION',
     screenSceneId: 'SCENE_SEARCH',
     audioPackId: 'PACK_BOOT_RADIO',
+    actionsCsv: DEFAULT_ACTIONS_CSV,
+    appsCsv: 'APP_AUDIO,APP_SCREEN,APP_GATE',
+    mp3GateOpen: false,
     x: 350,
     y: 280,
     isInitial: false,
@@ -157,14 +428,35 @@ const createDefaultGraph = () => {
     stepId: 'STEP_DONE',
     screenSceneId: 'SCENE_READY',
     audioPackId: '',
+    actionsCsv: `${DEFAULT_ACTIONS_CSV},ACTION_REFRESH_SD`,
+    appsCsv: 'APP_SCREEN,APP_GATE',
+    mp3GateOpen: true,
     x: 680,
     y: 90,
     isInitial: false,
   }
 
   const edges: EditorEdge[] = [
-    { id: 'edge-start-mid', fromNodeId: start.id, toNodeId: middle.id, eventName: 'UNLOCK' },
-    { id: 'edge-mid-done', fromNodeId: middle.id, toNodeId: done.id, eventName: 'BTN_NEXT' },
+    {
+      id: 'edge-start-mid',
+      fromNodeId: start.id,
+      toNodeId: middle.id,
+      trigger: 'on_event',
+      eventType: 'unlock',
+      eventName: 'UNLOCK',
+      afterMs: 0,
+      priority: 100,
+    },
+    {
+      id: 'edge-mid-done',
+      fromNodeId: middle.id,
+      toNodeId: done.id,
+      trigger: 'on_event',
+      eventType: 'action',
+      eventName: 'BTN_NEXT',
+      afterMs: 0,
+      priority: 100,
+    },
   ]
 
   return { nodes: [start, middle, done], edges }
@@ -175,7 +467,20 @@ const buildStoryYaml = (scenarioId: string, nodes: EditorNode[], edges: EditorEd
   if (normalizedNodes.length === 0) {
     return `id: ${normalizeToken(scenarioId, 'NODAL_STORY')}
 version: 2
-initial_step_id: STEP_START
+initial_step: STEP_START
+app_bindings:
+  - id: APP_LA
+    app: LA_DETECTOR
+    config:
+      hold_ms: 3000
+      unlock_event: UNLOCK
+      require_listening: true
+  - id: APP_AUDIO
+    app: AUDIO_PACK
+  - id: APP_SCREEN
+    app: SCREEN_SCENE
+  - id: APP_GATE
+    app: MP3_GATE
 steps: []
 `
   }
@@ -199,21 +504,41 @@ steps: []
   const lines: string[] = [
     `id: ${normalizeToken(scenarioId, 'NODAL_STORY')}`,
     'version: 2',
-    `initial_step_id: ${initialStepId}`,
+    `initial_step: ${initialStepId}`,
+    'app_bindings:',
+    '  - id: APP_LA',
+    '    app: LA_DETECTOR',
+    '    config:',
+    '      hold_ms: 3000',
+    '      unlock_event: UNLOCK',
+    '      require_listening: true',
+    '  - id: APP_AUDIO',
+    '    app: AUDIO_PACK',
+    '  - id: APP_SCREEN',
+    '    app: SCREEN_SCENE',
+    '  - id: APP_GATE',
+    '    app: MP3_GATE',
     'steps:',
   ]
 
   normalizedNodes.forEach((node, index) => {
     const stepId = stepIdByNodeId.get(node.id) ?? `STEP_NODE_${index + 1}`
     const screenSceneId = normalizeToken(node.screenSceneId, 'SCENE_LOCKED')
-    const audioPackId = node.audioPackId.trim().length > 0 ? normalizeToken(node.audioPackId, '') : ''
+    const audioPackId = node.audioPackId.trim().length > 0 ? normalizeToken(node.audioPackId, '') : '""'
+    const actions = tokenizeCsv(node.actionsCsv)
+    const apps = tokenizeCsv(node.appsCsv)
     const outgoingEdges = edges.filter((edge) => edge.fromNodeId === node.id && stepIdByNodeId.has(edge.toNodeId))
 
-    lines.push(`  - id: ${stepId}`)
+    lines.push(`  - step_id: ${stepId}`)
     lines.push(`    screen_scene_id: ${screenSceneId}`)
-    if (audioPackId) {
-      lines.push(`    audio_pack_id: ${audioPackId}`)
-    }
+    lines.push(`    audio_pack_id: ${audioPackId}`)
+    lines.push('    actions:')
+    ;(actions.length > 0 ? actions : [normalizeToken(DEFAULT_ACTIONS_CSV, 'ACTION_TRACE_STEP')]).forEach((action) =>
+      lines.push(`      - ${action}`),
+    )
+    lines.push('    apps:')
+    ;(apps.length > 0 ? apps : tokenizeCsv(DEFAULT_APPS_CSV)).forEach((appId) => lines.push(`      - ${appId}`))
+    lines.push(`    mp3_gate_open: ${node.mp3GateOpen ? 'true' : 'false'}`)
     if (outgoingEdges.length > 0) {
       lines.push('    transitions:')
       outgoingEdges.forEach((edge) => {
@@ -221,9 +546,16 @@ steps: []
         if (!targetStepId) {
           return
         }
-        lines.push(`      - event: ${normalizeToken(edge.eventName, 'BTN_NEXT')}`)
-        lines.push(`        target: ${targetStepId}`)
+        const eventName = normalizeToken(edge.eventName, 'BTN_NEXT')
+        lines.push(`      - trigger: ${normalizeTrigger(edge.trigger)}`)
+        lines.push(`        event_type: ${normalizeEventType(edge.eventType, eventName)}`)
+        lines.push(`        event_name: ${eventName}`)
+        lines.push(`        target_step_id: ${targetStepId}`)
+        lines.push(`        after_ms: ${Number.isFinite(edge.afterMs) ? Math.max(0, Math.trunc(edge.afterMs)) : 0}`)
+        lines.push(`        priority: ${Number.isFinite(edge.priority) ? Math.max(0, Math.min(255, Math.trunc(edge.priority))) : 100}`)
       })
+    } else {
+      lines.push('    transitions: []')
     }
   })
 
@@ -309,6 +641,9 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
   const [edges, setEdges] = useState<EditorEdge[]>(() => createDefaultGraph().edges)
   const [linkSourceId, setLinkSourceId] = useState<string | null>(null)
   const [linkEventName, setLinkEventName] = useState('BTN_NEXT')
+  const [linkEventType, setLinkEventType] = useState('action')
+  const [historyPast, setHistoryPast] = useState<GraphSnapshot[]>([])
+  const [historyFuture, setHistoryFuture] = useState<GraphSnapshot[]>([])
   const [dragState, setDragState] = useState<DragState | null>(null)
   const canvasRef = useRef<HTMLDivElement | null>(null)
 
@@ -348,10 +683,10 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
             path,
             labelX: (x1 + x2) / 2,
             labelY: (y1 + y2) / 2 - 6,
-            eventName: edge.eventName,
+            eventLabel: `${normalizeEventType(edge.eventType, edge.eventName)}:${edge.eventName}`,
           }
         })
-        .filter((edge): edge is { id: string; path: string; labelX: number; labelY: number; eventName: string } => edge !== null),
+        .filter((edge): edge is { id: string; path: string; labelX: number; labelY: number; eventLabel: string } => edge !== null),
     [edges, nodeMap],
   )
 
@@ -368,6 +703,128 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
       height: Math.max(bounds.height, CANVAS_HEIGHT),
     }
   }, [nodes])
+
+  const graphHealth = useMemo(() => {
+    const nodeIds = new Set(nodes.map((node) => node.id))
+    const incomingByNode = new Map<string, number>()
+    const outgoingByNode = new Map<string, number>()
+    nodes.forEach((node) => {
+      incomingByNode.set(node.id, 0)
+      outgoingByNode.set(node.id, 0)
+    })
+
+    edges.forEach((edge) => {
+      if (!nodeIds.has(edge.fromNodeId) || !nodeIds.has(edge.toNodeId)) {
+        return
+      }
+      incomingByNode.set(edge.toNodeId, (incomingByNode.get(edge.toNodeId) ?? 0) + 1)
+      outgoingByNode.set(edge.fromNodeId, (outgoingByNode.get(edge.fromNodeId) ?? 0) + 1)
+    })
+
+    const initialNodes = nodes.filter((node) => node.isInitial)
+    const selectedInitial = initialNodes[0] ?? null
+    const isolatedNodes = nodes.filter(
+      (node) => (incomingByNode.get(node.id) ?? 0) === 0 && (outgoingByNode.get(node.id) ?? 0) === 0,
+    )
+    const danglingNodes = nodes.filter(
+      (node) =>
+        !node.isInitial &&
+        (incomingByNode.get(node.id) ?? 0) === 0 &&
+        (outgoingByNode.get(node.id) ?? 0) > 0,
+    )
+    const terminalNodes = nodes.filter((node) => (outgoingByNode.get(node.id) ?? 0) === 0)
+
+    const warnings: string[] = []
+    if (initialNodes.length === 0) {
+      warnings.push('No initial node selected.')
+    } else if (initialNodes.length > 1) {
+      warnings.push('Multiple initial nodes detected; only one should remain active.')
+    }
+    if (isolatedNodes.length > 0) {
+      warnings.push(`${isolatedNodes.length} isolated node(s) without any transition.`)
+    }
+    if (danglingNodes.length > 0) {
+      warnings.push(`${danglingNodes.length} node(s) cannot be reached from another node.`)
+    }
+    if (terminalNodes.length === 0 && nodes.length > 0) {
+      warnings.push('No terminal node detected (all nodes loop to another node).')
+    }
+
+    return {
+      nodeCount: nodes.length,
+      edgeCount: edges.length,
+      terminalCount: terminalNodes.length,
+      selectedInitial,
+      warnings,
+    }
+  }, [edges, nodes])
+
+  const snapshotGraph = useCallback(
+    (): GraphSnapshot => ({
+      nodes: cloneNodes(nodes),
+      edges: cloneEdges(edges),
+      linkSourceId,
+      linkEventName,
+      linkEventType,
+    }),
+    [edges, linkEventName, linkEventType, linkSourceId, nodes],
+  )
+
+  const applyGraphSnapshot = useCallback((snapshot: GraphSnapshot) => {
+    setNodes(cloneNodes(snapshot.nodes))
+    setEdges(cloneEdges(snapshot.edges))
+    setLinkSourceId(snapshot.linkSourceId)
+    setLinkEventName(snapshot.linkEventName)
+    setLinkEventType(snapshot.linkEventType)
+  }, [])
+
+  const pushHistory = useCallback(() => {
+    const snapshot = snapshotGraph()
+    setHistoryPast((previous) => {
+      const next = [...previous, snapshot]
+      return next.length > 80 ? next.slice(next.length - 80) : next
+    })
+    setHistoryFuture([])
+  }, [snapshotGraph])
+
+  const canUndo = historyPast.length > 0
+  const canRedo = historyFuture.length > 0
+
+  const handleUndo = useCallback(() => {
+    if (!canUndo) {
+      return
+    }
+    const previous = historyPast[historyPast.length - 1]
+    if (!previous) {
+      return
+    }
+    const current = snapshotGraph()
+    setHistoryPast((past) => past.slice(0, -1))
+    setHistoryFuture((future) => {
+      const next = [...future, current]
+      return next.length > 80 ? next.slice(next.length - 80) : next
+    })
+    applyGraphSnapshot(previous)
+    setStatus('Undo applied.')
+  }, [applyGraphSnapshot, canUndo, historyPast, snapshotGraph])
+
+  const handleRedo = useCallback(() => {
+    if (!canRedo) {
+      return
+    }
+    const next = historyFuture[historyFuture.length - 1]
+    if (!next) {
+      return
+    }
+    const current = snapshotGraph()
+    setHistoryFuture((future) => future.slice(0, -1))
+    setHistoryPast((past) => {
+      const updated = [...past, current]
+      return updated.length > 80 ? updated.slice(updated.length - 80) : updated
+    })
+    applyGraphSnapshot(next)
+    setStatus('Redo applied.')
+  }, [applyGraphSnapshot, canRedo, historyFuture, snapshotGraph])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -396,6 +853,32 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
     return () => window.removeEventListener('mouseup', clearDrag)
   }, [])
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'z') {
+        return
+      }
+      const target = event.target as HTMLElement | null
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return
+      }
+      event.preventDefault()
+      if (event.shiftKey) {
+        handleRedo()
+      } else {
+        handleUndo()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [handleRedo, handleUndo])
+
   const updateNode = useCallback((nodeId: string, patch: Partial<EditorNode>) => {
     setNodes((previous) =>
       previous.map((node) => {
@@ -408,13 +891,14 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
   }, [])
 
   const setInitialNode = useCallback((nodeId: string) => {
+    pushHistory()
     setNodes((previous) =>
       previous.map((node) => ({
         ...node,
         isInitial: node.id === nodeId,
       })),
     )
-  }, [])
+  }, [pushHistory])
 
   const handleTemplateChange = (value: string) => {
     setSelectedTemplate(value)
@@ -444,10 +928,11 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
   )
 
   const handleAddNode = useCallback(() => {
+    pushHistory()
     createAndAddNode()
     setStatus('Node added.')
     setErrors([])
-  }, [createAndAddNode])
+  }, [createAndAddNode, pushHistory])
 
   const handleAddChildNode = useCallback(
     (sourceNodeId: string) => {
@@ -455,6 +940,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
       if (!sourceNode) {
         return
       }
+      pushHistory()
       const newNode = createAndAddNode({
         x: sourceNode.x + NODE_HORIZONTAL_GAP,
         y: sourceNode.y,
@@ -468,13 +954,17 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
           id: `edge-${makeIdFragment()}`,
           fromNodeId: sourceNodeId,
           toNodeId: newNode.id,
+          trigger: DEFAULT_EDGE_TRIGGER,
+          eventType: normalizeEventType(linkEventType, linkEventName),
           eventName: linkEventName.trim() || 'BTN_NEXT',
+          afterMs: DEFAULT_EDGE_AFTER_MS,
+          priority: DEFAULT_EDGE_PRIORITY,
         },
       ])
       setStatus('Child node added and linked.')
       setErrors([])
     },
-    [createAndAddNode, linkEventName, nodeMap],
+    [createAndAddNode, linkEventName, linkEventType, nodeMap, pushHistory],
   )
 
   const handleCanvasDoubleClick = useCallback(
@@ -486,28 +976,32 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
       const { scrollLeft, scrollTop } = canvasRef.current
       const x = event.clientX - bounds.left + scrollLeft - NODE_WIDTH / 2
       const y = event.clientY - bounds.top + scrollTop - 24
+      pushHistory()
       createAndAddNode({ x, y })
       setStatus('Node added on canvas.')
       setErrors([])
     },
-    [createAndAddNode],
+    [createAndAddNode, pushHistory],
   )
 
   const handleResetGraph = useCallback(() => {
+    pushHistory()
     const graph = createDefaultGraph()
     setNodes(graph.nodes)
     setEdges(graph.edges)
     setLinkSourceId(null)
     setLinkEventName('BTN_NEXT')
+    setLinkEventType('action')
     setStatus('Node graph reset to default.')
     setErrors([])
-  }, [])
+  }, [pushHistory])
 
   const handleRemoveNode = useCallback((nodeId: string) => {
+    pushHistory()
     setNodes((previous) => ensureInitialNode(previous.filter((node) => node.id !== nodeId)))
     setEdges((previous) => previous.filter((edge) => edge.fromNodeId !== nodeId && edge.toNodeId !== nodeId))
     setLinkSourceId((previous) => (previous === nodeId ? null : previous))
-  }, [])
+  }, [pushHistory])
 
   const handleStartLink = useCallback((nodeId: string) => {
     setLinkSourceId(nodeId)
@@ -526,6 +1020,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
         return
       }
 
+      pushHistory()
       setEdges((previous) => {
         const existing = previous.find(
           (edge) => edge.fromNodeId === linkSourceId && edge.toNodeId === nodeId,
@@ -535,7 +1030,10 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
             edge.id === existing.id
               ? {
                   ...edge,
+                  trigger: DEFAULT_EDGE_TRIGGER,
+                  eventType: normalizeEventType(linkEventType, trimmedEvent),
                   eventName: trimmedEvent,
+                  afterMs: DEFAULT_EDGE_AFTER_MS,
                 }
               : edge,
           )
@@ -546,7 +1044,11 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
             id: `edge-${makeIdFragment()}`,
             fromNodeId: linkSourceId,
             toNodeId: nodeId,
+            trigger: DEFAULT_EDGE_TRIGGER,
+            eventType: normalizeEventType(linkEventType, trimmedEvent),
             eventName: trimmedEvent,
+            afterMs: DEFAULT_EDGE_AFTER_MS,
+            priority: DEFAULT_EDGE_PRIORITY,
           },
         ]
       })
@@ -554,12 +1056,13 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
       setStatus('Nodes linked. Edit event directly inside the source node if needed.')
       setErrors([])
     },
-    [linkEventName, linkSourceId],
+    [linkEventName, linkEventType, linkSourceId, pushHistory],
   )
 
   const handleRemoveEdge = useCallback((edgeId: string) => {
+    pushHistory()
     setEdges((previous) => previous.filter((edge) => edge.id !== edgeId))
-  }, [])
+  }, [pushHistory])
 
   const handleDragStart = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>, nodeId: string) => {
@@ -570,6 +1073,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
       if (!node) {
         return
       }
+      pushHistory()
       const bounds = canvasRef.current.getBoundingClientRect()
       const { scrollLeft, scrollTop } = canvasRef.current
       setDragState({
@@ -580,7 +1084,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
       event.preventDefault()
       event.stopPropagation()
     },
-    [nodeMap],
+    [nodeMap, pushHistory],
   )
 
   const handleCanvasMouseMove = useCallback(
@@ -607,9 +1111,10 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
   }, [edges, graphScenarioId, nodes])
 
   const handleAutoLayout = useCallback(() => {
+    pushHistory()
     setNodes((previous) => autoLayoutNodes(previous, edges))
     setStatus('Auto layout applied.')
-  }, [edges])
+  }, [edges, pushHistory])
 
   const handleValidate = async () => {
     if (!validateEnabled) {
@@ -695,7 +1200,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
       )}
 
       <div className="glass-panel rounded-3xl p-5">
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] md:items-end">
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto_auto_auto] md:items-end">
           <label className="text-xs uppercase tracking-[0.2em] text-[var(--ink-500)]" htmlFor="graph-scenario-id">
             Scenario ID
             <input
@@ -728,6 +1233,24 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
           </button>
           <button
             type="button"
+            onClick={handleUndo}
+            disabled={!canUndo}
+            className="focus-ring min-h-[44px] rounded-full border border-[var(--ink-500)] px-4 text-sm font-semibold text-[var(--ink-700)] disabled:opacity-60"
+            title="Cmd/Ctrl+Z"
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            onClick={handleRedo}
+            disabled={!canRedo}
+            className="focus-ring min-h-[44px] rounded-full border border-[var(--ink-500)] px-4 text-sm font-semibold text-[var(--ink-700)] disabled:opacity-60"
+            title="Cmd/Ctrl+Shift+Z"
+          >
+            Redo
+          </button>
+          <button
+            type="button"
             onClick={handleResetGraph}
             className="focus-ring min-h-[44px] rounded-full border border-[var(--ink-500)] px-4 text-sm font-semibold text-[var(--ink-500)]"
           >
@@ -751,9 +1274,29 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                 <input
                   id="link-event-name"
                   value={linkEventName}
-                  onChange={(event) => setLinkEventName(event.target.value)}
+                  onChange={(event) => {
+                    const nextName = event.target.value
+                    setLinkEventName(nextName)
+                    setLinkEventType(inferEventType(nextName))
+                  }}
                   className="focus-ring mt-1 min-h-[32px] rounded-lg border border-[var(--accent-700)] bg-white px-2 text-xs text-[var(--ink-900)]"
                 />
+              </label>
+              <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--accent-700)]" htmlFor="link-event-type">
+                Event type
+                <select
+                  id="link-event-type"
+                  value={linkEventType}
+                  onChange={(event) => setLinkEventType(event.target.value)}
+                  className="focus-ring mt-1 min-h-[32px] rounded-lg border border-[var(--accent-700)] bg-white px-2 text-xs text-[var(--ink-900)]"
+                >
+                  <option value="action">action</option>
+                  <option value="unlock">unlock</option>
+                  <option value="audio_done">audio_done</option>
+                  <option value="timer">timer</option>
+                  <option value="serial">serial</option>
+                  <option value="none">none</option>
+                </select>
               </label>
               <button
                 type="button"
@@ -765,6 +1308,32 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
             </div>
           </div>
         )}
+
+        <div className="mt-3 rounded-xl border border-[var(--mist-400)] bg-white/60 px-3 py-2 text-xs text-[var(--ink-700)]">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-[var(--mist-400)] px-2 py-0.5">
+              Nodes: <span className="font-semibold">{graphHealth.nodeCount}</span>
+            </span>
+            <span className="rounded-full border border-[var(--mist-400)] px-2 py-0.5">
+              Links: <span className="font-semibold">{graphHealth.edgeCount}</span>
+            </span>
+            <span className="rounded-full border border-[var(--mist-400)] px-2 py-0.5">
+              Endings: <span className="font-semibold">{graphHealth.terminalCount}</span>
+            </span>
+            <span className="rounded-full border border-[var(--mist-400)] px-2 py-0.5">
+              Initial: <span className="font-semibold">{graphHealth.selectedInitial?.stepId ?? 'none'}</span>
+            </span>
+          </div>
+          {graphHealth.warnings.length > 0 ? (
+            <div className="mt-2 space-y-1 text-[var(--accent-700)]">
+              {graphHealth.warnings.map((warning) => (
+                <p key={warning}>- {warning}</p>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-2 text-[var(--teal-500)]">Graph structure looks consistent.</p>
+          )}
+        </div>
 
         <div
           ref={canvasRef}
@@ -787,7 +1356,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                 <g key={edge.id}>
                   <path d={edge.path} fill="none" stroke="rgba(31,42,68,0.55)" strokeWidth={2.5} />
                   <text x={edge.labelX} y={edge.labelY} textAnchor="middle" fontSize={11} fill="#1f2a44">
-                    {edge.eventName}
+                    {edge.eventLabel}
                   </text>
                 </g>
               ))}
@@ -849,6 +1418,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                     <input
                       value={node.stepId}
                       onChange={(event) => updateNode(node.id, { stepId: event.target.value })}
+                      onFocus={pushHistory}
                       onClick={(event) => event.stopPropagation()}
                       className="focus-ring mt-1 min-h-[32px] w-full rounded-lg border border-[var(--mist-400)] px-2 text-xs text-[var(--ink-900)]"
                     />
@@ -858,6 +1428,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                     <input
                       value={node.screenSceneId}
                       onChange={(event) => updateNode(node.id, { screenSceneId: event.target.value })}
+                      onFocus={pushHistory}
                       onClick={(event) => event.stopPropagation()}
                       className="focus-ring mt-1 min-h-[32px] w-full rounded-lg border border-[var(--mist-400)] px-2 text-xs text-[var(--ink-900)]"
                     />
@@ -867,9 +1438,43 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                     <input
                       value={node.audioPackId}
                       onChange={(event) => updateNode(node.id, { audioPackId: event.target.value })}
+                      onFocus={pushHistory}
                       onClick={(event) => event.stopPropagation()}
                       placeholder="PACK_BOOT_RADIO"
                       className="focus-ring mt-1 min-h-[32px] w-full rounded-lg border border-[var(--mist-400)] px-2 text-xs text-[var(--ink-900)]"
+                    />
+                  </label>
+                  <label className="mt-2 block text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">
+                    Actions (comma)
+                    <input
+                      value={node.actionsCsv}
+                      onChange={(event) => updateNode(node.id, { actionsCsv: event.target.value })}
+                      onFocus={pushHistory}
+                      onClick={(event) => event.stopPropagation()}
+                      placeholder="ACTION_TRACE_STEP"
+                      className="focus-ring mt-1 min-h-[32px] w-full rounded-lg border border-[var(--mist-400)] px-2 text-xs text-[var(--ink-900)]"
+                    />
+                  </label>
+                  <label className="mt-2 block text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">
+                    Apps (comma)
+                    <input
+                      value={node.appsCsv}
+                      onChange={(event) => updateNode(node.id, { appsCsv: event.target.value })}
+                      onFocus={pushHistory}
+                      onClick={(event) => event.stopPropagation()}
+                      placeholder="APP_SCREEN,APP_GATE"
+                      className="focus-ring mt-1 min-h-[32px] w-full rounded-lg border border-[var(--mist-400)] px-2 text-xs text-[var(--ink-900)]"
+                    />
+                  </label>
+                  <label className="mt-2 flex items-center justify-between rounded-lg border border-[var(--mist-400)] px-2 py-1 text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">
+                    MP3 gate open
+                    <input
+                      type="checkbox"
+                      checked={node.mp3GateOpen}
+                      onChange={(event) => updateNode(node.id, { mp3GateOpen: event.target.checked })}
+                      onFocus={pushHistory}
+                      onClick={(event) => event.stopPropagation()}
+                      className="h-4 w-4 accent-[var(--teal-500)]"
                     />
                   </label>
                   <button
@@ -898,6 +1503,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                           <div className="flex gap-1">
                             <input
                               value={edge.eventName}
+                              onFocus={pushHistory}
                               onClick={(event) => event.stopPropagation()}
                               onChange={(event) =>
                                 setEdges((previous) =>
@@ -906,6 +1512,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                                       ? {
                                           ...candidate,
                                           eventName: event.target.value,
+                                          eventType: inferEventType(event.target.value),
                                         }
                                       : candidate,
                                   ),
@@ -923,6 +1530,96 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                             >
                               x
                             </button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-1">
+                            <select
+                              value={edge.eventType}
+                              onFocus={pushHistory}
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={(event) =>
+                                setEdges((previous) =>
+                                  previous.map((candidate) =>
+                                    candidate.id === edge.id
+                                      ? {
+                                          ...candidate,
+                                          eventType: event.target.value,
+                                        }
+                                      : candidate,
+                                  ),
+                                )
+                              }
+                              className="focus-ring min-h-[26px] rounded-md border border-[var(--mist-400)] px-2 text-[10px] text-[var(--ink-900)]"
+                            >
+                              <option value="action">action</option>
+                              <option value="unlock">unlock</option>
+                              <option value="audio_done">audio_done</option>
+                              <option value="timer">timer</option>
+                              <option value="serial">serial</option>
+                              <option value="none">none</option>
+                            </select>
+                            <select
+                              value={edge.trigger}
+                              onFocus={pushHistory}
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={(event) =>
+                                setEdges((previous) =>
+                                  previous.map((candidate) =>
+                                    candidate.id === edge.id
+                                      ? {
+                                          ...candidate,
+                                          trigger: event.target.value,
+                                        }
+                                      : candidate,
+                                  ),
+                                )
+                              }
+                              className="focus-ring min-h-[26px] rounded-md border border-[var(--mist-400)] px-2 text-[10px] text-[var(--ink-900)]"
+                            >
+                              <option value="on_event">on_event</option>
+                              <option value="after_ms">after_ms</option>
+                              <option value="immediate">immediate</option>
+                            </select>
+                            <input
+                              type="number"
+                              value={edge.afterMs}
+                              min={0}
+                              onFocus={pushHistory}
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={(event) =>
+                                setEdges((previous) =>
+                                  previous.map((candidate) =>
+                                    candidate.id === edge.id
+                                      ? {
+                                          ...candidate,
+                                          afterMs: Number.parseInt(event.target.value || '0', 10) || 0,
+                                        }
+                                      : candidate,
+                                  ),
+                                )
+                              }
+                              className="focus-ring min-h-[26px] rounded-md border border-[var(--mist-400)] px-2 text-[10px] text-[var(--ink-900)]"
+                            />
+                            <input
+                              type="number"
+                              value={edge.priority}
+                              min={0}
+                              max={255}
+                              onFocus={pushHistory}
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={(event) =>
+                                setEdges((previous) =>
+                                  previous.map((candidate) =>
+                                    candidate.id === edge.id
+                                      ? {
+                                          ...candidate,
+                                          priority: Number.parseInt(event.target.value || '0', 10) || 0,
+                                        }
+                                      : candidate,
+                                  ),
+                                )
+                              }
+                              className="focus-ring min-h-[26px] rounded-md border border-[var(--mist-400)] px-2 text-[10px] text-[var(--ink-900)]"
+                            />
                           </div>
                         </div>
                       ))}

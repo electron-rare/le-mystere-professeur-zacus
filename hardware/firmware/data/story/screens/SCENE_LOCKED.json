@@ -1,47 +1,112 @@
 {
   "id": "SCENE_LOCKED",
-  "title": "VERROUILLE",
-  "subtitle": "Attente de debloquage",
+  "title": "Module U-SON PROTO",
+  "subtitle": "VERIFICATION EN COURS",
   "symbol": "LOCK",
-  "effect": "pulse",
+  "effect": "glitch",
   "visual": {
-    "show_title": false,
+    "show_title": true,
     "show_symbol": true,
-    "effect_speed_ms": 680
+    "effect_speed_ms": 90
   },
   "theme": {
-    "bg": "#08152D",
-    "accent": "#3E8DFF",
-    "text": "#F5F8FF"
+    "bg": "#06060E",
+    "accent": "#FFC766",
+    "text": "#F8FCFF"
+  },
+  "demo": {
+    "mode": "arcade",
+    "particle_count": 4,
+    "strobe_level": 100
   },
   "timeline": {
     "loop": true,
-    "duration_ms": 1400,
+    "duration_ms": 1500,
     "keyframes": [
       {
         "at_ms": 0,
-        "effect": "pulse",
-        "speed_ms": 680,
+        "effect": "glitch",
+        "speed_ms": 90,
         "theme": {
-          "bg": "#08152D",
-          "accent": "#3E8DFF",
-          "text": "#F5F8FF"
+          "bg": "#06060E",
+          "accent": "#FFC766",
+          "text": "#F8FCFF"
         }
       },
       {
-        "at_ms": 1400,
-        "effect": "blink",
-        "speed_ms": 420,
+        "at_ms": 220,
+        "effect": "celebrate",
+        "speed_ms": 170,
         "theme": {
-          "bg": "#0A1E3A",
-          "accent": "#74B0FF",
-          "text": "#F8FBFF"
+          "bg": "#0F0B15",
+          "accent": "#FFE17D",
+          "text": "#FFFDEE"
+        }
+      },
+      {
+        "at_ms": 460,
+        "effect": "glitch",
+        "speed_ms": 80,
+        "theme": {
+          "bg": "#15090F",
+          "accent": "#FF6A5F",
+          "text": "#FFF3F0"
+        }
+      },
+      {
+        "at_ms": 700,
+        "effect": "wave",
+        "speed_ms": 150,
+        "theme": {
+          "bg": "#050914",
+          "accent": "#6CB9FF",
+          "text": "#EAF5FF"
+        }
+      },
+      {
+        "at_ms": 920,
+        "effect": "glitch",
+        "speed_ms": 70,
+        "theme": {
+          "bg": "#17090E",
+          "accent": "#FF8E78",
+          "text": "#FFF8F3"
+        }
+      },
+      {
+        "at_ms": 1160,
+        "effect": "celebrate",
+        "speed_ms": 150,
+        "theme": {
+          "bg": "#0E0C14",
+          "accent": "#FFD86A",
+          "text": "#FFFCEB"
+        }
+      },
+      {
+        "at_ms": 1360,
+        "effect": "glitch",
+        "speed_ms": 65,
+        "theme": {
+          "bg": "#16090E",
+          "accent": "#FF7A64",
+          "text": "#FFF6F1"
+        }
+      },
+      {
+        "at_ms": 1500,
+        "effect": "celebrate",
+        "speed_ms": 180,
+        "theme": {
+          "bg": "#06060E",
+          "accent": "#FFE17D",
+          "text": "#FFFDEE"
         }
       }
     ]
   },
   "transition": {
     "effect": "fade",
-    "duration_ms": 260
+    "duration_ms": 70
   }
 }

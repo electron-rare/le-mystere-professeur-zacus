@@ -21,6 +21,15 @@ uint8_t clampU8(int value) {
   return static_cast<uint8_t>(value);
 }
 
+uint32_t hash32(uint32_t value) {
+  value ^= value >> 16;
+  value *= 0x7feb352dUL;
+  value ^= value >> 15;
+  value *= 0x846ca68bUL;
+  value ^= value >> 16;
+  return value;
+}
+
 }  // namespace
 
 HardwareManager::HardwareManager()
@@ -260,6 +269,11 @@ void HardwareManager::updateLed(uint32_t now_ms) {
     pulse = false;
   }
 
+  if (!manual_led_ && button_flash_until_ms_ <= now_ms && isBrokenSceneHint()) {
+    applyBrokenLedPattern(now_ms, base_r, base_g, base_b, brightness);
+    return;
+  }
+
   float dim = 1.0f;
   if (pulse) {
     const float phase = static_cast<float>(now_ms % 1400U) / 1400.0f;
@@ -281,6 +295,95 @@ void HardwareManager::updateLed(uint32_t now_ms) {
   snapshot_.led_brightness = brightness;
 }
 
+bool HardwareManager::isBrokenSceneHint() const {
+  return (std::strcmp(snapshot_.scene_id, "SCENE_LOCKED") == 0) ||
+         (std::strcmp(snapshot_.scene_id, "SCENE_BROKEN") == 0) ||
+         (std::strcmp(snapshot_.scene_id, "SCENE_SIGNAL_SPIKE") == 0);
+}
+
+void HardwareManager::applyBrokenLedPattern(uint32_t now_ms,
+                                            uint8_t base_r,
+                                            uint8_t base_g,
+                                            uint8_t base_b,
+                                            uint8_t brightness) {
+  const uint16_t led_count = FREENOVE_WS2812_COUNT;
+  if (led_count == 0U) {
+    return;
+  }
+
+  uint8_t effective_brightness = brightness;
+  if (effective_brightness < 92U) {
+    effective_brightness = 92U;
+  }
+  if (effective_brightness > 148U) {
+    effective_brightness = 148U;
+  }
+  strip_.setBrightness(clampU8(effective_brightness));
+
+  uint8_t first_r = 0U;
+  uint8_t first_g = 0U;
+  uint8_t first_b = 0U;
+
+  const uint32_t slot = now_ms / 46U;
+  const uint32_t in_slot = now_ms % 46U;
+  const uint32_t slot_noise = hash32(slot * 2654435761UL + 0x9e3779b9UL);
+  const uint16_t primary_led = static_cast<uint16_t>(slot_noise % led_count);
+  const uint8_t primary_window_ms = static_cast<uint8_t>(7U + ((slot_noise >> 16) % 11U));
+  const bool primary_active = in_slot < primary_window_ms;
+
+  uint16_t secondary_led = primary_led;
+  bool secondary_active = false;
+  if (led_count > 1U) {
+    secondary_led = static_cast<uint16_t>((primary_led + 1U + ((slot_noise >> 8) % (led_count - 1U))) % led_count);
+    secondary_active = (((slot_noise >> 27) & 0x1U) == 1U) && (in_slot >= 24U) && (in_slot < 29U);
+  }
+
+  for (uint16_t index = 0U; index < led_count; ++index) {
+    const uint32_t led_noise = hash32(slot_noise ^ (static_cast<uint32_t>(index + 1U) * 0x27d4eb2dUL));
+    int out_r = 0;
+    int out_g = 0;
+    int out_b = 0;
+
+    if (primary_active && index == primary_led) {
+      const float attack = 1.0f - (static_cast<float>(in_slot) / static_cast<float>(primary_window_ms));
+      const float dim = 0.88f + 0.55f * attack;
+      out_r = static_cast<int>(static_cast<float>(base_r) * dim) + static_cast<int>((led_noise >> 0) & 0x2fU);
+      out_g = static_cast<int>(static_cast<float>(base_g) * (0.30f + 0.95f * attack)) +
+              static_cast<int>((led_noise >> 8) & 0x17U);
+      out_b = static_cast<int>(static_cast<float>(base_b) * (0.18f + 0.85f * attack)) +
+              static_cast<int>((led_noise >> 16) & 0x3fU);
+    } else if (secondary_active && index == secondary_led) {
+      out_r = static_cast<int>(base_r * 0.45f) + static_cast<int>((led_noise >> 8) & 0x1fU);
+      out_g = static_cast<int>(base_g * 0.28f) + static_cast<int>((led_noise >> 16) & 0x0fU);
+      out_b = static_cast<int>(base_b * 0.40f) + static_cast<int>((led_noise >> 24) & 0x2fU);
+    } else {
+      const bool ghost = (((led_noise + slot + index * 5U) % 23U) == 0U) && (in_slot < 3U);
+      if (ghost) {
+        out_r = static_cast<int>(base_r * 0.12f);
+        out_g = static_cast<int>(base_g * 0.08f);
+        out_b = static_cast<int>(base_b * 0.20f) + 26;
+      }
+    }
+
+    const uint8_t final_r = clampU8(out_r);
+    const uint8_t final_g = clampU8(out_g);
+    const uint8_t final_b = clampU8(out_b);
+    strip_.setPixelColor(index, final_r, final_g, final_b);
+
+    if (index == 0U) {
+      first_r = final_r;
+      first_g = final_g;
+      first_b = final_b;
+    }
+  }
+
+  strip_.show();
+  snapshot_.led_r = first_r;
+  snapshot_.led_g = first_g;
+  snapshot_.led_b = first_b;
+  snapshot_.led_brightness = effective_brightness;
+}
+
 void HardwareManager::setScenePalette(const char* scene_id) {
   std::strncpy(snapshot_.scene_id, scene_id, sizeof(snapshot_.scene_id) - 1U);
   snapshot_.scene_id[sizeof(snapshot_.scene_id) - 1U] = '\0';
@@ -288,11 +391,16 @@ void HardwareManager::setScenePalette(const char* scene_id) {
   scene_brightness_ = kDefaultLedBrightness;
   led_pulse_ = true;
 
-  if (std::strcmp(scene_id, "SCENE_BROKEN") == 0) {
+  if (std::strcmp(scene_id, "SCENE_LOCKED") == 0) {
     scene_r_ = 255U;
-    scene_g_ = 50U;
-    scene_b_ = 28U;
-    scene_brightness_ = 74U;
+    scene_g_ = 96U;
+    scene_b_ = 22U;
+    scene_brightness_ = 88U;
+  } else if (std::strcmp(scene_id, "SCENE_BROKEN") == 0 || std::strcmp(scene_id, "SCENE_SIGNAL_SPIKE") == 0) {
+    scene_r_ = 255U;
+    scene_g_ = 40U;
+    scene_b_ = 18U;
+    scene_brightness_ = 86U;
   } else if (std::strcmp(scene_id, "SCENE_LA_DETECT") == 0 || std::strcmp(scene_id, "SCENE_SEARCH") == 0) {
     scene_r_ = 32U;
     scene_g_ = 224U;

@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include <TFT_eSPI.h>
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 
@@ -148,6 +149,23 @@ const char* mapSymbolToken(const char* symbol) {
   return nullptr;
 }
 
+uint32_t mixNoise(uint32_t value, uintptr_t salt) {
+  uint32_t x = value ^ static_cast<uint32_t>(salt);
+  x ^= (x << 13);
+  x ^= (x >> 17);
+  x ^= (x << 5);
+  return x;
+}
+
+int16_t signedNoise(uint32_t value, uintptr_t salt, int16_t amplitude) {
+  if (amplitude <= 0) {
+    return 0;
+  }
+  const uint32_t mixed = mixNoise(value * 1103515245UL + 12345UL, salt);
+  const int32_t span = static_cast<int32_t>(amplitude) * 2 + 1;
+  return static_cast<int16_t>(static_cast<int32_t>(mixed % static_cast<uint32_t>(span)) - amplitude);
+}
+
 }  // namespace
 
 bool UiManager::begin() {
@@ -193,6 +211,7 @@ bool UiManager::begin() {
 
   player_ui_.reset();
   createWidgets();
+  last_lvgl_tick_ms_ = millis();
   ready_ = true;
   Serial.println("[UI] LVGL + TFT ready");
   return true;
@@ -201,6 +220,12 @@ bool UiManager::begin() {
 void UiManager::update() {
   if (!ready_) {
     return;
+  }
+  const uint32_t now_ms = millis();
+  const uint32_t elapsed_ms = now_ms - last_lvgl_tick_ms_;
+  if (elapsed_ms > 0U) {
+    lv_tick_inc(elapsed_ms);
+    last_lvgl_tick_ms_ = now_ms;
   }
   if (player_ui_.consumeDirty()) {
     updatePageLine();
@@ -249,8 +274,11 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     if (std::strcmp(normalized, "wave") == 0) {
       return SceneEffect::kWave;
     }
-    if (std::strcmp(normalized, "blink") == 0 || std::strcmp(normalized, "glitch") == 0) {
+    if (std::strcmp(normalized, "blink") == 0) {
       return SceneEffect::kBlink;
+    }
+    if (std::strcmp(normalized, "glitch") == 0 || std::strcmp(normalized, "camera_flash") == 0) {
+      return SceneEffect::kGlitch;
     }
     if (std::strcmp(normalized, "celebrate") == 0 || std::strcmp(normalized, "reward") == 0) {
       return SceneEffect::kCelebrate;
@@ -371,13 +399,13 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   uint32_t text_rgb = 0xE8F1FFUL;
 
   if (std::strcmp(scene_id, "SCENE_LOCKED") == 0) {
-    title = "VERROUILLE";
-    subtitle = "Attente de debloquage";
+    title = "Module U-SON PROTO";
+    subtitle = "VERIFICATION EN COURS";
     symbol = "LOCK";
-    effect = SceneEffect::kPulse;
-    bg_rgb = 0x08152DUL;
-    accent_rgb = 0x3E8DFFUL;
-    text_rgb = 0xDBE8FFUL;
+    effect = SceneEffect::kGlitch;
+    bg_rgb = 0x07070FUL;
+    accent_rgb = 0xFFB74EUL;
+    text_rgb = 0xF6FBFFUL;
   } else if (std::strcmp(scene_id, "SCENE_BROKEN") == 0) {
     title = "PROTO U-SON";
     subtitle = "Signal brouille";
@@ -424,7 +452,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   resetSceneTimeline();
 
   if (screen_payload_json != nullptr && screen_payload_json[0] != '\0') {
-    StaticJsonDocument<1536> document;
+    DynamicJsonDocument document(4096);
     const DeserializationError error = deserializeJson(document, screen_payload_json);
     if (!error) {
       const char* payload_title = document["title"] | document["content"]["title"] | document["visual"]["title"] | "";
@@ -889,6 +917,8 @@ void UiManager::stopSceneAnimations() {
   lv_obj_set_style_opa(scene_root_, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_x(scene_root_, 0);
   lv_obj_set_y(scene_root_, 0);
+  lv_obj_set_style_translate_x(scene_root_, 0, LV_PART_MAIN);
+  lv_obj_set_style_translate_y(scene_root_, 0, LV_PART_MAIN);
 
   if (scene_ring_outer_ != nullptr) {
     lv_anim_del(scene_ring_outer_, nullptr);
@@ -899,6 +929,8 @@ void UiManager::stopSceneAnimations() {
     lv_obj_set_size(scene_ring_outer_, outer, outer);
     lv_obj_center(scene_ring_outer_);
     lv_obj_set_style_opa(scene_ring_outer_, LV_OPA_80, LV_PART_MAIN);
+    lv_obj_set_style_translate_x(scene_ring_outer_, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(scene_ring_outer_, 0, LV_PART_MAIN);
   }
 
   if (scene_ring_inner_ != nullptr) {
@@ -910,6 +942,8 @@ void UiManager::stopSceneAnimations() {
     lv_obj_set_size(scene_ring_inner_, inner, inner);
     lv_obj_center(scene_ring_inner_);
     lv_obj_set_style_opa(scene_ring_inner_, LV_OPA_80, LV_PART_MAIN);
+    lv_obj_set_style_translate_x(scene_ring_inner_, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(scene_ring_inner_, 0, LV_PART_MAIN);
   }
 
   if (scene_core_ != nullptr) {
@@ -921,6 +955,8 @@ void UiManager::stopSceneAnimations() {
     lv_obj_set_size(scene_core_, core, core);
     lv_obj_center(scene_core_);
     lv_obj_set_style_opa(scene_core_, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_translate_x(scene_core_, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(scene_core_, 0, LV_PART_MAIN);
   }
 
   if (scene_fx_bar_ != nullptr) {
@@ -932,17 +968,23 @@ void UiManager::stopSceneAnimations() {
     lv_obj_set_size(scene_fx_bar_, bar_width, 8);
     lv_obj_align(scene_fx_bar_, LV_ALIGN_CENTER, 0, (height / 2) - 12);
     lv_obj_set_style_opa(scene_fx_bar_, LV_OPA_90, LV_PART_MAIN);
+    lv_obj_set_style_translate_x(scene_fx_bar_, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(scene_fx_bar_, 0, LV_PART_MAIN);
   }
 
   if (scene_title_label_ != nullptr) {
     lv_anim_del(scene_title_label_, nullptr);
     lv_obj_set_style_opa(scene_title_label_, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_align(scene_title_label_, LV_ALIGN_TOP_MID, 0, 10);
+    lv_obj_set_style_translate_x(scene_title_label_, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(scene_title_label_, 0, LV_PART_MAIN);
   }
   if (scene_symbol_label_ != nullptr) {
     lv_anim_del(scene_symbol_label_, nullptr);
     lv_obj_set_style_opa(scene_symbol_label_, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_align(scene_symbol_label_, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_translate_x(scene_symbol_label_, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(scene_symbol_label_, 0, LV_PART_MAIN);
   }
   if (scene_subtitle_label_ != nullptr) {
     lv_anim_del(scene_subtitle_label_, nullptr);
@@ -951,6 +993,8 @@ void UiManager::stopSceneAnimations() {
     lv_label_set_long_mode(scene_subtitle_label_, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(scene_subtitle_label_, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_obj_align(scene_subtitle_label_, LV_ALIGN_BOTTOM_MID, 0, -20);
+    lv_obj_set_style_translate_x(scene_subtitle_label_, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(scene_subtitle_label_, 0, LV_PART_MAIN);
   }
 
   for (lv_obj_t* particle : scene_particles_) {
@@ -961,6 +1005,8 @@ void UiManager::stopSceneAnimations() {
     lv_obj_center(particle);
     lv_obj_set_style_opa(particle, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_add_flag(particle, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_translate_x(particle, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(particle, 0, LV_PART_MAIN);
   }
 
   if (page_label_ != nullptr && !lv_obj_has_flag(page_label_, LV_OBJ_FLAG_HIDDEN)) {
@@ -1154,11 +1200,233 @@ void UiManager::applySceneEffect(SceneEffect effect) {
     return;
   }
 
+  if (effect == SceneEffect::kGlitch) {
+    const uint16_t glitch_ms = resolveAnimMs(88);
+
+    int32_t root_low_opa = static_cast<int32_t>(LV_OPA_COVER) - static_cast<int32_t>(demo_strobe_level_) * 4;
+    if (root_low_opa < 8) {
+      root_low_opa = 8;
+    }
+    if (root_low_opa > LV_OPA_COVER) {
+      root_low_opa = LV_OPA_COVER;
+    }
+    lv_anim_set_var(&anim, scene_root_);
+    lv_anim_set_exec_cb(&anim, animSetOpa);
+    lv_anim_set_values(&anim, root_low_opa, LV_OPA_COVER);
+    lv_anim_set_time(&anim, glitch_ms);
+    lv_anim_set_playback_time(&anim, glitch_ms);
+    lv_anim_start(&anim);
+
+    lv_anim_t root_noise;
+    lv_anim_init(&root_noise);
+    lv_anim_set_var(&root_noise, scene_root_);
+    lv_anim_set_exec_cb(&root_noise, animSetRandomOpa);
+    lv_anim_set_values(&root_noise, 0, 4095);
+    lv_anim_set_time(&root_noise, resolveAnimMs(56));
+    lv_anim_set_repeat_count(&root_noise, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&root_noise);
+
+    if (scene_core_ != nullptr) {
+      lv_anim_t core_x;
+      lv_anim_init(&core_x);
+      lv_anim_set_var(&core_x, scene_core_);
+      lv_anim_set_exec_cb(&core_x, animSetRandomTranslateX);
+      lv_anim_set_values(&core_x, 0, 4095);
+      lv_anim_set_time(&core_x, resolveAnimMs(62));
+      lv_anim_set_repeat_count(&core_x, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&core_x);
+
+      lv_anim_t core_y;
+      lv_anim_init(&core_y);
+      lv_anim_set_var(&core_y, scene_core_);
+      lv_anim_set_exec_cb(&core_y, animSetRandomTranslateY);
+      lv_anim_set_values(&core_y, 0, 4095);
+      lv_anim_set_time(&core_y, resolveAnimMs(54));
+      lv_anim_set_repeat_count(&core_y, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&core_y);
+
+      lv_anim_t core_opa;
+      lv_anim_init(&core_opa);
+      lv_anim_set_var(&core_opa, scene_core_);
+      lv_anim_set_exec_cb(&core_opa, animSetRandomOpa);
+      lv_anim_set_values(&core_opa, 0, 4095);
+      lv_anim_set_time(&core_opa, resolveAnimMs(60));
+      lv_anim_set_repeat_count(&core_opa, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&core_opa);
+    }
+
+    if (scene_ring_outer_ != nullptr) {
+      lv_anim_t ring_outer_x;
+      lv_anim_init(&ring_outer_x);
+      lv_anim_set_var(&ring_outer_x, scene_ring_outer_);
+      lv_anim_set_exec_cb(&ring_outer_x, animSetRandomTranslateX);
+      lv_anim_set_values(&ring_outer_x, 0, 4095);
+      lv_anim_set_time(&ring_outer_x, resolveAnimMs(82));
+      lv_anim_set_repeat_count(&ring_outer_x, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&ring_outer_x);
+
+      lv_anim_t ring_outer_y;
+      lv_anim_init(&ring_outer_y);
+      lv_anim_set_var(&ring_outer_y, scene_ring_outer_);
+      lv_anim_set_exec_cb(&ring_outer_y, animSetRandomTranslateY);
+      lv_anim_set_values(&ring_outer_y, 0, 4095);
+      lv_anim_set_time(&ring_outer_y, resolveAnimMs(74));
+      lv_anim_set_repeat_count(&ring_outer_y, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&ring_outer_y);
+    }
+
+    if (scene_ring_inner_ != nullptr) {
+      lv_anim_t ring_inner_x;
+      lv_anim_init(&ring_inner_x);
+      lv_anim_set_var(&ring_inner_x, scene_ring_inner_);
+      lv_anim_set_exec_cb(&ring_inner_x, animSetRandomTranslateX);
+      lv_anim_set_values(&ring_inner_x, 0, 4095);
+      lv_anim_set_time(&ring_inner_x, resolveAnimMs(70));
+      lv_anim_set_repeat_count(&ring_inner_x, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&ring_inner_x);
+
+      lv_anim_t ring_inner_y;
+      lv_anim_init(&ring_inner_y);
+      lv_anim_set_var(&ring_inner_y, scene_ring_inner_);
+      lv_anim_set_exec_cb(&ring_inner_y, animSetRandomTranslateY);
+      lv_anim_set_values(&ring_inner_y, 0, 4095);
+      lv_anim_set_time(&ring_inner_y, resolveAnimMs(66));
+      lv_anim_set_repeat_count(&ring_inner_y, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&ring_inner_y);
+    }
+
+    if (scene_fx_bar_ != nullptr) {
+      lv_obj_set_size(scene_fx_bar_, width - 56, 14);
+      lv_obj_align(scene_fx_bar_, LV_ALIGN_CENTER, 0, -22);
+
+      lv_anim_t bar_x;
+      lv_anim_init(&bar_x);
+      lv_anim_set_var(&bar_x, scene_fx_bar_);
+      lv_anim_set_exec_cb(&bar_x, animSetRandomTranslateX);
+      lv_anim_set_values(&bar_x, 0, 4095);
+      lv_anim_set_time(&bar_x, resolveAnimMs(48));
+      lv_anim_set_repeat_count(&bar_x, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&bar_x);
+
+      lv_anim_t bar_y;
+      lv_anim_init(&bar_y);
+      lv_anim_set_var(&bar_y, scene_fx_bar_);
+      lv_anim_set_exec_cb(&bar_y, animSetRandomTranslateY);
+      lv_anim_set_values(&bar_y, 0, 4095);
+      lv_anim_set_time(&bar_y, resolveAnimMs(54));
+      lv_anim_set_repeat_count(&bar_y, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&bar_y);
+
+      lv_anim_t bar_opa;
+      lv_anim_init(&bar_opa);
+      lv_anim_set_var(&bar_opa, scene_fx_bar_);
+      lv_anim_set_exec_cb(&bar_opa, animSetRandomOpa);
+      lv_anim_set_values(&bar_opa, 0, 4095);
+      lv_anim_set_time(&bar_opa, resolveAnimMs(46));
+      lv_anim_set_repeat_count(&bar_opa, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&bar_opa);
+    }
+
+    const int16_t dx = min_dim / 5;
+    const int16_t dy = min_dim / 7;
+    for (uint8_t index = 0U; index < 4U; ++index) {
+      lv_obj_t* particle = scene_particles_[index];
+      if (particle == nullptr) {
+        continue;
+      }
+      const int16_t x_offset = ((index % 2U) == 0U) ? -dx : dx;
+      const int16_t y_offset = (index < 2U) ? -dy : dy;
+      lv_obj_clear_flag(particle, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_set_size(particle, 12 + static_cast<int16_t>((index % 2U) * 6U), 12 + static_cast<int16_t>((index % 2U) * 6U));
+      lv_obj_align(particle, LV_ALIGN_CENTER, x_offset, y_offset);
+
+      lv_anim_t core_x;
+      lv_anim_init(&core_x);
+      lv_anim_set_var(&core_x, particle);
+      lv_anim_set_exec_cb(&core_x, animSetRandomTranslateX);
+      lv_anim_set_values(&core_x, 0, 4095);
+      lv_anim_set_time(&core_x, resolveAnimMs(static_cast<uint16_t>(48U + index * 11U)));
+      lv_anim_set_repeat_count(&core_x, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_set_delay(&core_x, static_cast<uint16_t>(index * 17U));
+      lv_anim_start(&core_x);
+
+      lv_anim_t core_y;
+      lv_anim_init(&core_y);
+      lv_anim_set_var(&core_y, particle);
+      lv_anim_set_exec_cb(&core_y, animSetRandomTranslateY);
+      lv_anim_set_values(&core_y, 0, 4095);
+      lv_anim_set_time(&core_y, resolveAnimMs(static_cast<uint16_t>(54U + index * 13U)));
+      lv_anim_set_repeat_count(&core_y, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_set_delay(&core_y, static_cast<uint16_t>(index * 19U));
+      lv_anim_start(&core_y);
+
+      lv_anim_t particle_opa;
+      lv_anim_init(&particle_opa);
+      lv_anim_set_var(&particle_opa, particle);
+      lv_anim_set_exec_cb(&particle_opa, animSetRandomOpa);
+      lv_anim_set_values(&particle_opa, 0, 4095);
+      lv_anim_set_time(&particle_opa, resolveAnimMs(static_cast<uint16_t>(44U + index * 10U)));
+      lv_anim_set_repeat_count(&particle_opa, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_set_delay(&particle_opa, static_cast<uint16_t>(index * 15U));
+      lv_anim_start(&particle_opa);
+    }
+
+    if (scene_symbol_label_ != nullptr) {
+      lv_anim_t symbol_glitch;
+      lv_anim_init(&symbol_glitch);
+      lv_anim_set_var(&symbol_glitch, scene_symbol_label_);
+      lv_anim_set_exec_cb(&symbol_glitch, animSetRandomOpa);
+      lv_anim_set_values(&symbol_glitch, 0, 4095);
+      lv_anim_set_time(&symbol_glitch, resolveAnimMs(50));
+      lv_anim_set_repeat_count(&symbol_glitch, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&symbol_glitch);
+
+      lv_anim_t symbol_x;
+      lv_anim_init(&symbol_x);
+      lv_anim_set_var(&symbol_x, scene_symbol_label_);
+      lv_anim_set_exec_cb(&symbol_x, animSetRandomTranslateX);
+      lv_anim_set_values(&symbol_x, 0, 4095);
+      lv_anim_set_time(&symbol_x, resolveAnimMs(58));
+      lv_anim_set_repeat_count(&symbol_x, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&symbol_x);
+
+      lv_anim_t symbol_y;
+      lv_anim_init(&symbol_y);
+      lv_anim_set_var(&symbol_y, scene_symbol_label_);
+      lv_anim_set_exec_cb(&symbol_y, animSetRandomTranslateY);
+      lv_anim_set_values(&symbol_y, 0, 4095);
+      lv_anim_set_time(&symbol_y, resolveAnimMs(64));
+      lv_anim_set_repeat_count(&symbol_y, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&symbol_y);
+    }
+
+    if (scene_subtitle_label_ != nullptr) {
+      lv_anim_t subtitle_jitter_x;
+      lv_anim_init(&subtitle_jitter_x);
+      lv_anim_set_var(&subtitle_jitter_x, scene_subtitle_label_);
+      lv_anim_set_exec_cb(&subtitle_jitter_x, animSetRandomTranslateX);
+      lv_anim_set_values(&subtitle_jitter_x, 0, 4095);
+      lv_anim_set_time(&subtitle_jitter_x, resolveAnimMs(66));
+      lv_anim_set_repeat_count(&subtitle_jitter_x, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&subtitle_jitter_x);
+
+      lv_anim_t subtitle_opa;
+      lv_anim_init(&subtitle_opa);
+      lv_anim_set_var(&subtitle_opa, scene_subtitle_label_);
+      lv_anim_set_exec_cb(&subtitle_opa, animSetRandomOpa);
+      lv_anim_set_values(&subtitle_opa, 0, 4095);
+      lv_anim_set_time(&subtitle_opa, resolveAnimMs(58));
+      lv_anim_set_repeat_count(&subtitle_opa, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&subtitle_opa);
+    }
+    return;
+  }
+
   if (effect == SceneEffect::kBlink) {
     const uint16_t blink_ms = resolveAnimMs(170);
-    int32_t low_opa = static_cast<int32_t>(LV_OPA_COVER) - static_cast<int32_t>(demo_strobe_level_) * 2;
-    if (low_opa < 40) {
-      low_opa = 40;
+    int32_t low_opa = static_cast<int32_t>(LV_OPA_COVER) - static_cast<int32_t>(demo_strobe_level_) * 3;
+    if (low_opa < 24) {
+      low_opa = 24;
     }
     if (low_opa > LV_OPA_COVER) {
       low_opa = LV_OPA_COVER;
@@ -1186,6 +1454,7 @@ void UiManager::applySceneEffect(SceneEffect effect) {
   if (effect == SceneEffect::kCelebrate) {
     const uint16_t celebrate_ms = resolveAnimMs(460);
     const uint16_t celebrate_alt_ms = resolveAnimMs(420);
+    const bool broken_mode = demo_strobe_level_ >= 85U;
     if (scene_ring_outer_ != nullptr) {
       int16_t ring_small = min_dim - 88;
       if (ring_small < 84) {
@@ -1206,6 +1475,9 @@ void UiManager::applySceneEffect(SceneEffect effect) {
       lv_anim_start(&ring_anim);
     }
 
+    lv_obj_set_size(scene_fx_bar_, width - 92, broken_mode ? 10 : 8);
+    lv_obj_align(scene_fx_bar_, LV_ALIGN_CENTER, 0, broken_mode ? -18 : -10);
+
     lv_anim_t width_anim;
     lv_anim_init(&width_anim);
     lv_anim_set_var(&width_anim, scene_fx_bar_);
@@ -1215,6 +1487,17 @@ void UiManager::applySceneEffect(SceneEffect effect) {
     lv_anim_set_playback_time(&width_anim, celebrate_alt_ms);
     lv_anim_set_repeat_count(&width_anim, LV_ANIM_REPEAT_INFINITE);
     lv_anim_start(&width_anim);
+
+    if (broken_mode) {
+      lv_anim_t bar_y;
+      lv_anim_init(&bar_y);
+      lv_anim_set_var(&bar_y, scene_fx_bar_);
+      lv_anim_set_exec_cb(&bar_y, animSetRandomTranslateY);
+      lv_anim_set_values(&bar_y, 0, 4095);
+      lv_anim_set_time(&bar_y, resolveAnimMs(90));
+      lv_anim_set_repeat_count(&bar_y, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&bar_y);
+    }
 
     const int16_t dx = min_dim / 5;
     const int16_t dy = min_dim / 7;
@@ -1231,19 +1514,76 @@ void UiManager::applySceneEffect(SceneEffect effect) {
       const int16_t x_offset = ((index % 2U) == 0U) ? -dx : dx;
       const int16_t y_offset = (index < 2U) ? -dy : dy;
       lv_obj_clear_flag(particle, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_set_size(particle, broken_mode ? 12 : 10, broken_mode ? 12 : 10);
       lv_obj_align(particle, LV_ALIGN_CENTER, x_offset, y_offset);
 
       lv_anim_t particle_opa;
       lv_anim_init(&particle_opa);
       lv_anim_set_var(&particle_opa, particle);
-      lv_anim_set_exec_cb(&particle_opa, animSetOpa);
-      lv_anim_set_values(&particle_opa, 80, LV_OPA_COVER);
-      lv_anim_set_time(&particle_opa, resolveAnimMs(260));
-      lv_anim_set_playback_time(&particle_opa, resolveAnimMs(260));
+      if (broken_mode) {
+        lv_anim_set_exec_cb(&particle_opa, animSetRandomOpa);
+        lv_anim_set_values(&particle_opa, 0, 4095);
+      } else {
+        lv_anim_set_exec_cb(&particle_opa, animSetOpa);
+        lv_anim_set_values(&particle_opa, 80, LV_OPA_COVER);
+        lv_anim_set_playback_time(&particle_opa, resolveAnimMs(260));
+      }
+      lv_anim_set_time(&particle_opa, broken_mode ? resolveAnimMs(96) : resolveAnimMs(260));
       lv_anim_set_repeat_count(&particle_opa, LV_ANIM_REPEAT_INFINITE);
       lv_anim_set_delay(&particle_opa, static_cast<uint16_t>(index * 40U));
       lv_anim_start(&particle_opa);
+
+      if (broken_mode) {
+        lv_anim_t particle_x;
+        lv_anim_init(&particle_x);
+        lv_anim_set_var(&particle_x, particle);
+        lv_anim_set_exec_cb(&particle_x, animSetRandomTranslateX);
+        lv_anim_set_values(&particle_x, 0, 4095);
+        lv_anim_set_time(&particle_x, resolveAnimMs(static_cast<uint16_t>(70U + index * 12U)));
+        lv_anim_set_repeat_count(&particle_x, LV_ANIM_REPEAT_INFINITE);
+        lv_anim_set_delay(&particle_x, static_cast<uint16_t>(index * 15U));
+        lv_anim_start(&particle_x);
+
+        lv_anim_t particle_y;
+        lv_anim_init(&particle_y);
+        lv_anim_set_var(&particle_y, particle);
+        lv_anim_set_exec_cb(&particle_y, animSetRandomTranslateY);
+        lv_anim_set_values(&particle_y, 0, 4095);
+        lv_anim_set_time(&particle_y, resolveAnimMs(static_cast<uint16_t>(64U + index * 10U)));
+        lv_anim_set_repeat_count(&particle_y, LV_ANIM_REPEAT_INFINITE);
+        lv_anim_set_delay(&particle_y, static_cast<uint16_t>(index * 20U));
+        lv_anim_start(&particle_y);
+      }
     }
+
+    if (broken_mode) {
+      int32_t low_opa = static_cast<int32_t>(LV_OPA_COVER) - static_cast<int32_t>(demo_strobe_level_) * 3;
+      if (low_opa < 12) {
+        low_opa = 12;
+      }
+      if (low_opa > LV_OPA_COVER) {
+        low_opa = LV_OPA_COVER;
+      }
+      lv_anim_t root_flicker;
+      lv_anim_init(&root_flicker);
+      lv_anim_set_var(&root_flicker, scene_root_);
+      lv_anim_set_exec_cb(&root_flicker, animSetOpa);
+      lv_anim_set_values(&root_flicker, low_opa, LV_OPA_COVER);
+      lv_anim_set_time(&root_flicker, resolveAnimMs(84));
+      lv_anim_set_playback_time(&root_flicker, resolveAnimMs(84));
+      lv_anim_set_repeat_count(&root_flicker, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&root_flicker);
+
+      lv_anim_t root_noise;
+      lv_anim_init(&root_noise);
+      lv_anim_set_var(&root_noise, scene_root_);
+      lv_anim_set_exec_cb(&root_noise, animSetRandomOpa);
+      lv_anim_set_values(&root_noise, 0, 4095);
+      lv_anim_set_time(&root_noise, resolveAnimMs(60));
+      lv_anim_set_repeat_count(&root_noise, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&root_noise);
+    }
+
     if (scene_symbol_label_ != nullptr) {
       lv_anim_t symbol_celebrate;
       lv_anim_init(&symbol_celebrate);
@@ -1654,6 +1994,93 @@ void UiManager::animSetWidth(void* obj, int32_t value) {
     value = 16;
   }
   lv_obj_set_width(static_cast<lv_obj_t*>(obj), value);
+}
+
+void UiManager::animSetRandomTranslateX(void* obj, int32_t value) {
+  if (obj == nullptr) {
+    return;
+  }
+  lv_obj_t* target = static_cast<lv_obj_t*>(obj);
+  int16_t amplitude = 12;
+  if (g_instance != nullptr) {
+    if (target == g_instance->scene_fx_bar_) {
+      amplitude = 62;
+    } else if (target == g_instance->scene_core_) {
+      amplitude = 30;
+    } else if (target == g_instance->scene_symbol_label_) {
+      amplitude = 18;
+    } else if (target == g_instance->scene_ring_outer_ || target == g_instance->scene_ring_inner_) {
+      amplitude = 16;
+    } else {
+      for (lv_obj_t* particle : g_instance->scene_particles_) {
+        if (target == particle) {
+          amplitude = 42;
+          break;
+        }
+      }
+    }
+  }
+  const int16_t jitter = signedNoise(static_cast<uint32_t>(value), reinterpret_cast<uintptr_t>(target) ^ 0x6A09E667UL, amplitude);
+  lv_obj_set_style_translate_x(target, jitter, LV_PART_MAIN);
+}
+
+void UiManager::animSetRandomTranslateY(void* obj, int32_t value) {
+  if (obj == nullptr) {
+    return;
+  }
+  lv_obj_t* target = static_cast<lv_obj_t*>(obj);
+  int16_t amplitude = 10;
+  if (g_instance != nullptr) {
+    if (target == g_instance->scene_fx_bar_) {
+      amplitude = 34;
+    } else if (target == g_instance->scene_core_) {
+      amplitude = 24;
+    } else if (target == g_instance->scene_symbol_label_) {
+      amplitude = 14;
+    } else if (target == g_instance->scene_ring_outer_ || target == g_instance->scene_ring_inner_) {
+      amplitude = 12;
+    } else {
+      for (lv_obj_t* particle : g_instance->scene_particles_) {
+        if (target == particle) {
+          amplitude = 30;
+          break;
+        }
+      }
+    }
+  }
+  const int16_t jitter = signedNoise(static_cast<uint32_t>(value), reinterpret_cast<uintptr_t>(target) ^ 0xBB67AE85UL, amplitude);
+  lv_obj_set_style_translate_y(target, jitter, LV_PART_MAIN);
+}
+
+void UiManager::animSetRandomOpa(void* obj, int32_t value) {
+  if (obj == nullptr) {
+    return;
+  }
+  lv_obj_t* target = static_cast<lv_obj_t*>(obj);
+  lv_opa_t min_opa = 14;
+  lv_opa_t max_opa = LV_OPA_COVER;
+  if (g_instance != nullptr) {
+    if (target == g_instance->scene_root_) {
+      min_opa = (g_instance->demo_strobe_level_ >= 90U) ? 4 : 12;
+      max_opa = LV_OPA_COVER;
+    } else if (target == g_instance->scene_fx_bar_) {
+      min_opa = 12;
+    } else if (target == g_instance->scene_symbol_label_) {
+      min_opa = 8;
+    } else {
+      for (lv_obj_t* particle : g_instance->scene_particles_) {
+        if (target == particle) {
+          min_opa = 4;
+          break;
+        }
+      }
+    }
+  }
+  const uint32_t mixed =
+      mixNoise(static_cast<uint32_t>(value) * 1664525UL + 1013904223UL, reinterpret_cast<uintptr_t>(target) ^ 0x3C6EF372UL);
+  const uint16_t span = static_cast<uint16_t>(max_opa - min_opa);
+  const lv_opa_t out = static_cast<lv_opa_t>(min_opa + static_cast<lv_opa_t>(mixed % (span + 1U)));
+  lv_obj_set_style_opa(target, out, LV_PART_MAIN);
 }
 
 void UiManager::animTimelineTickCb(void* obj, int32_t value) {

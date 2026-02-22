@@ -29,6 +29,7 @@ class UiManager {
     kRadar,
     kWave,
     kBlink,
+    kGlitch,
     kCelebrate,
   };
 
@@ -84,6 +85,9 @@ class UiManager {
   static void animSetOpa(void* obj, int32_t value);
   static void animSetSize(void* obj, int32_t value);
   static void animSetWidth(void* obj, int32_t value);
+  static void animSetRandomTranslateX(void* obj, int32_t value);
+  static void animSetRandomTranslateY(void* obj, int32_t value);
+  static void animSetRandomOpa(void* obj, int32_t value);
   static void animTimelineTickCb(void* obj, int32_t value);
 
   bool ready_ = false;
@@ -110,6 +114,7 @@ class UiManager {
   char last_scene_id_[40] = {0};
   uint8_t demo_particle_count_ = 4U;
   uint8_t demo_strobe_level_ = 65U;
+  uint32_t last_lvgl_tick_ms_ = 0U;
 
   uint32_t pending_key_code_ = LV_KEY_ENTER;
   bool key_press_pending_ = false;

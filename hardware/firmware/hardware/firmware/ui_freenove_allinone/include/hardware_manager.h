@@ -46,6 +46,8 @@ class HardwareManager {
   void updateMic(uint32_t now_ms);
   void updateBattery(uint32_t now_ms);
   void updateLed(uint32_t now_ms);
+  bool isBrokenSceneHint() const;
+  void applyBrokenLedPattern(uint32_t now_ms, uint8_t base_r, uint8_t base_g, uint8_t base_b, uint8_t brightness);
   void setScenePalette(const char* scene_id);
   uint8_t batteryPercentFromMv(uint16_t cell_mv) const;
   static uint8_t clampColor(int value);

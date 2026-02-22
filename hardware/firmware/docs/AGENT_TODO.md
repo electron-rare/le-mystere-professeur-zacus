@@ -9,6 +9,28 @@
 7. Consigner les logs et artefacts produits (logs/rc_live/freenove_esp32s3_YYYYMMDD.log, artifacts/rc_live/freenove_esp32s3_YYYYMMDD.html).
 8. Documenter toute anomalie ou fail dans AGENT_TODO.md.
 
+## [2026-02-22] Freenove lockscreen glitch + LEDs cassées (Codex)
+
+- Renforcement de l'écran `SCENE_LOCKED`:
+  - nouvel effet runtime dédié `kGlitch` (secousses aléatoires X/Y, flicker aléatoire opacité, particules aléatoires, contraste renforcé).
+  - boucle d'effet enrichie pour les particules en mode `glitch` et `celebrate` (mode cassé) avec jitter non périodique.
+  - reset explicite des translations LVGL entre scènes pour éviter les résidus d'animation.
+- Renforcement LEDs WS2812 (4 LEDs Freenove) en scène cassée:
+  - pattern “broken hardware” aléatoire sur `SCENE_LOCKED` / `SCENE_BROKEN` / `SCENE_SIGNAL_SPIKE` (flashs brefs, non simultanés entre LEDs, coupures, sparks, dérive couleur).
+  - vérifié en série via `HW_STATUS` (LED#1 majoritairement OFF avec flashs brefs intermittents).
+- Data Story/FS alignées:
+  - `data/story/screens/SCENE_LOCKED.json` + `data/screens/locked.json` mis à jour (timeline plus agressive, strobe 100, contraste élevé, texte: `Module U-SON PROTO` / `VERIFICATION EN COURS`).
+  - fallback embarqué `/story/screens/SCENE_LOCKED.json` synchronisé dans `storage_manager.cpp`.
+- Correctif stabilité:
+  - régression stack canary détectée avec `StaticJsonDocument<4096>` dans `UiManager::renderScene`.
+  - corrigé via `DynamicJsonDocument(4096)` (plus de panic observé sur rechargement scénario).
+- Validations exécutées:
+  - `pio run -e freenove_esp32s3_full_with_ui` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `python3 tools/dev/verify_story_default_flow.py --port /dev/cu.usbmodem5AB90753301 --baud 115200` ✅
+  - vérif série: `[UI] scene=SCENE_LOCKED effect=6 speed=90 ... timeline=8` + absence `Guru Meditation` sur `SC_LOAD DEFAULT` ✅
+
 ## [2026-02-21] Firmware workflow hardening (Codex)
 
 - PR de correction et merge: `feat/fix-firmware-story-workflow` → PR #105 → squash merge (main).
@@ -685,3 +707,4 @@
   - résultat: suppressions annulées, structure source ESP8266 OLED rétablie.
 - [x] Validation:
   - `pio run -e esp8266_oled` ✅ (build complet OK après réparation).
+[20260222-113849] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260222-113849, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260222-113849/summary.md

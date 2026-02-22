@@ -1,0 +1,8 @@
+{
+  "id": "ACTION_HW_LED_READY",
+  "type": "hardware_led",
+  "config": {
+    "mode": "ready",
+    "auto_from_scene": true
+  }
+}

@@ -26,6 +26,8 @@ class UiManager {
     kNone = 0,
     kPulse,
     kScan,
+    kRadar,
+    kWave,
     kBlink,
     kCelebrate,
   };

@@ -268,9 +268,13 @@ ScenarioSnapshot ScenarioManager::snapshot() const {
   if (out.step != nullptr) {
     const char* screen_scene_id = out.step->resources.screenSceneId;
     const char* audio_pack_id = out.step->resources.audioPackId;
-    applyStepResourceOverride(out.step, &screen_scene_id, &audio_pack_id);
+    const char* const* action_ids = out.step->resources.actionIds;
+    uint8_t action_count = out.step->resources.actionCount;
+    applyStepResourceOverride(out.step, &screen_scene_id, &audio_pack_id, &action_ids, &action_count);
     out.screen_scene_id = screen_scene_id;
     out.audio_pack_id = audio_pack_id;
+    out.action_ids = action_ids;
+    out.action_count = action_count;
     out.mp3_gate_open = out.step->mp3GateOpen;
   }
   return out;
@@ -465,6 +469,11 @@ void ScenarioManager::clearStepResourceOverrides() {
     step_resource_overrides_[index].step_id.remove(0);
     step_resource_overrides_[index].screen_scene_id.remove(0);
     step_resource_overrides_[index].audio_pack_id.remove(0);
+    step_resource_overrides_[index].action_count = 0U;
+    for (uint8_t action_index = 0; action_index < StepResourceOverride::kMaxActionOverrides; ++action_index) {
+      step_resource_overrides_[index].action_ids[action_index].remove(0);
+      step_resource_overrides_[index].action_ptrs[action_index] = nullptr;
+    }
   }
   step_resource_override_count_ = 0U;
 }
@@ -542,7 +551,19 @@ void ScenarioManager::loadStepResourceOverrides(const char* scenario_file_path) 
       audio_pack_id = stringOrNull(step_obj["resources"]["audioPackId"]);
     }
 
-    if (screen_scene_id == nullptr && audio_pack_id == nullptr) {
+    JsonArrayConst action_ids = step_obj["action_ids"].as<JsonArrayConst>();
+    if (action_ids.isNull()) {
+      action_ids = step_obj["actionIds"].as<JsonArrayConst>();
+    }
+    if (action_ids.isNull()) {
+      action_ids = step_obj["resources"]["action_ids"].as<JsonArrayConst>();
+    }
+    if (action_ids.isNull()) {
+      action_ids = step_obj["resources"]["actionIds"].as<JsonArrayConst>();
+    }
+    const bool has_action_override = !action_ids.isNull() && action_ids.size() > 0U;
+
+    if (screen_scene_id == nullptr && audio_pack_id == nullptr && !has_action_override) {
       continue;
     }
     if (step_resource_override_count_ >= kMaxStepResourceOverrides) {
@@ -554,6 +575,28 @@ void ScenarioManager::loadStepResourceOverrides(const char* scenario_file_path) 
     entry.step_id = step_id;
     entry.screen_scene_id = (screen_scene_id != nullptr) ? screen_scene_id : "";
     entry.audio_pack_id = (audio_pack_id != nullptr) ? audio_pack_id : "";
+    entry.action_count = 0U;
+    for (uint8_t action_index = 0; action_index < StepResourceOverride::kMaxActionOverrides; ++action_index) {
+      entry.action_ids[action_index].remove(0);
+      entry.action_ptrs[action_index] = nullptr;
+    }
+    if (has_action_override) {
+      for (JsonVariantConst action_id_variant : action_ids) {
+        if (entry.action_count >= StepResourceOverride::kMaxActionOverrides) {
+          break;
+        }
+        if (!action_id_variant.is<const char*>()) {
+          continue;
+        }
+        const char* action_id = action_id_variant.as<const char*>();
+        if (action_id == nullptr || action_id[0] == '\0') {
+          continue;
+        }
+        entry.action_ids[entry.action_count] = action_id;
+        entry.action_ptrs[entry.action_count] = entry.action_ids[entry.action_count].c_str();
+        ++entry.action_count;
+      }
+    }
   }
 
   if (step_resource_override_count_ > 0U) {
@@ -576,7 +619,9 @@ const ScenarioManager::StepResourceOverride* ScenarioManager::findStepResourceOv
 
 void ScenarioManager::applyStepResourceOverride(const StepDef* step,
                                                 const char** out_screen_scene_id,
-                                                const char** out_audio_pack_id) const {
+                                                const char** out_audio_pack_id,
+                                                const char* const** out_action_ids,
+                                                uint8_t* out_action_count) const {
   if (step == nullptr) {
     return;
   }
@@ -589,5 +634,9 @@ void ScenarioManager::applyStepResourceOverride(const StepDef* step,
   }
   if (out_audio_pack_id != nullptr && !entry->audio_pack_id.isEmpty()) {
     *out_audio_pack_id = entry->audio_pack_id.c_str();
+  }
+  if (out_action_ids != nullptr && out_action_count != nullptr && entry->action_count > 0U) {
+    *out_action_ids = entry->action_ptrs;
+    *out_action_count = entry->action_count;
   }
 }

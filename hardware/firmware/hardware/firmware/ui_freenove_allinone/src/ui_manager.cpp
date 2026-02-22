@@ -243,13 +243,23 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     if (std::strcmp(normalized, "scan") == 0) {
       return SceneEffect::kScan;
     }
+    if (std::strcmp(normalized, "radar") == 0) {
+      return SceneEffect::kRadar;
+    }
+    if (std::strcmp(normalized, "wave") == 0) {
+      return SceneEffect::kWave;
+    }
     if (std::strcmp(normalized, "blink") == 0 || std::strcmp(normalized, "glitch") == 0) {
       return SceneEffect::kBlink;
     }
     if (std::strcmp(normalized, "celebrate") == 0 || std::strcmp(normalized, "reward") == 0) {
       return SceneEffect::kCelebrate;
     }
-    return fallback;
+    if (std::strstr(normalized, "scan") != nullptr || std::strstr(normalized, "radar") != nullptr ||
+        std::strstr(normalized, "wave") != nullptr || std::strstr(normalized, "sonar") != nullptr) {
+      return SceneEffect::kScan;
+    }
+    return SceneEffect::kPulse;
   };
 
   auto parseTransitionToken = [](const char* token, SceneTransition fallback) -> SceneTransition {
@@ -273,6 +283,9 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     if (std::strcmp(normalized, "slide_left") == 0 || std::strcmp(normalized, "left") == 0) {
       return SceneTransition::kSlideLeft;
     }
+    if (std::strcmp(normalized, "wipe") == 0) {
+      return SceneTransition::kSlideLeft;
+    }
     if (std::strcmp(normalized, "slide_right") == 0 || std::strcmp(normalized, "right") == 0) {
       return SceneTransition::kSlideRight;
     }
@@ -285,7 +298,8 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     if (std::strcmp(normalized, "zoom") == 0 || std::strcmp(normalized, "zoom_in") == 0) {
       return SceneTransition::kZoom;
     }
-    if (std::strcmp(normalized, "glitch") == 0 || std::strcmp(normalized, "flash") == 0) {
+    if (std::strcmp(normalized, "glitch") == 0 || std::strcmp(normalized, "flash") == 0 ||
+        std::strcmp(normalized, "camera_flash") == 0) {
       return SceneTransition::kGlitch;
     }
     return fallback;
@@ -372,14 +386,23 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     bg_rgb = 0x2A0508UL;
     accent_rgb = 0xFF4A45UL;
     text_rgb = 0xFFD5D1UL;
-  } else if (std::strcmp(scene_id, "SCENE_LA_DETECT") == 0 || std::strcmp(scene_id, "SCENE_SEARCH") == 0) {
+  } else if (std::strcmp(scene_id, "SCENE_LA_DETECT") == 0 || std::strcmp(scene_id, "SCENE_SEARCH") == 0 ||
+             std::strcmp(scene_id, "SCENE_CAMERA_SCAN") == 0) {
     title = "DETECTION";
     subtitle = "Balayage en cours";
     symbol = "SCAN";
-    effect = SceneEffect::kScan;
+    effect = SceneEffect::kRadar;
     bg_rgb = 0x041F1BUL;
     accent_rgb = 0x2CE5A6UL;
     text_rgb = 0xD9FFF0UL;
+  } else if (std::strcmp(scene_id, "SCENE_SIGNAL_SPIKE") == 0) {
+    title = "PIC DE SIGNAL";
+    subtitle = "Interference detectee";
+    symbol = "ALERT";
+    effect = SceneEffect::kWave;
+    bg_rgb = 0x24090CUL;
+    accent_rgb = 0xFF6A52UL;
+    text_rgb = 0xFFF2EBUL;
   } else if (std::strcmp(scene_id, "SCENE_WIN") == 0 || std::strcmp(scene_id, "SCENE_REWARD") == 0) {
     title = "VICTOIRE";
     subtitle = "Etape validee";
@@ -388,11 +411,11 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     bg_rgb = 0x231038UL;
     accent_rgb = 0xF4CB4AUL;
     text_rgb = 0xFFF6C7UL;
-  } else if (std::strcmp(scene_id, "SCENE_READY") == 0) {
+  } else if (std::strcmp(scene_id, "SCENE_READY") == 0 || std::strcmp(scene_id, "SCENE_MEDIA_ARCHIVE") == 0) {
     title = "PRET";
     subtitle = "Scenario termine";
     symbol = "READY";
-    effect = SceneEffect::kPulse;
+    effect = SceneEffect::kWave;
     bg_rgb = 0x0F2A12UL;
     accent_rgb = 0x6CD96BUL;
     text_rgb = 0xE8FFE7UL;
@@ -1040,6 +1063,93 @@ void UiManager::applySceneEffect(SceneEffect effect) {
       lv_anim_set_playback_time(&symbol_scan, scan_ms);
       lv_anim_set_repeat_count(&symbol_scan, LV_ANIM_REPEAT_INFINITE);
       lv_anim_start(&symbol_scan);
+    }
+    return;
+  }
+
+  if (effect == SceneEffect::kRadar) {
+    const uint16_t radar_ms = resolveAnimMs(780);
+    if (scene_ring_outer_ != nullptr) {
+      int16_t ring_small = min_dim - 96;
+      if (ring_small < 78) {
+        ring_small = 78;
+      }
+      int16_t ring_large = min_dim - 14;
+      if (ring_large < ring_small + 18) {
+        ring_large = ring_small + 18;
+      }
+      lv_anim_t ring_anim;
+      lv_anim_init(&ring_anim);
+      lv_anim_set_var(&ring_anim, scene_ring_outer_);
+      lv_anim_set_exec_cb(&ring_anim, animSetSize);
+      lv_anim_set_values(&ring_anim, ring_small, ring_large);
+      lv_anim_set_time(&ring_anim, radar_ms);
+      lv_anim_set_playback_time(&ring_anim, radar_ms);
+      lv_anim_set_repeat_count(&ring_anim, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&ring_anim);
+    }
+    if (scene_ring_inner_ != nullptr) {
+      lv_anim_t inner_opa;
+      lv_anim_init(&inner_opa);
+      lv_anim_set_var(&inner_opa, scene_ring_inner_);
+      lv_anim_set_exec_cb(&inner_opa, animSetOpa);
+      lv_anim_set_values(&inner_opa, 70, LV_OPA_COVER);
+      lv_anim_set_time(&inner_opa, radar_ms);
+      lv_anim_set_playback_time(&inner_opa, radar_ms);
+      lv_anim_set_repeat_count(&inner_opa, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&inner_opa);
+    }
+    if (scene_fx_bar_ != nullptr) {
+      lv_obj_set_size(scene_fx_bar_, width - 80, 6);
+      lv_obj_align(scene_fx_bar_, LV_ALIGN_CENTER, 0, 0);
+      lv_anim_t sweep_anim;
+      lv_anim_init(&sweep_anim);
+      lv_anim_set_var(&sweep_anim, scene_fx_bar_);
+      lv_anim_set_exec_cb(&sweep_anim, animSetY);
+      lv_anim_set_values(&sweep_anim, -6, (height / 2) - 10);
+      lv_anim_set_time(&sweep_anim, radar_ms);
+      lv_anim_set_playback_time(&sweep_anim, radar_ms);
+      lv_anim_set_repeat_count(&sweep_anim, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&sweep_anim);
+    }
+    return;
+  }
+
+  if (effect == SceneEffect::kWave) {
+    const uint16_t wave_ms = resolveAnimMs(520);
+    lv_obj_set_size(scene_fx_bar_, width - 120, 8);
+    lv_obj_align(scene_fx_bar_, LV_ALIGN_CENTER, 0, (height / 2) - 14);
+
+    lv_anim_t wave_width;
+    lv_anim_init(&wave_width);
+    lv_anim_set_var(&wave_width, scene_fx_bar_);
+    lv_anim_set_exec_cb(&wave_width, animSetWidth);
+    lv_anim_set_values(&wave_width, 44, width - 44);
+    lv_anim_set_time(&wave_width, wave_ms);
+    lv_anim_set_playback_time(&wave_width, wave_ms);
+    lv_anim_set_repeat_count(&wave_width, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&wave_width);
+
+    lv_anim_t wave_y;
+    lv_anim_init(&wave_y);
+    lv_anim_set_var(&wave_y, scene_fx_bar_);
+    lv_anim_set_exec_cb(&wave_y, animSetY);
+    lv_anim_set_values(&wave_y, (height / 2) - 30, (height / 2) + 4);
+    lv_anim_set_time(&wave_y, wave_ms);
+    lv_anim_set_playback_time(&wave_y, wave_ms);
+    lv_anim_set_repeat_count(&wave_y, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&wave_y);
+
+    if (scene_core_ != nullptr) {
+      lv_anim_t core_opa;
+      lv_anim_init(&core_opa);
+      lv_anim_set_var(&core_opa, scene_core_);
+      lv_anim_set_exec_cb(&core_opa, animSetOpa);
+      lv_anim_set_values(&core_opa, 85, LV_OPA_COVER);
+      lv_anim_set_time(&core_opa, wave_ms);
+      lv_anim_set_playback_time(&core_opa, wave_ms);
+      lv_anim_set_repeat_count(&core_opa, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&core_opa);
     }
     return;
   }

@@ -10,6 +10,8 @@ struct ScenarioSnapshot {
   const StepDef* step = nullptr;
   const char* screen_scene_id = nullptr;
   const char* audio_pack_id = nullptr;
+  const char* const* action_ids = nullptr;
+  uint8_t action_count = 0U;
   bool mp3_gate_open = false;
 };
 
@@ -37,6 +39,10 @@ class ScenarioManager {
     String step_id;
     String screen_scene_id;
     String audio_pack_id;
+    static constexpr uint8_t kMaxActionOverrides = 8U;
+    String action_ids[kMaxActionOverrides];
+    const char* action_ptrs[kMaxActionOverrides] = {nullptr};
+    uint8_t action_count = 0U;
   };
 
   static constexpr uint8_t kMaxStepResourceOverrides = 24U;
@@ -44,7 +50,11 @@ class ScenarioManager {
   void clearStepResourceOverrides();
   void loadStepResourceOverrides(const char* scenario_file_path);
   const StepResourceOverride* findStepResourceOverride(const char* step_id) const;
-  void applyStepResourceOverride(const StepDef* step, const char** out_screen_scene_id, const char** out_audio_pack_id) const;
+  void applyStepResourceOverride(const StepDef* step,
+                                 const char** out_screen_scene_id,
+                                 const char** out_audio_pack_id,
+                                 const char* const** out_action_ids = nullptr,
+                                 uint8_t* out_action_count = nullptr) const;
 
   bool dispatchEvent(StoryEventType type, const char* event_name, uint32_t now_ms, const char* source);
   bool applyTransition(const TransitionDef& transition, uint32_t now_ms, const char* source);

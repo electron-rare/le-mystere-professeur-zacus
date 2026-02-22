@@ -62,6 +62,8 @@ Palette de reference pour `data/story/screens/*.json` et pour la generation auto
 - `none`: scene statique.
 - `pulse`: pulsation du coeur/rings.
 - `scan`: balayage vertical.
+- `radar`: anneaux radar + balayage.
+- `wave`: onde/strobe horizontal.
 - `blink`: clignotement/strobe.
 - `celebrate`: mode celebration (bar + particules).
 
@@ -69,6 +71,11 @@ Aliases normalises au build:
 - `steady -> none`
 - `glitch -> blink`
 - `reward -> celebrate`
+- `sonar -> radar`
+
+Fallback runtime:
+- effet inconnu contenant `scan|radar|wave|sonar` -> `scan`
+- sinon -> `pulse`
 
 ## Options texte
 
@@ -123,6 +130,8 @@ Aliases normalises au build:
 - `down -> slide_down`
 - `zoom_in -> zoom`
 - `flash -> glitch`
+- `wipe -> slide_left`
+- `camera_flash -> glitch`
 
 `transition.duration_ms`: entier positif (fallback auto si invalide).
 

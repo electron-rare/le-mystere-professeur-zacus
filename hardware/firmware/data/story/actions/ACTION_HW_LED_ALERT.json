@@ -1,0 +1,12 @@
+{
+  "id": "ACTION_HW_LED_ALERT",
+  "type": "hardware_led",
+  "config": {
+    "mode": "alert",
+    "r": 255,
+    "g": 60,
+    "b": 32,
+    "brightness": 92,
+    "pulse": true
+  }
+}

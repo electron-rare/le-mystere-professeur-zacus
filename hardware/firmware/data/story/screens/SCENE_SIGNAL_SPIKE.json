@@ -1,0 +1,57 @@
+{
+  "id": "SCENE_SIGNAL_SPIKE",
+  "title": "PIC DE SIGNAL",
+  "subtitle": "Interference soudaine detectee",
+  "symbol": "ALERT",
+  "effect": "wave",
+  "visual": {
+    "show_title": false,
+    "show_symbol": true,
+    "effect_speed_ms": 260
+  },
+  "theme": {
+    "bg": "#24090C",
+    "accent": "#FF6A52",
+    "text": "#FFF2EB"
+  },
+  "timeline": {
+    "loop": true,
+    "duration_ms": 1400,
+    "keyframes": [
+      {
+        "at_ms": 0,
+        "effect": "wave",
+        "speed_ms": 260,
+        "theme": {
+          "bg": "#24090C",
+          "accent": "#FF6A52",
+          "text": "#FFF2EB"
+        }
+      },
+      {
+        "at_ms": 700,
+        "effect": "blink",
+        "speed_ms": 180,
+        "theme": {
+          "bg": "#2F1014",
+          "accent": "#FF8C73",
+          "text": "#FFF8F5"
+        }
+      },
+      {
+        "at_ms": 1400,
+        "effect": "wave",
+        "speed_ms": 320,
+        "theme": {
+          "bg": "#24090C",
+          "accent": "#FF6A52",
+          "text": "#FFF2EB"
+        }
+      }
+    ]
+  },
+  "transition": {
+    "effect": "camera_flash",
+    "duration_ms": 170
+  }
+}

@@ -3,11 +3,11 @@
   "title": "PRET",
   "subtitle": "Scenario termine",
   "symbol": "READY",
-  "effect": "pulse",
+  "effect": "wave",
   "visual": {
     "show_title": false,
     "show_symbol": true,
-    "effect_speed_ms": 620
+    "effect_speed_ms": 560
   },
   "theme": {
     "bg": "#0F2A12",
@@ -20,8 +20,8 @@
     "keyframes": [
       {
         "at_ms": 0,
-        "effect": "pulse",
-        "speed_ms": 620,
+        "effect": "wave",
+        "speed_ms": 560,
         "theme": {
           "bg": "#0F2A12",
           "accent": "#6CD96B",
@@ -30,8 +30,8 @@
       },
       {
         "at_ms": 1600,
-        "effect": "none",
-        "speed_ms": 620,
+        "effect": "radar",
+        "speed_ms": 740,
         "theme": {
           "bg": "#133517",
           "accent": "#9EE49D",

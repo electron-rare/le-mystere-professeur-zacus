@@ -1,0 +1,8 @@
+{
+  "id": "ACTION_REC_START",
+  "type": "recorder_start",
+  "config": {
+    "seconds": 20,
+    "filename": "story_voice.wav"
+  }
+}

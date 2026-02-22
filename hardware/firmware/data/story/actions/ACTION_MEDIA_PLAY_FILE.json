@@ -1,0 +1,7 @@
+{
+  "id": "ACTION_MEDIA_PLAY_FILE",
+  "type": "media_play",
+  "config": {
+    "file": "/music/boot_radio.mp3"
+  }
+}

@@ -41,7 +41,7 @@
     ]
   },
   "transition": {
-    "effect": "glitch",
+    "effect": "camera_flash",
     "duration_ms": 160
   }
 }

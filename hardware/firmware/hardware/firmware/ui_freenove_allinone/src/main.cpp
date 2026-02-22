@@ -1,13 +1,18 @@
 // main.cpp - Freenove ESP32-S3 all-in-one runtime loop.
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <LittleFS.h>
 #include <WebServer.h>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 #include "audio_manager.h"
 #include "button_manager.h"
+#include "camera_manager.h"
+#include "hardware_manager.h"
+#include "media_manager.h"
 #include "network_manager.h"
 #include "scenario_manager.h"
 #include "scenarios/default_scenario_v2.h"
@@ -44,6 +49,18 @@ struct RuntimeNetworkConfig {
   char espnow_boot_peers[kMaxEspNowBootPeers][18] = {};
 };
 
+struct RuntimeHardwareConfig {
+  bool enabled_on_boot = true;
+  uint32_t telemetry_period_ms = 2500U;
+  bool led_auto_from_scene = true;
+  bool mic_enabled = true;
+  uint8_t mic_event_threshold_pct = 72U;
+  char mic_event_name[32] = "SERIAL:MIC_SPIKE";
+  bool battery_enabled = true;
+  uint8_t battery_low_pct = 20U;
+  char battery_low_event_name[32] = "SERIAL:BATTERY_LOW";
+};
+
 AudioManager g_audio;
 ScenarioManager g_scenario;
 UiManager g_ui;
@@ -51,11 +68,22 @@ StorageManager g_storage;
 ButtonManager g_buttons;
 TouchManager g_touch;
 NetworkManager g_network;
+HardwareManager g_hardware;
+CameraManager g_camera;
+MediaManager g_media;
 RuntimeNetworkConfig g_network_cfg;
+RuntimeHardwareConfig g_hardware_cfg;
+CameraManager::Config g_camera_cfg;
+MediaManager::Config g_media_cfg;
 WebServer g_web_server(80);
 bool g_web_started = false;
 bool g_web_disconnect_sta_pending = false;
 uint32_t g_web_disconnect_sta_at_ms = 0U;
+bool g_hardware_started = false;
+uint32_t g_next_hw_telemetry_ms = 0U;
+bool g_mic_event_armed = true;
+bool g_battery_low_latched = false;
+char g_last_action_step_key[72] = {0};
 char g_serial_line[kSerialLineCapacity] = {0};
 size_t g_serial_line_len = 0U;
 
@@ -134,6 +162,27 @@ void copyText(char* out, size_t out_size, const char* text) {
   }
   std::strncpy(out, text, out_size - 1U);
   out[out_size - 1U] = '\0';
+}
+
+bool parseBoolToken(const char* text, bool* out_value) {
+  if (text == nullptr || out_value == nullptr) {
+    return false;
+  }
+  char normalized[16] = {0};
+  copyText(normalized, sizeof(normalized), text);
+  trimAsciiInPlace(normalized);
+  toLowerAsciiInPlace(normalized);
+  if (std::strcmp(normalized, "1") == 0 || std::strcmp(normalized, "true") == 0 || std::strcmp(normalized, "on") == 0 ||
+      std::strcmp(normalized, "yes") == 0) {
+    *out_value = true;
+    return true;
+  }
+  if (std::strcmp(normalized, "0") == 0 || std::strcmp(normalized, "false") == 0 || std::strcmp(normalized, "off") == 0 ||
+      std::strcmp(normalized, "no") == 0) {
+    *out_value = false;
+    return true;
+  }
+  return false;
 }
 
 void clearEspNowBootPeers() {
@@ -259,8 +308,23 @@ void resetRuntimeNetworkConfig() {
   clearEspNowBootPeers();
 }
 
+void resetRuntimeHardwareConfig() {
+  g_hardware_cfg = RuntimeHardwareConfig();
+}
+
+void resetRuntimeCameraConfig() {
+  g_camera_cfg = CameraManager::Config();
+}
+
+void resetRuntimeMediaConfig() {
+  g_media_cfg = MediaManager::Config();
+}
+
 void loadRuntimeNetworkConfig() {
   resetRuntimeNetworkConfig();
+  resetRuntimeHardwareConfig();
+  resetRuntimeCameraConfig();
+  resetRuntimeMediaConfig();
 
   const String wifi_payload = g_storage.loadTextFile("/story/apps/APP_WIFI.json");
   if (!wifi_payload.isEmpty()) {
@@ -357,6 +421,119 @@ void loadRuntimeNetworkConfig() {
     }
   }
 
+  const String hardware_payload = g_storage.loadTextFile("/story/apps/APP_HARDWARE.json");
+  if (!hardware_payload.isEmpty()) {
+    StaticJsonDocument<512> document;
+    const DeserializationError error = deserializeJson(document, hardware_payload);
+    if (!error) {
+      JsonVariantConst config = document["config"];
+      if (config["enabled_on_boot"].is<bool>()) {
+        g_hardware_cfg.enabled_on_boot = config["enabled_on_boot"].as<bool>();
+      }
+      if (config["telemetry_period_ms"].is<unsigned int>()) {
+        const uint32_t telemetry = config["telemetry_period_ms"].as<unsigned int>();
+        if (telemetry >= 250U) {
+          g_hardware_cfg.telemetry_period_ms = telemetry;
+        }
+      }
+      if (config["led_auto_from_scene"].is<bool>()) {
+        g_hardware_cfg.led_auto_from_scene = config["led_auto_from_scene"].as<bool>();
+      }
+      if (config["mic_enabled"].is<bool>()) {
+        g_hardware_cfg.mic_enabled = config["mic_enabled"].as<bool>();
+      }
+      if (config["mic_event_threshold_pct"].is<unsigned int>()) {
+        uint8_t threshold = static_cast<uint8_t>(config["mic_event_threshold_pct"].as<unsigned int>());
+        if (threshold > 100U) {
+          threshold = 100U;
+        }
+        g_hardware_cfg.mic_event_threshold_pct = threshold;
+      }
+      const char* mic_event_name = config["mic_event_name"] | "";
+      if (mic_event_name[0] != '\0') {
+        copyText(g_hardware_cfg.mic_event_name, sizeof(g_hardware_cfg.mic_event_name), mic_event_name);
+      }
+      if (config["battery_enabled"].is<bool>()) {
+        g_hardware_cfg.battery_enabled = config["battery_enabled"].as<bool>();
+      }
+      if (config["battery_low_pct"].is<unsigned int>()) {
+        uint8_t threshold = static_cast<uint8_t>(config["battery_low_pct"].as<unsigned int>());
+        if (threshold > 100U) {
+          threshold = 100U;
+        }
+        g_hardware_cfg.battery_low_pct = threshold;
+      }
+      const char* battery_event_name = config["battery_low_event_name"] | "";
+      if (battery_event_name[0] != '\0') {
+        copyText(g_hardware_cfg.battery_low_event_name,
+                 sizeof(g_hardware_cfg.battery_low_event_name),
+                 battery_event_name);
+      }
+    } else {
+      Serial.printf("[HW] APP_HARDWARE invalid json (%s)\n", error.c_str());
+    }
+  }
+
+  const String camera_payload = g_storage.loadTextFile("/story/apps/APP_CAMERA.json");
+  if (!camera_payload.isEmpty()) {
+    StaticJsonDocument<512> document;
+    const DeserializationError error = deserializeJson(document, camera_payload);
+    if (!error) {
+      JsonVariantConst config = document["config"];
+      if (config["enabled_on_boot"].is<bool>()) {
+        g_camera_cfg.enabled_on_boot = config["enabled_on_boot"].as<bool>();
+      }
+      const char* frame_size = config["frame_size"] | "";
+      if (frame_size[0] != '\0') {
+        copyText(g_camera_cfg.frame_size, sizeof(g_camera_cfg.frame_size), frame_size);
+      }
+      if (config["jpeg_quality"].is<unsigned int>()) {
+        g_camera_cfg.jpeg_quality = static_cast<uint8_t>(config["jpeg_quality"].as<unsigned int>());
+      }
+      if (config["fb_count"].is<unsigned int>()) {
+        g_camera_cfg.fb_count = static_cast<uint8_t>(config["fb_count"].as<unsigned int>());
+      }
+      if (config["xclk_hz"].is<unsigned int>()) {
+        g_camera_cfg.xclk_hz = config["xclk_hz"].as<unsigned int>();
+      }
+      const char* snapshot_dir = config["snapshot_dir"] | "";
+      if (snapshot_dir[0] != '\0') {
+        copyText(g_camera_cfg.snapshot_dir, sizeof(g_camera_cfg.snapshot_dir), snapshot_dir);
+      }
+    } else {
+      Serial.printf("[CAM] APP_CAMERA invalid json (%s)\n", error.c_str());
+    }
+  }
+
+  const String media_payload = g_storage.loadTextFile("/story/apps/APP_MEDIA.json");
+  if (!media_payload.isEmpty()) {
+    StaticJsonDocument<512> document;
+    const DeserializationError error = deserializeJson(document, media_payload);
+    if (!error) {
+      JsonVariantConst config = document["config"];
+      const char* music_dir = config["music_dir"] | "";
+      const char* picture_dir = config["picture_dir"] | "";
+      const char* record_dir = config["record_dir"] | "";
+      if (music_dir[0] != '\0') {
+        copyText(g_media_cfg.music_dir, sizeof(g_media_cfg.music_dir), music_dir);
+      }
+      if (picture_dir[0] != '\0') {
+        copyText(g_media_cfg.picture_dir, sizeof(g_media_cfg.picture_dir), picture_dir);
+      }
+      if (record_dir[0] != '\0') {
+        copyText(g_media_cfg.record_dir, sizeof(g_media_cfg.record_dir), record_dir);
+      }
+      if (config["record_max_seconds"].is<unsigned int>()) {
+        g_media_cfg.record_max_seconds = static_cast<uint16_t>(config["record_max_seconds"].as<unsigned int>());
+      }
+      if (config["auto_stop_record_on_step_change"].is<bool>()) {
+        g_media_cfg.auto_stop_record_on_step_change = config["auto_stop_record_on_step_change"].as<bool>();
+      }
+    } else {
+      Serial.printf("[MEDIA] APP_MEDIA invalid json (%s)\n", error.c_str());
+    }
+  }
+
   Serial.printf(
       "[NET] cfg host=%s local=%s wifi_test=%s ap_default=%s ap_policy=%u pause_retry_on_ap_client=%u retry_ms=%lu "
       "espnow_boot=%u bridge_story=%u peers=%u\n",
@@ -370,6 +547,28 @@ void loadRuntimeNetworkConfig() {
                 g_network_cfg.espnow_enabled_on_boot ? 1U : 0U,
                 g_network_cfg.espnow_bridge_to_story_event ? 1U : 0U,
                 g_network_cfg.espnow_boot_peer_count);
+  Serial.printf(
+      "[HW] cfg boot=%u telemetry_ms=%lu led_auto=%u mic=%u threshold=%u battery=%u low_pct=%u\n",
+      g_hardware_cfg.enabled_on_boot ? 1U : 0U,
+      static_cast<unsigned long>(g_hardware_cfg.telemetry_period_ms),
+      g_hardware_cfg.led_auto_from_scene ? 1U : 0U,
+      g_hardware_cfg.mic_enabled ? 1U : 0U,
+      g_hardware_cfg.mic_event_threshold_pct,
+      g_hardware_cfg.battery_enabled ? 1U : 0U,
+      g_hardware_cfg.battery_low_pct);
+  Serial.printf("[CAM] cfg boot=%u frame=%s quality=%u fb=%u xclk=%lu dir=%s\n",
+                g_camera_cfg.enabled_on_boot ? 1U : 0U,
+                g_camera_cfg.frame_size,
+                static_cast<unsigned int>(g_camera_cfg.jpeg_quality),
+                static_cast<unsigned int>(g_camera_cfg.fb_count),
+                static_cast<unsigned long>(g_camera_cfg.xclk_hz),
+                g_camera_cfg.snapshot_dir);
+  Serial.printf("[MEDIA] cfg music=%s picture=%s record=%s max_sec=%u auto_stop=%u\n",
+                g_media_cfg.music_dir,
+                g_media_cfg.picture_dir,
+                g_media_cfg.record_dir,
+                static_cast<unsigned int>(g_media_cfg.record_max_seconds),
+                g_media_cfg.auto_stop_record_on_step_change ? 1U : 0U);
 }
 
 bool buildEventTokenFromTypeName(StoryEventType type,
@@ -587,10 +786,26 @@ bool dispatchScenarioEventByType(StoryEventType type, const char* event_name, ui
 bool dispatchScenarioEventByName(const char* event_name, uint32_t now_ms);
 void refreshSceneIfNeeded(bool force_render);
 void startPendingAudioIfAny();
+void executeStoryActionsForStep(const ScenarioSnapshot& snapshot, uint32_t now_ms);
+bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot, uint32_t now_ms);
 void webFillWifiStatus(JsonObject out, const NetworkManager::Snapshot& net);
 void webFillEspNowStatus(JsonObject out, const NetworkManager::Snapshot& net);
+void webFillHardwareStatus(JsonObject out);
+void webFillCameraStatus(JsonObject out);
+void webFillMediaStatus(JsonObject out, uint32_t now_ms);
+void webSendHardwareStatus();
+void webSendCameraStatus();
+void webSendMediaFiles();
+void webSendMediaRecordStatus();
 bool webReconnectLocalWifi();
 bool refreshStoryFromSd();
+bool dispatchControlAction(const String& action_raw, uint32_t now_ms, String* out_error = nullptr);
+void printHardwareStatus();
+void printHardwareStatusJson();
+void printCameraStatus();
+void printMediaStatus();
+void maybeEmitHardwareEvents(uint32_t now_ms);
+void maybeLogHardwareTelemetry(uint32_t now_ms);
 
 struct EspNowCommandResult {
   bool handled = false;
@@ -603,6 +818,9 @@ struct EspNowCommandResult {
 void appendCompactRuntimeStatus(JsonObject out) {
   const NetworkManager::Snapshot net = g_network.snapshot();
   const ScenarioSnapshot scenario = g_scenario.snapshot();
+  const HardwareManager::Snapshot hardware = g_hardware.snapshot();
+  const CameraManager::Snapshot camera = g_camera.snapshot();
+  const MediaManager::Snapshot media = g_media.snapshot();
   out["state"] = net.state;
   out["mode"] = net.mode;
   out["ip"] = net.ip;
@@ -613,6 +831,9 @@ void appendCompactRuntimeStatus(JsonObject out) {
   out["screen"] = (scenario.screen_scene_id != nullptr) ? scenario.screen_scene_id : "";
   out["audio_pack"] = (scenario.audio_pack_id != nullptr) ? scenario.audio_pack_id : "";
   out["audio_playing"] = g_audio.isPlaying();
+  out["hw_ready"] = hardware.ready;
+  out["cam_enabled"] = camera.enabled;
+  out["media_recording"] = media.recording;
 }
 
 bool executeEspNowCommandPayload(const char* payload_text, uint32_t now_ms, EspNowCommandResult* out_result) {
@@ -766,6 +987,21 @@ bool executeEspNowCommandPayload(const char* payload_text, uint32_t now_ms, EspN
     out_result->ok = dispatched;
     if (!dispatched) {
       out_result->error = "invalid_sc_event";
+    }
+    return true;
+  }
+
+  String control_action = command;
+  if (!trailing_arg.isEmpty()) {
+    control_action += " ";
+    control_action += trailing_arg;
+  }
+  String control_error;
+  const bool control_ok = dispatchControlAction(control_action, now_ms, &control_error);
+  if (control_ok || control_error != "unsupported_action") {
+    out_result->ok = control_ok;
+    if (!control_ok) {
+      out_result->error = control_error;
     }
     return true;
   }
@@ -935,12 +1171,16 @@ void printButtonRead() {
 void printRuntimeStatus() {
   const ScenarioSnapshot snapshot = g_scenario.snapshot();
   const NetworkManager::Snapshot net = g_network.snapshot();
+  const HardwareManager::Snapshot hw = g_hardware.snapshot();
+  const CameraManager::Snapshot camera = g_camera.snapshot();
+  const MediaManager::Snapshot media = g_media.snapshot();
   const char* scenario_id = scenarioIdFromSnapshot(snapshot);
   const char* step_id = stepIdFromSnapshot(snapshot);
   const char* screen_id = (snapshot.screen_scene_id != nullptr) ? snapshot.screen_scene_id : "n/a";
   const char* audio_pack = (snapshot.audio_pack_id != nullptr) ? snapshot.audio_pack_id : "n/a";
   Serial.printf("STATUS scenario=%s step=%s screen=%s pack=%s audio=%u track=%s profile=%u:%s vol=%u "
-                "net=%s/%s sta=%u connecting=%u ap=%u espnow=%u peers=%u ip=%s key=%u mv=%d\n",
+                "net=%s/%s sta=%u connecting=%u ap=%u espnow=%u peers=%u ip=%s key=%u mv=%d "
+                "hw=%u mic=%u battery=%u cam=%u media_play=%u rec=%u\n",
                 scenario_id,
                 step_id,
                 screen_id,
@@ -959,7 +1199,74 @@ void printRuntimeStatus() {
                 net.espnow_peer_count,
                 net.ip,
                 g_buttons.currentKey(),
-                g_buttons.lastAnalogMilliVolts());
+                g_buttons.lastAnalogMilliVolts(),
+                hw.ready ? 1U : 0U,
+                hw.mic_level_percent,
+                hw.battery_percent,
+                camera.enabled ? 1U : 0U,
+                media.playing ? 1U : 0U,
+                media.recording ? 1U : 0U);
+}
+
+void printHardwareStatus() {
+  const HardwareManager::Snapshot hw = g_hardware.snapshot();
+  Serial.printf(
+      "HW_STATUS ready=%u ws2812=%u mic=%u battery=%u auto=%u manual=%u led=%u,%u,%u br=%u "
+      "mic_pct=%u mic_peak=%u battery_pct=%u battery_mv=%u charging=%u scene=%s\n",
+      hw.ready ? 1U : 0U,
+      hw.ws2812_ready ? 1U : 0U,
+      hw.mic_ready ? 1U : 0U,
+      hw.battery_ready ? 1U : 0U,
+      g_hardware_cfg.led_auto_from_scene ? 1U : 0U,
+      hw.led_manual ? 1U : 0U,
+      hw.led_r,
+      hw.led_g,
+      hw.led_b,
+      hw.led_brightness,
+      hw.mic_level_percent,
+      hw.mic_peak,
+      hw.battery_percent,
+      hw.battery_cell_mv,
+      hw.charging ? 1U : 0U,
+      hw.scene_id);
+}
+
+void printHardwareStatusJson() {
+  StaticJsonDocument<768> document;
+  webFillHardwareStatus(document.to<JsonObject>());
+  serializeJson(document, Serial);
+  Serial.println();
+}
+
+void printCameraStatus() {
+  const CameraManager::Snapshot camera = g_camera.snapshot();
+  Serial.printf("CAM_STATUS supported=%u enabled=%u init=%u frame=%s quality=%u fb=%u xclk=%lu captures=%lu fails=%lu last=%s err=%s\n",
+                camera.supported ? 1U : 0U,
+                camera.enabled ? 1U : 0U,
+                camera.initialized ? 1U : 0U,
+                camera.frame_size,
+                static_cast<unsigned int>(camera.jpeg_quality),
+                static_cast<unsigned int>(camera.fb_count),
+                static_cast<unsigned long>(camera.xclk_hz),
+                static_cast<unsigned long>(camera.capture_count),
+                static_cast<unsigned long>(camera.fail_count),
+                camera.last_file[0] != '\0' ? camera.last_file : "n/a",
+                camera.last_error[0] != '\0' ? camera.last_error : "none");
+}
+
+void printMediaStatus() {
+  const MediaManager::Snapshot media = g_media.snapshot();
+  Serial.printf("REC_STATUS playing=%u recording=%u elapsed=%u/%u file=%s music_dir=%s picture_dir=%s record_dir=%s last_ok=%u err=%s\n",
+                media.playing ? 1U : 0U,
+                media.recording ? 1U : 0U,
+                static_cast<unsigned int>(media.record_elapsed_seconds),
+                static_cast<unsigned int>(media.record_limit_seconds),
+                media.record_file[0] != '\0' ? media.record_file : "n/a",
+                media.music_dir,
+                media.picture_dir,
+                media.record_dir,
+                media.last_ok ? 1U : 0U,
+                media.last_error[0] != '\0' ? media.last_error : "none");
 }
 
 constexpr const char* kWebUiIndex = R"HTML(
@@ -1137,6 +1444,73 @@ void webFillWifiStatus(JsonObject out, const NetworkManager::Snapshot& net) {
   out["mode"] = String(net.mode);
 }
 
+void webFillHardwareStatus(JsonObject out) {
+  const HardwareManager::Snapshot hw = g_hardware.snapshot();
+  out["ready"] = hw.ready;
+  out["enabled_on_boot"] = g_hardware_cfg.enabled_on_boot;
+  out["led_auto_from_scene"] = g_hardware_cfg.led_auto_from_scene;
+  out["telemetry_period_ms"] = g_hardware_cfg.telemetry_period_ms;
+  out["ws2812_ready"] = hw.ws2812_ready;
+  out["mic_ready"] = hw.mic_ready;
+  out["battery_ready"] = hw.battery_ready;
+  out["led_manual"] = hw.led_manual;
+  JsonObject led = out["led"].to<JsonObject>();
+  led["r"] = hw.led_r;
+  led["g"] = hw.led_g;
+  led["b"] = hw.led_b;
+  out["led_brightness"] = hw.led_brightness;
+  out["mic_enabled"] = g_hardware_cfg.mic_enabled;
+  out["mic_threshold_pct"] = g_hardware_cfg.mic_event_threshold_pct;
+  out["mic_level_pct"] = hw.mic_level_percent;
+  out["mic_peak"] = hw.mic_peak;
+  out["battery_enabled"] = g_hardware_cfg.battery_enabled;
+  out["battery_low_pct"] = g_hardware_cfg.battery_low_pct;
+  out["battery_pct"] = hw.battery_percent;
+  out["battery_mv"] = hw.battery_cell_mv;
+  out["charging"] = hw.charging;
+  out["last_button"] = hw.last_button;
+  out["scene_id"] = hw.scene_id;
+}
+
+void webFillCameraStatus(JsonObject out) {
+  const CameraManager::Snapshot camera = g_camera.snapshot();
+  out["supported"] = camera.supported;
+  out["enabled"] = camera.enabled;
+  out["initialized"] = camera.initialized;
+  out["enabled_on_boot"] = g_camera_cfg.enabled_on_boot;
+  out["frame_size"] = camera.frame_size;
+  out["jpeg_quality"] = camera.jpeg_quality;
+  out["fb_count"] = camera.fb_count;
+  out["xclk_hz"] = camera.xclk_hz;
+  out["snapshot_dir"] = camera.snapshot_dir;
+  out["capture_count"] = camera.capture_count;
+  out["fail_count"] = camera.fail_count;
+  out["last_capture_ms"] = camera.last_capture_ms;
+  out["last_file"] = camera.last_file;
+  out["last_error"] = camera.last_error;
+}
+
+void webFillMediaStatus(JsonObject out, uint32_t now_ms) {
+  const MediaManager::Snapshot media = g_media.snapshot();
+  out["ready"] = media.ready;
+  out["playing"] = media.playing;
+  out["playing_path"] = media.playing_path;
+  out["recording"] = media.recording;
+  out["record_limit_seconds"] = media.record_limit_seconds;
+  uint16_t elapsed = media.record_elapsed_seconds;
+  if (media.recording && media.record_started_ms > 0U) {
+    elapsed = static_cast<uint16_t>((now_ms - media.record_started_ms) / 1000U);
+  }
+  out["record_elapsed_seconds"] = elapsed;
+  out["record_file"] = media.record_file;
+  out["record_simulated"] = media.record_simulated;
+  out["music_dir"] = media.music_dir;
+  out["picture_dir"] = media.picture_dir;
+  out["record_dir"] = media.record_dir;
+  out["last_ok"] = media.last_ok;
+  out["last_error"] = media.last_error;
+}
+
 void webSendWifiStatus() {
   const NetworkManager::Snapshot net = g_network.snapshot();
   StaticJsonDocument<384> document;
@@ -1148,6 +1522,47 @@ void webSendEspNowStatus() {
   const NetworkManager::Snapshot net = g_network.snapshot();
   StaticJsonDocument<512> document;
   webFillEspNowStatus(document.to<JsonObject>(), net);
+  webSendJsonDocument(document);
+}
+
+void webSendHardwareStatus() {
+  StaticJsonDocument<768> document;
+  webFillHardwareStatus(document.to<JsonObject>());
+  webSendJsonDocument(document);
+}
+
+void webSendCameraStatus() {
+  StaticJsonDocument<768> document;
+  webFillCameraStatus(document.to<JsonObject>());
+  webSendJsonDocument(document);
+}
+
+void webSendMediaFiles() {
+  String kind = g_web_server.arg("kind");
+  if (kind.isEmpty()) {
+    kind = "music";
+  }
+  String files_json;
+  const bool ok = g_media.listFiles(kind.c_str(), &files_json);
+  DynamicJsonDocument response(3072);
+  response["ok"] = ok;
+  response["kind"] = kind;
+  if (ok) {
+    DynamicJsonDocument files_doc(2048);
+    if (!deserializeJson(files_doc, files_json)) {
+      response["files"] = files_doc.as<JsonArrayConst>();
+    } else {
+      response["files_raw"] = files_json;
+    }
+  } else {
+    response["error"] = "invalid_kind";
+  }
+  webSendJsonDocument(response, ok ? 200 : 400);
+}
+
+void webSendMediaRecordStatus() {
+  StaticJsonDocument<768> document;
+  webFillMediaStatus(document.to<JsonObject>(), millis());
   webSendJsonDocument(document);
 }
 
@@ -1185,6 +1600,7 @@ bool refreshStoryFromSd() {
   }
   const bool reloaded = g_scenario.begin(kDefaultScenarioFile);
   if (reloaded) {
+    g_last_action_step_key[0] = '\0';
     refreshSceneIfNeeded(true);
     startPendingAudioIfAny();
   }
@@ -1192,19 +1608,179 @@ bool refreshStoryFromSd() {
   return reloaded;
 }
 
-bool webDispatchAction(const String& action_raw) {
+void maybeEmitHardwareEvents(uint32_t now_ms) {
+  if (!g_hardware_started) {
+    return;
+  }
+  const HardwareManager::Snapshot hw = g_hardware.snapshot();
+
+  if (g_hardware_cfg.mic_enabled && hw.mic_ready) {
+    if (hw.mic_level_percent >= g_hardware_cfg.mic_event_threshold_pct) {
+      if (g_mic_event_armed && g_hardware_cfg.mic_event_name[0] != '\0') {
+        dispatchScenarioEventByName(g_hardware_cfg.mic_event_name, now_ms);
+        g_mic_event_armed = false;
+      }
+    } else if (hw.mic_level_percent + 6U < g_hardware_cfg.mic_event_threshold_pct) {
+      g_mic_event_armed = true;
+    }
+  }
+
+  if (g_hardware_cfg.battery_enabled && hw.battery_ready) {
+    if (!g_battery_low_latched && hw.battery_percent <= g_hardware_cfg.battery_low_pct &&
+        g_hardware_cfg.battery_low_event_name[0] != '\0') {
+      dispatchScenarioEventByName(g_hardware_cfg.battery_low_event_name, now_ms);
+      g_battery_low_latched = true;
+    } else if (g_battery_low_latched && hw.battery_percent > (g_hardware_cfg.battery_low_pct + 4U)) {
+      g_battery_low_latched = false;
+    }
+  }
+}
+
+void maybeLogHardwareTelemetry(uint32_t now_ms) {
+  if (!g_hardware_started || g_hardware_cfg.telemetry_period_ms < 250U) {
+    return;
+  }
+  if (now_ms < g_next_hw_telemetry_ms) {
+    return;
+  }
+  g_next_hw_telemetry_ms = now_ms + g_hardware_cfg.telemetry_period_ms;
+  const HardwareManager::Snapshot hw = g_hardware.snapshot();
+  Serial.printf("[HW] telemetry mic=%u%% peak=%u battery=%u%% (%umV) led=%u,%u,%u auto=%u\n",
+                hw.mic_level_percent,
+                hw.mic_peak,
+                hw.battery_percent,
+                hw.battery_cell_mv,
+                hw.led_r,
+                hw.led_g,
+                hw.led_b,
+                g_hardware_cfg.led_auto_from_scene ? 1U : 0U);
+}
+
+bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot, uint32_t now_ms) {
+  if (action_id == nullptr || action_id[0] == '\0') {
+    return false;
+  }
+  const String action_path = String("/story/actions/") + action_id + ".json";
+  const String payload = g_storage.loadTextFile(action_path.c_str());
+  StaticJsonDocument<512> action_doc;
+  if (!payload.isEmpty()) {
+    deserializeJson(action_doc, payload);
+  }
+  const char* action_type = action_doc["type"] | "";
+
+  if (std::strcmp(action_id, "ACTION_TRACE_STEP") == 0 || std::strcmp(action_type, "trace_step") == 0) {
+    Serial.printf("[ACTION] TRACE scenario=%s step=%s screen=%s audio=%s\n",
+                  scenarioIdFromSnapshot(snapshot),
+                  stepIdFromSnapshot(snapshot),
+                  snapshot.screen_scene_id != nullptr ? snapshot.screen_scene_id : "n/a",
+                  snapshot.audio_pack_id != nullptr ? snapshot.audio_pack_id : "n/a");
+    return true;
+  }
+
+  if (std::strcmp(action_id, "ACTION_REFRESH_SD") == 0 || std::strcmp(action_type, "refresh_storage") == 0) {
+    const bool ok = g_storage.syncStoryTreeFromSd() || g_storage.syncStoryFileFromSd(kDefaultScenarioFile);
+    Serial.printf("[ACTION] REFRESH_SD ok=%u\n", ok ? 1U : 0U);
+    return ok;
+  }
+
+  if (std::strcmp(action_id, "ACTION_HW_LED_ALERT") == 0) {
+    const uint8_t red = static_cast<uint8_t>(action_doc["config"]["r"] | 255U);
+    const uint8_t green = static_cast<uint8_t>(action_doc["config"]["g"] | 60U);
+    const uint8_t blue = static_cast<uint8_t>(action_doc["config"]["b"] | 32U);
+    const uint8_t brightness = static_cast<uint8_t>(action_doc["config"]["brightness"] | 92U);
+    const bool pulse = action_doc["config"]["pulse"] | true;
+    return g_hardware.setManualLed(red, green, blue, brightness, pulse);
+  }
+
+  if (std::strcmp(action_id, "ACTION_HW_LED_READY") == 0) {
+    const bool auto_scene = action_doc["config"]["auto_from_scene"] | true;
+    g_hardware.clearManualLed();
+    if (auto_scene && snapshot.screen_scene_id != nullptr && g_hardware_cfg.led_auto_from_scene) {
+      g_hardware.setSceneHint(snapshot.screen_scene_id);
+    }
+    return true;
+  }
+
+  if (std::strcmp(action_id, "ACTION_CAMERA_SNAPSHOT") == 0) {
+    const char* filename = action_doc["config"]["filename"] | "";
+    const char* event_name = action_doc["config"]["event_on_success"] | "SERIAL:CAMERA_CAPTURED";
+    String out_path;
+    const bool ok = g_camera.snapshotToFile(filename[0] != '\0' ? filename : nullptr, &out_path);
+    Serial.printf("[ACTION] CAMERA_SNAPSHOT ok=%u path=%s\n", ok ? 1U : 0U, ok ? out_path.c_str() : "n/a");
+    if (ok) {
+      dispatchScenarioEventByName(event_name, now_ms);
+    }
+    return ok;
+  }
+
+  if (std::strcmp(action_id, "ACTION_MEDIA_PLAY_FILE") == 0) {
+    const char* media_file = action_doc["config"]["file"] | action_doc["config"]["path"] | "/music/boot_radio.mp3";
+    return g_media.play(media_file, &g_audio);
+  }
+
+  if (std::strcmp(action_id, "ACTION_REC_START") == 0) {
+    const uint16_t seconds = static_cast<uint16_t>(action_doc["config"]["seconds"] | action_doc["config"]["duration_sec"] |
+                                                   g_media_cfg.record_max_seconds);
+    const char* filename = action_doc["config"]["filename"] | "";
+    return g_media.startRecording(seconds, filename);
+  }
+
+  if (std::strcmp(action_id, "ACTION_REC_STOP") == 0) {
+    return g_media.stopRecording();
+  }
+
+  return false;
+}
+
+void executeStoryActionsForStep(const ScenarioSnapshot& snapshot, uint32_t now_ms) {
+  if (snapshot.step == nullptr) {
+    return;
+  }
+  if (snapshot.action_ids == nullptr || snapshot.action_count == 0U) {
+    return;
+  }
+
+  char step_key[sizeof(g_last_action_step_key)] = {0};
+  snprintf(step_key,
+           sizeof(step_key),
+           "%s:%s",
+           scenarioIdFromSnapshot(snapshot),
+           stepIdFromSnapshot(snapshot));
+  if (std::strcmp(step_key, g_last_action_step_key) == 0) {
+    return;
+  }
+  copyText(g_last_action_step_key, sizeof(g_last_action_step_key), step_key);
+
+  g_media.noteStepChange();
+  for (uint8_t index = 0U; index < snapshot.action_count; ++index) {
+    const char* action_id = snapshot.action_ids[index];
+    if (action_id == nullptr || action_id[0] == '\0') {
+      continue;
+    }
+    const bool ok = executeStoryAction(action_id, snapshot, now_ms);
+    Serial.printf("[ACTION] id=%s ok=%u\n", action_id, ok ? 1U : 0U);
+  }
+}
+
+bool dispatchControlAction(const String& action_raw, uint32_t now_ms, String* out_error) {
+  if (out_error != nullptr) {
+    out_error->remove(0);
+  }
   String action = action_raw;
   action.trim();
   if (action.isEmpty()) {
+    if (out_error != nullptr) {
+      *out_error = "empty_action";
+    }
     return false;
   }
 
   if (action.equalsIgnoreCase("UNLOCK")) {
-    g_scenario.notifyUnlock(millis());
+    g_scenario.notifyUnlock(now_ms);
     return true;
   }
   if (action.equalsIgnoreCase("NEXT")) {
-    g_scenario.notifyButton(5U, false, millis());
+    g_scenario.notifyButton(5U, false, now_ms);
     return true;
   }
   if (action.equalsIgnoreCase("STORY_REFRESH_SD")) {
@@ -1222,6 +1798,43 @@ bool webDispatchAction(const String& action_raw) {
   }
   if (action.equalsIgnoreCase("ESPNOW_OFF")) {
     g_network.disableEspNow();
+    return true;
+  }
+  if (action.equalsIgnoreCase("HW_STATUS")) {
+    printHardwareStatus();
+    return true;
+  }
+  if (action.equalsIgnoreCase("HW_STATUS_JSON")) {
+    printHardwareStatusJson();
+    return true;
+  }
+  if (action.equalsIgnoreCase("HW_MIC_STATUS")) {
+    printHardwareStatus();
+    return true;
+  }
+  if (action.equalsIgnoreCase("HW_BAT_STATUS")) {
+    printHardwareStatus();
+    return true;
+  }
+  if (action.equalsIgnoreCase("CAM_STATUS")) {
+    printCameraStatus();
+    return true;
+  }
+  if (action.equalsIgnoreCase("CAM_ON")) {
+    return g_camera.start();
+  }
+  if (action.equalsIgnoreCase("CAM_OFF")) {
+    g_camera.stop();
+    return true;
+  }
+  if (action.equalsIgnoreCase("MEDIA_STOP")) {
+    return g_media.stop(&g_audio);
+  }
+  if (action.equalsIgnoreCase("REC_STOP")) {
+    return g_media.stopRecording();
+  }
+  if (action.equalsIgnoreCase("REC_STATUS")) {
+    printMediaStatus();
     return true;
   }
 
@@ -1257,7 +1870,7 @@ bool webDispatchAction(const String& action_raw) {
     if (event_name.isEmpty()) {
       return false;
     }
-    return dispatchScenarioEventByName(event_name.c_str(), millis());
+    return dispatchScenarioEventByName(event_name.c_str(), now_ms);
   }
 
   if (startsWithIgnoreCase(action.c_str(), "SC_EVENT ")) {
@@ -1275,13 +1888,144 @@ bool webDispatchAction(const String& action_raw) {
     if (!parseEventType(type_text.c_str(), &event_type)) {
       return false;
     }
-    return dispatchScenarioEventByType(event_type, event_name.isEmpty() ? nullptr : event_name.c_str(), millis());
+    return dispatchScenarioEventByType(event_type, event_name.isEmpty() ? nullptr : event_name.c_str(), now_ms);
   }
 
+  if (startsWithIgnoreCase(action.c_str(), "HW_LED_SET ")) {
+    String args = action.substring(static_cast<unsigned int>(std::strlen("HW_LED_SET ")));
+    args.trim();
+    int r = 0;
+    int g = 0;
+    int b = 0;
+    int brightness = FREENOVE_WS2812_BRIGHTNESS;
+    int pulse = 1;
+    const int count = std::sscanf(args.c_str(), "%d %d %d %d %d", &r, &g, &b, &brightness, &pulse);
+    if (count < 3) {
+      if (out_error != nullptr) {
+        *out_error = "hw_led_set_args";
+      }
+      return false;
+    }
+    if (brightness < 0) {
+      brightness = 0;
+    } else if (brightness > 255) {
+      brightness = 255;
+    }
+    if (r < 0) {
+      r = 0;
+    } else if (r > 255) {
+      r = 255;
+    }
+    if (g < 0) {
+      g = 0;
+    } else if (g > 255) {
+      g = 255;
+    }
+    if (b < 0) {
+      b = 0;
+    } else if (b > 255) {
+      b = 255;
+    }
+    return g_hardware.setManualLed(static_cast<uint8_t>(r),
+                                   static_cast<uint8_t>(g),
+                                   static_cast<uint8_t>(b),
+                                   static_cast<uint8_t>(brightness),
+                                   pulse != 0);
+  }
+
+  if (startsWithIgnoreCase(action.c_str(), "HW_LED_AUTO ")) {
+    String value = action.substring(static_cast<unsigned int>(std::strlen("HW_LED_AUTO ")));
+    value.trim();
+    bool enabled = false;
+    if (!parseBoolToken(value.c_str(), &enabled)) {
+      if (out_error != nullptr) {
+        *out_error = "hw_led_auto_args";
+      }
+      return false;
+    }
+    g_hardware_cfg.led_auto_from_scene = enabled;
+    if (enabled) {
+      g_hardware.clearManualLed();
+      const ScenarioSnapshot snapshot = g_scenario.snapshot();
+      if (snapshot.screen_scene_id != nullptr) {
+        g_hardware.setSceneHint(snapshot.screen_scene_id);
+      }
+    }
+    return true;
+  }
+
+  if (startsWithIgnoreCase(action.c_str(), "CAM_SNAPSHOT")) {
+    const size_t prefix_len = std::strlen("CAM_SNAPSHOT");
+    String filename = action.substring(static_cast<unsigned int>(prefix_len));
+    filename.trim();
+    String out_path;
+    const bool ok = g_camera.snapshotToFile(filename.isEmpty() ? nullptr : filename.c_str(), &out_path);
+    if (ok) {
+      dispatchScenarioEventByName("SERIAL:CAMERA_CAPTURED", now_ms);
+    } else if (out_error != nullptr) {
+      *out_error = "camera_snapshot_failed";
+    }
+    return ok;
+  }
+
+  if (startsWithIgnoreCase(action.c_str(), "MEDIA_PLAY ")) {
+    String media_path = action.substring(static_cast<unsigned int>(std::strlen("MEDIA_PLAY ")));
+    media_path.trim();
+    const bool ok = !media_path.isEmpty() && g_media.play(media_path.c_str(), &g_audio);
+    if (!ok && out_error != nullptr) {
+      *out_error = "media_play_failed";
+    }
+    return ok;
+  }
+
+  if (startsWithIgnoreCase(action.c_str(), "REC_START")) {
+    const size_t prefix_len = std::strlen("REC_START");
+    String args = action.substring(static_cast<unsigned int>(prefix_len));
+    args.trim();
+    uint16_t seconds = g_media_cfg.record_max_seconds;
+    String filename;
+    if (!args.isEmpty()) {
+      const int sep = args.indexOf(' ');
+      String seconds_text = (sep < 0) ? args : args.substring(0, static_cast<unsigned int>(sep));
+      filename = (sep < 0) ? String("") : args.substring(static_cast<unsigned int>(sep + 1));
+      seconds_text.trim();
+      filename.trim();
+      if (!seconds_text.isEmpty()) {
+        char* end = nullptr;
+        const unsigned long parsed = std::strtoul(seconds_text.c_str(), &end, 10);
+        if (end != seconds_text.c_str() && (end == nullptr || *end == '\0')) {
+          seconds = static_cast<uint16_t>(parsed);
+        }
+      }
+    }
+    return g_media.startRecording(seconds, filename.isEmpty() ? nullptr : filename.c_str());
+  }
+
+  if (startsWithIgnoreCase(action.c_str(), "MEDIA_LIST ")) {
+    String kind = action.substring(static_cast<unsigned int>(std::strlen("MEDIA_LIST ")));
+    kind.trim();
+    if (kind.isEmpty()) {
+      kind = "music";
+    }
+    String files_json;
+    const bool ok = g_media.listFiles(kind.c_str(), &files_json);
+    if (ok) {
+      Serial.printf("MEDIA_LIST kind=%s files=%s\n", kind.c_str(), files_json.c_str());
+    }
+    return ok;
+  }
+
+  if (out_error != nullptr) {
+    *out_error = "unsupported_action";
+  }
   return false;
 }
 
-void webBuildStatusDocument(StaticJsonDocument<1536>* out_document) {
+bool webDispatchAction(const String& action_raw) {
+  return dispatchControlAction(action_raw, millis(), nullptr);
+}
+
+void webBuildStatusDocument(StaticJsonDocument<3072>* out_document) {
   if (out_document == nullptr) {
     return;
   }
@@ -1320,16 +2064,25 @@ void webBuildStatusDocument(StaticJsonDocument<1536>* out_document) {
   audio["playing"] = g_audio.isPlaying();
   audio["track"] = g_audio.currentTrack();
   audio["volume"] = g_audio.volume();
+
+  JsonObject hardware = (*out_document)["hardware"].to<JsonObject>();
+  webFillHardwareStatus(hardware);
+
+  JsonObject camera = (*out_document)["camera"].to<JsonObject>();
+  webFillCameraStatus(camera);
+
+  JsonObject media = (*out_document)["media"].to<JsonObject>();
+  webFillMediaStatus(media, millis());
 }
 
 void webSendStatus() {
-  StaticJsonDocument<1536> document;
+  StaticJsonDocument<3072> document;
   webBuildStatusDocument(&document);
   webSendJsonDocument(document);
 }
 
 void webSendStatusSse() {
-  StaticJsonDocument<1536> document;
+  StaticJsonDocument<3072> document;
   webBuildStatusDocument(&document);
   String payload;
   serializeJson(document, payload);
@@ -1356,6 +2109,157 @@ void setupWebUi() {
 
   g_web_server.on("/api/stream", HTTP_GET, []() {
     webSendStatusSse();
+  });
+
+  g_web_server.on("/api/hardware", HTTP_GET, []() {
+    webSendHardwareStatus();
+  });
+
+  g_web_server.on("/api/hardware/led", HTTP_POST, []() {
+    int red = g_web_server.arg("r").toInt();
+    int green = g_web_server.arg("g").toInt();
+    int blue = g_web_server.arg("b").toInt();
+    int brightness = g_web_server.hasArg("brightness") ? g_web_server.arg("brightness").toInt() : FREENOVE_WS2812_BRIGHTNESS;
+    bool pulse = true;
+    if (g_web_server.hasArg("pulse")) {
+      pulse = (g_web_server.arg("pulse").toInt() != 0);
+    }
+    StaticJsonDocument<256> request_json;
+    if (webParseJsonBody(&request_json)) {
+      if (request_json["r"].is<int>()) {
+        red = request_json["r"].as<int>();
+      }
+      if (request_json["g"].is<int>()) {
+        green = request_json["g"].as<int>();
+      }
+      if (request_json["b"].is<int>()) {
+        blue = request_json["b"].as<int>();
+      }
+      if (request_json["brightness"].is<int>()) {
+        brightness = request_json["brightness"].as<int>();
+      }
+      if (request_json["pulse"].is<bool>()) {
+        pulse = request_json["pulse"].as<bool>();
+      }
+    }
+    if (brightness < 0) {
+      brightness = 0;
+    } else if (brightness > 255) {
+      brightness = 255;
+    }
+    const bool ok = g_hardware.setManualLed(static_cast<uint8_t>(red),
+                                            static_cast<uint8_t>(green),
+                                            static_cast<uint8_t>(blue),
+                                            static_cast<uint8_t>(brightness),
+                                            pulse);
+    webSendResult("HW_LED_SET", ok);
+  });
+
+  g_web_server.on("/api/hardware/led/auto", HTTP_POST, []() {
+    bool enabled = false;
+    bool parsed = false;
+    if (g_web_server.hasArg("enabled")) {
+      parsed = parseBoolToken(g_web_server.arg("enabled").c_str(), &enabled);
+    } else if (g_web_server.hasArg("value")) {
+      parsed = parseBoolToken(g_web_server.arg("value").c_str(), &enabled);
+    }
+    StaticJsonDocument<128> request_json;
+    if (!parsed && webParseJsonBody(&request_json)) {
+      if (request_json["enabled"].is<bool>()) {
+        enabled = request_json["enabled"].as<bool>();
+        parsed = true;
+      } else if (request_json["value"].is<bool>()) {
+        enabled = request_json["value"].as<bool>();
+        parsed = true;
+      }
+    }
+    if (!parsed) {
+      webSendResult("HW_LED_AUTO", false);
+      return;
+    }
+    g_hardware_cfg.led_auto_from_scene = enabled;
+    if (enabled) {
+      g_hardware.clearManualLed();
+      const ScenarioSnapshot snapshot = g_scenario.snapshot();
+      if (snapshot.screen_scene_id != nullptr) {
+        g_hardware.setSceneHint(snapshot.screen_scene_id);
+      }
+    }
+    webSendResult("HW_LED_AUTO", true);
+  });
+
+  g_web_server.on("/api/camera/status", HTTP_GET, []() {
+    webSendCameraStatus();
+  });
+
+  g_web_server.on("/api/camera/on", HTTP_POST, []() {
+    const bool ok = g_camera.start();
+    webSendResult("CAM_ON", ok);
+  });
+
+  g_web_server.on("/api/camera/off", HTTP_POST, []() {
+    g_camera.stop();
+    webSendResult("CAM_OFF", true);
+  });
+
+  g_web_server.on("/api/camera/snapshot.jpg", HTTP_GET, []() {
+    String out_path;
+    if (!g_camera.snapshotToFile(nullptr, &out_path)) {
+      g_web_server.send(500, "application/json", "{\"ok\":false,\"error\":\"camera_snapshot_failed\"}");
+      return;
+    }
+    File image = LittleFS.open(out_path.c_str(), "r");
+    if (!image) {
+      g_web_server.send(500, "application/json", "{\"ok\":false,\"error\":\"camera_snapshot_missing\"}");
+      return;
+    }
+    g_web_server.streamFile(image, "image/jpeg");
+    image.close();
+    dispatchScenarioEventByName("SERIAL:CAMERA_CAPTURED", millis());
+  });
+
+  g_web_server.on("/api/media/files", HTTP_GET, []() {
+    webSendMediaFiles();
+  });
+
+  g_web_server.on("/api/media/play", HTTP_POST, []() {
+    String path = g_web_server.arg("path");
+    StaticJsonDocument<256> request_json;
+    if (webParseJsonBody(&request_json) && path.isEmpty()) {
+      path = request_json["path"] | request_json["file"] | "";
+    }
+    const bool ok = !path.isEmpty() && g_media.play(path.c_str(), &g_audio);
+    webSendResult("MEDIA_PLAY", ok);
+  });
+
+  g_web_server.on("/api/media/stop", HTTP_POST, []() {
+    const bool ok = g_media.stop(&g_audio);
+    webSendResult("MEDIA_STOP", ok);
+  });
+
+  g_web_server.on("/api/media/record/start", HTTP_POST, []() {
+    uint16_t seconds = static_cast<uint16_t>(g_web_server.arg("seconds").toInt());
+    String filename = g_web_server.arg("filename");
+    StaticJsonDocument<256> request_json;
+    if (webParseJsonBody(&request_json)) {
+      if (request_json["seconds"].is<unsigned int>()) {
+        seconds = static_cast<uint16_t>(request_json["seconds"].as<unsigned int>());
+      }
+      if (filename.isEmpty()) {
+        filename = request_json["filename"] | "";
+      }
+    }
+    const bool ok = g_media.startRecording(seconds, filename.isEmpty() ? nullptr : filename.c_str());
+    webSendResult("REC_START", ok);
+  });
+
+  g_web_server.on("/api/media/record/stop", HTTP_POST, []() {
+    const bool ok = g_media.stopRecording();
+    webSendResult("REC_STOP", ok);
+  });
+
+  g_web_server.on("/api/media/record/status", HTTP_GET, []() {
+    webSendMediaRecordStatus();
   });
 
   g_web_server.on("/api/network/wifi", HTTP_GET, []() {
@@ -1542,10 +2446,14 @@ void setupWebUi() {
     if (webParseJsonBody(&request_json) && action.isEmpty()) {
       action = request_json["action"] | "";
     }
-    const bool ok = webDispatchAction(action);
+    String error;
+    const bool ok = dispatchControlAction(action, millis(), &error);
     StaticJsonDocument<256> response;
     response["ok"] = ok;
     response["action"] = action;
+    if (!ok && !error.isEmpty()) {
+      response["error"] = error;
+    }
     webSendJsonDocument(response, ok ? 200 : 400);
   });
 
@@ -1775,6 +2683,12 @@ void refreshSceneIfNeeded(bool force_render) {
   }
 
   const ScenarioSnapshot snapshot = g_scenario.snapshot();
+  const uint32_t now_ms = millis();
+  if (g_hardware_started && g_hardware_cfg.led_auto_from_scene && snapshot.screen_scene_id != nullptr) {
+    g_hardware.setSceneHint(snapshot.screen_scene_id);
+  }
+  executeStoryActionsForStep(snapshot, now_ms);
+
   const char* step_id = (snapshot.step != nullptr && snapshot.step->id != nullptr) ? snapshot.step->id : "n/a";
   const String screen_payload = g_storage.loadScenePayloadById(snapshot.screen_scene_id);
   Serial.printf("[UI] render step=%s screen=%s pack=%s playing=%u\n",
@@ -1863,6 +2777,9 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
         "CMDS PING STATUS BTN_READ NEXT UNLOCK RESET "
         "SC_LIST SC_LOAD <id> SC_COVERAGE SC_REVALIDATE SC_REVALIDATE_ALL SC_EVENT <type> [name] SC_EVENT_RAW <name> "
         "STORY_REFRESH_SD STORY_SD_STATUS "
+        "HW_STATUS HW_STATUS_JSON HW_LED_SET <r> <g> <b> [brightness] [pulse] HW_LED_AUTO <ON|OFF> HW_MIC_STATUS HW_BAT_STATUS "
+        "CAM_STATUS CAM_ON CAM_OFF CAM_SNAPSHOT [filename] "
+        "MEDIA_LIST <picture|music|recorder> MEDIA_PLAY <path> MEDIA_STOP REC_START [seconds] [filename] REC_STOP REC_STATUS "
         "NET_STATUS WIFI_STATUS WIFI_TEST WIFI_STA <ssid> <pass> WIFI_CONNECT <ssid> <pass> WIFI_DISCONNECT "
         "WIFI_AP_ON [ssid] [pass] WIFI_AP_OFF "
         "ESPNOW_ON ESPNOW_OFF ESPNOW_STATUS ESPNOW_STATUS_JSON ESPNOW_PEER_ADD <mac> ESPNOW_PEER_DEL <mac> ESPNOW_PEER_LIST "
@@ -1890,6 +2807,7 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
   }
   if (std::strcmp(command, "RESET") == 0) {
     g_scenario.reset();
+    g_last_action_step_key[0] = '\0';
     Serial.println("ACK RESET");
     return;
   }
@@ -1908,6 +2826,7 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
     const bool ok = g_scenario.beginById(scenario_id);
     Serial.printf("ACK SC_LOAD id=%s ok=%u\n", scenario_id, ok ? 1U : 0U);
     if (ok) {
+      g_last_action_step_key[0] = '\0';
       refreshSceneIfNeeded(true);
       startPendingAudioIfAny();
     }
@@ -1920,6 +2839,42 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
   }
   if (std::strcmp(command, "STORY_SD_STATUS") == 0) {
     Serial.printf("STORY_SD_STATUS ready=%u\n", g_storage.hasSdCard() ? 1U : 0U);
+    return;
+  }
+  if (std::strcmp(command, "HW_STATUS") == 0 || std::strcmp(command, "HW_MIC_STATUS") == 0 ||
+      std::strcmp(command, "HW_BAT_STATUS") == 0) {
+    printHardwareStatus();
+    return;
+  }
+  if (std::strcmp(command, "HW_STATUS_JSON") == 0) {
+    printHardwareStatusJson();
+    return;
+  }
+  if (std::strcmp(command, "CAM_STATUS") == 0) {
+    printCameraStatus();
+    return;
+  }
+  if (std::strcmp(command, "REC_STATUS") == 0) {
+    printMediaStatus();
+    return;
+  }
+  if (std::strcmp(command, "HW_LED_SET") == 0 || std::strcmp(command, "HW_LED_AUTO") == 0 ||
+      std::strcmp(command, "CAM_ON") == 0 || std::strcmp(command, "CAM_OFF") == 0 ||
+      std::strcmp(command, "CAM_SNAPSHOT") == 0 || std::strcmp(command, "MEDIA_LIST") == 0 ||
+      std::strcmp(command, "MEDIA_PLAY") == 0 || std::strcmp(command, "MEDIA_STOP") == 0 ||
+      std::strcmp(command, "REC_START") == 0 || std::strcmp(command, "REC_STOP") == 0) {
+    String action = command;
+    if (argument != nullptr && argument[0] != '\0') {
+      action += " ";
+      action += argument;
+    }
+    String error;
+    const bool ok = dispatchControlAction(action, now_ms, &error);
+    Serial.printf("ACK %s ok=%u%s%s\n",
+                  command,
+                  ok ? 1U : 0U,
+                  error.isEmpty() ? "" : " err=",
+                  error.isEmpty() ? "" : error.c_str());
     return;
   }
   if (std::strcmp(command, "SC_COVERAGE") == 0) {
@@ -2248,6 +3203,22 @@ void setup() {
                 static_cast<unsigned long>(g_storage.checksum(kDefaultScenarioFile)));
   Serial.printf("[MAIN] story storage sd=%u\n", g_storage.hasSdCard() ? 1U : 0U);
 
+  g_media.begin(g_media_cfg);
+  g_camera.begin(g_camera_cfg);
+  if (g_camera_cfg.enabled_on_boot) {
+    const bool cam_ok = g_camera.start();
+    Serial.printf("[CAM] boot start=%u\n", cam_ok ? 1U : 0U);
+  }
+  if (g_hardware_cfg.enabled_on_boot) {
+    g_hardware_started = g_hardware.begin();
+    g_next_hw_telemetry_ms = millis() + g_hardware_cfg.telemetry_period_ms;
+    g_mic_event_armed = true;
+    g_battery_low_latched = false;
+  } else {
+    g_hardware_started = false;
+    Serial.println("[HW] disabled by APP_HARDWARE config");
+  }
+
   g_buttons.begin();
   g_touch.begin();
   g_network.begin(g_network_cfg.hostname);
@@ -2291,6 +3262,7 @@ void setup() {
   if (!g_scenario.begin(kDefaultScenarioFile)) {
     Serial.println("[MAIN] scenario init failed");
   }
+  g_last_action_step_key[0] = '\0';
 
   g_ui.begin();
   refreshSceneIfNeeded(true);
@@ -2306,6 +3278,9 @@ void loop() {
     Serial.printf("[MAIN] button key=%u long=%u\n", event.key, event.long_press ? 1 : 0);
     g_ui.handleButton(event.key, event.long_press);
     g_scenario.notifyButton(event.key, event.long_press, now_ms);
+    if (g_hardware_started) {
+      g_hardware.noteButton(event.key, event.long_press, now_ms);
+    }
   }
 
   TouchPoint touch;
@@ -2316,6 +3291,11 @@ void loop() {
   }
 
   g_network.update(now_ms);
+  if (g_hardware_started) {
+    g_hardware.update(now_ms);
+    maybeEmitHardwareEvents(now_ms);
+    maybeLogHardwareTelemetry(now_ms);
+  }
   char net_payload[192] = {0};
   char net_peer[18] = {0};
   char net_msg_id[32] = {0};
@@ -2384,6 +3364,7 @@ void loop() {
   }
 
   g_audio.update();
+  g_media.update(now_ms, &g_audio);
   g_scenario.tick(now_ms);
   startPendingAudioIfAny();
   refreshSceneIfNeeded(false);

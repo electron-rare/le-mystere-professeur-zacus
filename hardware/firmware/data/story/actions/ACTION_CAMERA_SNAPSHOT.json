@@ -1,0 +1,8 @@
+{
+  "id": "ACTION_CAMERA_SNAPSHOT",
+  "type": "camera_snapshot",
+  "config": {
+    "filename": "story_capture.jpg",
+    "event_on_success": "SERIAL:CAMERA_CAPTURED"
+  }
+}

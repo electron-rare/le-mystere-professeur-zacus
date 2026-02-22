@@ -152,6 +152,22 @@ Compat legacy runtime V2 (feature flag):
 - rollback runtime: `STORY_V2_ENABLE OFF`
 - rollback release: remettre `kStoryV2EnabledDefault=false` puis recompiler/reflasher
 
+## Extensions runtime Freenove (Serial + WebUI + Story)
+
+Nouvelles options exposées en parallèle du flux Story:
+
+- hardware:
+  - série: `HW_STATUS`, `HW_STATUS_JSON`, `HW_LED_SET <r> <g> <b> [brightness] [pulse]`, `HW_LED_AUTO <ON|OFF>`, `HW_MIC_STATUS`, `HW_BAT_STATUS`
+  - WebUI/API: `GET /api/hardware`, `POST /api/hardware/led`, `POST /api/hardware/led/auto`
+- caméra:
+  - série: `CAM_STATUS`, `CAM_ON`, `CAM_OFF`, `CAM_SNAPSHOT [filename]`
+  - WebUI/API: `GET /api/camera/status`, `POST /api/camera/on`, `POST /api/camera/off`, `GET /api/camera/snapshot.jpg`
+- média:
+  - série: `MEDIA_LIST <picture|music|recorder>`, `MEDIA_PLAY <path>`, `MEDIA_STOP`, `REC_START [seconds] [filename]`, `REC_STOP`, `REC_STATUS`
+  - WebUI/API: `GET /api/media/files?kind=...`, `POST /api/media/play`, `POST /api/media/stop`, `POST /api/media/record/start`, `POST /api/media/record/stop`, `GET /api/media/record/status`
+
+Le `GET /api/status` expose maintenant les blocs `hardware`, `camera` et `media`.
+
 ## Creation d'un nouveau scenario
 
 1. copier `docs/protocols/story_specs/templates/scenario.template.yaml`

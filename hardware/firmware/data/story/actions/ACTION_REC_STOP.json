@@ -1,0 +1,7 @@
+{
+  "id": "ACTION_REC_STOP",
+  "type": "recorder_stop",
+  "config": {
+    "reason": "step_change"
+  }
+}

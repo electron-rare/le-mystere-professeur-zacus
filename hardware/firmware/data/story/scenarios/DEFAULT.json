@@ -15,35 +15,68 @@
     "APP_SCREEN",
     "APP_GATE",
     "APP_WIFI",
-    "APP_ESPNOW"
+    "APP_ESPNOW",
+    "APP_HARDWARE",
+    "APP_CAMERA",
+    "APP_MEDIA"
   ],
   "actions_catalog": [
     "ACTION_TRACE_STEP",
     "ACTION_FORCE_ETAPE2",
-    "ACTION_REFRESH_SD"
+    "ACTION_REFRESH_SD",
+    "ACTION_HW_LED_ALERT",
+    "ACTION_HW_LED_READY",
+    "ACTION_CAMERA_SNAPSHOT",
+    "ACTION_MEDIA_PLAY_FILE",
+    "ACTION_REC_START",
+    "ACTION_REC_STOP"
   ],
   "steps": [
     {
       "id": "STEP_WAIT_UNLOCK",
-      "screen_scene_id": "SCENE_LOCKED"
+      "screen_scene_id": "SCENE_LOCKED",
+      "action_ids": [
+        "ACTION_TRACE_STEP",
+        "ACTION_HW_LED_READY"
+      ]
     },
     {
       "id": "STEP_U_SON_PROTO",
       "screen_scene_id": "SCENE_BROKEN",
-      "audio_pack_id": "PACK_BOOT_RADIO"
+      "audio_pack_id": "PACK_BOOT_RADIO",
+      "action_ids": [
+        "ACTION_TRACE_STEP",
+        "ACTION_HW_LED_ALERT",
+        "ACTION_MEDIA_PLAY_FILE"
+      ]
     },
     {
       "id": "STEP_WAIT_ETAPE2",
-      "screen_scene_id": "SCENE_LA_DETECT"
+      "screen_scene_id": "SCENE_CAMERA_SCAN",
+      "action_ids": [
+        "ACTION_TRACE_STEP",
+        "ACTION_CAMERA_SNAPSHOT",
+        "ACTION_REC_START"
+      ]
     },
     {
       "id": "STEP_ETAPE2",
-      "screen_scene_id": "SCENE_WIN",
-      "audio_pack_id": "PACK_WIN"
+      "screen_scene_id": "SCENE_SIGNAL_SPIKE",
+      "audio_pack_id": "PACK_WIN",
+      "action_ids": [
+        "ACTION_TRACE_STEP",
+        "ACTION_HW_LED_ALERT"
+      ]
     },
     {
       "id": "STEP_DONE",
-      "screen_scene_id": "SCENE_READY"
+      "screen_scene_id": "SCENE_MEDIA_ARCHIVE",
+      "action_ids": [
+        "ACTION_TRACE_STEP",
+        "ACTION_REC_STOP",
+        "ACTION_HW_LED_READY",
+        "ACTION_REFRESH_SD"
+      ]
     }
   ],
   "source": "story_selector",

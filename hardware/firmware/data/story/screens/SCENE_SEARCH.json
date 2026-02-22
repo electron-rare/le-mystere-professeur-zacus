@@ -30,8 +30,8 @@
       },
       {
         "at_ms": 1600,
-        "effect": "pulse",
-        "speed_ms": 600,
+        "effect": "wave",
+        "speed_ms": 520,
         "theme": {
           "bg": "#07322A",
           "accent": "#67F0C4",
@@ -51,7 +51,7 @@
     ]
   },
   "transition": {
-    "effect": "slide_left",
+    "effect": "camera_flash",
     "duration_ms": 230
   }
 }

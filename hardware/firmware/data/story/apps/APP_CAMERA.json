@@ -1,0 +1,12 @@
+{
+  "id": "APP_CAMERA",
+  "app": "CAMERA_STACK",
+  "config": {
+    "enabled_on_boot": true,
+    "frame_size": "VGA",
+    "jpeg_quality": 12,
+    "fb_count": 1,
+    "xclk_hz": 20000000,
+    "snapshot_dir": "/picture"
+  }
+}

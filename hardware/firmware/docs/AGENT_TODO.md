@@ -612,3 +612,40 @@
   - `ZACUS_ENV=freenove_esp32s3 ... ./tools/dev/run_matrix_and_smoke.sh` ✅ (artefact: `artifacts/rc_live/freenove_esp32s3_20260222-002556/`),
   - validation série live (`SC_LOAD/SC_EVENT`) avec logs UI montrant `transition=<type>:<ms>` sur changements de scène.
 [20260222-002556] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260222-002556, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260222-002556/summary.md
+[20260222-025923] Run artefacts: `artifacts/rc_live/freenove_esp32s3_20260222-025923/`, logs: `logs/rc_live/`, summary: `artifacts/rc_live/freenove_esp32s3_20260222-025923/summary.md`
+
+## [2026-02-22] Intégration complète Story + options Freenove (phases 1→3)
+
+- [x] Runtime Freenove branché en modules:
+  - `HardwareManager` intégré au cycle principal (`init/update/noteButton/setSceneHint`),
+  - nouveaux modules `CameraManager` et `MediaManager` ajoutés et initialisés au boot.
+- [x] Options Story (`data/story/apps`) ajoutées + fallback embarqué synchronisé:
+  - `APP_HARDWARE.json`, `APP_CAMERA.json`, `APP_MEDIA.json`,
+  - fallback LittleFS mis à jour dans `storage_manager.cpp` (bundle embarqué complet).
+- [x] Interfaces publiques ajoutées:
+  - série: `HW_*`, `CAM_*`, `MEDIA_*`, `REC_*`,
+  - API WebUI: `/api/hardware*`, `/api/camera*`, `/api/media*`,
+  - `/api/status` enrichi (`hardware`, `camera`, `media`),
+  - commandes ESP-NOW `type=command` dispatchées sur les nouveaux contrôles.
+- [x] Couplage Story actions au changement d'étape:
+  - exécuteur d'`action_ids` branché,
+  - nouvelles actions supportées (`ACTION_HW_LED_*`, `ACTION_CAMERA_SNAPSHOT`, `ACTION_MEDIA_PLAY_FILE`, `ACTION_REC_*`, etc.),
+  - snapshot action `SERIAL:CAMERA_CAPTURED` émis en succès.
+- [x] Évolution écran/effets Story:
+  - effets ajoutés: `radar`, `wave`,
+  - aliases transition ajoutés: `wipe -> slide_left`, `camera_flash -> glitch`,
+  - scènes ajoutées: `SCENE_CAMERA_SCAN`, `SCENE_SIGNAL_SPIKE`, `SCENE_MEDIA_ARCHIVE`,
+  - docs alignées: `docs/protocols/story_screen_palette_v2.md`, `docs/protocols/story_README.md`.
+- [x] Validation réalisée (session courante):
+  - builds: `pio run -e esp32dev -e esp32_release -e esp8266_oled -e ui_rp2040_ili9488 -e ui_rp2040_ili9486` ✅,
+  - build Freenove: `pio run -e freenove_esp32s3` ✅,
+  - FS Freenove: `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅,
+  - smoke orchestré: `ZACUS_ENV=freenove_esp32s3 ./tools/dev/run_matrix_and_smoke.sh` ✅ (run sans hardware -> smoke/UI link `SKIPPED`, justif. combined board + port non résolu; artefact `artifacts/rc_live/freenove_esp32s3_20260222-025923/`),
+  - Story tooling: `./tools/dev/story-gen validate` ✅, `./tools/dev/story-gen generate-bundle --out-dir /tmp/story_bundle_options_20260222T035914` ✅,
+  - tests Python: `.venv/bin/python3 -m pytest lib/zacus_story_gen_ai/tests/test_generator.py` ✅ (5 passed),
+  - scénario canonique: `.venv/bin/python3 ../../tools/scenario/validate_scenario.py ../../game/scenarios/zacus_v1.yaml` ✅,
+  - export brief: `.venv/bin/python3 ../../tools/scenario/export_md.py ../../game/scenarios/zacus_v1.yaml` ✅.
+- [!] Limites constatées hors scope firmware:
+  - `.venv/bin/python3 ../../tools/audio/validate_manifest.py ../../audio/manifests/zacus_v1_audio.yaml` ❌ (`game/prompts/audio/intro.md` manquant),
+  - `.venv/bin/python3 ../../tools/printables/validate_manifest.py ../../printables/manifests/zacus_v1_printables.yaml` ❌ (prompts `printables/src/prompts/*.md` manquants),
+  - aucune validation live `curl /api/*` ou cycle série ACK HW/CAM/MEDIA possible sans carte connectée pendant cette session.

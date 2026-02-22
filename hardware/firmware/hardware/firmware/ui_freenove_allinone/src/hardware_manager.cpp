@@ -263,7 +263,7 @@ void HardwareManager::updateLed(uint32_t now_ms) {
   float dim = 1.0f;
   if (pulse) {
     const float phase = static_cast<float>(now_ms % 1400U) / 1400.0f;
-    dim = 0.30f + (0.70f * (0.5f + 0.5f * std::sinf(phase * kTwoPi)));
+    dim = 0.30f + (0.70f * (0.5f + 0.5f * std::sin(phase * kTwoPi)));
   }
   const uint8_t out_r = clampU8(static_cast<int>(static_cast<float>(base_r) * dim));
   const uint8_t out_g = clampU8(static_cast<int>(static_cast<float>(base_g) * dim));

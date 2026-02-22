@@ -1,0 +1,11 @@
+{
+  "id": "APP_MEDIA",
+  "app": "MEDIA_STACK",
+  "config": {
+    "music_dir": "/music",
+    "picture_dir": "/picture",
+    "record_dir": "/recorder",
+    "record_max_seconds": 30,
+    "auto_stop_record_on_step_change": true
+  }
+}

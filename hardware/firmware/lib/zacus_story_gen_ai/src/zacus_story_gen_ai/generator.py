@@ -154,7 +154,7 @@ SCENE_PROFILES: dict[str, dict[str, Any]] = {
         "effect": "scan",
         "effect_speed_ms": 920,
         "theme": {"bg": "#05261F", "accent": "#35E7B0", "text": "#EFFFF8"},
-        "transition": {"effect": "slide_left", "duration_ms": 230},
+        "transition": {"effect": "camera_flash", "duration_ms": 230},
         "timeline": [
             {
                 "at_ms": 0,
@@ -164,8 +164,8 @@ SCENE_PROFILES: dict[str, dict[str, Any]] = {
             },
             {
                 "at_ms": 1600,
-                "effect": "pulse",
-                "speed_ms": 600,
+                "effect": "wave",
+                "speed_ms": 520,
                 "theme": {"bg": "#07322A", "accent": "#67F0C4", "text": "#F2FFF9"},
             },
             {
@@ -173,6 +173,93 @@ SCENE_PROFILES: dict[str, dict[str, Any]] = {
                 "effect": "scan",
                 "speed_ms": 820,
                 "theme": {"bg": "#05261F", "accent": "#35E7B0", "text": "#EFFFF8"},
+            },
+        ],
+    },
+    "SCENE_CAMERA_SCAN": {
+        "title": "CAMERA SCAN",
+        "subtitle": "Capture des indices visuels",
+        "symbol": "SCAN",
+        "effect": "radar",
+        "effect_speed_ms": 840,
+        "theme": {"bg": "#041A24", "accent": "#5CE6FF", "text": "#E9FBFF"},
+        "transition": {"effect": "wipe", "duration_ms": 230},
+        "timeline": [
+            {
+                "at_ms": 0,
+                "effect": "radar",
+                "speed_ms": 840,
+                "theme": {"bg": "#041A24", "accent": "#5CE6FF", "text": "#E9FBFF"},
+            },
+            {
+                "at_ms": 1200,
+                "effect": "wave",
+                "speed_ms": 620,
+                "theme": {"bg": "#072838", "accent": "#8AF1FF", "text": "#F5FEFF"},
+            },
+            {
+                "at_ms": 2200,
+                "effect": "radar",
+                "speed_ms": 760,
+                "theme": {"bg": "#041A24", "accent": "#5CE6FF", "text": "#E9FBFF"},
+            },
+        ],
+    },
+    "SCENE_SIGNAL_SPIKE": {
+        "title": "PIC DE SIGNAL",
+        "subtitle": "Interference soudaine detectee",
+        "symbol": "ALERT",
+        "effect": "wave",
+        "effect_speed_ms": 260,
+        "theme": {"bg": "#24090C", "accent": "#FF6A52", "text": "#FFF2EB"},
+        "transition": {"effect": "camera_flash", "duration_ms": 170},
+        "timeline": [
+            {
+                "at_ms": 0,
+                "effect": "wave",
+                "speed_ms": 260,
+                "theme": {"bg": "#24090C", "accent": "#FF6A52", "text": "#FFF2EB"},
+            },
+            {
+                "at_ms": 700,
+                "effect": "blink",
+                "speed_ms": 180,
+                "theme": {"bg": "#2F1014", "accent": "#FF8C73", "text": "#FFF8F5"},
+            },
+            {
+                "at_ms": 1400,
+                "effect": "wave",
+                "speed_ms": 320,
+                "theme": {"bg": "#24090C", "accent": "#FF6A52", "text": "#FFF2EB"},
+            },
+        ],
+    },
+    "SCENE_MEDIA_ARCHIVE": {
+        "title": "ARCHIVES MEDIA",
+        "subtitle": "Photos et enregistrements sauvegardes",
+        "symbol": "READY",
+        "effect": "radar",
+        "effect_speed_ms": 760,
+        "theme": {"bg": "#0D1A34", "accent": "#7CB1FF", "text": "#EEF4FF"},
+        "transition": {"effect": "fade", "duration_ms": 240},
+        "timeline": [
+            {
+                "at_ms": 0,
+                "effect": "radar",
+                "speed_ms": 760,
+                "theme": {"bg": "#0D1A34", "accent": "#7CB1FF", "text": "#EEF4FF"},
+            },
+            {
+                "at_ms": 1000,
+                "effect": "pulse",
+                "speed_ms": 620,
+                "theme": {"bg": "#132245", "accent": "#9CC7FF", "text": "#F7FAFF"},
+            },
+            {
+                "at_ms": 2000,
+                "effect": "radar",
+                "speed_ms": 760,
+                "theme": {"bg": "#0D1A34", "accent": "#7CB1FF", "text": "#EEF4FF"},
             },
         ],
     },
@@ -226,22 +313,22 @@ SCENE_PROFILES: dict[str, dict[str, Any]] = {
         "title": "PRET",
         "subtitle": "Scenario termine",
         "symbol": "READY",
-        "effect": "pulse",
-        "effect_speed_ms": 620,
+        "effect": "wave",
+        "effect_speed_ms": 560,
         "theme": {"bg": "#0F2A12", "accent": "#6CD96B", "text": "#EDFFED"},
         "transition": {"effect": "fade", "duration_ms": 220},
         "timeline": [
             {
                 "at_ms": 0,
-                "effect": "pulse",
-                "speed_ms": 620,
+                "effect": "wave",
+                "speed_ms": 560,
                 "theme": {"bg": "#0F2A12", "accent": "#6CD96B", "text": "#EDFFED"},
             },
             {
                 "at_ms": 1500,
-                "effect": "none",
-                "speed_ms": 620,
-                "theme": {"bg": "#133117", "accent": "#8CE28B", "text": "#F2FFF2"},
+                "effect": "radar",
+                "speed_ms": 740,
+                "theme": {"bg": "#133517", "accent": "#9EE49D", "text": "#F4FFF4"},
             },
         ],
     },
@@ -277,8 +364,13 @@ DEFAULT_DEMO_OPTIONS: dict[str, Any] = {
     "strobe_level": 65,
 }
 
-SCREEN_EFFECT_CHOICES = {"none", "pulse", "scan", "blink", "celebrate"}
-SCREEN_EFFECT_ALIASES = {"steady": "none", "glitch": "blink", "reward": "celebrate"}
+SCREEN_EFFECT_CHOICES = {"none", "pulse", "scan", "radar", "wave", "blink", "celebrate"}
+SCREEN_EFFECT_ALIASES = {
+    "steady": "none",
+    "glitch": "blink",
+    "reward": "celebrate",
+    "sonar": "radar",
+}
 TRANSITION_EFFECT_CHOICES = {"none", "fade", "slide_left", "slide_right", "slide_up", "slide_down", "zoom", "glitch"}
 TRANSITION_EFFECT_ALIASES = {
     "crossfade": "fade",
@@ -288,6 +380,8 @@ TRANSITION_EFFECT_ALIASES = {
     "down": "slide_down",
     "zoom_in": "zoom",
     "flash": "glitch",
+    "wipe": "slide_left",
+    "camera_flash": "glitch",
 }
 TEXT_CASE_CHOICES = {"raw", "upper", "lower"}
 TEXT_ALIGN_CHOICES = {"top", "center", "bottom"}
@@ -847,6 +941,9 @@ def _normalize_screen_effect(value: Any, default_value: str) -> str:
         normalized = SCREEN_EFFECT_ALIASES.get(normalized, normalized)
         if normalized in SCREEN_EFFECT_CHOICES:
             return normalized
+        if any(token in normalized for token in ("scan", "radar", "wave", "sonar")):
+            return "scan"
+        return "pulse"
     return _as_choice(default_value, SCREEN_EFFECT_CHOICES, "pulse")
 
 

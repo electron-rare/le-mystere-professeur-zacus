@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { yaml } from '@codemirror/lang-yaml'
 import type { DeviceCapabilities } from '../lib/deviceApi'
@@ -21,19 +21,32 @@ type StoryDesignerProps = {
   capabilities: DeviceCapabilities
 }
 
-type NodalStyle = 'linear' | 'fork_merge' | 'hub'
-
-type NodalTransition = {
-  event: string
-  target: string
-}
-
-type NodalStep = {
+type EditorNode = {
   id: string
-  screen: string
-  audio?: string
-  transitions: NodalTransition[]
+  stepId: string
+  screenSceneId: string
+  audioPackId: string
+  x: number
+  y: number
+  isInitial: boolean
 }
+
+type EditorEdge = {
+  id: string
+  fromNodeId: string
+  toNodeId: string
+  eventName: string
+}
+
+type DragState = {
+  nodeId: string
+  offsetX: number
+  offsetY: number
+}
+
+const NODE_WIDTH = 250
+const NODE_HEIGHT = 260
+const CANVAS_HEIGHT = 560
 
 const TEMPLATE_LIBRARY: Record<string, string> = {
   DEFAULT: `id: DEFAULT
@@ -89,155 +102,130 @@ steps:
 `,
 }
 
-const NODAL_STYLE_LABELS: Record<NodalStyle, string> = {
-  linear: 'Linear chain',
-  fork_merge: 'Fork and merge',
-  hub: 'Hub and spokes',
-}
-
 const SCENE_ROTATION = ['SCENE_LOCKED', 'SCENE_SEARCH', 'SCENE_BROKEN', 'SCENE_REWARD', 'SCENE_READY']
-const AUDIO_ROTATION = ['PACK_BOOT_RADIO', 'PACK_WIN']
 
-const clampNodeCount = (value: number) => Math.min(10, Math.max(3, Number.isFinite(value) ? value : 5))
+const makeIdFragment = () => Math.random().toString(36).slice(2, 8)
 
-const sanitizeScenarioId = (value: string) => {
+const normalizeToken = (value: string, fallback: string) => {
   const normalized = value.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_')
-  return normalized.length > 0 ? normalized : 'NODAL_STORY'
+  return normalized.length > 0 ? normalized : fallback
 }
 
-const renderNodalYaml = (scenarioId: string, initialStepId: string, steps: NodalStep[]) => {
-  const lines: string[] = [`id: ${scenarioId}`, 'version: 2', `initial_step_id: ${initialStepId}`, 'steps:']
+const ensureInitialNode = (nodes: EditorNode[]) => {
+  if (nodes.length === 0) {
+    return nodes
+  }
+  if (nodes.some((node) => node.isInitial)) {
+    return nodes
+  }
+  return nodes.map((node, index) => ({ ...node, isInitial: index === 0 }))
+}
 
-  for (const step of steps) {
-    lines.push(`  - id: ${step.id}`)
-    lines.push(`    screen_scene_id: ${step.screen}`)
-    if (step.audio) {
-      lines.push(`    audio_pack_id: ${step.audio}`)
-    }
-    if (step.transitions.length > 0) {
-      lines.push('    transitions:')
-      for (const transition of step.transitions) {
-        lines.push(`      - event: ${transition.event}`)
-        lines.push(`        target: ${transition.target}`)
-      }
-    }
+const createNode = (index: number): EditorNode => ({
+  id: `node-${makeIdFragment()}`,
+  stepId: `STEP_NODE_${index}`,
+  screenSceneId: SCENE_ROTATION[(index - 1) % SCENE_ROTATION.length],
+  audioPackId: '',
+  x: 28 + ((index - 1) % 3) * 270,
+  y: 36 + Math.floor((index - 1) / 3) * 250,
+  isInitial: false,
+})
+
+const createDefaultGraph = () => {
+  const start: EditorNode = {
+    id: 'node-start',
+    stepId: 'STEP_START',
+    screenSceneId: 'SCENE_LOCKED',
+    audioPackId: '',
+    x: 32,
+    y: 90,
+    isInitial: true,
+  }
+  const middle: EditorNode = {
+    id: 'node-investigate',
+    stepId: 'STEP_INVESTIGATION',
+    screenSceneId: 'SCENE_SEARCH',
+    audioPackId: 'PACK_BOOT_RADIO',
+    x: 350,
+    y: 280,
+    isInitial: false,
+  }
+  const done: EditorNode = {
+    id: 'node-done',
+    stepId: 'STEP_DONE',
+    screenSceneId: 'SCENE_READY',
+    audioPackId: '',
+    x: 680,
+    y: 90,
+    isInitial: false,
   }
 
-  return `${lines.join('\n')}\n`
-}
-
-const makeLinearGraph = (nodeCount: number) => {
-  const steps: NodalStep[] = []
-  for (let index = 0; index < nodeCount; index += 1) {
-    const nodeId = index === 0 ? 'STEP_START' : `STEP_NODE_${index + 1}`
-    const nextNode = index === nodeCount - 1 ? 'STEP_DONE' : `STEP_NODE_${index + 2}`
-    const transitions: NodalTransition[] = []
-    if (index === 0) {
-      transitions.push({ event: 'UNLOCK', target: nextNode })
-    }
-    transitions.push({ event: 'BTN_NEXT', target: nextNode })
-    transitions.push({ event: 'FORCE_DONE', target: 'STEP_DONE' })
-    const audio = index % 2 === 1 ? AUDIO_ROTATION[index % AUDIO_ROTATION.length] : undefined
-
-    steps.push({
-      id: nodeId,
-      screen: SCENE_ROTATION[index % SCENE_ROTATION.length],
-      audio,
-      transitions,
-    })
-  }
-
-  steps.push({ id: 'STEP_DONE', screen: 'SCENE_READY', transitions: [] })
-  return { initialStepId: 'STEP_START', steps }
-}
-
-const makeForkMergeGraph = (nodeCount: number) => {
-  const branchDepth = Math.max(1, Math.min(3, Math.floor((nodeCount - 2) / 2)))
-  const steps: NodalStep[] = [
-    {
-      id: 'STEP_START',
-      screen: 'SCENE_LOCKED',
-      transitions: [
-        { event: 'UNLOCK', target: 'STEP_A_1' },
-        { event: 'BTN_NEXT', target: 'STEP_B_1' },
-      ],
-    },
+  const edges: EditorEdge[] = [
+    { id: 'edge-start-mid', fromNodeId: start.id, toNodeId: middle.id, eventName: 'UNLOCK' },
+    { id: 'edge-mid-done', fromNodeId: middle.id, toNodeId: done.id, eventName: 'BTN_NEXT' },
   ]
 
-  for (let depth = 1; depth <= branchDepth; depth += 1) {
-    const nextA = depth === branchDepth ? 'STEP_MERGE' : `STEP_A_${depth + 1}`
-    const nextB = depth === branchDepth ? 'STEP_MERGE' : `STEP_B_${depth + 1}`
-    steps.push({
-      id: `STEP_A_${depth}`,
-      screen: SCENE_ROTATION[(depth + 1) % SCENE_ROTATION.length],
-      audio: depth === branchDepth ? AUDIO_ROTATION[0] : undefined,
-      transitions: [{ event: 'BTN_NEXT', target: nextA }],
-    })
-    steps.push({
-      id: `STEP_B_${depth}`,
-      screen: SCENE_ROTATION[(depth + 2) % SCENE_ROTATION.length],
-      audio: depth === branchDepth ? AUDIO_ROTATION[1] : undefined,
-      transitions: [{ event: 'BTN_NEXT', target: nextB }],
-    })
-  }
-
-  steps.push({
-    id: 'STEP_MERGE',
-    screen: 'SCENE_REWARD',
-    transitions: [
-      { event: 'AUDIO_DONE', target: 'STEP_DONE' },
-      { event: 'BTN_NEXT', target: 'STEP_DONE' },
-    ],
-  })
-  steps.push({ id: 'STEP_DONE', screen: 'SCENE_READY', transitions: [] })
-
-  return { initialStepId: 'STEP_START', steps }
+  return { nodes: [start, middle, done], edges }
 }
 
-const makeHubGraph = (nodeCount: number) => {
-  const branchCount = Math.max(3, Math.min(5, nodeCount - 1))
-  const eventNames = ['UNLOCK', 'BTN_NEXT', 'FORCE_ETAPE2', 'PATH_4', 'PATH_5']
-  const steps: NodalStep[] = []
-  const startTransitions: NodalTransition[] = []
-
-  for (let index = 0; index < branchCount; index += 1) {
-    const branchId = `STEP_PATH_${index + 1}`
-    startTransitions.push({
-      event: eventNames[index] ?? `PATH_${index + 1}`,
-      target: branchId,
-    })
-    steps.push({
-      id: branchId,
-      screen: SCENE_ROTATION[(index + 1) % SCENE_ROTATION.length],
-      audio: index % 2 === 0 ? AUDIO_ROTATION[index % AUDIO_ROTATION.length] : undefined,
-      transitions: [{ event: 'BTN_NEXT', target: 'STEP_HUB_MERGE' }],
-    })
+const buildStoryYaml = (scenarioId: string, nodes: EditorNode[], edges: EditorEdge[]) => {
+  const normalizedNodes = ensureInitialNode(nodes)
+  if (normalizedNodes.length === 0) {
+    return `id: ${normalizeToken(scenarioId, 'NODAL_STORY')}
+version: 2
+initial_step_id: STEP_START
+steps: []
+`
   }
 
-  steps.unshift({ id: 'STEP_START', screen: 'SCENE_LOCKED', transitions: startTransitions })
-  steps.push({
-    id: 'STEP_HUB_MERGE',
-    screen: 'SCENE_REWARD',
-    transitions: [
-      { event: 'AUDIO_DONE', target: 'STEP_DONE' },
-      { event: 'BTN_NEXT', target: 'STEP_DONE' },
-    ],
+  const usedStepIds = new Set<string>()
+  const stepIdByNodeId = new Map<string, string>()
+  normalizedNodes.forEach((node, index) => {
+    const baseId = normalizeToken(node.stepId, `STEP_NODE_${index + 1}`)
+    let candidate = baseId
+    let suffix = 2
+    while (usedStepIds.has(candidate)) {
+      candidate = `${baseId}_${suffix}`
+      suffix += 1
+    }
+    usedStepIds.add(candidate)
+    stepIdByNodeId.set(node.id, candidate)
   })
-  steps.push({ id: 'STEP_DONE', screen: 'SCENE_READY', transitions: [] })
 
-  return { initialStepId: 'STEP_START', steps }
-}
+  const initialNode = normalizedNodes.find((node) => node.isInitial) ?? normalizedNodes[0]
+  const initialStepId = stepIdByNodeId.get(initialNode.id) ?? 'STEP_START'
+  const lines: string[] = [
+    `id: ${normalizeToken(scenarioId, 'NODAL_STORY')}`,
+    'version: 2',
+    `initial_step_id: ${initialStepId}`,
+    'steps:',
+  ]
 
-const buildNodalDraft = (scenarioId: string, style: NodalStyle, nodeCount: number) => {
-  const safeId = sanitizeScenarioId(scenarioId)
-  const safeNodeCount = clampNodeCount(nodeCount)
-  const graph =
-    style === 'linear'
-      ? makeLinearGraph(safeNodeCount)
-      : style === 'fork_merge'
-        ? makeForkMergeGraph(safeNodeCount)
-        : makeHubGraph(safeNodeCount)
-  return renderNodalYaml(safeId, graph.initialStepId, graph.steps)
+  normalizedNodes.forEach((node, index) => {
+    const stepId = stepIdByNodeId.get(node.id) ?? `STEP_NODE_${index + 1}`
+    const screenSceneId = normalizeToken(node.screenSceneId, 'SCENE_LOCKED')
+    const audioPackId = node.audioPackId.trim().length > 0 ? normalizeToken(node.audioPackId, '') : ''
+    const outgoingEdges = edges.filter((edge) => edge.fromNodeId === node.id && stepIdByNodeId.has(edge.toNodeId))
+
+    lines.push(`  - id: ${stepId}`)
+    lines.push(`    screen_scene_id: ${screenSceneId}`)
+    if (audioPackId) {
+      lines.push(`    audio_pack_id: ${audioPackId}`)
+    }
+    if (outgoingEdges.length > 0) {
+      lines.push('    transitions:')
+      outgoingEdges.forEach((edge) => {
+        const targetStepId = stepIdByNodeId.get(edge.toNodeId)
+        if (!targetStepId) {
+          return
+        }
+        lines.push(`      - event: ${normalizeToken(edge.eventName, 'BTN_NEXT')}`)
+        lines.push(`        target: ${targetStepId}`)
+      })
+    }
+  })
+
+  return `${lines.join('\n')}\n`
 }
 
 const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryDesignerProps) => {
@@ -246,13 +234,55 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
   const [errors, setErrors] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [selectedTemplate, setSelectedTemplate] = useState('')
-  const [nodalScenarioId, setNodalScenarioId] = useState('NODAL_STORY')
-  const [nodalStyle, setNodalStyle] = useState<NodalStyle>('fork_merge')
-  const [nodalNodeCount, setNodalNodeCount] = useState(5)
+  const [graphScenarioId, setGraphScenarioId] = useState('NODAL_STORY')
+  const [nodes, setNodes] = useState<EditorNode[]>(() => createDefaultGraph().nodes)
+  const [edges, setEdges] = useState<EditorEdge[]>(() => createDefaultGraph().edges)
+  const [linkSourceId, setLinkSourceId] = useState<string | null>(null)
+  const [dragState, setDragState] = useState<DragState | null>(null)
+  const canvasRef = useRef<HTMLDivElement | null>(null)
 
   const validateEnabled = capabilities.canValidate
   const deployEnabled = capabilities.canDeploy
   const testRunEnabled = capabilities.canDeploy && capabilities.canSelectScenario && capabilities.canStart
+
+  const nodeMap = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes])
+
+  const outgoingEdgeMap = useMemo(() => {
+    const map = new Map<string, EditorEdge[]>()
+    edges.forEach((edge) => {
+      const current = map.get(edge.fromNodeId) ?? []
+      current.push(edge)
+      map.set(edge.fromNodeId, current)
+    })
+    return map
+  }, [edges])
+
+  const renderedEdges = useMemo(
+    () =>
+      edges
+        .map((edge) => {
+          const from = nodeMap.get(edge.fromNodeId)
+          const to = nodeMap.get(edge.toNodeId)
+          if (!from || !to) {
+            return null
+          }
+          const x1 = from.x + NODE_WIDTH
+          const y1 = from.y + 54
+          const x2 = to.x
+          const y2 = to.y + 54
+          const controlGap = Math.max(Math.abs(x2 - x1) * 0.4, 60)
+          const path = `M ${x1} ${y1} C ${x1 + controlGap} ${y1}, ${x2 - controlGap} ${y2}, ${x2} ${y2}`
+          return {
+            id: edge.id,
+            path,
+            labelX: (x1 + x2) / 2,
+            labelY: (y1 + y2) / 2 - 6,
+            eventName: edge.eventName,
+          }
+        })
+        .filter((edge): edge is { id: string; path: string; labelX: number; labelY: number; eventName: string } => edge !== null),
+    [edges, nodeMap],
+  )
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -275,6 +305,32 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [draft])
 
+  useEffect(() => {
+    const clearDrag = () => setDragState(null)
+    window.addEventListener('mouseup', clearDrag)
+    return () => window.removeEventListener('mouseup', clearDrag)
+  }, [])
+
+  const updateNode = useCallback((nodeId: string, patch: Partial<EditorNode>) => {
+    setNodes((previous) =>
+      previous.map((node) => {
+        if (node.id !== nodeId) {
+          return node
+        }
+        return { ...node, ...patch }
+      }),
+    )
+  }, [])
+
+  const setInitialNode = useCallback((nodeId: string) => {
+    setNodes((previous) =>
+      previous.map((node) => ({
+        ...node,
+        isInitial: node.id === nodeId,
+      })),
+    )
+  }, [])
+
   const handleTemplateChange = (value: string) => {
     setSelectedTemplate(value)
     if (value && TEMPLATE_LIBRARY[value]) {
@@ -284,12 +340,131 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
     }
   }
 
-  const handleGenerateNodalDraft = () => {
-    const generated = buildNodalDraft(nodalScenarioId, nodalStyle, nodalNodeCount)
-    setDraft(generated)
-    setStatus(`Nodal draft generated (${NODAL_STYLE_LABELS[nodalStyle]}, ${clampNodeCount(nodalNodeCount)} nodes).`)
+  const handleAddNode = useCallback(() => {
+    setNodes((previous) => {
+      const nextNode = createNode(previous.length + 1)
+      if (previous.length === 0) {
+        nextNode.isInitial = true
+      }
+      return [...previous, nextNode]
+    })
+  }, [])
+
+  const handleResetGraph = useCallback(() => {
+    const graph = createDefaultGraph()
+    setNodes(graph.nodes)
+    setEdges(graph.edges)
+    setLinkSourceId(null)
+    setStatus('Node graph reset to default.')
     setErrors([])
-  }
+  }, [])
+
+  const handleRemoveNode = useCallback((nodeId: string) => {
+    setNodes((previous) => ensureInitialNode(previous.filter((node) => node.id !== nodeId)))
+    setEdges((previous) => previous.filter((edge) => edge.fromNodeId !== nodeId && edge.toNodeId !== nodeId))
+    setLinkSourceId((previous) => (previous === nodeId ? null : previous))
+  }, [])
+
+  const handleStartLink = useCallback((nodeId: string) => {
+    setLinkSourceId(nodeId)
+    const nodeLabel = nodeMap.get(nodeId)?.stepId ?? nodeId
+    setStatus(`Link mode: select target node for ${nodeLabel}.`)
+  }, [nodeMap])
+
+  const handleNodeClick = useCallback(
+    (nodeId: string) => {
+      if (!linkSourceId || linkSourceId === nodeId) {
+        return
+      }
+      const eventName = window.prompt('Transition event name', 'BTN_NEXT')
+      if (eventName === null) {
+        setStatus('Link creation cancelled.')
+        setLinkSourceId(null)
+        return
+      }
+      const trimmedEvent = eventName.trim()
+      if (!trimmedEvent) {
+        setStatus('Link event cannot be empty.')
+        return
+      }
+
+      setEdges((previous) => {
+        const existing = previous.find(
+          (edge) => edge.fromNodeId === linkSourceId && edge.toNodeId === nodeId,
+        )
+        if (existing) {
+          return previous.map((edge) =>
+            edge.id === existing.id
+              ? {
+                  ...edge,
+                  eventName: trimmedEvent,
+                }
+              : edge,
+          )
+        }
+        return [
+          ...previous,
+          {
+            id: `edge-${makeIdFragment()}`,
+            fromNodeId: linkSourceId,
+            toNodeId: nodeId,
+            eventName: trimmedEvent,
+          },
+        ]
+      })
+      setLinkSourceId(null)
+      setStatus('Nodes linked. Edit event directly inside the source node if needed.')
+      setErrors([])
+    },
+    [linkSourceId],
+  )
+
+  const handleRemoveEdge = useCallback((edgeId: string) => {
+    setEdges((previous) => previous.filter((edge) => edge.id !== edgeId))
+  }, [])
+
+  const handleDragStart = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>, nodeId: string) => {
+      if (!canvasRef.current) {
+        return
+      }
+      const node = nodeMap.get(nodeId)
+      if (!node) {
+        return
+      }
+      const bounds = canvasRef.current.getBoundingClientRect()
+      setDragState({
+        nodeId,
+        offsetX: event.clientX - bounds.left - node.x,
+        offsetY: event.clientY - bounds.top - node.y,
+      })
+      event.preventDefault()
+      event.stopPropagation()
+    },
+    [nodeMap],
+  )
+
+  const handleCanvasMouseMove = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (!dragState || !canvasRef.current) {
+        return
+      }
+      const bounds = canvasRef.current.getBoundingClientRect()
+      const maxX = Math.max(20, bounds.width - NODE_WIDTH - 10)
+      const maxY = Math.max(20, CANVAS_HEIGHT - NODE_HEIGHT - 10)
+      const nextX = Math.min(maxX, Math.max(10, event.clientX - bounds.left - dragState.offsetX))
+      const nextY = Math.min(maxY, Math.max(10, event.clientY - bounds.top - dragState.offsetY))
+      updateNode(dragState.nodeId, { x: nextX, y: nextY })
+    },
+    [dragState, updateNode],
+  )
+
+  const handleGenerateFromNodes = useCallback(() => {
+    const generated = buildStoryYaml(graphScenarioId, nodes, edges)
+    setDraft(generated)
+    setStatus('YAML generated from linked nodes.')
+    setErrors([])
+  }, [edges, graphScenarioId, nodes])
 
   const handleValidate = async () => {
     if (!validateEnabled) {
@@ -363,7 +538,9 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
     <section className="space-y-6">
       <div>
         <h2 className="text-2xl font-semibold">Story Designer</h2>
-        <p className="text-sm text-[var(--ink-500)]">Draft YAML scenarios and deploy them to the device.</p>
+        <p className="text-sm text-[var(--ink-500)]">
+          Build your story as linked nodes, set parameters in each node, then generate YAML.
+        </p>
       </div>
 
       {(!validateEnabled || !deployEnabled) && (
@@ -371,6 +548,198 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
           Story Designer is in read/edit mode. Validate/deploy actions require Story V2 API support.
         </div>
       )}
+
+      <div className="glass-panel rounded-3xl p-5">
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto_auto] md:items-end">
+          <label className="text-xs uppercase tracking-[0.2em] text-[var(--ink-500)]" htmlFor="graph-scenario-id">
+            Scenario ID
+            <input
+              id="graph-scenario-id"
+              value={graphScenarioId}
+              onChange={(event) => setGraphScenarioId(event.target.value)}
+              className="focus-ring mt-2 min-h-[44px] w-full rounded-xl border border-[var(--ink-500)] bg-white/70 px-3 text-sm text-[var(--ink-900)]"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={handleAddNode}
+            className="focus-ring min-h-[44px] rounded-full border border-[var(--ink-700)] px-4 text-sm font-semibold text-[var(--ink-700)]"
+          >
+            Add node
+          </button>
+          <button
+            type="button"
+            onClick={handleGenerateFromNodes}
+            className="focus-ring min-h-[44px] rounded-full bg-[var(--ink-700)] px-4 text-sm font-semibold text-white"
+          >
+            Generate YAML
+          </button>
+          <button
+            type="button"
+            onClick={handleResetGraph}
+            className="focus-ring min-h-[44px] rounded-full border border-[var(--ink-500)] px-4 text-sm font-semibold text-[var(--ink-500)]"
+          >
+            Reset graph
+          </button>
+        </div>
+        <p className="mt-3 text-xs text-[var(--ink-500)]">
+          Click <span className="font-semibold">Link</span> on a source node, then click a target node to connect them.
+          Node parameters and transition events are edited directly inside each node.
+        </p>
+        {linkSourceId && (
+          <p className="mt-2 rounded-xl border border-[var(--accent-700)] bg-white/70 px-3 py-2 text-xs text-[var(--accent-700)]">
+            Link mode active from <span className="font-semibold">{nodeMap.get(linkSourceId)?.stepId ?? linkSourceId}</span>. Click a target node.
+          </p>
+        )}
+
+        <div
+          ref={canvasRef}
+          className="relative mt-4 overflow-auto rounded-2xl border border-white/60 bg-white/40"
+          style={{ height: `${CANVAS_HEIGHT}px` }}
+          onMouseMove={handleCanvasMouseMove}
+          onMouseUp={() => setDragState(null)}
+          onMouseLeave={() => setDragState(null)}
+        >
+          <svg className="pointer-events-none absolute inset-0 h-full w-full">
+            {renderedEdges.map((edge) => (
+              <g key={edge.id}>
+                <path d={edge.path} fill="none" stroke="rgba(31,42,68,0.55)" strokeWidth={2.5} />
+                <text x={edge.labelX} y={edge.labelY} textAnchor="middle" fontSize={11} fill="#1f2a44">
+                  {edge.eventName}
+                </text>
+              </g>
+            ))}
+          </svg>
+
+          {nodes.map((node) => {
+            const outgoing = outgoingEdgeMap.get(node.id) ?? []
+            return (
+              <div
+                key={node.id}
+                className={`absolute rounded-2xl border bg-white/90 p-3 shadow-lg ${
+                  linkSourceId === node.id ? 'border-[var(--accent-700)]' : 'border-[var(--mist-400)]'
+                }`}
+                style={{ left: `${node.x}px`, top: `${node.y}px`, width: `${NODE_WIDTH}px`, minHeight: `${NODE_HEIGHT}px` }}
+                onClick={() => handleNodeClick(node.id)}
+              >
+                <div
+                  className="mb-2 flex cursor-move items-center justify-between rounded-xl bg-[var(--mist-200)] px-2 py-1 text-xs font-semibold text-[var(--ink-700)]"
+                  onMouseDown={(event) => handleDragStart(event, node.id)}
+                >
+                  <span>{node.stepId || 'STEP_NODE'}</span>
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        handleStartLink(node.id)
+                      }}
+                      className="rounded-md border border-[var(--ink-500)] px-2 py-1 text-[10px]"
+                    >
+                      Link
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        handleRemoveNode(node.id)
+                      }}
+                      className="rounded-md border border-[var(--accent-700)] px-2 py-1 text-[10px] text-[var(--accent-700)]"
+                    >
+                      Del
+                    </button>
+                  </div>
+                </div>
+
+                <label className="block text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">
+                  Step ID
+                  <input
+                    value={node.stepId}
+                    onChange={(event) => updateNode(node.id, { stepId: event.target.value })}
+                    onClick={(event) => event.stopPropagation()}
+                    className="focus-ring mt-1 min-h-[32px] w-full rounded-lg border border-[var(--mist-400)] px-2 text-xs text-[var(--ink-900)]"
+                  />
+                </label>
+                <label className="mt-2 block text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">
+                  Screen
+                  <input
+                    value={node.screenSceneId}
+                    onChange={(event) => updateNode(node.id, { screenSceneId: event.target.value })}
+                    onClick={(event) => event.stopPropagation()}
+                    className="focus-ring mt-1 min-h-[32px] w-full rounded-lg border border-[var(--mist-400)] px-2 text-xs text-[var(--ink-900)]"
+                  />
+                </label>
+                <label className="mt-2 block text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">
+                  Audio pack
+                  <input
+                    value={node.audioPackId}
+                    onChange={(event) => updateNode(node.id, { audioPackId: event.target.value })}
+                    onClick={(event) => event.stopPropagation()}
+                    placeholder="PACK_BOOT_RADIO"
+                    className="focus-ring mt-1 min-h-[32px] w-full rounded-lg border border-[var(--mist-400)] px-2 text-xs text-[var(--ink-900)]"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setInitialNode(node.id)
+                  }}
+                  className={`mt-2 min-h-[30px] w-full rounded-lg border px-2 text-[10px] uppercase tracking-[0.15em] ${
+                    node.isInitial
+                      ? 'border-[var(--teal-500)] bg-[var(--teal-500)] text-white'
+                      : 'border-[var(--ink-500)] text-[var(--ink-700)]'
+                  }`}
+                >
+                  {node.isInitial ? 'Initial node' : 'Set initial'}
+                </button>
+
+                {outgoing.length > 0 && (
+                  <div className="mt-2 space-y-1 rounded-lg border border-[var(--mist-400)] p-2">
+                    <p className="text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">Transitions</p>
+                    {outgoing.map((edge) => (
+                      <div key={edge.id} className="space-y-1">
+                        <div className="text-[10px] text-[var(--ink-500)]">
+                          to {nodeMap.get(edge.toNodeId)?.stepId ?? 'Unknown'}
+                        </div>
+                        <div className="flex gap-1">
+                          <input
+                            value={edge.eventName}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={(event) =>
+                              setEdges((previous) =>
+                                previous.map((candidate) =>
+                                  candidate.id === edge.id
+                                    ? {
+                                        ...candidate,
+                                        eventName: event.target.value,
+                                      }
+                                    : candidate,
+                                ),
+                              )
+                            }
+                            className="focus-ring min-h-[28px] flex-1 rounded-md border border-[var(--mist-400)] px-2 text-[10px] text-[var(--ink-900)]"
+                          />
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              handleRemoveEdge(edge.id)
+                            }}
+                            className="rounded-md border border-[var(--accent-700)] px-2 text-[10px] text-[var(--accent-700)]"
+                          >
+                            x
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="glass-panel rounded-3xl p-4">
@@ -401,58 +770,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
               ))}
             </select>
             <p className="text-xs text-[var(--ink-500)]">
-              Templates use real scenario IDs and provide an editable starting point.
-            </p>
-          </div>
-
-          <div className="space-y-3 border-t border-white/60 pt-4">
-            <p className="text-xs uppercase tracking-[0.2em] text-[var(--ink-500)]">Nodal generator</p>
-            <label className="block text-xs text-[var(--ink-500)]" htmlFor="nodal-scenario-id">
-              Scenario ID
-            </label>
-            <input
-              id="nodal-scenario-id"
-              value={nodalScenarioId}
-              onChange={(event) => setNodalScenarioId(event.target.value)}
-              className="focus-ring min-h-[44px] w-full rounded-xl border border-[var(--ink-500)] bg-white/70 px-3 text-sm"
-            />
-            <label className="block text-xs text-[var(--ink-500)]" htmlFor="nodal-style">
-              Graph style
-            </label>
-            <select
-              id="nodal-style"
-              value={nodalStyle}
-              onChange={(event) => setNodalStyle(event.target.value as NodalStyle)}
-              className="focus-ring min-h-[44px] w-full rounded-xl border border-[var(--ink-500)] bg-white/70 px-3 text-sm"
-            >
-              {(Object.keys(NODAL_STYLE_LABELS) as NodalStyle[]).map((style) => (
-                <option key={style} value={style}>
-                  {NODAL_STYLE_LABELS[style]}
-                </option>
-              ))}
-            </select>
-            <label className="block text-xs text-[var(--ink-500)]" htmlFor="nodal-node-count">
-              Approx node count
-            </label>
-            <input
-              id="nodal-node-count"
-              type="number"
-              min={3}
-              max={10}
-              value={nodalNodeCount}
-              onChange={(event) => setNodalNodeCount(clampNodeCount(Number.parseInt(event.target.value, 10)))}
-              className="focus-ring min-h-[44px] w-full rounded-xl border border-[var(--ink-500)] bg-white/70 px-3 text-sm"
-            />
-            <button
-              type="button"
-              onClick={handleGenerateNodalDraft}
-              disabled={busy}
-              className="focus-ring min-h-[44px] w-full rounded-full border border-[var(--ink-700)] px-4 text-sm font-semibold text-[var(--ink-700)] disabled:opacity-70"
-            >
-              Generate nodal draft
-            </button>
-            <p className="text-xs text-[var(--ink-500)]">
-              Creates a node-and-transition skeleton directly in YAML so you can iterate visually by flow.
+              You can still switch to template mode and manually adjust YAML.
             </p>
           </div>
 
@@ -503,3 +821,4 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
 }
 
 export default StoryDesigner
+

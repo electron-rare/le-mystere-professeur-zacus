@@ -5,9 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:esp": "VITE_API_BASE=http://192.168.0.91 VITE_API_PROBE_PORTS=80,8080 VITE_API_FLAVOR=auto vite --host --port 5173",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "preview:esp": "VITE_API_BASE=http://192.168.0.91 VITE_API_PROBE_PORTS=80,8080 VITE_API_FLAVOR=auto vite preview --host --port 4173",
+    "preview:esp:build": "npm run build && npm run preview:esp",
     "test:e2e": "playwright test",
     "test:e2e:live": "playwright test --grep @live"
   },

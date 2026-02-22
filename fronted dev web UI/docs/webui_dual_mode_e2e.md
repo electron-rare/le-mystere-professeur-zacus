@@ -23,6 +23,32 @@ export VITE_API_PROBE_PORTS=80,8080
 export VITE_API_FLAVOR=auto
 ```
 
+## Dev and Preview (ESP preset)
+
+Quick commands with the target already set to `192.168.0.91`:
+
+```bash
+npm run dev:esp
+```
+
+- Dev URL (local): `http://localhost:5173`
+- Dev URL (LAN): `http://<your-computer-ip>:5173`
+
+Preview from existing build:
+
+```bash
+npm run preview:esp
+```
+
+Build + preview in one command:
+
+```bash
+npm run preview:esp:build
+```
+
+- Preview URL (local): `http://localhost:4173`
+- Preview URL (LAN): `http://<your-computer-ip>:4173`
+
 ## Test Commands
 
 Mock-only suite:

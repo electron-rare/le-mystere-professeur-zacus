@@ -4,6 +4,8 @@
 #include <ArduinoJson.h>
 #include <TFT_eSPI.h>
 #include <cctype>
+#include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -33,6 +35,13 @@ int16_t activeDisplayHeight() {
     return static_cast<int16_t>(lv_disp_get_ver_res(display));
   }
   return ((FREENOVE_LCD_ROTATION & 0x1U) != 0U) ? FREENOVE_LCD_WIDTH : FREENOVE_LCD_HEIGHT;
+}
+
+uint32_t pseudoRandom32(uint32_t value) {
+  value ^= (value << 13U);
+  value ^= (value >> 17U);
+  value ^= (value << 5U);
+  return value;
 }
 
 uint32_t toLvKey(uint8_t key, bool long_press) {
@@ -230,7 +239,648 @@ void UiManager::update() {
   if (player_ui_.consumeDirty()) {
     updatePageLine();
   }
+  renderMicrophoneWaveform();
   lv_timer_handler();
+}
+
+void UiManager::setHardwareSnapshot(const HardwareManager::Snapshot& snapshot) {
+  waveform_snapshot_ = snapshot;
+  waveform_snapshot_valid_ = true;
+}
+
+void UiManager::setLaDetectionState(bool locked,
+                                    uint8_t stability_pct,
+                                    uint32_t stable_ms,
+                                    uint32_t stable_target_ms,
+                                    uint32_t gate_elapsed_ms,
+                                    uint32_t gate_timeout_ms) {
+  la_detection_locked_ = locked;
+  if (stability_pct > 100U) {
+    stability_pct = 100U;
+  }
+  la_detection_stability_pct_ = stability_pct;
+  la_detection_stable_ms_ = stable_ms;
+  la_detection_stable_target_ms_ = stable_target_ms;
+  la_detection_gate_elapsed_ms_ = gate_elapsed_ms;
+  la_detection_gate_timeout_ms_ = gate_timeout_ms;
+}
+
+void UiManager::configureWaveformOverlay(const HardwareManager::Snapshot* snapshot,
+                                        bool enabled,
+                                        uint8_t sample_count,
+                                        uint8_t amplitude_pct,
+                                        bool jitter) {
+  waveform_overlay_enabled_ = enabled;
+  waveform_snapshot_valid_ = (snapshot != nullptr);
+  if (snapshot != nullptr) {
+    waveform_snapshot_ = *snapshot;
+  }
+  waveform_sample_count_ = sample_count;
+  waveform_amplitude_pct_ = amplitude_pct;
+  waveform_overlay_jitter_ = jitter;
+
+  if (!waveform_overlay_enabled_ || scene_waveform_ == nullptr) {
+    if (scene_waveform_outer_ != nullptr) {
+      lv_obj_add_flag(scene_waveform_outer_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (scene_waveform_ != nullptr) {
+      lv_obj_add_flag(scene_waveform_, LV_OBJ_FLAG_HIDDEN);
+    }
+    return;
+  }
+
+  if (scene_waveform_outer_ != nullptr) {
+    lv_obj_set_style_opa(scene_waveform_outer_, LV_OPA_60, LV_PART_MAIN);
+    lv_obj_clear_flag(scene_waveform_outer_, LV_OBJ_FLAG_HIDDEN);
+  }
+  lv_obj_set_style_opa(scene_waveform_, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_clear_flag(scene_waveform_, LV_OBJ_FLAG_HIDDEN);
+}
+
+void UiManager::updateLaOverlay(bool visible,
+                                uint16_t freq_hz,
+                                int16_t cents,
+                                uint8_t confidence,
+                                uint8_t level_pct,
+                                uint8_t stability_pct) {
+  auto hide_all = [this]() {
+    if (scene_la_status_label_ != nullptr) {
+      lv_obj_add_flag(scene_la_status_label_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (scene_la_pitch_label_ != nullptr) {
+      lv_obj_add_flag(scene_la_pitch_label_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (scene_la_timer_label_ != nullptr) {
+      lv_obj_add_flag(scene_la_timer_label_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (scene_la_timeout_label_ != nullptr) {
+      lv_obj_add_flag(scene_la_timeout_label_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (scene_la_meter_bg_ != nullptr) {
+      lv_obj_add_flag(scene_la_meter_bg_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (scene_la_meter_fill_ != nullptr) {
+      lv_obj_add_flag(scene_la_meter_fill_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (scene_la_needle_ != nullptr) {
+      lv_obj_add_flag(scene_la_needle_, LV_OBJ_FLAG_HIDDEN);
+    }
+    for (lv_obj_t* bar : scene_la_analyzer_bars_) {
+      if (bar != nullptr) {
+        lv_obj_add_flag(bar, LV_OBJ_FLAG_HIDDEN);
+      }
+    }
+  };
+
+  if (!visible) {
+    hide_all();
+    return;
+  }
+  if (scene_la_status_label_ == nullptr || scene_la_pitch_label_ == nullptr || scene_la_timer_label_ == nullptr ||
+      scene_la_timeout_label_ == nullptr || scene_la_meter_bg_ == nullptr || scene_la_meter_fill_ == nullptr ||
+      scene_la_needle_ == nullptr || scene_core_ == nullptr ||
+      scene_ring_outer_ == nullptr) {
+    hide_all();
+    return;
+  }
+
+  if (stability_pct > 100U) {
+    stability_pct = 100U;
+  }
+  if (confidence > 100U) {
+    confidence = 100U;
+  }
+  if (level_pct > 100U) {
+    level_pct = 100U;
+  }
+  const int16_t info_shift_y = 36;
+  const int16_t hz_line_shift_y = 8;
+  const int16_t meter_shift_y = 32;
+  const int16_t analyzer_shift_y = 52;
+
+  int16_t abs_cents = cents;
+  if (abs_cents < 0) {
+    abs_cents = static_cast<int16_t>(-abs_cents);
+  }
+
+  const char* status_text = "ECOUTE...";
+  uint32_t status_rgb = 0x86CCFFUL;
+  if (la_detection_locked_) {
+    status_text = "SIGNAL VERROUILLE";
+    status_rgb = 0x9DFF63UL;
+  } else if (freq_hz == 0U || confidence < 20U) {
+    status_text = "AUCUN SIGNAL";
+    status_rgb = 0x66B7FFUL;
+  } else if (abs_cents <= 8) {
+    status_text = "SIGNAL STABLE";
+    status_rgb = 0xC9FF6EUL;
+  } else if (cents < 0) {
+    status_text = "MONTE EN FREQUENCE";
+    status_rgb = 0xFFD772UL;
+  } else {
+    status_text = "DESCENDS EN FREQUENCE";
+    status_rgb = 0xFFAA66UL;
+  }
+
+  lv_label_set_text(scene_la_status_label_, status_text);
+  lv_obj_set_style_text_color(scene_la_status_label_, lv_color_hex(status_rgb), LV_PART_MAIN);
+  lv_obj_align(scene_la_status_label_, LV_ALIGN_TOP_RIGHT, -8, static_cast<lv_coord_t>(8 + info_shift_y));
+  lv_obj_clear_flag(scene_la_status_label_, LV_OBJ_FLAG_HIDDEN);
+
+  char pitch_line[56] = {0};
+  std::snprintf(pitch_line,
+                sizeof(pitch_line),
+                "%3u Hz  %+d c  C%u  S%u",
+                static_cast<unsigned int>(freq_hz),
+                static_cast<int>(cents),
+                static_cast<unsigned int>(confidence),
+                static_cast<unsigned int>(stability_pct));
+  lv_label_set_text(scene_la_pitch_label_, pitch_line);
+  lv_obj_align(scene_la_pitch_label_, LV_ALIGN_BOTTOM_MID, 0, static_cast<lv_coord_t>(-30 + hz_line_shift_y));
+  lv_obj_clear_flag(scene_la_pitch_label_, LV_OBJ_FLAG_HIDDEN);
+
+  const uint32_t stable_target_ms = (la_detection_stable_target_ms_ > 0U) ? la_detection_stable_target_ms_ : 3000U;
+  const float stable_sec = static_cast<float>(la_detection_stable_ms_) / 1000.0f;
+  const float stable_target_sec = static_cast<float>(stable_target_ms) / 1000.0f;
+  char timer_line[40] = {0};
+  std::snprintf(timer_line,
+                sizeof(timer_line),
+                "Stabilite %.1fs / %.1fs",
+                static_cast<double>(stable_sec),
+                static_cast<double>(stable_target_sec));
+  lv_label_set_text(scene_la_timer_label_, timer_line);
+  lv_obj_set_style_text_color(scene_la_timer_label_, lv_color_hex(la_detection_locked_ ? 0x9DFF63UL : 0x9AD6FFUL), LV_PART_MAIN);
+  lv_obj_align(scene_la_timer_label_, LV_ALIGN_TOP_LEFT, 8, static_cast<lv_coord_t>(8 + info_shift_y));
+  lv_obj_clear_flag(scene_la_timer_label_, LV_OBJ_FLAG_HIDDEN);
+
+  if (la_detection_gate_timeout_ms_ > 0U) {
+    const int32_t remain_ms = static_cast<int32_t>(la_detection_gate_timeout_ms_) - static_cast<int32_t>(la_detection_gate_elapsed_ms_);
+    const float remain_sec = static_cast<float>((remain_ms > 0) ? remain_ms : 0) / 1000.0f;
+    const float limit_sec = static_cast<float>(la_detection_gate_timeout_ms_) / 1000.0f;
+    char timeout_line[42] = {0};
+    std::snprintf(timeout_line,
+                  sizeof(timeout_line),
+                  "Timeout %.1fs / %.1fs",
+                  static_cast<double>(remain_sec),
+                  static_cast<double>(limit_sec));
+    lv_label_set_text(scene_la_timeout_label_, timeout_line);
+    lv_obj_set_style_text_color(scene_la_timeout_label_, lv_color_hex((remain_ms < 3000) ? 0xFFB06DUL : 0x84CFFFUL), LV_PART_MAIN);
+    lv_obj_align(scene_la_timeout_label_, LV_ALIGN_TOP_MID, 0, static_cast<lv_coord_t>(30 + info_shift_y));
+    lv_obj_clear_flag(scene_la_timeout_label_, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_add_flag(scene_la_timeout_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+
+  int16_t meter_width = static_cast<int16_t>(activeDisplayWidth() - 52);
+  if (meter_width < 96) {
+    meter_width = 96;
+  }
+  const uint8_t meter_pct =
+      static_cast<uint8_t>(((static_cast<uint16_t>(confidence) * 35U) + (static_cast<uint16_t>(level_pct) * 30U) +
+                            (static_cast<uint16_t>(stability_pct) * 35U)) /
+                           100U);
+  int16_t fill_width = static_cast<int16_t>((static_cast<int32_t>(meter_width - 4) * meter_pct) / 100);
+  if (fill_width < 6) {
+    fill_width = 6;
+  }
+  if (fill_width > (meter_width - 4)) {
+    fill_width = meter_width - 4;
+  }
+
+  lv_obj_set_size(scene_la_meter_bg_, meter_width, 10);
+  lv_obj_align(scene_la_meter_bg_, LV_ALIGN_BOTTOM_MID, 0, static_cast<lv_coord_t>(-12 - meter_shift_y));
+  lv_obj_clear_flag(scene_la_meter_bg_, LV_OBJ_FLAG_HIDDEN);
+
+  lv_obj_set_size(scene_la_meter_fill_, fill_width, 6);
+  lv_obj_align_to(scene_la_meter_fill_, scene_la_meter_bg_, LV_ALIGN_LEFT_MID, 2, 0);
+  uint32_t meter_rgb = 0x4AD0FFUL;
+  if (la_detection_locked_) {
+    meter_rgb = 0x8DFF63UL;
+  } else if (abs_cents <= 12 && confidence >= 55U) {
+    meter_rgb = 0xD8FF74UL;
+  } else if (abs_cents > 30) {
+    meter_rgb = 0xFF8259UL;
+  } else {
+    meter_rgb = 0xFFC56EUL;
+  }
+  lv_obj_set_style_bg_color(scene_la_meter_fill_, lv_color_hex(meter_rgb), LV_PART_MAIN);
+  lv_obj_clear_flag(scene_la_meter_fill_, LV_OBJ_FLAG_HIDDEN);
+
+  const int16_t center_x = static_cast<int16_t>(lv_obj_get_x(scene_core_) + (lv_obj_get_width(scene_core_) / 2));
+  const int16_t center_y = static_cast<int16_t>(lv_obj_get_y(scene_core_) + (lv_obj_get_height(scene_core_) / 2));
+  int16_t ring_radius = static_cast<int16_t>(lv_obj_get_width(scene_ring_outer_) / 2);
+  if (ring_radius < 40) {
+    ring_radius = 40;
+  }
+
+  int16_t tuned_cents = cents;
+  if (tuned_cents < -60) {
+    tuned_cents = -60;
+  } else if (tuned_cents > 60) {
+    tuned_cents = 60;
+  }
+  constexpr float kPi = 3.14159265f;
+  constexpr float kHalfPi = 1.57079632f;
+  const float normalized = static_cast<float>(tuned_cents) / 60.0f;
+  const float jitter = (100U - confidence) * 0.0007f;
+  const float angle = (-kHalfPi) + (normalized * (kPi / 2.6f)) + jitter;
+  const int16_t needle_radius = static_cast<int16_t>(ring_radius - 2);
+  const int16_t x = static_cast<int16_t>(center_x + std::cos(angle) * static_cast<float>(needle_radius));
+  const int16_t y = static_cast<int16_t>(center_y + std::sin(angle) * static_cast<float>(needle_radius));
+  la_needle_points_[0].x = center_x;
+  la_needle_points_[0].y = center_y;
+  la_needle_points_[1].x = x;
+  la_needle_points_[1].y = y;
+  lv_line_set_points(scene_la_needle_, la_needle_points_, 2);
+  lv_obj_set_pos(scene_la_needle_, 0, 0);
+  lv_obj_set_style_line_width(scene_la_needle_, la_detection_locked_ ? 4 : 3, LV_PART_MAIN);
+  lv_obj_set_style_line_color(scene_la_needle_, lv_color_hex(meter_rgb), LV_PART_MAIN);
+  lv_obj_clear_flag(scene_la_needle_, LV_OBJ_FLAG_HIDDEN);
+
+  const int16_t bar_region_width = 92;
+  const int16_t bar_x_start = activeDisplayWidth() - bar_region_width - 8;
+  const int16_t bar_y_bottom = static_cast<int16_t>(activeDisplayHeight() - 54 - analyzer_shift_y);
+  const float freq_norm = (freq_hz <= 320U)
+                              ? 0.0f
+                              : ((freq_hz >= 560U) ? 1.0f : (static_cast<float>(freq_hz - 320U) / 240.0f));
+  const float freq_bin_pos = freq_norm * static_cast<float>(kLaAnalyzerBarCount - 1U);
+  const float signal_gain = (static_cast<float>(level_pct) / 100.0f) * (0.45f + static_cast<float>(confidence) / 200.0f);
+  for (uint8_t index = 0U; index < kLaAnalyzerBarCount; ++index) {
+    lv_obj_t* bar = scene_la_analyzer_bars_[index];
+    if (bar == nullptr) {
+      continue;
+    }
+    const float distance = std::fabs(static_cast<float>(index) - freq_bin_pos);
+    float profile = 1.0f - (distance / 2.8f);
+    if (profile < 0.0f) {
+      profile = 0.0f;
+    }
+    float energy = profile * signal_gain;
+    if (freq_hz == 0U || confidence < 8U) {
+      const uint32_t seed = pseudoRandom32(static_cast<uint32_t>(millis()) + static_cast<uint32_t>(index * 97U));
+      energy = (static_cast<float>((seed % 26U) + 8U) / 100.0f) * (static_cast<float>(level_pct) / 100.0f);
+    }
+    int16_t height = static_cast<int16_t>(6 + (energy * 44.0f));
+    if (height < 6) {
+      height = 6;
+    }
+    if (height > 50) {
+      height = 50;
+    }
+    const int16_t x = static_cast<int16_t>(bar_x_start + static_cast<int16_t>(index * 11));
+    const int16_t y = static_cast<int16_t>(bar_y_bottom - height);
+    lv_obj_set_size(bar, 8, height);
+    lv_obj_set_pos(bar, x, y);
+    uint32_t bar_color = 0x3CCBFFUL;
+    if (distance <= 0.7f && confidence >= 24U) {
+      bar_color = 0xA5FF72UL;
+    } else if (distance <= 1.8f) {
+      bar_color = 0xFFD27AUL;
+    } else if (distance >= 3.0f) {
+      bar_color = 0x5F86FFUL;
+    }
+    lv_obj_set_style_bg_color(bar, lv_color_hex(bar_color), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(bar, static_cast<lv_opa_t>(120 + (confidence / 2U)), LV_PART_MAIN);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+void UiManager::renderMicrophoneWaveform() {
+  auto hide_waveform = [this]() {
+    if (scene_waveform_outer_ != nullptr) {
+      lv_obj_add_flag(scene_waveform_outer_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (scene_waveform_ != nullptr) {
+      lv_obj_add_flag(scene_waveform_, LV_OBJ_FLAG_HIDDEN);
+    }
+  };
+
+  if (!ready_ || scene_waveform_ == nullptr) {
+    return;
+  }
+  const uint16_t freq_hz = waveform_snapshot_valid_ ? waveform_snapshot_.mic_freq_hz : 0U;
+  const int16_t cents = waveform_snapshot_valid_ ? waveform_snapshot_.mic_pitch_cents : 0;
+  const uint8_t confidence = waveform_snapshot_valid_ ? waveform_snapshot_.mic_pitch_confidence : 0U;
+  const uint8_t level_pct = waveform_snapshot_valid_ ? waveform_snapshot_.mic_level_percent : 0U;
+  const uint8_t stability_pct = la_detection_stability_pct_;
+
+  if (!waveform_overlay_enabled_ || !waveform_snapshot_valid_ || waveform_snapshot_.mic_waveform_count == 0U) {
+    hide_waveform();
+    updateLaOverlay(la_detection_scene_, freq_hz, cents, confidence, level_pct, stability_pct);
+    return;
+  }
+
+  if (scene_core_ == nullptr || scene_ring_outer_ == nullptr) {
+    hide_waveform();
+    updateLaOverlay(false, 0U, 0, 0U, 0U, 0U);
+    return;
+  }
+
+  uint8_t first = waveform_snapshot_.mic_waveform_head;
+  uint8_t count = waveform_snapshot_.mic_waveform_count;
+  if (count > HardwareManager::kMicWaveformCapacity) {
+    count = HardwareManager::kMicWaveformCapacity;
+  }
+  uint16_t start = (first >= count) ? static_cast<uint16_t>(first - count) : static_cast<uint16_t>(first + HardwareManager::kMicWaveformCapacity - count);
+  const uint8_t display_count = (waveform_sample_count_ == 0U) ? 1U : waveform_sample_count_;
+  const uint8_t points_to_draw = (count < display_count) ? count : display_count;
+  if (points_to_draw < 3U) {
+    hide_waveform();
+    updateLaOverlay(la_detection_scene_, freq_hz, cents, confidence, level_pct, stability_pct);
+    return;
+  }
+
+  int16_t abs_cents = cents;
+  if (abs_cents < 0) {
+    abs_cents = static_cast<int16_t>(-abs_cents);
+  }
+
+  const bool locked_scene = (std::strcmp(last_scene_id_, "SCENE_LOCKED") == 0);
+  uint32_t inner_color = 0x8FFFD2U;
+  uint32_t outer_color = 0x3CD8FFU;
+  if (locked_scene) {
+    inner_color = (confidence >= 20U) ? 0xFFD78CU : 0xFFAA6DU;
+    outer_color = (level_pct >= 22U) ? 0xFF5564U : 0xFF854EU;
+  } else if (la_detection_scene_) {
+    if (la_detection_locked_) {
+      inner_color = 0x84FF68U;
+      outer_color = 0xD8FF86U;
+    } else if (stability_pct >= 70U) {
+      inner_color = 0xD8FF6BU;
+      outer_color = 0xFFE08AU;
+    } else if (stability_pct >= 35U) {
+      inner_color = 0x7EE9FFU;
+      outer_color = 0x72B8FFU;
+    } else {
+      inner_color = 0x4ED4FFU;
+      outer_color = 0x4E7DFFU;
+    }
+  } else if (confidence < 16U) {
+    inner_color = 0x63E6FFU;
+    outer_color = 0x2B90FFU;
+  } else if (abs_cents <= 12) {
+    inner_color = 0x7DFF7FU;
+    outer_color = 0x36CF7FU;
+  } else if (abs_cents <= 35) {
+    inner_color = 0xFFD96AU;
+    outer_color = 0xFF9F4AU;
+  } else {
+    inner_color = 0xFF7A62U;
+    outer_color = 0xFF3F57U;
+  }
+  uint8_t inner_width = (confidence >= 32U) ? 3U : 2U;
+  uint8_t outer_width = (confidence >= 24U) ? 2U : 1U;
+  lv_opa_t inner_opa = (confidence >= 20U) ? LV_OPA_COVER : LV_OPA_70;
+  lv_opa_t outer_opa = (confidence >= 20U) ? LV_OPA_70 : LV_OPA_40;
+  if (la_detection_scene_) {
+    inner_width = la_detection_locked_ ? 5U : ((stability_pct >= 55U) ? 4U : 3U);
+    outer_width = la_detection_locked_ ? 3U : 2U;
+    inner_opa = LV_OPA_COVER;
+    outer_opa = la_detection_locked_ ? LV_OPA_90 : LV_OPA_70;
+  }
+  lv_obj_set_style_line_color(scene_waveform_, lv_color_hex(inner_color), LV_PART_MAIN);
+  lv_obj_set_style_line_width(scene_waveform_, inner_width, LV_PART_MAIN);
+  lv_obj_set_style_opa(scene_waveform_, inner_opa, LV_PART_MAIN);
+  if (scene_waveform_outer_ != nullptr) {
+    lv_obj_set_style_line_color(scene_waveform_outer_, lv_color_hex(outer_color), LV_PART_MAIN);
+    lv_obj_set_style_line_width(scene_waveform_outer_, outer_width, LV_PART_MAIN);
+    lv_obj_set_style_opa(scene_waveform_outer_, outer_opa, LV_PART_MAIN);
+  }
+
+  if (locked_scene) {
+    const int16_t width = activeDisplayWidth();
+    const int16_t height = activeDisplayHeight();
+    if (width < 40 || height < 40) {
+      hide_waveform();
+      updateLaOverlay(false, freq_hz, cents, confidence, level_pct, 0U);
+      return;
+    }
+
+    const uint32_t now_ms = millis();
+    const uint16_t sweep_ms = resolveAnimMs(1600);
+    float phase = static_cast<float>(now_ms % sweep_ms) / static_cast<float>(sweep_ms);
+    if (phase > 0.5f) {
+      phase = 1.0f - phase;
+    }
+    const float sweep = phase * 2.0f;
+
+    const int16_t top_margin = 22;
+    const int16_t bottom_margin = 20;
+    int16_t base_y = static_cast<int16_t>(top_margin + sweep * static_cast<float>(height - top_margin - bottom_margin));
+    base_y = static_cast<int16_t>(base_y + signedNoise(now_ms / 19U, reinterpret_cast<uintptr_t>(scene_waveform_) ^ 0xA5319B4DUL, 9));
+    if (base_y < top_margin) {
+      base_y = top_margin;
+    } else if (base_y > (height - bottom_margin)) {
+      base_y = static_cast<int16_t>(height - bottom_margin);
+    }
+
+    const int16_t left_margin = 12;
+    const int16_t right_margin = 12;
+    const int16_t usable_width = static_cast<int16_t>(width - left_margin - right_margin);
+    if (usable_width < 16) {
+      hide_waveform();
+      updateLaOverlay(false, freq_hz, cents, confidence, level_pct, 0U);
+      return;
+    }
+
+    int16_t amplitude = static_cast<int16_t>(8 + (static_cast<int16_t>(waveform_amplitude_pct_) / 5) +
+                                             (static_cast<int16_t>(level_pct) / 3));
+    if (amplitude > 42) {
+      amplitude = 42;
+    }
+    if (confidence < 12U) {
+      amplitude = static_cast<int16_t>(amplitude * 2 / 3);
+    }
+    if (amplitude < 6) {
+      amplitude = 6;
+    }
+
+    const int16_t scan_drift_x =
+        signedNoise(now_ms / 15U, reinterpret_cast<uintptr_t>(scene_waveform_) ^ 0x7D6AB111UL, 22);
+    const int16_t outer_y_bias = static_cast<int16_t>(2 + (level_pct / 24U));
+    uint8_t point_index = 0U;
+    for (uint8_t index = 0U; index < points_to_draw; ++index) {
+      const uint16_t sample_index = static_cast<uint16_t>(start + index) % HardwareManager::kMicWaveformCapacity;
+      uint8_t sample = waveform_snapshot_.mic_waveform[sample_index];
+      if (sample > 100U) {
+        sample = 100U;
+      }
+
+      int16_t x = static_cast<int16_t>(
+          left_margin + (static_cast<int32_t>(usable_width) * static_cast<int32_t>(index)) /
+                            static_cast<int32_t>(points_to_draw - 1U));
+      x = static_cast<int16_t>(x + scan_drift_x);
+      if (waveform_overlay_jitter_) {
+        x = static_cast<int16_t>(
+            x + signedNoise(now_ms + static_cast<uint32_t>(index) * 31U,
+                            reinterpret_cast<uintptr_t>(scene_waveform_outer_) ^ static_cast<uintptr_t>(sample_index), 3));
+      }
+
+      const int16_t centered = static_cast<int16_t>(sample) - 50;
+      const int16_t spike = static_cast<int16_t>((static_cast<int32_t>(centered) * centered) / 100);
+      int16_t y = static_cast<int16_t>(base_y + ((centered * amplitude) / 50) + (centered >= 0 ? spike / 5 : -spike / 7));
+      if (waveform_overlay_jitter_) {
+        y = static_cast<int16_t>(
+            y + signedNoise((now_ms / 2U) + static_cast<uint32_t>(index) * 53U,
+                            reinterpret_cast<uintptr_t>(scene_waveform_) ^ 0x5F3783A5UL,
+                            static_cast<int16_t>(3 + (level_pct / 18U))));
+      }
+
+      if ((mixNoise(now_ms + static_cast<uint32_t>(index) * 67U,
+                    reinterpret_cast<uintptr_t>(scene_waveform_) ^ 0xC2B2AE35UL) &
+           0x0FU) == 0U) {
+        y = static_cast<int16_t>(y + signedNoise(now_ms + static_cast<uint32_t>(index) * 89U,
+                                                 reinterpret_cast<uintptr_t>(scene_fx_bar_) ^ 0x27D4EB2FUL,
+                                                 static_cast<int16_t>(8 + (level_pct / 8U))));
+      }
+
+      if (x < 3) {
+        x = 3;
+      } else if (x > (width - 3)) {
+        x = static_cast<int16_t>(width - 3);
+      }
+      if (y < 4) {
+        y = 4;
+      } else if (y > (height - 4)) {
+        y = static_cast<int16_t>(height - 4);
+      }
+
+      int16_t y_outer = static_cast<int16_t>(
+          y + outer_y_bias +
+          signedNoise(now_ms + static_cast<uint32_t>(index) * 41U, reinterpret_cast<uintptr_t>(scene_waveform_outer_), 2));
+      if (y_outer < 4) {
+        y_outer = 4;
+      } else if (y_outer > (height - 4)) {
+        y_outer = static_cast<int16_t>(height - 4);
+      }
+
+      waveform_points_[point_index].x = x;
+      waveform_points_[point_index].y = y;
+      waveform_outer_points_[point_index].x = x;
+      waveform_outer_points_[point_index].y = y_outer;
+      ++point_index;
+    }
+
+    lv_line_set_points(scene_waveform_, waveform_points_, point_index);
+    if (scene_waveform_outer_ != nullptr) {
+      lv_line_set_points(scene_waveform_outer_, waveform_outer_points_, point_index);
+      lv_obj_set_pos(scene_waveform_outer_, 0, 0);
+      lv_obj_clear_flag(scene_waveform_outer_, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_set_pos(scene_waveform_, 0, 0);
+    lv_obj_clear_flag(scene_waveform_, LV_OBJ_FLAG_HIDDEN);
+    updateLaOverlay(false, freq_hz, cents, confidence, level_pct, 0U);
+    return;
+  }
+
+  const int16_t center_x = static_cast<int16_t>(lv_obj_get_x(scene_core_) + (lv_obj_get_width(scene_core_) / 2));
+  const int16_t center_y = static_cast<int16_t>(lv_obj_get_y(scene_core_) + (lv_obj_get_height(scene_core_) / 2));
+  int16_t core_radius = static_cast<int16_t>(lv_obj_get_width(scene_core_) / 2);
+  int16_t ring_radius = static_cast<int16_t>(lv_obj_get_width(scene_ring_outer_) / 2);
+  if (core_radius < 12) {
+    core_radius = 12;
+  }
+  if (ring_radius <= (core_radius + 6)) {
+    ring_radius = static_cast<int16_t>(core_radius + 12);
+  }
+
+  int16_t ring_band = static_cast<int16_t>(ring_radius - core_radius);
+  if (ring_band < 6) {
+    ring_band = 6;
+  }
+  int16_t base_radius = static_cast<int16_t>(core_radius + ((ring_band * 58) / 100));
+  int16_t radius_span = static_cast<int16_t>((ring_band * static_cast<int16_t>(waveform_amplitude_pct_)) / 140);
+  if (radius_span < 4) {
+    radius_span = 4;
+  }
+  const int16_t max_span = static_cast<int16_t>(ring_band - 2);
+  if (radius_span > max_span) {
+    radius_span = max_span;
+  }
+  const int16_t level_boost = static_cast<int16_t>(waveform_snapshot_.mic_level_percent / 9U);
+  const int16_t jitter_amp = waveform_overlay_jitter_ ? 2 : 0;
+  constexpr float kTau = 6.28318530718f;
+  constexpr float kHalfPi = 1.57079632679f;
+  int16_t outer_offset = static_cast<int16_t>(2 + (static_cast<int16_t>(waveform_snapshot_.mic_level_percent) / 28));
+  if (la_detection_scene_) {
+    outer_offset = static_cast<int16_t>(outer_offset + 2 + (static_cast<int16_t>(stability_pct) / 20));
+  }
+  const float spin_phase =
+      la_detection_scene_ ? static_cast<float>((millis() / 12U) % 360U) * (kTau / 360.0f) : 0.0f;
+
+  uint8_t point_index = 0U;
+  for (uint8_t index = 0U; index < points_to_draw; ++index) {
+    const uint16_t sample_index = static_cast<uint16_t>(start + index) % HardwareManager::kMicWaveformCapacity;
+    uint8_t sample = waveform_snapshot_.mic_waveform[sample_index];
+    if (sample > 100U) {
+      sample = 100U;
+    }
+
+    const uint32_t noise_seed =
+        pseudoRandom32(static_cast<uint32_t>(start) + static_cast<uint32_t>((index + 1U) * 113U));
+    int16_t radial_jitter = static_cast<int16_t>((noise_seed % 5U) - 2U);
+    if (radial_jitter > jitter_amp) {
+      radial_jitter = jitter_amp;
+    }
+    if (radial_jitter < -jitter_amp) {
+      radial_jitter = -jitter_amp;
+    }
+
+    const int16_t centered = static_cast<int16_t>(sample) - 50;
+    const int16_t punch = static_cast<int16_t>((static_cast<int32_t>(centered) * centered) / 120);
+    int16_t radius =
+        static_cast<int16_t>(base_radius + ((centered * radius_span) / 50) + (punch / 3) + radial_jitter + level_boost);
+    const int16_t min_radius = static_cast<int16_t>(core_radius + 2);
+    const int16_t max_radius = static_cast<int16_t>(ring_radius - 2);
+    if (radius < min_radius) {
+      radius = min_radius;
+    }
+    if (radius > max_radius) {
+      radius = max_radius;
+    }
+
+    const float phase = static_cast<float>(index) / static_cast<float>(points_to_draw);
+    float phase_warp = static_cast<float>((static_cast<int>(noise_seed >> 12U) & 0x7) - 3) * 0.0036f;
+    if (la_detection_scene_) {
+      phase_warp *= 1.6f;
+    }
+    const float angle = (-kHalfPi) + spin_phase + ((phase + phase_warp) * kTau);
+    const int16_t x = static_cast<int16_t>(center_x + std::cos(angle) * static_cast<float>(radius));
+    const int16_t y = static_cast<int16_t>(center_y + std::sin(angle) * static_cast<float>(radius));
+    int16_t outer_radius = static_cast<int16_t>(radius + outer_offset);
+    if (outer_radius > ring_radius) {
+      outer_radius = ring_radius;
+    }
+    const int16_t x_outer = static_cast<int16_t>(center_x + std::cos(angle) * static_cast<float>(outer_radius));
+    const int16_t y_outer = static_cast<int16_t>(center_y + std::sin(angle) * static_cast<float>(outer_radius));
+
+    waveform_points_[point_index].x = x;
+    waveform_points_[point_index].y = y;
+    waveform_outer_points_[point_index].x = x_outer;
+    waveform_outer_points_[point_index].y = y_outer;
+    ++point_index;
+  }
+
+  if (point_index >= 2U && point_index < (HardwareManager::kMicWaveformCapacity + 1U)) {
+    waveform_points_[point_index] = waveform_points_[0];
+    waveform_outer_points_[point_index] = waveform_outer_points_[0];
+    ++point_index;
+  }
+
+  lv_line_set_points(scene_waveform_, waveform_points_, point_index);
+  if (scene_waveform_outer_ != nullptr) {
+    lv_line_set_points(scene_waveform_outer_, waveform_outer_points_, point_index);
+    lv_obj_set_pos(scene_waveform_outer_, 0, 0);
+    lv_obj_clear_flag(scene_waveform_outer_, LV_OBJ_FLAG_HIDDEN);
+  }
+  lv_obj_set_pos(scene_waveform_, 0, 0);
+  lv_obj_clear_flag(scene_waveform_, LV_OBJ_FLAG_HIDDEN);
+  updateLaOverlay(la_detection_scene_,
+                  waveform_snapshot_.mic_freq_hz,
+                  waveform_snapshot_.mic_pitch_cents,
+                  waveform_snapshot_.mic_pitch_confidence,
+                  waveform_snapshot_.mic_level_percent,
+                  stability_pct);
 }
 
 void UiManager::renderScene(const ScenarioDef* scenario,
@@ -394,6 +1044,11 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   String demo_mode = "standard";
   uint8_t demo_particle_count = 4U;
   uint8_t demo_strobe_level = 65U;
+  bool waveform_enabled = false;
+  uint8_t waveform_sample_count = HardwareManager::kMicWaveformCapacity;
+  uint8_t waveform_amplitude_pct = 95U;
+  bool waveform_jitter = true;
+  la_detection_scene_ = false;
   uint32_t bg_rgb = 0x07132AUL;
   uint32_t accent_rgb = 0x2A76FFUL;
   uint32_t text_rgb = 0xE8F1FFUL;
@@ -403,6 +1058,10 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     subtitle = "VERIFICATION EN COURS";
     symbol = "LOCK";
     effect = SceneEffect::kGlitch;
+    waveform_enabled = true;
+    waveform_sample_count = HardwareManager::kMicWaveformCapacity;
+    waveform_amplitude_pct = 100U;
+    waveform_jitter = true;
     bg_rgb = 0x07070FUL;
     accent_rgb = 0xFFB74EUL;
     text_rgb = 0xF6FBFFUL;
@@ -414,15 +1073,26 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     bg_rgb = 0x2A0508UL;
     accent_rgb = 0xFF4A45UL;
     text_rgb = 0xFFD5D1UL;
-  } else if (std::strcmp(scene_id, "SCENE_LA_DETECT") == 0 || std::strcmp(scene_id, "SCENE_SEARCH") == 0 ||
+  } else if (std::strcmp(scene_id, "SCENE_LA_DETECT") == 0 || std::strcmp(scene_id, "SCENE_LA_DETECTOR") == 0 ||
+             std::strcmp(scene_id, "SCENE_SEARCH") == 0 ||
              std::strcmp(scene_id, "SCENE_CAMERA_SCAN") == 0) {
-    title = "DETECTION";
-    subtitle = "Balayage en cours";
-    symbol = "SCAN";
-    effect = SceneEffect::kRadar;
-    bg_rgb = 0x041F1BUL;
-    accent_rgb = 0x2CE5A6UL;
-    text_rgb = 0xD9FFF0UL;
+    title = "DETECTEUR DE RESONNANCE";
+    subtitle = "";
+    symbol = "AUDIO";
+    effect = SceneEffect::kWave;
+    bg_rgb = 0x04141FUL;
+    accent_rgb = 0x49D9FFUL;
+    text_rgb = 0xE7F6FFUL;
+    if (std::strcmp(scene_id, "SCENE_LA_DETECT") == 0 || std::strcmp(scene_id, "SCENE_LA_DETECTOR") == 0) {
+      bg_rgb = 0x000000UL;
+      la_detection_scene_ = true;
+      waveform_enabled = true;
+      waveform_sample_count = HardwareManager::kMicWaveformCapacity;
+      waveform_amplitude_pct = 100U;
+      waveform_jitter = true;
+      frame_split_layout = true;
+      frame_dy = 8;
+    }
   } else if (std::strcmp(scene_id, "SCENE_SIGNAL_SPIKE") == 0) {
     title = "PIC DE SIGNAL";
     subtitle = "Interference detectee";
@@ -592,6 +1262,36 @@ void UiManager::renderScene(const ScenarioDef* scenario,
       if (demo_strobe_level > 100U) {
         demo_strobe_level = 100U;
       }
+      if (document["visual"]["waveform"].is<JsonObjectConst>()) {
+        const JsonObjectConst waveform = document["visual"]["waveform"].as<JsonObjectConst>();
+        if (waveform["enabled"].is<bool>()) {
+          waveform_enabled = waveform["enabled"].as<bool>();
+        }
+        if (waveform["sample_count"].is<unsigned int>()) {
+          waveform_sample_count = static_cast<uint8_t>(waveform["sample_count"].as<unsigned int>());
+        }
+        if (waveform["amplitude_pct"].is<unsigned int>()) {
+          waveform_amplitude_pct = static_cast<uint8_t>(waveform["amplitude_pct"].as<unsigned int>());
+        }
+        if (waveform["jitter"].is<bool>()) {
+          waveform_jitter = waveform["jitter"].as<bool>();
+        }
+      }
+      if (document["waveform"].is<JsonObjectConst>()) {
+        const JsonObjectConst waveform = document["waveform"].as<JsonObjectConst>();
+        if (waveform["enabled"].is<bool>()) {
+          waveform_enabled = waveform["enabled"].as<bool>();
+        }
+        if (waveform["sample_count"].is<unsigned int>()) {
+          waveform_sample_count = static_cast<uint8_t>(waveform["sample_count"].as<unsigned int>());
+        }
+        if (waveform["amplitude_pct"].is<unsigned int>()) {
+          waveform_amplitude_pct = static_cast<uint8_t>(waveform["amplitude_pct"].as<unsigned int>());
+        }
+        if (waveform["jitter"].is<bool>()) {
+          waveform_jitter = waveform["jitter"].as<bool>();
+        }
+      }
 
       JsonArrayConst timeline_nodes;
       bool timeline_loop = true;
@@ -704,6 +1404,23 @@ void UiManager::renderScene(const ScenarioDef* scenario,
       Serial.printf("[UI] invalid scene payload (%s)\n", error.c_str());
     }
   }
+
+  if (waveform_sample_count == 0U) {
+    waveform_sample_count = HardwareManager::kMicWaveformCapacity;
+  } else if (waveform_sample_count > HardwareManager::kMicWaveformCapacity) {
+    waveform_sample_count = HardwareManager::kMicWaveformCapacity;
+  }
+  if (waveform_sample_count < 2U) {
+    waveform_sample_count = 2U;
+  }
+  if (waveform_amplitude_pct > 100U) {
+    waveform_amplitude_pct = 100U;
+  }
+  configureWaveformOverlay(waveform_snapshot_valid_ ? &waveform_snapshot_ : nullptr,
+                          waveform_enabled,
+                          waveform_sample_count,
+                          waveform_amplitude_pct,
+                          waveform_jitter);
 
   stopSceneAnimations();
   demo_particle_count_ = demo_particle_count;
@@ -858,6 +1575,56 @@ void UiManager::createWidgets() {
     lv_obj_add_flag(particle, LV_OBJ_FLAG_HIDDEN);
   }
 
+  scene_waveform_outer_ = lv_line_create(scene_root_);
+  lv_obj_add_flag(scene_waveform_outer_, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_style_line_color(scene_waveform_outer_, lv_color_hex(0x4AEAFF), LV_PART_MAIN);
+  lv_obj_set_style_line_width(scene_waveform_outer_, 1, LV_PART_MAIN);
+  lv_obj_set_style_line_rounded(scene_waveform_outer_, true, LV_PART_MAIN);
+  lv_obj_set_style_opa(scene_waveform_outer_, LV_OPA_60, LV_PART_MAIN);
+
+  scene_waveform_ = lv_line_create(scene_root_);
+  lv_obj_add_flag(scene_waveform_, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_style_line_color(scene_waveform_, lv_color_hex(0xA9FFCF), LV_PART_MAIN);
+  lv_obj_set_style_line_width(scene_waveform_, 2, LV_PART_MAIN);
+  lv_obj_set_style_line_rounded(scene_waveform_, true, LV_PART_MAIN);
+
+  scene_la_needle_ = lv_line_create(scene_root_);
+  lv_obj_add_flag(scene_la_needle_, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_style_line_color(scene_la_needle_, lv_color_hex(0xA9FFCF), LV_PART_MAIN);
+  lv_obj_set_style_line_width(scene_la_needle_, 3, LV_PART_MAIN);
+  lv_obj_set_style_line_rounded(scene_la_needle_, true, LV_PART_MAIN);
+  lv_obj_set_style_opa(scene_la_needle_, LV_OPA_90, LV_PART_MAIN);
+
+  scene_la_meter_bg_ = lv_obj_create(scene_root_);
+  lv_obj_remove_style_all(scene_la_meter_bg_);
+  lv_obj_set_size(scene_la_meter_bg_, activeDisplayWidth() - 52, 10);
+  lv_obj_set_style_radius(scene_la_meter_bg_, 4, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(scene_la_meter_bg_, LV_OPA_30, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(scene_la_meter_bg_, lv_color_hex(0x1B3C56), LV_PART_MAIN);
+  lv_obj_set_style_border_width(scene_la_meter_bg_, 1, LV_PART_MAIN);
+  lv_obj_set_style_border_opa(scene_la_meter_bg_, LV_OPA_70, LV_PART_MAIN);
+  lv_obj_set_style_border_color(scene_la_meter_bg_, lv_color_hex(0x53A5CC), LV_PART_MAIN);
+  lv_obj_align(scene_la_meter_bg_, LV_ALIGN_BOTTOM_MID, 0, -12);
+  lv_obj_add_flag(scene_la_meter_bg_, LV_OBJ_FLAG_HIDDEN);
+
+  scene_la_meter_fill_ = lv_obj_create(scene_root_);
+  lv_obj_remove_style_all(scene_la_meter_fill_);
+  lv_obj_set_size(scene_la_meter_fill_, 12, 6);
+  lv_obj_set_style_radius(scene_la_meter_fill_, 3, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(scene_la_meter_fill_, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(scene_la_meter_fill_, lv_color_hex(0x4AD0FF), LV_PART_MAIN);
+  lv_obj_add_flag(scene_la_meter_fill_, LV_OBJ_FLAG_HIDDEN);
+
+  for (uint8_t index = 0U; index < kLaAnalyzerBarCount; ++index) {
+    scene_la_analyzer_bars_[index] = lv_obj_create(scene_root_);
+    lv_obj_remove_style_all(scene_la_analyzer_bars_[index]);
+    lv_obj_set_size(scene_la_analyzer_bars_[index], 8, 8);
+    lv_obj_set_style_radius(scene_la_analyzer_bars_[index], 2, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(scene_la_analyzer_bars_[index], lv_color_hex(0x3CCBFF), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(scene_la_analyzer_bars_[index], LV_OPA_70, LV_PART_MAIN);
+    lv_obj_add_flag(scene_la_analyzer_bars_[index], LV_OBJ_FLAG_HIDDEN);
+  }
+
   page_label_ = lv_label_create(scene_root_);
   lv_obj_add_flag(page_label_, LV_OBJ_FLAG_HIDDEN);
   lv_obj_set_style_text_opa(page_label_, LV_OPA_60, LV_PART_MAIN);
@@ -866,26 +1633,59 @@ void UiManager::createWidgets() {
   scene_title_label_ = lv_label_create(scene_root_);
   scene_subtitle_label_ = lv_label_create(scene_root_);
   scene_symbol_label_ = lv_label_create(scene_root_);
+  scene_la_status_label_ = lv_label_create(scene_root_);
+  scene_la_pitch_label_ = lv_label_create(scene_root_);
+  scene_la_timer_label_ = lv_label_create(scene_root_);
+  scene_la_timeout_label_ = lv_label_create(scene_root_);
   lv_obj_set_style_text_color(scene_title_label_, lv_color_hex(0xE8F1FF), LV_PART_MAIN);
   lv_obj_set_style_text_color(scene_subtitle_label_, lv_color_hex(0xE8F1FF), LV_PART_MAIN);
   lv_obj_set_style_text_color(scene_symbol_label_, lv_color_hex(0xE8F1FF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(scene_la_status_label_, lv_color_hex(0x86CCFF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(scene_la_pitch_label_, lv_color_hex(0xE8F1FF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(scene_la_timer_label_, lv_color_hex(0x9AD6FF), LV_PART_MAIN);
+  lv_obj_set_style_text_color(scene_la_timeout_label_, lv_color_hex(0x84CFFF), LV_PART_MAIN);
   lv_obj_set_style_text_font(scene_title_label_, &lv_font_montserrat_14, LV_PART_MAIN);
   lv_obj_set_style_text_font(scene_subtitle_label_, &lv_font_montserrat_14, LV_PART_MAIN);
   lv_obj_set_style_text_font(scene_symbol_label_, &lv_font_montserrat_18, LV_PART_MAIN);
+  lv_obj_set_style_text_font(scene_la_status_label_, &lv_font_montserrat_14, LV_PART_MAIN);
+  lv_obj_set_style_text_font(scene_la_pitch_label_, &lv_font_montserrat_14, LV_PART_MAIN);
+  lv_obj_set_style_text_font(scene_la_timer_label_, &lv_font_montserrat_14, LV_PART_MAIN);
+  lv_obj_set_style_text_font(scene_la_timeout_label_, &lv_font_montserrat_14, LV_PART_MAIN);
   lv_obj_set_style_text_opa(scene_title_label_, LV_OPA_80, LV_PART_MAIN);
   lv_obj_set_style_text_opa(scene_subtitle_label_, LV_OPA_80, LV_PART_MAIN);
   lv_obj_set_style_text_opa(scene_symbol_label_, LV_OPA_90, LV_PART_MAIN);
+  lv_obj_set_style_text_opa(scene_la_status_label_, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_text_opa(scene_la_pitch_label_, LV_OPA_90, LV_PART_MAIN);
+  lv_obj_set_style_text_opa(scene_la_timer_label_, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_text_opa(scene_la_timeout_label_, LV_OPA_90, LV_PART_MAIN);
   lv_obj_align(scene_title_label_, LV_ALIGN_TOP_MID, 0, 10);
   lv_obj_align(scene_subtitle_label_, LV_ALIGN_BOTTOM_MID, 0, -20);
   lv_obj_align(scene_symbol_label_, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_align(scene_la_status_label_, LV_ALIGN_TOP_RIGHT, -8, 8);
+  lv_obj_align(scene_la_timer_label_, LV_ALIGN_TOP_LEFT, 8, 8);
+  lv_obj_align(scene_la_timeout_label_, LV_ALIGN_TOP_MID, 0, 30);
+  lv_obj_align(scene_la_pitch_label_, LV_ALIGN_BOTTOM_MID, 0, -30);
+  lv_obj_set_style_text_align(scene_la_status_label_, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
+  lv_obj_set_style_text_align(scene_la_pitch_label_, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  lv_obj_set_style_text_align(scene_la_timer_label_, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
+  lv_obj_set_style_text_align(scene_la_timeout_label_, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  lv_obj_set_width(scene_la_pitch_label_, activeDisplayWidth() - 26);
   lv_obj_set_width(scene_subtitle_label_, activeDisplayWidth() - 32);
   lv_label_set_long_mode(scene_subtitle_label_, LV_LABEL_LONG_DOT);
   lv_obj_set_style_text_align(scene_subtitle_label_, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   lv_label_set_text(scene_title_label_, "MISSION");
   lv_label_set_text(scene_subtitle_label_, "");
   lv_label_set_text(scene_symbol_label_, LV_SYMBOL_PLAY);
+  lv_label_set_text(scene_la_status_label_, "");
+  lv_label_set_text(scene_la_pitch_label_, "");
+  lv_label_set_text(scene_la_timer_label_, "");
+  lv_label_set_text(scene_la_timeout_label_, "");
   lv_obj_add_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
   lv_obj_add_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(scene_la_status_label_, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(scene_la_pitch_label_, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(scene_la_timer_label_, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(scene_la_timeout_label_, LV_OBJ_FLAG_HIDDEN);
 
   stopSceneAnimations();
 }
@@ -1007,6 +1807,46 @@ void UiManager::stopSceneAnimations() {
     lv_obj_add_flag(particle, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_translate_x(particle, 0, LV_PART_MAIN);
     lv_obj_set_style_translate_y(particle, 0, LV_PART_MAIN);
+  }
+
+  if (scene_waveform_ != nullptr) {
+    lv_obj_add_flag(scene_waveform_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_opa(scene_waveform_, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_translate_x(scene_waveform_, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(scene_waveform_, 0, LV_PART_MAIN);
+  }
+  if (scene_waveform_outer_ != nullptr) {
+    lv_obj_add_flag(scene_waveform_outer_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_opa(scene_waveform_outer_, LV_OPA_70, LV_PART_MAIN);
+    lv_obj_set_style_translate_x(scene_waveform_outer_, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(scene_waveform_outer_, 0, LV_PART_MAIN);
+  }
+  if (scene_la_needle_ != nullptr) {
+    lv_obj_add_flag(scene_la_needle_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_opa(scene_la_needle_, LV_OPA_90, LV_PART_MAIN);
+  }
+  if (scene_la_meter_bg_ != nullptr) {
+    lv_obj_add_flag(scene_la_meter_bg_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (scene_la_meter_fill_ != nullptr) {
+    lv_obj_add_flag(scene_la_meter_fill_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (scene_la_status_label_ != nullptr) {
+    lv_obj_add_flag(scene_la_status_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (scene_la_pitch_label_ != nullptr) {
+    lv_obj_add_flag(scene_la_pitch_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (scene_la_timer_label_ != nullptr) {
+    lv_obj_add_flag(scene_la_timer_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (scene_la_timeout_label_ != nullptr) {
+    lv_obj_add_flag(scene_la_timeout_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  for (lv_obj_t* bar : scene_la_analyzer_bars_) {
+    if (bar != nullptr) {
+      lv_obj_add_flag(bar, LV_OBJ_FLAG_HIDDEN);
+    }
   }
 
   if (page_label_ != nullptr && !lv_obj_has_flag(page_label_, LV_OBJ_FLAG_HIDDEN)) {
@@ -1876,9 +2716,21 @@ void UiManager::applyThemeColors(uint32_t bg_rgb, uint32_t accent_rgb, uint32_t 
   lv_obj_set_style_border_color(scene_ring_outer_, accent, LV_PART_MAIN);
   lv_obj_set_style_border_color(scene_ring_inner_, text, LV_PART_MAIN);
   lv_obj_set_style_bg_color(scene_fx_bar_, accent, LV_PART_MAIN);
+  if (scene_waveform_outer_ != nullptr) {
+    lv_obj_set_style_line_color(scene_waveform_outer_, accent, LV_PART_MAIN);
+  }
+  if (scene_waveform_ != nullptr) {
+    lv_obj_set_style_line_color(scene_waveform_, text, LV_PART_MAIN);
+  }
   lv_obj_set_style_text_color(scene_title_label_, text, LV_PART_MAIN);
   lv_obj_set_style_text_color(scene_subtitle_label_, text, LV_PART_MAIN);
   lv_obj_set_style_text_color(scene_symbol_label_, text, LV_PART_MAIN);
+  if (scene_la_pitch_label_ != nullptr) {
+    lv_obj_set_style_text_color(scene_la_pitch_label_, text, LV_PART_MAIN);
+  }
+  if (scene_la_meter_bg_ != nullptr) {
+    lv_obj_set_style_border_color(scene_la_meter_bg_, accent, LV_PART_MAIN);
+  }
   for (lv_obj_t* particle : scene_particles_) {
     if (particle == nullptr) {
       continue;

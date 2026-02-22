@@ -43,12 +43,13 @@ Bootstrap + workspace:
 Build gates:
 
 - `./build_all.sh`
-- or `pio run -e esp32dev esp32_release esp8266_oled ui_rp2040_ili9488 ui_rp2040_ili9486`
+- or `pio run -e esp32dev -e esp32_release -e freenove_esp32s3 -e esp8266_oled -e ui_rp2040_ili9488 -e ui_rp2040_ili9486`
 
 
 Smoke gates:
 
 - `./tools/dev/run_matrix_and_smoke.sh`
+- `./tools/dev/run_smoke_tests.sh` (dual-board) or `./tools/dev/run_smoke_tests.sh --combined-board` (Freenove)
 - strict FAIL on panic/reboot markers
 - UI verdict from ESP32 side: `UI_LINK_STATUS connected==1`
 
@@ -62,7 +63,8 @@ Port + baud policy:
 
 Fast loop:
 
-- `make fast-esp32`, `make fast-ui-oled`, `make fast-ui-tft`
+- `make fast-esp32`, `make fast-ui-oled`, `make fast-ui-tft`, `make fast-freenove`
+- monitor optionnel pour les boucles non interactives via `FAST_MONITOR=0` (`FAST_MONITOR=auto` par defaut)
 
 
 Logs/artifacts:

@@ -48,4 +48,8 @@ node_modules/
 __pycache__/
 *.pyc
 
+# Copies accidentelles "fichier 2.*" produites hors workflow git
+* 2
+* 2.*
+
 # Autres à adapter selon besoins

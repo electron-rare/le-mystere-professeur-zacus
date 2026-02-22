@@ -4,7 +4,10 @@
   "version": 2,
   "initial_step": "STEP_WAIT_UNLOCK",
   "hardware_events": {
-    "button_short_1": "UNLOCK",
+    "button_short_1": "BTN_NEXT",
+    "button_short_2": "BTN_NEXT",
+    "button_short_3": "BTN_NEXT",
+    "button_short_4": "BTN_NEXT",
     "button_short_5": "BTN_NEXT",
     "button_long_3": "FORCE_ETAPE2",
     "button_long_4": "FORCE_DONE",
@@ -52,7 +55,7 @@
     },
     {
       "id": "STEP_WAIT_ETAPE2",
-      "screen_scene_id": "SCENE_CAMERA_SCAN",
+      "screen_scene_id": "SCENE_LA_DETECTOR",
       "action_ids": [
         "ACTION_TRACE_STEP",
         "ACTION_CAMERA_SNAPSHOT",

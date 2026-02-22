@@ -33,6 +33,13 @@ steps:
         target_step_id: STEP_U_SON_PROTO
         after_ms: 0
         priority: 100
+      # Verrou gameplay: sur STEP_WAIT_UNLOCK, tout appui bouton (court/long, 1..5) est normalise en BTN_NEXT.
+      - trigger: on_event
+        event_type: serial
+        event_name: BTN_NEXT
+        target_step_id: STEP_WAIT_ETAPE2
+        after_ms: 0
+        priority: 110
 
   - step_id: STEP_U_SON_PROTO
     screen_scene_id: SCENE_BROKEN
@@ -66,7 +73,7 @@ steps:
         priority: 120
 
   - step_id: STEP_WAIT_ETAPE2
-    screen_scene_id: SCENE_LA_DETECT
+    screen_scene_id: SCENE_LA_DETECTOR
     audio_pack_id: ""
     actions:
       - ACTION_TRACE_STEP

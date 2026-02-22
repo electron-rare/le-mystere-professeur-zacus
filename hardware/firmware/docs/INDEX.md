@@ -54,6 +54,7 @@ Règle active: les contributions valides passent uniquement par `main`.
 - **[RTOS + WiFi Health](RTOS_WIFI_HEALTH.md)** - Checks stabilite et recovery
 - **[Recovery WiFi/AP & Health](WIFI_RECOVERY_AND_HEALTH.md)** - Procédure recovery AP, healthcheck, troubleshooting
 - **[Test & Script Coordinator](TEST_SCRIPT_COORDINATOR.md)** - Coherence tests/scripts et evidence
+- **Freenove combined-board** - workflow mono-carte: `ZACUS_ENV=freenove_esp32s3 ./tools/dev/run_matrix_and_smoke.sh` + `./tools/dev/run_smoke_tests.sh --combined-board`
 
 ---
 
@@ -160,7 +161,7 @@ hardware/firmware/docs/
 |--------|----------|---------|
 | Builder le firmware | [Quickstart](QUICKSTART.md) | Build gates |
 | Flasher les devices | [Quickstart](QUICKSTART.md) | Flash procedure |
-| Tester hardware | [State Analysis](STATE_ANALYSIS.md) | Smoke tests |
+| Tester hardware | [Quickstart](QUICKSTART.md) | Matrix + smoke + stress |
 | Créer un scénario | [Générer scénario](protocols/GENERER_UN_SCENARIO_STORY_V2.md) | - |
 | Ajouter un service | [UML Index](uml/INDEX.md) | Services |
 | Ajouter une UI | [UML Index](uml/INDEX.md) | UI |

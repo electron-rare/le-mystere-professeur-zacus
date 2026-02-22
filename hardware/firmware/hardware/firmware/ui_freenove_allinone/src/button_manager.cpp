@@ -83,18 +83,55 @@ int ButtonManager::lastAnalogMilliVolts() const {
 }
 
 uint8_t ButtonManager::decodeAnalogKey(int millivolts) const {
-  if (millivolts >= (kNoAnalogButtonMv - threshold_range_mv_)) {
+  if (millivolts < 0) {
     return 0U;
   }
-  for (int index = 1; index < 6; ++index) {
-    const int threshold = voltage_thresholds_[index];
-    if (millivolts >= (threshold - threshold_range_mv_) &&
-        millivolts <= (threshold + threshold_range_mv_)) {
-      if (index >= 1 && index <= 5) {
-        return static_cast<uint8_t>(index);
-      }
-      return 0U;
+
+  const int no_button_floor_mv = kNoAnalogButtonMv - threshold_range_mv_;
+  if (millivolts >= no_button_floor_mv) {
+    return 0U;
+  }
+
+  // Prefer midpoint buckets between nominal ladder voltages.
+  const int split_12 = (voltage_thresholds_[1] + voltage_thresholds_[2]) / 2;
+  const int split_23 = (voltage_thresholds_[2] + voltage_thresholds_[3]) / 2;
+  const int split_34 = (voltage_thresholds_[3] + voltage_thresholds_[4]) / 2;
+  const int split_45 = (voltage_thresholds_[4] + voltage_thresholds_[5]) / 2;
+  const int split_5n = (voltage_thresholds_[5] + no_button_floor_mv) / 2;
+  if (millivolts <= split_12) {
+    return 1U;
+  }
+  if (millivolts <= split_23) {
+    return 2U;
+  }
+  if (millivolts <= split_34) {
+    return 3U;
+  }
+  if (millivolts <= split_45) {
+    return 4U;
+  }
+  if (millivolts <= split_5n) {
+    return 5U;
+  }
+
+  // Fallback nearest-threshold match with wider tolerance for board variance.
+  int best_key = 1;
+  int best_delta = millivolts - voltage_thresholds_[1];
+  if (best_delta < 0) {
+    best_delta = -best_delta;
+  }
+  for (int index = 2; index <= 5; ++index) {
+    int delta = millivolts - voltage_thresholds_[index];
+    if (delta < 0) {
+      delta = -delta;
     }
+    if (delta < best_delta) {
+      best_delta = delta;
+      best_key = index;
+    }
+  }
+  if (best_delta <= (threshold_range_mv_ * 7)) {
+    return static_cast<uint8_t>(best_key);
   }
   return 0U;
 }

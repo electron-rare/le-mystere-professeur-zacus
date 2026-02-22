@@ -4,6 +4,7 @@
 #include <LittleFS.h>
 #include <WebServer.h>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -31,6 +32,15 @@ constexpr uint32_t kDefaultLocalRetryMs = 15000U;
 constexpr size_t kSerialLineCapacity = 192U;
 constexpr uint8_t kMaxEspNowBootPeers = 10U;
 constexpr bool kBootDiagnosticTone = true;
+constexpr uint16_t kLaDetectionToleranceHz = 10U;
+constexpr uint16_t kLaMatchLevelDenom = 7000U;
+constexpr uint8_t kLaMatchLevelFloorPct = 20U;
+constexpr uint8_t kLaMatchConfidenceBoostMax = 12U;
+constexpr uint8_t kLaMatchConfidenceBoostScale = 4U;
+constexpr uint8_t kLaMatchConfidenceFloor = 6U;
+constexpr uint8_t kLaMatchRelaxedBonus = 6U;
+constexpr uint8_t kLaMatchRelaxedConfidenceFloor = 10U;
+constexpr uint8_t kLaMatchRelaxedConfidencePenalty = 10U;
 
 struct RuntimeNetworkConfig {
   char hostname[33] = "zacus-freenove";
@@ -56,9 +66,38 @@ struct RuntimeHardwareConfig {
   bool mic_enabled = true;
   uint8_t mic_event_threshold_pct = 72U;
   char mic_event_name[32] = "SERIAL:MIC_SPIKE";
+  bool mic_la_trigger_enabled = true;
+  uint16_t mic_la_target_hz = 440U;
+  uint16_t mic_la_tolerance_hz = kLaDetectionToleranceHz;
+  uint8_t mic_la_max_abs_cents = 42U;
+  uint8_t mic_la_min_confidence = 28U;
+  uint8_t mic_la_min_level_pct = 8U;
+  uint16_t mic_la_stable_ms = 3000U;
+  uint16_t mic_la_release_ms = 50U;
+  uint16_t mic_la_cooldown_ms = 1400U;
+  uint32_t mic_la_timeout_ms = 60000U;
+  char mic_la_event_name[32] = "SERIAL:BTN_NEXT";
   bool battery_enabled = true;
   uint8_t battery_low_pct = 20U;
   char battery_low_event_name[32] = "SERIAL:BATTERY_LOW";
+};
+
+struct LaTriggerRuntimeState {
+  bool gate_active = false;
+  bool sample_match = false;
+  bool locked = false;
+  bool dispatched = false;
+  bool timeout_pending = false;
+  uint32_t gate_entered_ms = 0U;
+  uint32_t timeout_deadline_ms = 0U;
+  uint32_t stable_since_ms = 0U;
+  uint32_t last_match_ms = 0U;
+  uint32_t stable_ms = 0U;
+  uint32_t last_trigger_ms = 0U;
+  uint16_t last_freq_hz = 0U;
+  int16_t last_cents = 0;
+  uint8_t last_confidence = 0U;
+  uint8_t last_level_pct = 0U;
 };
 
 AudioManager g_audio;
@@ -81,11 +120,18 @@ bool g_web_disconnect_sta_pending = false;
 uint32_t g_web_disconnect_sta_at_ms = 0U;
 bool g_hardware_started = false;
 uint32_t g_next_hw_telemetry_ms = 0U;
+bool g_mic_tuner_stream_enabled = false;
+uint16_t g_mic_tuner_stream_period_ms = 250U;
+uint32_t g_next_mic_tuner_stream_ms = 0U;
 bool g_mic_event_armed = true;
 bool g_battery_low_latched = false;
+LaTriggerRuntimeState g_la_trigger;
+bool g_la_dispatch_in_progress = false;
 char g_last_action_step_key[72] = {0};
 char g_serial_line[kSerialLineCapacity] = {0};
 size_t g_serial_line_len = 0U;
+
+bool dispatchScenarioEventByName(const char* event_name, uint32_t now_ms);
 
 const char* audioPackToFile(const char* pack_id) {
   if (pack_id == nullptr || pack_id[0] == '\0') {
@@ -112,6 +158,43 @@ const char* scenarioIdFromSnapshot(const ScenarioSnapshot& snapshot) {
 
 const char* stepIdFromSnapshot(const ScenarioSnapshot& snapshot) {
   return (snapshot.step != nullptr && snapshot.step->id != nullptr) ? snapshot.step->id : "n/a";
+}
+
+bool loadScenarioByIdPreferStoryFile(const char* scenario_id, String* out_source, String* out_path) {
+  if (scenario_id == nullptr || scenario_id[0] == '\0') {
+    return false;
+  }
+  String normalized_id = scenario_id;
+  normalized_id.trim();
+  if (normalized_id.isEmpty()) {
+    return false;
+  }
+
+  String story_path = "/story/scenarios/";
+  story_path += normalized_id;
+  story_path += ".json";
+  if (g_storage.fileExists(story_path.c_str())) {
+    if (g_scenario.begin(story_path.c_str())) {
+      if (out_source != nullptr) {
+        *out_source = "story_file";
+      }
+      if (out_path != nullptr) {
+        *out_path = story_path;
+      }
+      return true;
+    }
+  }
+
+  if (g_scenario.beginById(normalized_id.c_str())) {
+    if (out_source != nullptr) {
+      *out_source = "builtin";
+    }
+    if (out_path != nullptr) {
+      out_path->remove(0);
+    }
+    return true;
+  }
+  return false;
 }
 
 void toLowerAsciiInPlace(char* text) {
@@ -164,6 +247,59 @@ void copyText(char* out, size_t out_size, const char* text) {
   out[out_size - 1U] = '\0';
 }
 
+uint8_t laEstimatedLevelPct(const HardwareManager::Snapshot& hw) {
+  if (hw.mic_level_percent > 0U) {
+    return hw.mic_level_percent;
+  }
+  const uint16_t noise_floor = hw.mic_noise_floor;
+  const uint16_t effective_peak = (hw.mic_peak > noise_floor) ? static_cast<uint16_t>(hw.mic_peak - noise_floor) : 0U;
+  return static_cast<uint8_t>(std::min<uint16_t>(100U, static_cast<uint16_t>((effective_peak * 100U) / kLaMatchLevelDenom)));
+}
+
+uint16_t laToleranceForTarget() {
+  const uint16_t configured = g_hardware_cfg.mic_la_tolerance_hz;
+  if (configured == 0U) {
+    return 0U;
+  }
+  return (configured > kLaDetectionToleranceHz) ? kLaDetectionToleranceHz : configured;
+}
+
+uint8_t laCentsLimitForTarget(uint16_t effective_tolerance_hz) {
+  uint8_t limit = g_hardware_cfg.mic_la_max_abs_cents;
+  if (g_hardware_cfg.mic_la_target_hz > 0U && effective_tolerance_hz > 0U &&
+      g_hardware_cfg.mic_la_target_hz >= effective_tolerance_hz) {
+    const float target_hz = static_cast<float>(g_hardware_cfg.mic_la_target_hz);
+    const float upper_hz = target_hz + static_cast<float>(effective_tolerance_hz);
+    const float tolerance_cents_f = 1200.0f * std::log2(upper_hz / target_hz);
+    if (std::isfinite(tolerance_cents_f) && tolerance_cents_f > 0.0f) {
+      const uint8_t tolerance_cents = static_cast<uint8_t>(std::min<float>(120.0f, std::ceil(tolerance_cents_f)));
+      if (tolerance_cents > limit) {
+        limit = tolerance_cents;
+      }
+    }
+  }
+  return limit;
+}
+
+uint8_t laDynamicConfidenceFloor(uint8_t base_confidence, uint8_t level_pct, bool relaxed_for_continuity) {
+  uint8_t dynamic_boost = 0U;
+  if (level_pct > kLaMatchLevelFloorPct) {
+    const uint8_t raw_boost =
+        static_cast<uint8_t>((level_pct - kLaMatchLevelFloorPct) / kLaMatchConfidenceBoostScale);
+    dynamic_boost = (raw_boost > kLaMatchConfidenceBoostMax) ? kLaMatchConfidenceBoostMax : raw_boost;
+  }
+  if (relaxed_for_continuity && dynamic_boost >= kLaMatchRelaxedBonus) {
+    dynamic_boost -= kLaMatchRelaxedBonus;
+  }
+  if (base_confidence <= dynamic_boost) {
+    return kLaMatchConfidenceFloor;
+  }
+  const uint16_t raw_floor = base_confidence - dynamic_boost;
+  return (raw_floor < kLaMatchConfidenceFloor) ? kLaMatchConfidenceFloor : static_cast<uint8_t>(raw_floor);
+}
+
+bool isLaSampleMatching(const HardwareManager::Snapshot& hw, bool relaxed_for_continuity);
+
 bool parseBoolToken(const char* text, bool* out_value) {
   if (text == nullptr || out_value == nullptr) {
     return false;
@@ -183,6 +319,252 @@ bool parseBoolToken(const char* text, bool* out_value) {
     return true;
   }
   return false;
+}
+
+void resetLaTriggerState(bool keep_cooldown = true) {
+  const uint32_t last_trigger_ms = g_la_trigger.last_trigger_ms;
+  g_la_trigger = LaTriggerRuntimeState();
+  if (keep_cooldown) {
+    g_la_trigger.last_trigger_ms = last_trigger_ms;
+  }
+}
+
+bool isLaTriggerStep(const ScenarioSnapshot& snapshot) {
+  if (snapshot.step != nullptr && snapshot.step->id != nullptr &&
+      std::strcmp(snapshot.step->id, "STEP_WAIT_ETAPE2") == 0) {
+    return true;
+  }
+  if (snapshot.screen_scene_id == nullptr) {
+    return false;
+  }
+  return (std::strcmp(snapshot.screen_scene_id, "SCENE_LA_DETECT") == 0 ||
+          std::strcmp(snapshot.screen_scene_id, "SCENE_LA_DETECTOR") == 0);
+}
+
+bool shouldEnforceLaMatchOnly(const ScenarioSnapshot& snapshot) {
+  return g_hardware_cfg.mic_la_trigger_enabled && isLaTriggerStep(snapshot);
+}
+
+void resetLaTriggerTimeout(uint32_t now_ms, const char* source_tag) {
+  if (!g_la_trigger.gate_active) {
+    return;
+  }
+
+  g_la_trigger.gate_entered_ms = now_ms;
+  g_la_trigger.timeout_pending = false;
+  g_la_trigger.timeout_deadline_ms = 0U;
+
+  Serial.printf(
+      "[LA_TRIGGER] timer reset by %s at %lu ms\n",
+      (source_tag != nullptr && source_tag[0] != '\0') ? source_tag : "unknown",
+      static_cast<unsigned long>(now_ms));
+}
+
+bool notifyScenarioButtonGuarded(uint8_t key, bool long_press, uint32_t now_ms, const char* source_tag) {
+  const ScenarioSnapshot snapshot = g_scenario.snapshot();
+  if (shouldEnforceLaMatchOnly(snapshot)) {
+    Serial.printf("[LA_TRIGGER] ignore scenario button key=%u long=%u source=%s while waiting LA match\n",
+                  static_cast<unsigned int>(key),
+                  long_press ? 1U : 0U,
+                  (source_tag != nullptr && source_tag[0] != '\0') ? source_tag : "n/a");
+    return false;
+  }
+  g_scenario.notifyButton(key, long_press, now_ms);
+  return true;
+}
+
+bool isLaSampleMatching(const HardwareManager::Snapshot& hw, bool relaxed_for_continuity) {
+  if (!hw.mic_ready || hw.mic_freq_hz == 0U) {
+    return false;
+  }
+
+  const uint8_t detected_level = laEstimatedLevelPct(hw);
+  if (relaxed_for_continuity) {
+    // For continuity mode, don't hard-fail when level is momentarily at 0.
+    // Keep a minimum floor using pitch confidence to avoid matching pure noise.
+    if (detected_level == 0U && hw.mic_pitch_confidence < kLaMatchRelaxedConfidenceFloor) {
+      return false;
+    }
+  } else if (detected_level < g_hardware_cfg.mic_la_min_level_pct) {
+    return false;
+  }
+
+  const uint8_t dynamic_min_confidence = laDynamicConfidenceFloor(g_hardware_cfg.mic_la_min_confidence,
+                                                                 detected_level,
+                                                                 relaxed_for_continuity);
+  uint8_t required_confidence = dynamic_min_confidence;
+  if (relaxed_for_continuity && required_confidence > kLaMatchRelaxedConfidencePenalty) {
+    required_confidence -= kLaMatchRelaxedConfidencePenalty;
+  }
+  if (required_confidence < kLaMatchRelaxedConfidenceFloor) {
+    required_confidence = kLaMatchRelaxedConfidenceFloor;
+  }
+  if (hw.mic_pitch_confidence < required_confidence) {
+    return false;
+  }
+
+  int16_t abs_cents = hw.mic_pitch_cents;
+  if (abs_cents < 0) {
+    abs_cents = static_cast<int16_t>(-abs_cents);
+  }
+  uint8_t cents_limit = laCentsLimitForTarget(laToleranceForTarget());
+  if (relaxed_for_continuity && cents_limit < 120U) {
+    cents_limit = static_cast<uint8_t>(std::min<uint16_t>(120U, static_cast<uint16_t>(cents_limit + 4U)));
+  }
+  if (static_cast<uint8_t>(abs_cents) > cents_limit) {
+    return false;
+  }
+  const uint16_t tolerance_hz = static_cast<uint16_t>(laToleranceForTarget() + (relaxed_for_continuity ? 2U : 0U));
+  const int32_t delta_hz = static_cast<int32_t>(hw.mic_freq_hz) - static_cast<int32_t>(g_hardware_cfg.mic_la_target_hz);
+  const int32_t abs_delta_hz = (delta_hz < 0) ? -delta_hz : delta_hz;
+  return abs_delta_hz <= static_cast<int32_t>(tolerance_hz);
+}
+
+uint8_t laStablePercent() {
+  if (!g_hardware_cfg.mic_la_trigger_enabled) {
+    return 0U;
+  }
+  if (g_hardware_cfg.mic_la_stable_ms == 0U) {
+    return g_la_trigger.locked ? 100U : 0U;
+  }
+  uint32_t percent = (g_la_trigger.stable_ms * 100U) / g_hardware_cfg.mic_la_stable_ms;
+  if (percent > 100U) {
+    percent = 100U;
+  }
+  return static_cast<uint8_t>(percent);
+}
+
+void startLaTimeoutRecovery(const ScenarioSnapshot& snapshot, uint32_t now_ms) {
+  (void)snapshot;
+  (void)now_ms;
+  g_la_trigger.timeout_pending = false;
+  g_la_trigger.timeout_deadline_ms = 0U;
+  g_la_trigger.dispatched = false;
+  g_la_trigger.locked = false;
+  g_la_trigger.sample_match = false;
+
+  g_scenario.reset();
+  g_audio.stop();
+  g_last_action_step_key[0] = '\0';
+  if (g_hardware_started) {
+    g_hardware.clearManualLed();
+  }
+  resetLaTriggerState(false);
+  Serial.println("[LA_TRIGGER] timeout -> scenario reset (SCENE_LOCKED)");
+}
+
+void updateLaGameplayTrigger(const ScenarioSnapshot& snapshot, const HardwareManager::Snapshot& hw, uint32_t now_ms) {
+  g_la_trigger.last_freq_hz = hw.mic_freq_hz;
+  g_la_trigger.last_cents = hw.mic_pitch_cents;
+  g_la_trigger.last_confidence = hw.mic_pitch_confidence;
+  g_la_trigger.last_level_pct = hw.mic_level_percent;
+  const uint32_t match_continuity_window_ms = static_cast<uint32_t>(g_hardware_cfg.mic_la_release_ms);
+
+  const bool gate_was_active = g_la_trigger.gate_active;
+  const bool gate_active = g_hardware_cfg.mic_enabled && g_hardware_cfg.mic_la_trigger_enabled && isLaTriggerStep(snapshot);
+  g_la_trigger.gate_active = gate_active;
+  if (!gate_active) {
+    resetLaTriggerState();
+    g_la_trigger.gate_active = false;
+    return;
+  }
+  if (!gate_was_active) {
+    g_la_trigger.gate_entered_ms = now_ms;
+    g_la_trigger.timeout_pending = false;
+    g_la_trigger.timeout_deadline_ms = 0U;
+  }
+  if (g_la_trigger.timeout_pending) {
+    return;
+  }
+
+  const bool sample_match = isLaSampleMatching(hw, false);
+  const bool continuity_match = isLaSampleMatching(hw, true);
+  const uint32_t effective_window_ms = (match_continuity_window_ms == 0U) ? 1U : match_continuity_window_ms;
+  g_la_trigger.sample_match = sample_match;
+  bool has_stable_candidate = false;
+  const uint32_t dt_ms = (g_la_trigger.last_match_ms == 0U) ? 0U : (now_ms - g_la_trigger.last_match_ms);
+  const bool continuation_window_ok = (dt_ms > 0U) && (dt_ms <= effective_window_ms);
+
+  if (sample_match || (continuity_match && continuation_window_ok)) {
+    const bool starts_new_candidate = (g_la_trigger.last_match_ms == 0U) || (dt_ms > effective_window_ms);
+    if (starts_new_candidate && g_la_trigger.stable_since_ms == 0U) {
+      g_la_trigger.stable_since_ms = now_ms;
+    }
+    if (continuation_window_ok && g_la_trigger.stable_ms < g_hardware_cfg.mic_la_stable_ms) {
+      const uint32_t next_stable_ms = g_la_trigger.stable_ms + dt_ms;
+      g_la_trigger.stable_ms =
+          (next_stable_ms >= g_hardware_cfg.mic_la_stable_ms) ? g_hardware_cfg.mic_la_stable_ms : next_stable_ms;
+    }
+    g_la_trigger.last_match_ms = now_ms;
+    has_stable_candidate = true;
+  } else if (sample_match || continuity_match) {
+    // continuity_match on a fresh state starts/sticks to match tracking but does not accumulate instantly.
+    if (g_la_trigger.last_match_ms == 0U && g_la_trigger.stable_since_ms == 0U) {
+      g_la_trigger.stable_since_ms = now_ms;
+      g_la_trigger.last_match_ms = now_ms;
+      has_stable_candidate = true;
+    } else if (g_la_trigger.last_match_ms != 0U && (now_ms - g_la_trigger.last_match_ms) <= effective_window_ms) {
+      g_la_trigger.last_match_ms = now_ms;
+      has_stable_candidate = true;
+    } else if (dt_ms > effective_window_ms) {
+      g_la_trigger.last_match_ms = now_ms;
+    }
+  } else if (g_la_trigger.last_match_ms != 0U && dt_ms > effective_window_ms) {
+    // Stop incrementing after grace period, but keep accumulated value for observability.
+    g_la_trigger.last_match_ms = 0U;
+  }
+
+  if (!has_stable_candidate && g_la_trigger.last_match_ms == 0U && g_la_trigger.stable_ms == 0U) {
+    g_la_trigger.stable_ms = 0U;
+    g_la_trigger.stable_since_ms = 0U;
+  }
+
+  g_la_trigger.locked = g_la_trigger.stable_ms >= g_hardware_cfg.mic_la_stable_ms;
+  if (!g_la_trigger.locked && g_hardware_cfg.mic_la_timeout_ms > 0U &&
+      g_la_trigger.gate_entered_ms > 0U && (now_ms - g_la_trigger.gate_entered_ms) >= g_hardware_cfg.mic_la_timeout_ms) {
+    Serial.printf(
+        "[LA_TRIGGER] timeout after %lu ms (freq=%u cents=%d conf=%u level=%u)\n",
+        static_cast<unsigned long>(now_ms - g_la_trigger.gate_entered_ms),
+        static_cast<unsigned int>(hw.mic_freq_hz),
+        static_cast<int>(hw.mic_pitch_cents),
+        static_cast<unsigned int>(hw.mic_pitch_confidence),
+        static_cast<unsigned int>(hw.mic_level_percent));
+    startLaTimeoutRecovery(snapshot, now_ms);
+    return;
+  }
+  if (!g_la_trigger.locked || g_la_trigger.dispatched) {
+    return;
+  }
+
+  if (g_la_trigger.last_trigger_ms > 0U &&
+      (now_ms - g_la_trigger.last_trigger_ms) < g_hardware_cfg.mic_la_cooldown_ms) {
+    return;
+  }
+
+  const char* event_name =
+      (g_hardware_cfg.mic_la_event_name[0] != '\0') ? g_hardware_cfg.mic_la_event_name : "SERIAL:BTN_NEXT";
+  const ScenarioSnapshot before = g_scenario.snapshot();
+  g_la_dispatch_in_progress = true;
+  const bool dispatched = dispatchScenarioEventByName(event_name, now_ms);
+  g_la_dispatch_in_progress = false;
+  const ScenarioSnapshot after = g_scenario.snapshot();
+  const bool changed = std::strcmp(stepIdFromSnapshot(before), stepIdFromSnapshot(after)) != 0;
+  Serial.printf(
+      "[LA_TRIGGER] dispatched=%u changed=%u event=%s step=%s freq=%u cents=%d conf=%u level=%u stable_ms=%lu gate=%u\n",
+      dispatched ? 1U : 0U,
+      changed ? 1U : 0U,
+      event_name,
+      stepIdFromSnapshot(after),
+      static_cast<unsigned int>(hw.mic_freq_hz),
+      static_cast<int>(hw.mic_pitch_cents),
+      static_cast<unsigned int>(hw.mic_pitch_confidence),
+      static_cast<unsigned int>(hw.mic_level_percent),
+      static_cast<unsigned long>(g_la_trigger.stable_ms),
+      gate_active ? 1U : 0U);
+  if (dispatched) {
+    g_la_trigger.dispatched = true;
+    g_la_trigger.last_trigger_ms = now_ms;
+  }
 }
 
 void clearEspNowBootPeers() {
@@ -423,7 +805,7 @@ void loadRuntimeNetworkConfig() {
 
   const String hardware_payload = g_storage.loadTextFile("/story/apps/APP_HARDWARE.json");
   if (!hardware_payload.isEmpty()) {
-    StaticJsonDocument<512> document;
+    StaticJsonDocument<1024> document;
     const DeserializationError error = deserializeJson(document, hardware_payload);
     if (!error) {
       JsonVariantConst config = document["config"];
@@ -452,6 +834,84 @@ void loadRuntimeNetworkConfig() {
       const char* mic_event_name = config["mic_event_name"] | "";
       if (mic_event_name[0] != '\0') {
         copyText(g_hardware_cfg.mic_event_name, sizeof(g_hardware_cfg.mic_event_name), mic_event_name);
+      }
+      if (config["la_trigger_enabled"].is<bool>()) {
+        g_hardware_cfg.mic_la_trigger_enabled = config["la_trigger_enabled"].as<bool>();
+      }
+      if (config["la_target_hz"].is<unsigned int>()) {
+        uint16_t target = static_cast<uint16_t>(config["la_target_hz"].as<unsigned int>());
+        if (target < 220U) {
+          target = 220U;
+        } else if (target > 880U) {
+          target = 880U;
+        }
+        g_hardware_cfg.mic_la_target_hz = target;
+      }
+      if (config["la_tolerance_hz"].is<unsigned int>()) {
+        uint16_t tolerance = static_cast<uint16_t>(config["la_tolerance_hz"].as<unsigned int>());
+        if (tolerance < 2U) {
+          tolerance = 2U;
+        } else if (tolerance > kLaDetectionToleranceHz) {
+          tolerance = kLaDetectionToleranceHz;
+        }
+        g_hardware_cfg.mic_la_tolerance_hz = tolerance;
+      }
+      if (config["la_max_abs_cents"].is<unsigned int>()) {
+        uint8_t max_abs_cents = static_cast<uint8_t>(config["la_max_abs_cents"].as<unsigned int>());
+        if (max_abs_cents > 120U) {
+          max_abs_cents = 120U;
+        }
+        g_hardware_cfg.mic_la_max_abs_cents = max_abs_cents;
+      }
+      if (config["la_min_confidence"].is<unsigned int>()) {
+        uint8_t min_conf = static_cast<uint8_t>(config["la_min_confidence"].as<unsigned int>());
+        if (min_conf > 100U) {
+          min_conf = 100U;
+        }
+        g_hardware_cfg.mic_la_min_confidence = min_conf;
+      }
+      if (config["la_min_level_pct"].is<unsigned int>()) {
+        uint8_t min_level = static_cast<uint8_t>(config["la_min_level_pct"].as<unsigned int>());
+        if (min_level > 100U) {
+          min_level = 100U;
+        }
+        g_hardware_cfg.mic_la_min_level_pct = min_level;
+      }
+      if (config["la_stable_ms"].is<unsigned int>()) {
+        uint16_t stable_ms = static_cast<uint16_t>(config["la_stable_ms"].as<unsigned int>());
+        if (stable_ms < 120U) {
+          stable_ms = 120U;
+        } else if (stable_ms > 5000U) {
+          stable_ms = 5000U;
+        }
+        g_hardware_cfg.mic_la_stable_ms = stable_ms;
+      }
+      if (config["la_release_ms"].is<unsigned int>()) {
+        uint16_t release_ms = static_cast<uint16_t>(config["la_release_ms"].as<unsigned int>());
+        if (release_ms > 2000U) {
+          release_ms = 2000U;
+        }
+        g_hardware_cfg.mic_la_release_ms = release_ms;
+      }
+      if (config["la_cooldown_ms"].is<unsigned int>()) {
+        uint16_t cooldown_ms = static_cast<uint16_t>(config["la_cooldown_ms"].as<unsigned int>());
+        if (cooldown_ms < 100U) {
+          cooldown_ms = 100U;
+        } else if (cooldown_ms > 15000U) {
+          cooldown_ms = 15000U;
+        }
+        g_hardware_cfg.mic_la_cooldown_ms = cooldown_ms;
+      }
+      if (config["la_timeout_ms"].is<unsigned int>()) {
+        uint32_t timeout_ms = config["la_timeout_ms"].as<unsigned int>();
+        if (timeout_ms > 600000U) {
+          timeout_ms = 600000U;
+        }
+        g_hardware_cfg.mic_la_timeout_ms = timeout_ms;
+      }
+      const char* la_event_name = config["la_event_name"] | "";
+      if (la_event_name[0] != '\0') {
+        copyText(g_hardware_cfg.mic_la_event_name, sizeof(g_hardware_cfg.mic_la_event_name), la_event_name);
       }
       if (config["battery_enabled"].is<bool>()) {
         g_hardware_cfg.battery_enabled = config["battery_enabled"].as<bool>();
@@ -548,12 +1008,21 @@ void loadRuntimeNetworkConfig() {
                 g_network_cfg.espnow_bridge_to_story_event ? 1U : 0U,
                 g_network_cfg.espnow_boot_peer_count);
   Serial.printf(
-      "[HW] cfg boot=%u telemetry_ms=%lu led_auto=%u mic=%u threshold=%u battery=%u low_pct=%u\n",
+      "[HW] cfg boot=%u telemetry_ms=%lu led_auto=%u mic=%u threshold=%u la_trigger=%u target=%u tol=%u "
+      "cents=%u conf_min=%u level_min=%u stable=%ums timeout=%lums battery=%u low_pct=%u\n",
       g_hardware_cfg.enabled_on_boot ? 1U : 0U,
       static_cast<unsigned long>(g_hardware_cfg.telemetry_period_ms),
       g_hardware_cfg.led_auto_from_scene ? 1U : 0U,
       g_hardware_cfg.mic_enabled ? 1U : 0U,
       g_hardware_cfg.mic_event_threshold_pct,
+      g_hardware_cfg.mic_la_trigger_enabled ? 1U : 0U,
+      static_cast<unsigned int>(g_hardware_cfg.mic_la_target_hz),
+      static_cast<unsigned int>(g_hardware_cfg.mic_la_tolerance_hz),
+      static_cast<unsigned int>(g_hardware_cfg.mic_la_max_abs_cents),
+      static_cast<unsigned int>(g_hardware_cfg.mic_la_min_confidence),
+      static_cast<unsigned int>(g_hardware_cfg.mic_la_min_level_pct),
+      static_cast<unsigned int>(g_hardware_cfg.mic_la_stable_ms),
+      static_cast<unsigned long>(g_hardware_cfg.mic_la_timeout_ms),
       g_hardware_cfg.battery_enabled ? 1U : 0U,
       g_hardware_cfg.battery_low_pct);
   Serial.printf("[CAM] cfg boot=%u frame=%s quality=%u fb=%u xclk=%lu dir=%s\n",
@@ -801,11 +1270,13 @@ bool webReconnectLocalWifi();
 bool refreshStoryFromSd();
 bool dispatchControlAction(const String& action_raw, uint32_t now_ms, String* out_error = nullptr);
 void printHardwareStatus();
+void printMicTunerStatus();
 void printHardwareStatusJson();
 void printCameraStatus();
 void printMediaStatus();
 void maybeEmitHardwareEvents(uint32_t now_ms);
 void maybeLogHardwareTelemetry(uint32_t now_ms);
+void maybeStreamMicTunerStatus(uint32_t now_ms);
 
 struct EspNowCommandResult {
   bool handled = false;
@@ -922,13 +1393,11 @@ bool executeEspNowCommandPayload(const char* payload_text, uint32_t now_ms, EspN
     return true;
   }
   if (command == "UNLOCK") {
-    g_scenario.notifyUnlock(now_ms);
-    out_result->ok = true;
+    out_result->ok = dispatchScenarioEventByName("UNLOCK", now_ms);
     return true;
   }
   if (command == "NEXT") {
-    g_scenario.notifyButton(5U, false, now_ms);
-    out_result->ok = true;
+    out_result->ok = notifyScenarioButtonGuarded(5U, false, now_ms, "espnow_command");
     return true;
   }
   if (command == "WIFI_DISCONNECT") {
@@ -1212,7 +1681,9 @@ void printHardwareStatus() {
   const HardwareManager::Snapshot hw = g_hardware.snapshot();
   Serial.printf(
       "HW_STATUS ready=%u ws2812=%u mic=%u battery=%u auto=%u manual=%u led=%u,%u,%u br=%u "
-      "mic_pct=%u mic_peak=%u battery_pct=%u battery_mv=%u charging=%u scene=%s\n",
+      "mic_pct=%u mic_peak=%u mic_noise=%u mic_gain=%u mic_freq=%u mic_cents=%d mic_conf=%u "
+      "la_gate=%u la_match=%u la_lock=%u la_pending=%u la_stable_ms=%lu la_timeout_ms=%lu "
+      "battery_pct=%u battery_mv=%u charging=%u scene=%s\n",
       hw.ready ? 1U : 0U,
       hw.ws2812_ready ? 1U : 0U,
       hw.mic_ready ? 1U : 0U,
@@ -1225,14 +1696,48 @@ void printHardwareStatus() {
       hw.led_brightness,
       hw.mic_level_percent,
       hw.mic_peak,
+      static_cast<unsigned int>(hw.mic_noise_floor),
+      static_cast<unsigned int>(hw.mic_gain_percent),
+      hw.mic_freq_hz,
+      static_cast<int>(hw.mic_pitch_cents),
+      hw.mic_pitch_confidence,
+      g_la_trigger.gate_active ? 1U : 0U,
+      g_la_trigger.sample_match ? 1U : 0U,
+      g_la_trigger.locked ? 1U : 0U,
+      g_la_trigger.timeout_pending ? 1U : 0U,
+      static_cast<unsigned long>(g_la_trigger.stable_ms),
+      static_cast<unsigned long>(g_hardware_cfg.mic_la_timeout_ms),
       hw.battery_percent,
       hw.battery_cell_mv,
       hw.charging ? 1U : 0U,
       hw.scene_id);
 }
 
+void printMicTunerStatus() {
+  const HardwareManager::Snapshot hw = g_hardware.snapshot();
+  Serial.printf(
+      "MIC_TUNER_STATUS freq=%u cents=%d conf=%u level=%u peak=%u noise=%u gain=%u scene=%s stream=%u period_ms=%u "
+      "la_gate=%u la_match=%u la_lock=%u la_pending=%u la_stable_ms=%lu la_pct=%u\n",
+                static_cast<unsigned int>(hw.mic_freq_hz),
+                static_cast<int>(hw.mic_pitch_cents),
+                static_cast<unsigned int>(hw.mic_pitch_confidence),
+                static_cast<unsigned int>(hw.mic_level_percent),
+                static_cast<unsigned int>(hw.mic_peak),
+                static_cast<unsigned int>(hw.mic_noise_floor),
+                static_cast<unsigned int>(hw.mic_gain_percent),
+                hw.scene_id,
+                g_mic_tuner_stream_enabled ? 1U : 0U,
+                static_cast<unsigned int>(g_mic_tuner_stream_period_ms),
+                g_la_trigger.gate_active ? 1U : 0U,
+                g_la_trigger.sample_match ? 1U : 0U,
+                g_la_trigger.locked ? 1U : 0U,
+                g_la_trigger.timeout_pending ? 1U : 0U,
+                static_cast<unsigned long>(g_la_trigger.stable_ms),
+                static_cast<unsigned int>(laStablePercent()));
+}
+
 void printHardwareStatusJson() {
-  StaticJsonDocument<768> document;
+  StaticJsonDocument<1024> document;
   webFillHardwareStatus(document.to<JsonObject>());
   serializeJson(document, Serial);
   Serial.println();
@@ -1463,6 +1968,29 @@ void webFillHardwareStatus(JsonObject out) {
   out["mic_threshold_pct"] = g_hardware_cfg.mic_event_threshold_pct;
   out["mic_level_pct"] = hw.mic_level_percent;
   out["mic_peak"] = hw.mic_peak;
+  out["mic_noise_floor"] = hw.mic_noise_floor;
+  out["mic_gain_pct"] = hw.mic_gain_percent;
+  out["mic_freq_hz"] = hw.mic_freq_hz;
+  out["mic_pitch_cents"] = hw.mic_pitch_cents;
+  out["mic_pitch_confidence"] = hw.mic_pitch_confidence;
+  JsonObject la_trigger = out["la_trigger"].to<JsonObject>();
+  la_trigger["enabled"] = g_hardware_cfg.mic_la_trigger_enabled;
+  la_trigger["target_hz"] = g_hardware_cfg.mic_la_target_hz;
+  la_trigger["tolerance_hz"] = g_hardware_cfg.mic_la_tolerance_hz;
+  la_trigger["max_abs_cents"] = g_hardware_cfg.mic_la_max_abs_cents;
+  la_trigger["min_confidence"] = g_hardware_cfg.mic_la_min_confidence;
+  la_trigger["min_level_pct"] = g_hardware_cfg.mic_la_min_level_pct;
+  la_trigger["stable_ms"] = g_hardware_cfg.mic_la_stable_ms;
+  la_trigger["release_ms"] = g_hardware_cfg.mic_la_release_ms;
+  la_trigger["cooldown_ms"] = g_hardware_cfg.mic_la_cooldown_ms;
+  la_trigger["timeout_ms"] = g_hardware_cfg.mic_la_timeout_ms;
+  la_trigger["event_name"] = g_hardware_cfg.mic_la_event_name;
+  la_trigger["gate_active"] = g_la_trigger.gate_active;
+  la_trigger["sample_match"] = g_la_trigger.sample_match;
+  la_trigger["locked"] = g_la_trigger.locked;
+  la_trigger["timeout_pending"] = g_la_trigger.timeout_pending;
+  la_trigger["stable_now_ms"] = g_la_trigger.stable_ms;
+  la_trigger["stable_pct"] = laStablePercent();
   out["battery_enabled"] = g_hardware_cfg.battery_enabled;
   out["battery_low_pct"] = g_hardware_cfg.battery_low_pct;
   out["battery_pct"] = hw.battery_percent;
@@ -1526,7 +2054,7 @@ void webSendEspNowStatus() {
 }
 
 void webSendHardwareStatus() {
-  StaticJsonDocument<768> document;
+  StaticJsonDocument<1280> document;
   webFillHardwareStatus(document.to<JsonObject>());
   webSendJsonDocument(document);
 }
@@ -1601,6 +2129,7 @@ bool refreshStoryFromSd() {
   const bool reloaded = g_scenario.begin(kDefaultScenarioFile);
   if (reloaded) {
     g_last_action_step_key[0] = '\0';
+    resetLaTriggerState(false);
     refreshSceneIfNeeded(true);
     startPendingAudioIfAny();
   }
@@ -1613,6 +2142,7 @@ void maybeEmitHardwareEvents(uint32_t now_ms) {
     return;
   }
   const HardwareManager::Snapshot hw = g_hardware.snapshot();
+  const ScenarioSnapshot scenario = g_scenario.snapshot();
 
   if (g_hardware_cfg.mic_enabled && hw.mic_ready) {
     if (hw.mic_level_percent >= g_hardware_cfg.mic_event_threshold_pct) {
@@ -1634,6 +2164,8 @@ void maybeEmitHardwareEvents(uint32_t now_ms) {
       g_battery_low_latched = false;
     }
   }
+
+  updateLaGameplayTrigger(scenario, hw, now_ms);
 }
 
 void maybeLogHardwareTelemetry(uint32_t now_ms) {
@@ -1654,6 +2186,17 @@ void maybeLogHardwareTelemetry(uint32_t now_ms) {
                 hw.led_g,
                 hw.led_b,
                 g_hardware_cfg.led_auto_from_scene ? 1U : 0U);
+}
+
+void maybeStreamMicTunerStatus(uint32_t now_ms) {
+  if (!g_hardware_started || !g_mic_tuner_stream_enabled) {
+    return;
+  }
+  if (now_ms < g_next_mic_tuner_stream_ms) {
+    return;
+  }
+  g_next_mic_tuner_stream_ms = now_ms + g_mic_tuner_stream_period_ms;
+  printMicTunerStatus();
 }
 
 bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot, uint32_t now_ms) {
@@ -1776,12 +2319,10 @@ bool dispatchControlAction(const String& action_raw, uint32_t now_ms, String* ou
   }
 
   if (action.equalsIgnoreCase("UNLOCK")) {
-    g_scenario.notifyUnlock(now_ms);
-    return true;
+    return dispatchScenarioEventByName("UNLOCK", now_ms);
   }
   if (action.equalsIgnoreCase("NEXT")) {
-    g_scenario.notifyButton(5U, false, now_ms);
-    return true;
+    return notifyScenarioButtonGuarded(5U, false, now_ms, "api_control");
   }
   if (action.equalsIgnoreCase("STORY_REFRESH_SD")) {
     return refreshStoryFromSd();
@@ -2025,7 +2566,7 @@ bool webDispatchAction(const String& action_raw) {
   return dispatchControlAction(action_raw, millis(), nullptr);
 }
 
-void webBuildStatusDocument(StaticJsonDocument<3072>* out_document) {
+void webBuildStatusDocument(StaticJsonDocument<4096>* out_document) {
   if (out_document == nullptr) {
     return;
   }
@@ -2076,13 +2617,13 @@ void webBuildStatusDocument(StaticJsonDocument<3072>* out_document) {
 }
 
 void webSendStatus() {
-  StaticJsonDocument<3072> document;
+  StaticJsonDocument<4096> document;
   webBuildStatusDocument(&document);
   webSendJsonDocument(document);
 }
 
 void webSendStatusSse() {
-  StaticJsonDocument<3072> document;
+  StaticJsonDocument<4096> document;
   webBuildStatusDocument(&document);
   String payload;
   serializeJson(document, payload);
@@ -2431,13 +2972,13 @@ void setupWebUi() {
   });
 
   g_web_server.on("/api/scenario/unlock", HTTP_POST, []() {
-    g_scenario.notifyUnlock(millis());
-    webSendResult("UNLOCK", true);
+    const bool ok = dispatchScenarioEventByName("UNLOCK", millis());
+    webSendResult("UNLOCK", ok);
   });
 
   g_web_server.on("/api/scenario/next", HTTP_POST, []() {
-    g_scenario.notifyButton(5U, false, millis());
-    webSendResult("NEXT", true);
+    const bool ok = notifyScenarioButtonGuarded(5U, false, millis(), "api_scenario_next");
+    webSendResult("NEXT", ok);
   });
 
   g_web_server.on("/api/control", HTTP_POST, []() {
@@ -2516,6 +3057,16 @@ bool dispatchScenarioEventByName(const char* event_name, uint32_t now_ms) {
   char normalized[kSerialLineCapacity] = {0};
   std::strncpy(normalized, event_name, sizeof(normalized) - 1U);
   toUpperAsciiInPlace(normalized);
+
+  const ScenarioSnapshot current = g_scenario.snapshot();
+  if (!g_la_dispatch_in_progress && shouldEnforceLaMatchOnly(current)) {
+    if (std::strcmp(normalized, "UNLOCK") == 0 || std::strcmp(normalized, "BTN_NEXT") == 0 ||
+        std::strcmp(normalized, "SERIAL:BTN_NEXT") == 0) {
+      Serial.printf("[LA_TRIGGER] blocked manual event=%s while waiting LA match\n", normalized);
+      return false;
+    }
+  }
+
   if (std::strcmp(normalized, "UNLOCK") == 0) {
     g_scenario.notifyUnlock(now_ms);
     return true;
@@ -2778,6 +3329,7 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
         "SC_LIST SC_LOAD <id> SC_COVERAGE SC_REVALIDATE SC_REVALIDATE_ALL SC_EVENT <type> [name] SC_EVENT_RAW <name> "
         "STORY_REFRESH_SD STORY_SD_STATUS "
         "HW_STATUS HW_STATUS_JSON HW_LED_SET <r> <g> <b> [brightness] [pulse] HW_LED_AUTO <ON|OFF> HW_MIC_STATUS HW_BAT_STATUS "
+        "MIC_TUNER_STATUS [ON|OFF|<period_ms>] "
         "CAM_STATUS CAM_ON CAM_OFF CAM_SNAPSHOT [filename] "
         "MEDIA_LIST <picture|music|recorder> MEDIA_PLAY <path> MEDIA_STOP REC_START [seconds] [filename] REC_STOP REC_STATUS "
         "NET_STATUS WIFI_STATUS WIFI_TEST WIFI_STA <ssid> <pass> WIFI_CONNECT <ssid> <pass> WIFI_DISCONNECT "
@@ -2796,13 +3348,13 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
     return;
   }
   if (std::strcmp(command, "NEXT") == 0) {
-    g_scenario.notifyButton(5, false, now_ms);
-    Serial.println("ACK NEXT");
+    const bool ok = notifyScenarioButtonGuarded(5U, false, now_ms, "serial_next");
+    Serial.printf("ACK NEXT ok=%u\n", ok ? 1U : 0U);
     return;
   }
   if (std::strcmp(command, "UNLOCK") == 0) {
-    g_scenario.notifyUnlock(now_ms);
-    Serial.println("ACK UNLOCK");
+    const bool ok = dispatchScenarioEventByName("UNLOCK", now_ms);
+    Serial.printf("ACK UNLOCK ok=%u\n", ok ? 1U : 0U);
     return;
   }
   if (std::strcmp(command, "RESET") == 0) {
@@ -2823,8 +3375,17 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
     char scenario_id[kSerialLineCapacity] = {0};
     std::strncpy(scenario_id, argument, sizeof(scenario_id) - 1U);
     toUpperAsciiInPlace(scenario_id);
-    const bool ok = g_scenario.beginById(scenario_id);
+    String load_source;
+    String load_path;
+    const bool ok = loadScenarioByIdPreferStoryFile(scenario_id, &load_source, &load_path);
     Serial.printf("ACK SC_LOAD id=%s ok=%u\n", scenario_id, ok ? 1U : 0U);
+    if (ok) {
+      if (!load_path.isEmpty()) {
+        Serial.printf("[SCENARIO] load source=%s path=%s\n", load_source.c_str(), load_path.c_str());
+      } else {
+        Serial.printf("[SCENARIO] load source=%s id=%s\n", load_source.c_str(), scenario_id);
+      }
+    }
     if (ok) {
       g_last_action_step_key[0] = '\0';
       refreshSceneIfNeeded(true);
@@ -2848,6 +3409,60 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
   }
   if (std::strcmp(command, "HW_STATUS_JSON") == 0) {
     printHardwareStatusJson();
+    return;
+  }
+  if (std::strcmp(command, "MIC_TUNER_STATUS") == 0) {
+    if (argument == nullptr) {
+      printMicTunerStatus();
+      return;
+    }
+
+    char arg_copy[40] = {0};
+    copyText(arg_copy, sizeof(arg_copy), argument);
+    trimAsciiInPlace(arg_copy);
+    if (arg_copy[0] == '\0') {
+      printMicTunerStatus();
+      return;
+    }
+
+    char* extra = std::strchr(arg_copy, ' ');
+    if (extra != nullptr) {
+      *extra = '\0';
+      ++extra;
+      while (*extra == ' ') {
+        ++extra;
+      }
+    }
+
+    bool stream_value = false;
+    if (parseBoolToken(arg_copy, &stream_value)) {
+      g_mic_tuner_stream_enabled = stream_value;
+      if (extra != nullptr && extra[0] != '\0') {
+        const long period_ms = std::strtol(extra, nullptr, 10);
+        if (period_ms >= 50L && period_ms <= 5000L) {
+          g_mic_tuner_stream_period_ms = static_cast<uint16_t>(period_ms);
+        }
+      }
+      g_next_mic_tuner_stream_ms = now_ms + 20U;
+      Serial.printf("ACK MIC_TUNER_STATUS stream=%u period_ms=%u\n",
+                    g_mic_tuner_stream_enabled ? 1U : 0U,
+                    static_cast<unsigned int>(g_mic_tuner_stream_period_ms));
+      if (!g_mic_tuner_stream_enabled) {
+        printMicTunerStatus();
+      }
+      return;
+    }
+
+    const long period_ms = std::strtol(arg_copy, nullptr, 10);
+    if (period_ms >= 50L && period_ms <= 5000L) {
+      g_mic_tuner_stream_enabled = true;
+      g_mic_tuner_stream_period_ms = static_cast<uint16_t>(period_ms);
+      g_next_mic_tuner_stream_ms = now_ms + 20U;
+      Serial.printf("ACK MIC_TUNER_STATUS stream=1 period_ms=%u\n", static_cast<unsigned int>(g_mic_tuner_stream_period_ms));
+      return;
+    }
+
+    Serial.println("ERR MIC_TUNER_STATUS_ARG");
     return;
   }
   if (std::strcmp(command, "CAM_STATUS") == 0) {
@@ -3214,6 +3829,7 @@ void setup() {
     g_next_hw_telemetry_ms = millis() + g_hardware_cfg.telemetry_period_ms;
     g_mic_event_armed = true;
     g_battery_low_latched = false;
+    resetLaTriggerState(false);
   } else {
     g_hardware_started = false;
     Serial.println("[HW] disabled by APP_HARDWARE config");
@@ -3265,6 +3881,8 @@ void setup() {
   g_last_action_step_key[0] = '\0';
 
   g_ui.begin();
+  g_ui.setLaDetectionState(false, 0U, 0U, g_hardware_cfg.mic_la_stable_ms, 0U, g_hardware_cfg.mic_la_timeout_ms);
+  g_ui.setHardwareSnapshot(g_hardware.snapshot());
   refreshSceneIfNeeded(true);
   startPendingAudioIfAny();
 }
@@ -3277,7 +3895,7 @@ void loop() {
   while (g_buttons.pollEvent(&event)) {
     Serial.printf("[MAIN] button key=%u long=%u\n", event.key, event.long_press ? 1 : 0);
     g_ui.handleButton(event.key, event.long_press);
-    g_scenario.notifyButton(event.key, event.long_press, now_ms);
+    notifyScenarioButtonGuarded(event.key, event.long_press, now_ms, "physical_button");
     if (g_hardware_started) {
       g_hardware.noteButton(event.key, event.long_press, now_ms);
     }
@@ -3295,6 +3913,7 @@ void loop() {
     g_hardware.update(now_ms);
     maybeEmitHardwareEvents(now_ms);
     maybeLogHardwareTelemetry(now_ms);
+    maybeStreamMicTunerStatus(now_ms);
   }
   char net_payload[192] = {0};
   char net_peer[18] = {0};
@@ -3367,6 +3986,17 @@ void loop() {
   g_media.update(now_ms, &g_audio);
   g_scenario.tick(now_ms);
   startPendingAudioIfAny();
+  uint32_t la_gate_elapsed_ms = 0U;
+  if (g_la_trigger.gate_active && g_la_trigger.gate_entered_ms > 0U) {
+    la_gate_elapsed_ms = now_ms - g_la_trigger.gate_entered_ms;
+  }
+  g_ui.setLaDetectionState(g_la_trigger.locked,
+                           laStablePercent(),
+                           g_la_trigger.stable_ms,
+                           g_hardware_cfg.mic_la_stable_ms,
+                           la_gate_elapsed_ms,
+                           g_hardware_cfg.mic_la_timeout_ms);
+  g_ui.setHardwareSnapshot(g_hardware.snapshot());
   refreshSceneIfNeeded(false);
   g_ui.update();
   if (g_web_started) {

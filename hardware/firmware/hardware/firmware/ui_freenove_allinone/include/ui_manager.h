@@ -5,12 +5,20 @@
 #include <lvgl.h>
 
 #include "core/scenario_def.h"
+#include "hardware_manager.h"
 #include "ui/player_ui_model.h"
 
 class UiManager {
  public:
-  bool begin();
+ bool begin();
   void update();
+  void setHardwareSnapshot(const HardwareManager::Snapshot& snapshot);
+  void setLaDetectionState(bool locked,
+                           uint8_t stability_pct,
+                           uint32_t stable_ms,
+                           uint32_t stable_target_ms,
+                           uint32_t gate_elapsed_ms,
+                           uint32_t gate_timeout_ms);
 
   void renderScene(const ScenarioDef* scenario,
                    const char* screen_scene_id,
@@ -72,6 +80,14 @@ class UiManager {
   void applySceneFraming(int16_t frame_dx, int16_t frame_dy, uint8_t frame_scale_pct, bool split_layout);
   void applyTextLayout(SceneTextAlign title_align, SceneTextAlign subtitle_align);
   void applySubtitleScroll(SceneScrollMode mode, uint16_t speed_ms, uint16_t pause_ms, bool loop);
+  void configureWaveformOverlay(const HardwareManager::Snapshot* snapshot, bool enabled, uint8_t sample_count, uint8_t amplitude_pct, bool jitter);
+  void updateLaOverlay(bool visible,
+                       uint16_t freq_hz,
+                       int16_t cents,
+                       uint8_t confidence,
+                       uint8_t level_pct,
+                       uint8_t stability_pct);
+  void renderMicrophoneWaveform();
   uint16_t resolveAnimMs(uint16_t fallback_ms) const;
   void applyThemeColors(uint32_t bg_rgb, uint32_t accent_rgb, uint32_t text_rgb);
   void resetSceneTimeline();
@@ -103,6 +119,20 @@ class UiManager {
   lv_obj_t* scene_subtitle_label_ = nullptr;
   lv_obj_t* scene_symbol_label_ = nullptr;
   lv_obj_t* scene_particles_[4] = {nullptr, nullptr, nullptr, nullptr};
+  lv_obj_t* scene_waveform_outer_ = nullptr;
+  lv_obj_t* scene_waveform_ = nullptr;
+  lv_obj_t* scene_la_status_label_ = nullptr;
+  lv_obj_t* scene_la_pitch_label_ = nullptr;
+  lv_obj_t* scene_la_timer_label_ = nullptr;
+  lv_obj_t* scene_la_timeout_label_ = nullptr;
+  lv_obj_t* scene_la_meter_bg_ = nullptr;
+  lv_obj_t* scene_la_meter_fill_ = nullptr;
+  lv_obj_t* scene_la_needle_ = nullptr;
+  static constexpr uint8_t kLaAnalyzerBarCount = 8U;
+  lv_obj_t* scene_la_analyzer_bars_[kLaAnalyzerBarCount] = {nullptr};
+  lv_point_t waveform_points_[HardwareManager::kMicWaveformCapacity + 1U] = {};
+  lv_point_t waveform_outer_points_[HardwareManager::kMicWaveformCapacity + 1U] = {};
+  lv_point_t la_needle_points_[2] = {};
   SceneEffect current_effect_ = SceneEffect::kNone;
   uint16_t effect_speed_ms_ = 0U;
   static constexpr uint8_t kMaxTimelineKeyframes = 8U;
@@ -119,6 +149,19 @@ class UiManager {
   uint32_t pending_key_code_ = LV_KEY_ENTER;
   bool key_press_pending_ = false;
   bool key_release_pending_ = false;
+  HardwareManager::Snapshot waveform_snapshot_ = {};
+  bool waveform_snapshot_valid_ = false;
+  bool waveform_overlay_enabled_ = false;
+  bool waveform_overlay_jitter_ = true;
+  uint8_t waveform_sample_count_ = HardwareManager::kMicWaveformCapacity;
+  uint8_t waveform_amplitude_pct_ = 95U;
+  bool la_detection_scene_ = false;
+  bool la_detection_locked_ = false;
+  uint8_t la_detection_stability_pct_ = 0U;
+  uint32_t la_detection_stable_ms_ = 0U;
+  uint32_t la_detection_stable_target_ms_ = 0U;
+  uint32_t la_detection_gate_elapsed_ms_ = 0U;
+  uint32_t la_detection_gate_timeout_ms_ = 0U;
 
   int16_t touch_x_ = 0;
   int16_t touch_y_ = 0;

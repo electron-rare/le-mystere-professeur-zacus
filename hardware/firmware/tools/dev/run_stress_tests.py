@@ -22,7 +22,9 @@ except ImportError:
     print("pip install pyserial", file=sys.stderr)
     sys.exit(2)
 
-DEFAULT_SCENARIOS = ["DEFAULT", "EXPRESS", "EXPRESS_DONE", "SPECTRE"]
+STANDARD_SCENARIOS = ["DEFAULT", "EXPRESS", "EXPRESS_DONE", "SPECTRE"]
+COMBINED_LA_SCENARIOS = ["DEFAULT"]
+DEFAULT_SCENARIOS = list(STANDARD_SCENARIOS)
 FATAL_MARKERS = ("PANIC", "Guru Meditation", "ASSERT", "ABORT", "REBOOT", "rst:", "watchdog")
 DONE_MARKERS = (
     "STORY_ENGINE_DONE",
@@ -255,10 +257,10 @@ def line_has_done(line: str) -> bool:
     return any(marker.upper() in upper for marker in DONE_MARKERS)
 
 
-def line_has_critical(line: str) -> bool:
+def line_has_critical(line: str, require_ui_link: bool = True) -> bool:
     if line_has_fatal(line):
         return True
-    if "UI_LINK_STATUS" in line and "connected=0" in line:
+    if require_ui_link and "UI_LINK_STATUS" in line and "connected=0" in line:
         return True
     return False
 
@@ -269,10 +271,11 @@ def scan_for_patterns(
     log_fp,
     ring: Deque[str],
     patterns: list[re.Pattern[str]],
+    require_ui_link: bool,
 ) -> tuple[bool, str, bool]:
     for line in read_lines(ser, duration_s):
         append_rx(log_fp, ring, line)
-        if line_has_critical(line):
+        if line_has_critical(line, require_ui_link):
             return False, line, True
         for pattern in patterns:
             if pattern.search(line):
@@ -280,14 +283,14 @@ def scan_for_patterns(
     return False, "timeout", False
 
 
-def detect_story_protocol(ser: serial.Serial, log_fp, ring: Deque[str]) -> str:
+def detect_story_protocol(ser: serial.Serial, log_fp, ring: Deque[str], require_ui_link: bool) -> str:
     log_line(log_fp, "Probing story protocol")
     send_json_cmd(ser, "story.status")
     saw_unknown_json = False
     saw_json_status = False
     for line in read_lines(ser, 1.5):
         append_rx(log_fp, ring, line)
-        if line_has_critical(line):
+        if line_has_critical(line, require_ui_link):
             return PROTOCOL_LEGACY_SC
         if 'UNKNOWN {"cmd":"story.status"}' in line:
             saw_unknown_json = True
@@ -300,7 +303,7 @@ def detect_story_protocol(ser: serial.Serial, log_fp, ring: Deque[str]) -> str:
     saw_sc_commands = False
     for line in read_lines(ser, 1.5):
         append_rx(log_fp, ring, line)
-        if line_has_critical(line):
+        if line_has_critical(line, require_ui_link):
             return PROTOCOL_LEGACY_SC
         if "SC_LOAD" in line or "SC_LIST" in line:
             saw_sc_commands = True
@@ -309,12 +312,12 @@ def detect_story_protocol(ser: serial.Serial, log_fp, ring: Deque[str]) -> str:
     return PROTOCOL_JSON_V3
 
 
-def list_legacy_scenarios(ser: serial.Serial, log_fp, ring: Deque[str]) -> list[str]:
+def list_legacy_scenarios(ser: serial.Serial, log_fp, ring: Deque[str], require_ui_link: bool) -> list[str]:
     send_cmd(ser, "SC_LIST")
     scenarios: list[str] = []
     for line in read_lines(ser, 2.0):
         append_rx(log_fp, ring, line)
-        if line_has_critical(line):
+        if line_has_critical(line, require_ui_link):
             break
         match = RE_SCENARIO_ITEM.search(line)
         if match:
@@ -339,6 +342,7 @@ def run_scenario_json_v3(
     log_fp,
     ring: Deque[str],
     duration_s: float,
+    require_ui_link: bool,
 ) -> bool:
     log_line(log_fp, f"Scenario {scenario}: load + arm")
     send_json_cmd(ser, "story.load", {"scenario": scenario})
@@ -348,11 +352,8 @@ def run_scenario_json_v3(
     done = False
     for line in read_lines(ser, duration_s):
         append_rx(log_fp, ring, line)
-        if line_has_fatal(line):
+        if line_has_critical(line, require_ui_link):
             log_line(log_fp, f"CRITICAL {line}")
-            return False
-        if "UI_LINK_STATUS" in line and "connected=0" in line:
-            log_line(log_fp, f"CRITICAL ui link down: {line}")
             return False
         if line_has_done(line):
             done = True
@@ -365,11 +366,8 @@ def run_scenario_json_v3(
     send_json_cmd(ser, "story.status")
     for line in read_lines(ser, 6.0):
         append_rx(log_fp, ring, line)
-        if line_has_fatal(line):
+        if line_has_critical(line, require_ui_link):
             log_line(log_fp, f"CRITICAL {line}")
-            return False
-        if "UI_LINK_STATUS" in line and "connected=0" in line:
-            log_line(log_fp, f"CRITICAL ui link down: {line}")
             return False
         if line_has_done(line):
             return True
@@ -383,6 +381,7 @@ def run_scenario_legacy_sc(
     log_fp,
     ring: Deque[str],
     duration_s: float,
+    require_ui_link: bool,
 ) -> bool:
     del duration_s  # Legacy path actively drives transitions, timeout is command-based.
     log_line(log_fp, f"Scenario {scenario}: legacy SC_LOAD + transitions")
@@ -397,6 +396,7 @@ def run_scenario_legacy_sc(
             re.compile(rf"ACK SC_LOAD id={re.escape(scenario)} ok=1", re.IGNORECASE),
             re.compile(r"ACK SC_LOAD id=[A-Za-z0-9_\-]+ ok=1", re.IGNORECASE),
         ],
+        require_ui_link,
     )
     if not ok:
         if critical:
@@ -417,6 +417,7 @@ def run_scenario_legacy_sc(
                 re.compile(r"step=STEP_(DONE|WIN)", re.IGNORECASE),
                 re.compile(r"STEP_(DONE|WIN)", re.IGNORECASE),
             ],
+            require_ui_link,
         )
         if not ok and critical:
             log_line(log_fp, f"CRITICAL {info}")
@@ -431,6 +432,7 @@ def run_scenario_legacy_sc(
         log_fp,
         ring,
         [re.compile(r"step=STEP_(DONE|WIN)", re.IGNORECASE), re.compile(r"STEP_(DONE|WIN)", re.IGNORECASE)],
+        require_ui_link,
     )
     if ok:
         return True
@@ -448,10 +450,11 @@ def run_scenario(
     ring: Deque[str],
     duration_s: float,
     protocol: str,
+    require_ui_link: bool,
 ) -> bool:
     if protocol == PROTOCOL_LEGACY_SC:
-        return run_scenario_legacy_sc(ser, scenario, log_fp, ring, duration_s)
-    return run_scenario_json_v3(ser, scenario, log_fp, ring, duration_s)
+        return run_scenario_legacy_sc(ser, scenario, log_fp, ring, duration_s, require_ui_link)
+    return run_scenario_json_v3(ser, scenario, log_fp, ring, duration_s, require_ui_link)
 
 
 def main() -> int:
@@ -464,6 +467,12 @@ def main() -> int:
         "--scenarios",
         default="",
         help="Optional comma-separated scenario IDs. Defaults depend on protocol.",
+    )
+    parser.add_argument(
+        "--scenario-profile",
+        choices=["auto", "standard", "combined_la"],
+        default="auto",
+        help="Scenario profile. auto selects combined_la when ZACUS_ENV includes freenove_esp32s3.",
     )
     parser.add_argument("--log", default="", help="Log output path")
     parser.add_argument("--allow-no-hardware", action="store_true")
@@ -511,9 +520,19 @@ def main() -> int:
     iterations = 0
 
     requested_scenarios = [item.strip() for item in args.scenarios.split(",") if item.strip()]
+    scenario_profile = args.scenario_profile
+    if scenario_profile == "auto":
+        if "freenove_esp32s3" in os.environ.get("ZACUS_ENV", ""):
+            scenario_profile = "combined_la"
+        else:
+            scenario_profile = "standard"
+    require_ui_link = scenario_profile != "combined_la"
 
     with log_path.open("w", encoding="utf-8") as log_fp:
         log_line(log_fp, f"Starting stress test: {args.hours:.2f}h on {port} (baud={args.baud})")
+        log_line(log_fp, f"Scenario profile: {scenario_profile}")
+        if not require_ui_link:
+            log_line(log_fp, "UI link gate: skipped (combined board profile)")
 
         stop_event = Event()
         ws_lock = Lock()
@@ -526,21 +545,28 @@ def main() -> int:
             with serial.Serial(port, args.baud, timeout=0.5) as ser:
                 time.sleep(0.8)
                 ser.reset_input_buffer()
-                protocol = detect_story_protocol(ser, log_fp, ring)
+                protocol = detect_story_protocol(ser, log_fp, ring, require_ui_link)
                 log_line(log_fp, f"Story protocol: {protocol}")
                 if protocol == PROTOCOL_LEGACY_SC:
-                    available_scenarios = list_legacy_scenarios(ser, log_fp, ring)
+                    available_scenarios = list_legacy_scenarios(ser, log_fp, ring, require_ui_link)
                     if requested_scenarios:
                         scenarios = [s for s in requested_scenarios if s in available_scenarios]
                         if not scenarios:
                             scenarios = [available_scenarios[0]]
+                    elif scenario_profile == "combined_la" and "DEFAULT" in available_scenarios:
+                        scenarios = ["DEFAULT"]
                     elif "DEFAULT" in available_scenarios:
                         # Keep legacy runs deterministic: DEFAULT has stable transitions in single-board mode.
                         scenarios = ["DEFAULT"]
                     else:
                         scenarios = [available_scenarios[0]]
                 else:
-                    scenarios = requested_scenarios or list(DEFAULT_SCENARIOS)
+                    if requested_scenarios:
+                        scenarios = requested_scenarios
+                    elif scenario_profile == "combined_la":
+                        scenarios = list(COMBINED_LA_SCENARIOS)
+                    else:
+                        scenarios = list(STANDARD_SCENARIOS)
                 log_line(log_fp, f"Scenarios: {', '.join(scenarios)}")
                 prepare_story_session_for_protocol(ser, log_fp, protocol)
 
@@ -550,7 +576,15 @@ def main() -> int:
                             break
                         iterations += 1
                         log_line(log_fp, f"[{iterations}] Running {scenario}")
-                        ok = run_scenario(ser, scenario, log_fp, ring, args.scenario_duration, protocol)
+                        ok = run_scenario(
+                            ser,
+                            scenario,
+                            log_fp,
+                            ring,
+                            args.scenario_duration,
+                            protocol,
+                            require_ui_link,
+                        )
                         if ok:
                             log_line(log_fp, f"OK {scenario}")
                         else:

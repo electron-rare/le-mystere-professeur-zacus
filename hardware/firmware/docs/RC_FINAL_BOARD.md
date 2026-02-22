@@ -1,41 +1,55 @@
 ## Mapping Hardware Freenove ESP32-S3 Media Kit
 
-| Fonction         | Pin (ESP32-S3) | Définition macro         | Remarque/Conflit |
-|------------------|----------------|-------------------------|------------------|
-| LCD Width        | 320            | FREENOVE_LCD_WIDTH      | panneau physique |
-| LCD Height       | 480            | FREENOVE_LCD_HEIGHT     | panneau physique |
-| TFT SCK          | 47             | FREENOVE_TFT_SCK        | profil Sketch_19 |
-| TFT MOSI         | 21             | FREENOVE_TFT_MOSI       | profil Sketch_19 |
-| TFT MISO         | -1             | FREENOVE_TFT_MISO       | non utilisé      |
-| TFT CS           | -1             | FREENOVE_TFT_CS         | board intégré    |
-| TFT DC           | 45             | FREENOVE_TFT_DC         |                  |
-| TFT RST          | 20             | FREENOVE_TFT_RST        |                  |
-| TFT BL           | 2              | FREENOVE_TFT_BL         |                  |
-| Touch CS         | 9              | FREENOVE_TOUCH_CS       | optionnel        |
-| Touch IRQ        | 15             | FREENOVE_TOUCH_IRQ      | optionnel        |
-| Boutons          | 19             | FREENOVE_BTN_ANALOG_PIN | ladder analogique|
-| I2S WS           | 41             | FREENOVE_I2S_WS         | profil principal |
-| I2S BCK          | 42             | FREENOVE_I2S_BCK        | profil principal |
-| I2S DOUT         | 1              | FREENOVE_I2S_DOUT       | profil principal |
+Référence canonique: `hardware/firmware/ui_freenove_allinone/include/ui_freenove_config.h`.
 
-### Librairies recommandées
-- [TFT_eSPI](https://github.com/Bodmer/TFT_eSPI) (écran TFT)
-- [XPT2046_Touchscreen](https://github.com/PaulStoffregen/XPT2046_Touchscreen) (tactile)
-- [LVGL](https://github.com/lvgl/lvgl) (UI avancée)
-- [ESP8266Audio](https://github.com/earlephilhower/ESP8266Audio) (audio)
-- [Mozzi](https://github.com/sensorium/Mozzi) (synthèse audio)
-- [ArduinoJson](https://github.com/bblanchon/ArduinoJson) (JSON)
+| Domaine | Signal | Pin (ESP32-S3) | Macro |
+|---|---|---:|---|
+| LCD | Width x Height | 320 x 480 | `FREENOVE_LCD_WIDTH`, `FREENOVE_LCD_HEIGHT` |
+| TFT | SCK | 47 | `FREENOVE_TFT_SCK` |
+| TFT | MOSI | 21 | `FREENOVE_TFT_MOSI` |
+| TFT | MISO | -1 | `FREENOVE_TFT_MISO` |
+| TFT | CS | -1 | `FREENOVE_TFT_CS` |
+| TFT | DC | 45 | `FREENOVE_TFT_DC` |
+| TFT | RST | 20 | `FREENOVE_TFT_RST` |
+| TFT | BL | 2 | `FREENOVE_TFT_BL` |
+| Touch (option) | CS | 9 | `FREENOVE_TOUCH_CS` |
+| Touch (option) | IRQ | 15 | `FREENOVE_TOUCH_IRQ` |
+| Buttons | Analog ladder | 19 | `FREENOVE_BTN_ANALOG_PIN` |
+| SD_MMC | CMD | 38 | `FREENOVE_SDMMC_CMD` |
+| SD_MMC | CLK | 39 | `FREENOVE_SDMMC_CLK` |
+| SD_MMC | D0 | 40 | `FREENOVE_SDMMC_D0` |
+| I2S OUT | WS | 41 | `FREENOVE_I2S_WS` |
+| I2S OUT | BCK | 42 | `FREENOVE_I2S_BCK` |
+| I2S OUT | DOUT | 1 | `FREENOVE_I2S_DOUT` |
+| I2S IN (mic) | SCK | 3 | `FREENOVE_I2S_IN_SCK` |
+| I2S IN (mic) | WS | 14 | `FREENOVE_I2S_IN_WS` |
+| I2S IN (mic) | DIN | 46 | `FREENOVE_I2S_IN_DIN` |
+| WS2812 | Data | 48 | `FREENOVE_WS2812_PIN` |
+| WS2812 | Count | 4 (FNK0102B) | `FREENOVE_WS2812_COUNT` |
+| Battery | ADC | 20 | `FREENOVE_BAT_ADC_PIN` |
+| Camera | XCLK | 15 | `FREENOVE_CAM_XCLK` |
+| Camera | SIOD / SIOC | 4 / 5 | `FREENOVE_CAM_SIOD`, `FREENOVE_CAM_SIOC` |
+| Camera | VSYNC / HREF / PCLK | 6 / 7 / 13 | `FREENOVE_CAM_VSYNC`, `FREENOVE_CAM_HREF`, `FREENOVE_CAM_PCLK` |
 
-## Procédure de validation hardware Freenove
+## Procédure Freenove (build/flash/test)
 
-1. Vérifier le câblage selon le schéma officiel Freenove.
-2. Tester l’écran TFT avec la librairie TFT_eSPI.
-3. Tester le tactile avec XPT2046_Touchscreen.
-4. Tester l’audio (I2S) avec ESP8266Audio ou Mozzi.
-5. Vérifier les boutons, LED, buzzer, capteurs (DHT11, MPU6050).
-6. Utiliser les scripts de smoke test et gates PlatformIO.
-7. Utiliser `tools/dev/cockpit.sh` pour build, flash, test, logs.
-8. Documenter toute incohérence ou conflit de pin dans AGENT_TODO.md.
+1. Build:
+   - `pio run -e freenove_esp32s3`
+   - `pio run -e freenove_esp32s3_full_with_ui`
+   - `pio run -e freenove_esp32s3_full_with_ui -t buildfs`
+2. Flash (USB modem):
+   - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301`
+   - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301`
+3. Smoke combiné:
+   - `ZACUS_ENV=freenove_esp32s3 ./tools/dev/run_matrix_and_smoke.sh`
+   - `./tools/dev/run_smoke_tests.sh --combined-board`
+   - `python3 tools/dev/run_stress_tests.py --hours 0.5 --scenario-profile combined_la`
+4. Critères stricts:
+   - aucun marqueur panic/reboot dans les logs
+   - evidence complète: `meta.json`, `commands.txt`, `summary.md`, logs par étape.
+5. Traçabilité:
+   - reporter chemins artefacts/logs + verdicts dans `docs/AGENT_TODO.md`.
+
 # RC Execution Board - hardware/firmware
 
 This file is the source of truth for the RC execution cycle focused on

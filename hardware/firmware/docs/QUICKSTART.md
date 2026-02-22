@@ -76,6 +76,7 @@ Attendu:
 make fast-esp32 ESP32_PORT=<PORT_ESP32>
 make fast-ui-oled UI_OLED_PORT=<PORT_ESP8266>
 make fast-ui-tft UI_TFT_PORT=<PORT_RP2040>
+make fast-freenove FREENOVE_PORT=<PORT_FREENOVE> FAST_MONITOR=0
 python3 tools/dev/serial_smoke.py --role auto --baud 115200 --wait-port 3 --allow-no-hardware
 python3 tools/dev/serial_smoke.py --role all --baud 115200 --wait-port 3 --allow-no-hardware
 ```
@@ -89,6 +90,7 @@ Baud separation a retenir:
 
 ```sh
 ./tools/dev/run_matrix_and_smoke.sh
+./tools/dev/run_smoke_tests.sh --combined-board
 ```
 
 Cockpit equivalent:
@@ -99,7 +101,7 @@ Cockpit equivalent:
 
 Le script force `PLATFORMIO_CORE_DIR=$HOME/.platformio` pour que les caches PlatformIO restent en dehors du repo.
 Avant le smoke, il affiche `⚠️ BRANCHE L’USB MAINTENANT ⚠️` 3 fois, puis attend Enter en listant les ports toutes les 15s.
-Chaque run dépose `summary.json`, `summary.md`, `ports_resolve.json` et `ui_link.log` dans `artifacts/rc_live/<env_label>_<timestamp>/`.
+Chaque run dépose `meta.json`, `commands.txt`, `summary.json`, `summary.md`, `ports_resolve.json` et `ui_link.log` dans `artifacts/rc_live/<env_label>_<timestamp>/`.
 Le log global est `logs/rc_live/<env_label>_<timestamp>.log`.
 Le verdict UI link est strict: `UI_LINK_STATUS connected=1` attendu sur l'ESP32.
 Pour `ZACUS_ENV="freenove_esp32s3"` (board combinée), les checks ESP8266/UI-link/story-screen sont marqués `SKIP` avec `not needed for combined board`.
@@ -209,10 +211,8 @@ SYS_RTOS_STATUS
 ---
 ### Audio sur ESP32-S3 (Freenove)
 
-- Attention : l’ESP32-S3 ne possède pas de DAC intégré.
-- Toute sortie audio doit passer par l’I2S (voir mapping GPIO 25/26/27).
-- Connecter un DAC externe compatible I2S (ex : PCM5102, ES9023).
-- Adapter la fonction `i2sWriteSample` : utiliser l’API Espressif I2S pour écrire les samples.
-- Voir la documentation Espressif pour l’initialisation et l’écriture I2S.
-- Tester l’audio avec un signal simple (ex : sinus, square) et vérifier la sortie sur le DAC.
-- En cas d’erreur ou d’absence de DAC, loguer l’évidence et désactiver l’audio.
+- L’ESP32-S3 ne possède pas de DAC intégré: la sortie audio passe par l’I2S.
+- Mapping I2S out Freenove: `BCK=42`, `WS=41`, `DOUT=1` (`FREENOVE_I2S_BCK`, `FREENOVE_I2S_WS`, `FREENOVE_I2S_DOUT`).
+- Mapping micro I2S in: `SCK=3`, `WS=14`, `DIN=46` (`FREENOVE_I2S_IN_SCK`, `FREENOVE_I2S_IN_WS`, `FREENOVE_I2S_IN_DIN`).
+- Tester avec `MIC_TUNER_STATUS ON 200` et `HW_STATUS_JSON` pour vérifier fréquence/confiance/niveau.
+- En cas d’échec, consigner l’evidence (artefact + log + commande) dans `docs/AGENT_TODO.md`.

@@ -31,3 +31,4 @@
 - `hardware/firmware/docs/AGENT_TODO.md` is the evidence tracker for builds, smoke/stress runs, UI Link/LittleFS/I2S, and WebSocket/HTTP health—log each artifact path when reporting.
 - Build artifacts/logs live outside git; reference their directories/timestamps in reports instead of committing them.
 - Skills and AGENT contracts work hand-in-hand: trigger the right skill, then obey the contract file(s) tied to that business spec.
+- Freenove combined-board standard flow: `ZACUS_ENV=freenove_esp32s3 ./tools/dev/run_matrix_and_smoke.sh`, `./tools/dev/run_smoke_tests.sh --combined-board`, `python3 tools/dev/run_stress_tests.py --scenario-profile combined_la`.

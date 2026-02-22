@@ -3,11 +3,85 @@
 1. Vérifier la configuration du port série (résolution dynamique via cockpit.sh ports).
 2. Flasher la cible Freenove avec cockpit.sh flash (ou build_all.sh).
 3. Lancer le smoke test avec tools/dev/run_matrix_and_smoke.sh.
-4. Vérifier le verdict UI_LINK_STATUS connected==1 (fail strict si absent).
+4. Vérifier le verdict UI_LINK_STATUS connected==1 (fail strict si absent),
+   sauf en mode carte combinée (`ZACUS_ENV=freenove_esp32s3`) où la gate doit être `SKIP: not needed for combined board`.
 5. Vérifier l’absence de panic/reboot dans les logs.
 6. Vérifier la santé des WebSockets (logs, auto-recover).
-7. Consigner les logs et artefacts produits (logs/rc_live/freenove_esp32s3_YYYYMMDD.log, artifacts/rc_live/freenove_esp32s3_YYYYMMDD.html).
+7. Consigner les logs et artefacts produits (`logs/rc_live/*.log`, `artifacts/rc_live/<env>_<timestamp>/{meta.json,commands.txt,summary.md,...}`).
 8. Documenter toute anomalie ou fail dans AGENT_TODO.md.
+
+### Verrou opératoire (demande utilisateur)
+
+- Mode de travail verrouillé: utiliser uniquement les commandes `pio` pour build/flash/FS (`pio run ...`).
+- Ne pas exécuter les scripts `tools/dev/*` tant que ce verrou est actif.
+
+## [2026-02-22] Verrou transition boutons -> LA detector (Codex)
+
+- [x] Contrat verrouillé: depuis `STEP_WAIT_UNLOCK` (`SCENE_LOCKED`), tout appui bouton (`1..5`, court/long) déclenche `BTN_NEXT` et enchaîne vers `STEP_WAIT_ETAPE2`.
+- [x] Spécification canonique alignée:
+  - `docs/protocols/story_specs/scenarios/default_unlock_win_etape2.yaml` annoté + `screen_scene_id: SCENE_LA_DETECTOR`.
+- [x] Data Story alignée:
+  - `data/story/scenarios/DEFAULT.json`: `button_short_1..5 = BTN_NEXT`.
+  - `data/story/scenarios/DEFAULT.json`: `STEP_WAIT_ETAPE2.screen_scene_id = SCENE_LA_DETECTOR`.
+  - `data/story/screens/SCENE_LA_DETECTOR.json` ajouté (alias écran LA detector).
+- [x] Validation hardware série (usbmodem Freenove):
+  - `python3 tools/dev/verify_story_default_flow.py --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 3.0 --settle 3.0` ✅
+  - `NEXT` direct validé: `STEP_WAIT_UNLOCK/SCENE_LOCKED -> STEP_WAIT_ETAPE2/SCENE_LA_DETECTOR` ✅
+- [x] Correctif robustesse bouton:
+  - `ScenarioManager::notifyButton`: en `STEP_WAIT_UNLOCK`, tout appui bouton (`1..5`, court **ou** long) déclenche `BTN_NEXT`.
+  - revalidation runtime: `SC_REVALIDATE_HW` => `changed=1` pour `BTN1_SHORT`, `BTN3_LONG`, `BTN4_LONG`, `BTN5_SHORT`, `BTN5_LONG` ✅
+- [x] Outillage test aligné:
+  - `tools/dev/verify_story_default_flow.py`: attente `SCENE_LA_DETECTOR` + fallback robuste si `SC_LOAD` ne renvoie pas d'ACK.
+
+## [2026-02-22] Focus validation micro + détection (hardware Freenove)
+
+- [x] Correctifs runtime micro/tuner appliqués dans `hardware/firmware/ui_freenove_allinone/src/hardware_manager.cpp`:
+  - capture I2S micro en `32-bit` puis conversion PCM16 (`>>8`) pour éviter les lectures saturées parasites,
+  - détection LA recentrée sur bande utile (`320..560 Hz`) pour réduire les faux positifs hors contexte,
+  - sortie tuner instantanée (`mic_freq_hz/mic_pitch_cents/mic_pitch_confidence`) sans lissage décroissant trompeur.
+- [x] Validation firmware sur carte (port USB modem):
+  - `pio run -e freenove_esp32s3_full_with_ui` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- [x] Validation live micro:
+  - `./tools/dev/verify_mic_live.py --port /dev/cu.usbmodem5AB90753301 --samples 25 --duration 12` ✅
+  - verdict observé: `mic_ready_all=1`, `conf_non_zero>0`, `freq_non_zero>0`.
+- [x] Validation comportement détection fréquentielle (campagne locale via `afplay`):
+  - 392 Hz -> médiane ~391 Hz (conf élevée),
+  - 440 Hz -> médiane ~441 Hz (conf élevée),
+  - 466 Hz -> médiane ~468 Hz (conf élevée),
+  - 523 Hz -> médiane ~521 Hz (détection présente),
+  - baseline silencieuse/ambiante: médiane confiance à `0` (quelques détections isolées restantes).
+- [x] Non-régression Story:
+  - `python3 tools/dev/verify_story_default_flow.py --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 2.2` ✅
+  - flux validé: `SCENE_LOCKED -> SCENE_BROKEN -> SCENE_LA_DETECT -> SCENE_SIGNAL_SPIKE -> SCENE_MEDIA_ARCHIVE`.
+
+## [2026-02-22] SCENE_LA_DETECTOR — UI instrumentée + trigger match micro strict (Codex)
+
+- [x] UI `SCENE_LA_DETECT` enrichie (dans `ui_manager`):
+  - waveform micro circulaire autour du noyau (input réel micro),
+  - indicateur niveau micro (barre),
+  - analyseur fréquentiel simplifié (barres),
+  - indicateur de justesse (aiguille) + statut (`AUCUNE NOTE` / `PRESQUE JUSTE` / `LA VALIDE`),
+  - compteur LA détecté et compteur timeout visibles à l’écran.
+  - accordeur autour du LA au niveau des LED (WS2812) du freenove
+- [x] Trigger gameplay LA ajusté:
+  - validation LA continue à `3s` (`la_stable_ms=3000`) -> passage scène suivante,
+  - timeout global à `60s` (`la_timeout_ms=60000`) -> retour direct `SCENE_LOCKED`.
+- [x] Garde-fous “match micro obligatoire” sur l’étape LA:
+  - blocage des raccourcis `NEXT/UNLOCK` manuels en `STEP_WAIT_ETAPE2` (série/web/control/boutons),
+  - seule la validation micro peut déclencher la transition nominale.
+- [x] Stabilité runtime:
+  - correction stack canary loopTask (buffers DSP micro déplacés hors pile dans `HardwareManager`).
+- [x] Validation exécutée (USB modem Freenove):
+  - `pio run -e freenove_esp32s3_full_with_ui` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - logs série auto: absence `Guru Meditation`/panic ✅
+  - logs série auto: `NEXT` bloqué en scène LA (`ACK NEXT ok=0`) ✅
+  - logs série auto: timeout LA ~60s puis reset `STEP_WAIT_UNLOCK / SCENE_LOCKED` ✅
+- [ ] Validation visuelle matérielle à confirmer:
+  - lisibilité des 4 widgets UI (waveform/level/analyzer/timers),
+  - calibration terrain pour atteindre `LA VALIDE` en 3s sur ton setup micro.
 
 ## [2026-02-22] Freenove lockscreen glitch + LEDs cassées (Codex)
 
@@ -15,6 +89,7 @@
   - nouvel effet runtime dédié `kGlitch` (secousses aléatoires X/Y, flicker aléatoire opacité, particules aléatoires, contraste renforcé).
   - boucle d'effet enrichie pour les particules en mode `glitch` et `celebrate` (mode cassé) avec jitter non périodique.
   - reset explicite des translations LVGL entre scènes pour éviter les résidus d'animation.
+  - waveform micro ajoutée sur `SCENE_LOCKED` en mode glitch mobile (scan vertical sur l'écran + distorsions aléatoires).
 - Renforcement LEDs WS2812 (4 LEDs Freenove) en scène cassée:
   - pattern “broken hardware” aléatoire sur `SCENE_LOCKED` / `SCENE_BROKEN` / `SCENE_SIGNAL_SPIKE` (flashs brefs, non simultanés entre LEDs, coupures, sparks, dérive couleur).
   - vérifié en série via `HW_STATUS` (LED#1 majoritairement OFF avec flashs brefs intermittents).
@@ -30,6 +105,34 @@
   - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
   - `python3 tools/dev/verify_story_default_flow.py --port /dev/cu.usbmodem5AB90753301 --baud 115200` ✅
   - vérif série: `[UI] scene=SCENE_LOCKED effect=6 speed=90 ... timeline=8` + absence `Guru Meditation` sur `SC_LOAD DEFAULT` ✅
+  - `python3 tools/dev/verify_story_default_flow.py --port /dev/cu.usbmodem5AB90753301 --timeout 2.2` ✅
+    (flux attendu: `SCENE_LOCKED -> SCENE_BROKEN -> SCENE_LA_DETECT -> SCENE_SIGNAL_SPIKE -> SCENE_MEDIA_ARCHIVE`)
+  - waveform micro déplacée sur un tracé circulaire autour du noyau écran (`scene_core_/scene_ring_outer_`) pour `SCENE_LA_DETECT`.
+  - validation micro Freenove série en condition runtime (`STEP_WAIT_ETAPE2`, `SCENE_LA_DETECT`):
+    - `mic_ready=1` sur tous les échantillons.
+    - `mic_level_pct` variable (span 45), `mic_peak` non nul (max 32768), `mic_freq_hz>0` et `mic_pitch_confidence>0`.
+  - variante scope renforcée:
+    - double tracé circulaire (anneau principal + anneau externe) autour du noyau (`scene_core_`) pour visualiser la forme d'onde directement sur le cercle.
+    - couleur/épaisseur pilotées par la justesse (`mic_pitch_cents`) et la confiance (`mic_pitch_confidence`) pour la détection LA.
+  - nouvel outil de validation opérateur:
+    - `tools/dev/verify_mic_live.py` (auto-load scénario, passage `SCENE_LA_DETECT`, sampling `HW_STATUS_JSON`, verdict PASS/FAIL).
+    - run validé: `./tools/dev/verify_mic_live.py --port /dev/cu.usbmodem5AB90753301 --samples 20 --duration 10` ✅ (`mic_ready_all=1`, `level span=40`, `peak_max=32768`, `freq_non_zero=17`).
+  - nettoyage anti-doublons:
+    - purge des artefacts `* 2*` non trackés (copies parasites), restauration des fichiers trackés détectés par erreur hors scope firmware.
+    - règles préventives ajoutées:
+      - `.gitignore` racine: `**/* 2` + `**/* 2.*`
+      - `hardware/firmware/.gitignore`: `* 2` + `* 2.*`
+  - évolution accordeur:
+    - LEDs (4 WS2812) en mode tuner plus lisible: `flat` à gauche (bleu/cyan), `in-tune` au centre (vert), `sharp` à droite (orange/rouge), avec flash extrême en forte dérive.
+    - debug série live ajouté: `MIC_TUNER_STATUS [ON|OFF|<period_ms>]`.
+  - évolution écran LA_DETECT:
+    - rendu “vibromètre” accentué sur anneaux circulaires (amplitude/punch renforcés, warp de phase léger, boost niveau micro).
+  - validations additionnelles:
+    - `pio run -e freenove_esp32s3_full_with_ui` ✅
+    - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+    - série: `MIC_TUNER_STATUS` one-shot + `MIC_TUNER_STATUS ON 180` (flux live observé) + `MIC_TUNER_STATUS OFF` ✅
+    - `./tools/dev/verify_mic_live.py --port /dev/cu.usbmodem5AB90753301 --samples 20 --duration 10` ✅ (fallback `MIC_TUNER_STATUS` si `HW_STATUS_JSON` non décodable)
+    - `python3 tools/dev/verify_story_default_flow.py --port /dev/cu.usbmodem5AB90753301 --timeout 2.2` ✅
 
 ## [2026-02-21] Firmware workflow hardening (Codex)
 
@@ -658,6 +761,8 @@
   - aliases transition ajoutés: `wipe -> slide_left`, `camera_flash -> glitch`,
   - scènes ajoutées: `SCENE_CAMERA_SCAN`, `SCENE_SIGNAL_SPIKE`, `SCENE_MEDIA_ARCHIVE`,
   - docs alignées: `docs/protocols/story_screen_palette_v2.md`, `docs/protocols/story_README.md`.
+- [x] Contrôle de flux: ajout d'un déclencheur `BTN_NEXT` depuis `STEP_WAIT_UNLOCK` vers `STEP_WAIT_ETAPE2` (scène LA détection), pour permettre le passage immédiat via `NEXT` / `/api/scenario/next`/`SC_EVENT serial BTN_NEXT`; artefact build: `pio run -e freenove_esp32s3` (success 2026-02-22) et fichiers générés mis à jour (`docs/protocols/story_specs/scenarios/default_unlock_win_etape2.yaml`, `hardware/libs/story/src/generated/*`).
+- [x] Contrôle tactile/physique Freenove: adaptation de `ScenarioManager::notifyButton` pour que tout bouton court (`1..5`) sur `STEP_WAIT_UNLOCK` déclenche `BTN_NEXT` si disponible (fallback `NEXT`), donc passage direct vers `STEP_WAIT_ETAPE2` depuis n'importe quel bouton.
 - [x] Validation réalisée (session courante):
   - builds: `pio run -e esp32dev -e esp32_release -e esp8266_oled -e ui_rp2040_ili9488 -e ui_rp2040_ili9486` ✅,
   - build Freenove: `pio run -e freenove_esp32s3` ✅,
@@ -708,3 +813,4 @@
 - [x] Validation:
   - `pio run -e esp8266_oled` ✅ (build complet OK après réparation).
 [20260222-113849] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260222-113849, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260222-113849/summary.md
+[20260222-204146] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260222-204146, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260222-204146/summary.md

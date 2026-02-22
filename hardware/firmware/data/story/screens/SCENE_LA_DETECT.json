@@ -1,57 +1,73 @@
 {
   "id": "SCENE_LA_DETECT",
-  "title": "DETECTION",
-  "subtitle": "Balayage en cours",
-  "symbol": "SCAN",
-  "effect": "radar",
+  "title": "DETECTEUR DE RESONNANCE",
+  "subtitle": "",
+  "symbol": "AUDIO",
+  "effect": "wave",
   "visual": {
-    "show_title": false,
+    "show_title": true,
     "show_symbol": true,
-    "effect_speed_ms": 900
+    "effect_speed_ms": 480,
+    "waveform": {
+      "enabled": true,
+      "sample_count": 16,
+      "amplitude_pct": 100,
+      "jitter": true
+    }
   },
   "theme": {
-    "bg": "#041F1B",
-    "accent": "#2CE5A6",
-    "text": "#EFFFF8"
+    "bg": "#000000",
+    "accent": "#49D9FF",
+    "text": "#E8F6FF"
   },
   "timeline": {
     "loop": true,
-    "duration_ms": 1800,
+    "duration_ms": 2400,
     "keyframes": [
       {
         "at_ms": 0,
-        "effect": "radar",
-        "speed_ms": 900,
-        "theme": {
-          "bg": "#041F1B",
-          "accent": "#2CE5A6",
-          "text": "#EFFFF8"
-        }
-      },
-      {
-        "at_ms": 900,
         "effect": "wave",
-        "speed_ms": 540,
+        "speed_ms": 480,
         "theme": {
-          "bg": "#05282A",
-          "accent": "#64E8D9",
-          "text": "#F3FFFC"
+          "bg": "#000000",
+          "accent": "#49D9FF",
+          "text": "#E8F6FF"
         }
       },
       {
-        "at_ms": 1800,
+        "at_ms": 800,
         "effect": "radar",
-        "speed_ms": 900,
+        "speed_ms": 620,
         "theme": {
-          "bg": "#041F1B",
-          "accent": "#2CE5A6",
-          "text": "#EFFFF8"
+          "bg": "#000000",
+          "accent": "#7EE8FF",
+          "text": "#F2FAFF"
+        }
+      },
+      {
+        "at_ms": 1600,
+        "effect": "wave",
+        "speed_ms": 340,
+        "theme": {
+          "bg": "#000000",
+          "accent": "#D8FF6B",
+          "text": "#F9FFD8"
+        }
+      },
+      {
+        "at_ms": 2400,
+        "effect": "radar",
+        "speed_ms": 700,
+        "theme": {
+          "bg": "#000000",
+          "accent": "#49D9FF",
+          "text": "#E8F6FF"
         }
       }
     ]
   },
   "transition": {
-    "effect": "wipe",
-    "duration_ms": 220
+    "effect": "zoom",
+    "duration_ms": 260
   }
 }

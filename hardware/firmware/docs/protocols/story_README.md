@@ -19,6 +19,11 @@ UNLOCK → U_SON_PROTO → WAIT_ETAPE2 → ETAPE2 → DONE
 
 **Tous les nouveaux scénarios doivent suivre ce flux par défaut** (ou l'étendre, jamais le modifier).
 
+Verrou runtime/spec du flux par défaut:
+
+- sur `STEP_WAIT_UNLOCK` (`SCENE_LOCKED`), tout appui bouton (`1..5`, court ou long) est normalisé en `BTN_NEXT`
+- `BTN_NEXT` enchaîne directement vers `STEP_WAIT_ETAPE2` / `SCENE_LA_DETECTOR`
+
 ## Source de verite
 
 - schema logique: `docs/protocols/story_specs/schema/story_spec_v1.yaml`

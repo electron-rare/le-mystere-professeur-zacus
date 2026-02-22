@@ -204,6 +204,18 @@ void ScenarioManager::notifyUnlock(uint32_t now_ms) {
 }
 
 void ScenarioManager::notifyButton(uint8_t key, bool long_press, uint32_t now_ms) {
+  const StepDef* step = currentStep();
+  if (step != nullptr && step->id != nullptr && std::strcmp(step->id, "STEP_WAIT_UNLOCK") == 0) {
+    // Contract: any single press (short or long) from lock screen jumps to LA detector.
+    if (key >= 1U && key <= 5U) {
+      if (dispatchEvent(StoryEventType::kSerial, "BTN_NEXT", now_ms, "btn_any_short")) {
+        return;
+      }
+      dispatchEvent(StoryEventType::kSerial, "NEXT", now_ms, "btn_any_short_legacy");
+      return;
+    }
+  }
+
   switch (key) {
     case 1:
       if (long_press) {

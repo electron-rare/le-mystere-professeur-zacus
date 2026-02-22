@@ -65,6 +65,9 @@ SUMMARY_JSON=""
 SUMMARY_MD=""
 PORTS_RESOLVE_JSON=""
 RESOLVE_PORTS_ALLOW_RETRY="0"
+META_JSON=""
+COMMANDS_TXT=""
+ORIG_ARGS=("$@")
 
 EXIT_CODE=0
 FINALIZED=0
@@ -96,6 +99,13 @@ log_warn() {
 
 log_error() {
   action_log "[error] $*"
+}
+
+record_command() {
+  local cmd="$1"
+  if [[ -n "$COMMANDS_TXT" ]]; then
+    printf '%s\n' "$cmd" >> "$COMMANDS_TXT"
+  fi
 }
 
 append_step() {
@@ -216,10 +226,25 @@ init_run_paths() {
   SUMMARY_JSON="$ARTIFACT_DIR/summary.json"
   SUMMARY_MD="$ARTIFACT_DIR/summary.md"
   PORTS_RESOLVE_JSON="$ARTIFACT_DIR/ports_resolve.json"
+  META_JSON="$ARTIFACT_DIR/meta.json"
+  COMMANDS_TXT="$ARTIFACT_DIR/commands.txt"
 
   mkdir -p "$ARTIFACT_DIR" "$LOG_DIR"
   : > "$RUN_LOG"
   : > "$STEPS_TSV"
+  printf '# Commands\n' > "$COMMANDS_TXT"
+  record_command "./tools/dev/run_matrix_and_smoke.sh ${ORIG_ARGS[*]:-}"
+  cat > "$META_JSON" <<EOF
+{
+  "timestamp": "${TIMESTAMP}",
+  "phase": "rc_live",
+  "utc": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "command": "./tools/dev/run_matrix_and_smoke.sh ${ORIG_ARGS[*]:-}",
+  "cwd": "${ROOT}",
+  "repo_root": "${REPO_ROOT}",
+  "fw_root": "${ROOT}"
+}
+EOF
 }
 
 all_builds_present() {
@@ -237,6 +262,7 @@ run_step_cmd() {
   local log_file="$2"
   shift 2
   mkdir -p "$(dirname "$log_file")"
+  record_command "$*"
   printf '[step] %s\n' "$*" | tee -a "$RUN_LOG" "$log_file"
   set +e
   "$@" >>"$log_file" 2>&1
@@ -450,6 +476,7 @@ resolve_live_ports() {
   fi
 
   printf '[step] %s\n' "${resolver_cmd[*]}" | tee -a "$RUN_LOG" "$resolve_log"
+  record_command "${resolver_cmd[*]}"
   set +e
   local resolve_json
   resolve_json="$("${resolver_cmd[@]}" 2>>"$resolve_log")"
@@ -560,6 +587,7 @@ run_role_smoke() {
   fi
 
   local cmd=("$PYTHON_BIN" "$SERIAL_SMOKE" --role "$role" --port "$port" --baud "$baud" --timeout "$timeout_s" --wait-port "$wait_port")
+  record_command "${cmd[*]}"
   printf '[step] %s\n' "${cmd[*]}" | tee -a "$RUN_LOG" "$log_file"
   set +e
   "${cmd[@]}" >>"$log_file" 2>&1
@@ -570,6 +598,7 @@ run_role_smoke() {
   if [[ "$role" == "esp8266_usb" ]]; then
     local monitor_log="$ARTIFACT_DIR/ui_link_monitor.log"
     local monitor_cmd=("$PYTHON_BIN" "$SERIAL_SMOKE" --role "$role" --port "$port" --baud "$baud" --timeout "7.0" --wait-port "$wait_port")
+    record_command "${monitor_cmd[*]}"
     printf '[step] monitor UI_LINK %s\n' "${monitor_cmd[*]}" | tee -a "$RUN_LOG" "$monitor_log"
     set +e
     "${monitor_cmd[@]}" >>"$monitor_log" 2>&1
@@ -615,6 +644,7 @@ run_ui_link_check() {
     sleep "$wait_s"
   fi
   printf '[step] ui-link check on %s\n' "$PORT_ESP32" | tee -a "$RUN_LOG" "$ui_log"
+  record_command "python3 - <inline> UI_LINK_STATUS port=$PORT_ESP32 retries=$max_retries"
 
   while (( retry_count < max_retries )); do
     set +e
@@ -728,6 +758,7 @@ run_story_screen_smoke() {
   fi
 
   local cmd=("$PYTHON_BIN" "$STORY_SCREEN_SMOKE" --port "$PORT_ESP32" --baud 115200)
+  record_command "${cmd[*]}"
   printf '[step] %s\n' "${cmd[*]}" | tee -a "$RUN_LOG" "$log_file"
   set +e
   "${cmd[@]}" >>"$log_file" 2>&1

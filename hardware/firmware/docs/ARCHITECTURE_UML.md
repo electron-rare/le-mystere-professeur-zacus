@@ -11,6 +11,14 @@ NOTE: A more readable, split UML documentation lives in docs/uml/INDEX.md.
 Le firmware suit une **architecture multi-MCU** avec 3 firmwares indépendants communiquant via protocole UART :
 
 ```
+
+### Variante Freenove (board combinée)
+
+En cible `freenove_esp32s3`, l'ESP32-S3 exécute runtime + UI sur la même carte:
+
+- pas de dépendance UI ESP8266/RP2040 au run-time
+- gates UI link/story screen marquées `SKIP` avec justification `not needed for combined board`
+- validation principale via `run_matrix_and_smoke.sh`, `run_smoke_tests.sh --combined-board`, `run_stress_tests.py --scenario-profile combined_la`.
 ┌─────────────────────────────────────────────────────────────┐
 │                    ESP32 Audio Kit                          │
 │              (Firmware principal C++)                       │

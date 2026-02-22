@@ -21,6 +21,8 @@ S'applique aux scripts et helpers dans `hardware/firmware/tools/dev/**`.
 - Garder une sortie CLI courte et grep-friendly (`[step]`, `[ok]`, `[fail]`).
 - Documenter et maintenir `tools/dev/plan_runner.sh` pour permettre d’exécuter automatiquement les sections `## Plan d’action` des briefs.
 - En mode carte combinee (`ZACUS_ENV=freenove_esp32s3`), les gates UI link/story screen doivent etre sorties en `SKIP` avec justification explicite `not needed for combined board`.
+- `run_smoke_tests.sh` doit supporter les deux modes: dual-board (ESP32+ESP8266) et combined-board Freenove (`--combined-board`).
+- `run_matrix_and_smoke.sh` doit toujours produire l’evidence minimale: `meta.json`, `commands.txt`, `summary.md`, `summary.json`, logs par etape.
 - `run_stress_tests.py` doit rester compatible protocoles story JSON + serial legacy (`SC_*`) et permettre la cible `DEFAULT` en single-board.
 - Les changements structurels d'outillage sont autorises, mais doivent etre reflites dans la doc/onboarding.
 
@@ -37,6 +39,7 @@ S'applique aux scripts et helpers dans `hardware/firmware/tools/dev/**`.
 ## Gates
 - `python3 hardware/firmware/tools/dev/serial_smoke.py --help`
 - `bash hardware/firmware/tools/dev/run_matrix_and_smoke.sh` (quand le contexte hardware est disponible)
+- `bash hardware/firmware/tools/dev/run_smoke_tests.sh --help`
 
 Les gates sont recommandees, mais obligatoires uniquement si demande explicite.
 

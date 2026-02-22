@@ -43,3 +43,8 @@ printables/export/pdf/**
 # Locally generated printable PNGs (not versioned)
 printables/export/png/**
 !printables/export/png/zacus_v1/.gitkeep
+
+# Accidental duplicate copies from desktop/Finder workflows
+# Example: "file 2.ext" or "Makefile 2"
+**/* 2
+**/* 2.*

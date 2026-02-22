@@ -1,28 +1,32 @@
 # Story V2 WebUI
 
-Mission Control frontend for Zacus devices.
+Frontend Mission Control pour les devices Zacus.
 
-## Features
+## Nouveautes principales
 
-- `Scenario Selector`: browse and open scenarios.
-- `Live Orchestrator`: live stream, controls, and event log.
-- `Story Designer`: YAML editing, validate, deploy, and test-run.
-- `Nodal Story Generator`: generate node/transition YAML drafts (linear, fork/merge, hub).
+- `Scenario Selector` revu: recherche, tri, mode legacy explicite, CTA adaptes aux capabilities.
+- `Live Orchestrator` revu: statut runtime lisible, recovery stream, filtre d'evenements, controles reseau legacy.
+- `Story Designer` nodal avec React Flow:
+  - import YAML -> graphe (Story V2 canonique + legacy simplifie),
+  - export graphe -> YAML canonique Story V2,
+  - edition guidee des `app_bindings`,
+  - edition node/edge, undo/redo, auto-layout.
+- UI globale harmonisee en style glass modern, labels FR et focus accessibilite.
 
-## API Modes
+## Modes API (dual mode)
 
-The app auto-detects the connected firmware flavor:
+Detection automatique du firmware connecte:
 
-- `story_v2`: `/api/story/*` + WebSocket stream.
-- `freenove_legacy`: `/api/status`, `/api/scenario/*`, `/api/stream` (SSE).
+- `story_v2`: endpoints `/api/story/*` + stream WebSocket.
+- `freenove_legacy`: endpoints `/api/status`, `/api/scenario/*`, `/api/stream` (SSE).
 
-When running in legacy mode, unsupported actions are disabled with explicit UI messaging.
+Les actions non supportees en mode legacy sont desactivees avec message explicite.
 
-## Environment
+## Variables d'environnement
 
-- `VITE_API_BASE` default target seed, example: `http://192.168.0.91`
-- `VITE_API_PROBE_PORTS` probe order, default: `80,8080`
-- `VITE_API_FLAVOR` override: `auto|story_v2|freenove_legacy` (default `auto`)
+- `VITE_API_BASE` cible prioritaire (ex: `http://192.168.0.91`)
+- `VITE_API_PROBE_PORTS` ordre de probe (defaut: `80,8080`)
+- `VITE_API_FLAVOR` override (`auto|story_v2|freenove_legacy`, defaut `auto`)
 
 ## Run
 
@@ -31,24 +35,46 @@ npm install
 npm run dev
 ```
 
-Example (current ESP target):
+Preset ESP cible `192.168.0.91`:
 
 ```bash
-VITE_API_BASE=http://192.168.0.91 VITE_API_PROBE_PORTS=80,8080 npm run dev
+npm run dev:esp
 ```
 
-## Gates
+- Dev local: `http://localhost:5173`
+- Dev LAN: `http://<ip-machine>:5173`
+
+Preview sur build existant:
+
+```bash
+npm run preview:esp
+```
+
+- Preview local: `http://localhost:4173`
+- Preview LAN: `http://<ip-machine>:4173`
+
+Build + preview:
+
+```bash
+npm run preview:esp:build
+```
+
+## Tests / gates frontend
 
 ```bash
 npm run lint
 npm run build
+npm run test:unit
 npx playwright test
 npx playwright test --grep @live
 ```
 
-Default Playwright execution runs `@mock` scenarios. `@live` tests are intended for the real device and include control mutations.
+- `test:unit`: validation parser/generation YAML Story Designer.
+- `playwright @mock`: detection Story V2/legacy, UX et regressions principales.
+- `playwright @live`: tests live sur `192.168.0.91` (actions mutantes autorisees).
 
-## Notes
+## Notes live
 
-- Live tests target `http://192.168.0.91` by default.
-- Keep a stable local network during `@live` runs because tests include WiFi/ESP-NOW control actions.
+- La suite `@live` execute des actions de controle (`unlock`, `next`, `wifi reconnect`, `espnow off/on`).
+- Un finalizer force `espnow on` en fin de run.
+- A lancer sur une fenetre de test dediee (pas pendant une partie active).

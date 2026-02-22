@@ -1,21 +1,21 @@
 # WebUI Dual-Mode E2E Runbook
 
-## Scope
+## Objectif
 
-This runbook covers frontend validation for:
+Valider le frontend dual mode sur:
 
-- Story V2 API mode (`/api/story/*`, WebSocket stream).
-- Freenove legacy API mode (`/api/status`, `/api/scenario/*`, SSE stream).
+- Story V2 (`/api/story/*`, stream WebSocket)
+- Legacy Freenove (`/api/status`, `/api/scenario/*`, `/api/stream` SSE)
 
-## Prerequisites
+Cible live par defaut: `192.168.0.91`.
 
-- Node.js + npm installed.
-- Dependencies installed: `npm install`
-- Device reachable on LAN (default target: `192.168.0.91`).
+## Prerequis
 
-## Environment
+- Node.js + npm installes
+- Dependances installees: `npm install`
+- Device joignable sur le LAN
 
-Recommended runtime values:
+## Variables d'environnement
 
 ```bash
 export VITE_API_BASE=http://192.168.0.91
@@ -23,58 +23,72 @@ export VITE_API_PROBE_PORTS=80,8080
 export VITE_API_FLAVOR=auto
 ```
 
-## Dev and Preview (ESP preset)
-
-Quick commands with the target already set to `192.168.0.91`:
+## Dev / Preview (preset ESP)
 
 ```bash
 npm run dev:esp
 ```
 
-- Dev URL (local): `http://localhost:5173`
-- Dev URL (LAN): `http://<your-computer-ip>:5173`
-
-Preview from existing build:
+- Dev local: `http://localhost:5173`
+- Dev LAN: `http://<ip-machine>:5173`
 
 ```bash
 npm run preview:esp
 ```
 
-Build + preview in one command:
+- Preview local: `http://localhost:4173`
+- Preview LAN: `http://<ip-machine>:4173`
+
+Build + preview:
 
 ```bash
 npm run preview:esp:build
 ```
 
-- Preview URL (local): `http://localhost:4173`
-- Preview URL (LAN): `http://<your-computer-ip>:4173`
+## Suites de tests
 
-## Test Commands
+Unitaires parser/generation Story Designer:
 
-Mock-only suite:
+```bash
+npm run test:unit
+```
+
+Playwright mock (defaut):
 
 ```bash
 npx playwright test
 ```
 
-Live device suite:
+Playwright live:
 
 ```bash
 npx playwright test --grep @live
 ```
 
-Full gate sequence:
+## Gates frontend completes
 
 ```bash
 npm run lint
 npm run build
+npm run test:unit
 npx playwright test
 npx playwright test --grep @live
 ```
 
-## Live Test Behavior
+## Scenarios verifies (mock)
 
-`@live` tests perform:
+- detection `story_v2`
+- detection `freenove_legacy`
+- UX selector/orchestrator/designer en FR
+- Story Designer:
+  - import YAML -> graphe
+  - edition binding -> export/import coherent
+  - undo/redo
+- gestion erreurs API (404/507)
+
+## Scenarios verifies (live @full-control)
+
+Actions executees:
 
 - `GET /api/status`
 - `GET /api/stream`
@@ -84,12 +98,12 @@ npx playwright test --grep @live
 - `POST /api/network/espnow/off`
 - `POST /api/network/espnow/on`
 
-A test finalizer always calls `POST /api/network/espnow/on` to return to a safe state.
+Verification finale: `GET /api/status` + finalizer `espnow on`.
 
-## Risks (Full Control Mode)
+## Risques (mode Full control)
 
-- Temporary control-plane instability while WiFi reconnect is triggered.
-- Short telemetry gaps during ESP-NOW off/on toggles.
-- If the device is under active gameplay, unlock/next may advance story state.
+- transitions de story avancees (unlock/next)
+- micro-coupures reseau pendant reconnect WiFi
+- telemetrie interrompue temporairement pendant off/on ESP-NOW
 
-Use `@live` only on a non-critical session or dedicated test window.
+Lancer `@live` uniquement sur une fenetre de test dediee.

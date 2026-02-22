@@ -3,6 +3,7 @@
 @tailwind utilities;
 
 :root {
+  color-scheme: light;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -27,7 +28,9 @@ body {
   min-height: 100vh;
   font-family: "Trebuchet MS", "Gill Sans", "Gill Sans MT", sans-serif;
   color: var(--ink-900);
-  background: radial-gradient(circle at 20% 20%, #fff8f2 0%, #eef2ff 30%, #dae6ff 55%, #c9d9ff 100%);
+  background:
+    radial-gradient(circle at 20% 20%, #fff8f2 0%, #eef2ff 30%, #dae6ff 55%, #c9d9ff 100%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0));
 }
 
 #root {
@@ -43,12 +46,18 @@ h3 {
 
 .glass-panel {
   background: var(--glass);
-  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.15);
+  box-shadow:
+    0 20px 60px rgba(15, 23, 42, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
   border: 1px solid rgba(255, 255, 255, 0.6);
   backdrop-filter: blur(14px);
 }
 
 .focus-ring:focus-visible {
   outline: 3px solid var(--accent-500);
-  outline-offset: 2px;
+  outline-offset: 3px;
+}
+
+::selection {
+  background: rgba(47, 179, 162, 0.28);
 }

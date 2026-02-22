@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import ScenarioSelector from './components/ScenarioSelector'
 import LiveOrchestrator from './components/LiveOrchestrator'
+import ScenarioSelector from './components/ScenarioSelector'
 import StoryDesigner from './components/StoryDesigner'
-import type { ScenarioMeta } from './types/story'
+import { Badge, Button, Panel } from './components/ui'
 import {
   API_BASE,
   type ApiFlavor,
@@ -18,37 +18,40 @@ import {
   startStory,
   validateStory,
 } from './lib/api'
+import type { ScenarioMeta } from './types/story'
 
 type ViewKey = 'selector' | 'orchestrator' | 'designer'
 
 const VIEW_LABELS: Record<ViewKey, string> = {
-  selector: 'Scenario Selector',
-  orchestrator: 'Live Orchestrator',
-  designer: 'Story Designer',
+  selector: 'Scenarios',
+  orchestrator: 'Orchestrateur',
+  designer: 'Designer',
 }
 
 const FLAVOR_LABELS: Record<ApiFlavor, string> = {
-  story_v2: 'Story V2 API',
-  freenove_legacy: 'Freenove Legacy API',
-  unknown: 'Unknown API',
+  story_v2: 'API Story V2',
+  freenove_legacy: 'API Legacy',
+  unknown: 'API inconnue',
 }
 
 const friendlyError = (err: unknown, fallback: string) => {
   if (err && typeof err === 'object' && 'status' in err) {
     const status = Number((err as { status?: number }).status)
     if (status === 404) {
-      return 'Scenario not found. Browse available scenarios.'
+      return 'Scenario introuvable. Verifie la liste disponible.'
     }
     if (status === 409) {
-      return 'Device is busy. Try again shortly.'
+      return 'Le device est occupe. Reessaie dans quelques secondes.'
     }
     if (status === 507) {
-      return 'Device storage full. Delete old scenarios.'
+      return "Stockage du device plein. Supprime d'anciens scenarios."
     }
   }
+
   if (err instanceof Error && err.message) {
     return err.message
   }
+
   return fallback
 }
 
@@ -66,6 +69,7 @@ const App = () => {
   const loadScenarios = useCallback(async () => {
     setLoading(true)
     setError('')
+
     try {
       const runtime = await getRuntimeInfo()
       setApiFlavor(runtime.flavor)
@@ -76,7 +80,7 @@ const App = () => {
       setScenarios(result)
       setActiveScenario((previous) => previous || result[0]?.id || '')
     } catch (err) {
-      setError(friendlyError(err, `Cannot reach device at ${resolvedBase}. Check connection.`))
+      setError(friendlyError(err, `Impossible de joindre le device sur ${resolvedBase}.`))
     } finally {
       setLoading(false)
     }
@@ -104,10 +108,11 @@ const App = () => {
         if (capabilities.canStart) {
           await startStory()
         }
+
         setActiveScenario(scenarioId)
         setView('orchestrator')
       } catch (err) {
-        throw new Error(friendlyError(err, 'Unable to open scenario.'))
+        throw new Error(friendlyError(err, "Impossible d'ouvrir le scenario."))
       }
     },
     [capabilities.canSelectScenario, capabilities.canStart],
@@ -117,7 +122,7 @@ const App = () => {
     try {
       return (await validateStory(yaml)) as { valid: boolean; errors?: string[] }
     } catch (err) {
-      throw new Error(friendlyError(err, 'Validation failed.'))
+      throw new Error(friendlyError(err, 'Validation en erreur.'))
     }
   }, [])
 
@@ -125,7 +130,7 @@ const App = () => {
     try {
       return (await deployStory(yaml)) as { deployed?: string; status: 'ok' | 'error'; message?: string }
     } catch (err) {
-      throw new Error(friendlyError(err, 'Deployment failed.'))
+      throw new Error(friendlyError(err, 'Deploiement en erreur.'))
     }
   }, [])
 
@@ -133,17 +138,20 @@ const App = () => {
     async (yaml: string) => {
       try {
         if (!capabilities.canDeploy || !capabilities.canSelectScenario || !capabilities.canStart) {
-          throw new Error('Test run is only available when Story V2 deploy/start APIs are enabled.')
+          throw new Error('Le test run est disponible uniquement avec les APIs Story V2 deploy/select/start.')
         }
 
         const deployResult = (await deployStory(yaml)) as { deployed?: string; status: 'ok' | 'error' }
         if (deployResult.status !== 'ok' || !deployResult.deployed) {
-          throw new Error('Deploy failed before test run.')
+          throw new Error('Le deploiement a echoue avant le test run.')
         }
+
         await selectStory(deployResult.deployed)
         await startStory()
+
         setActiveScenario(deployResult.deployed)
         setView('orchestrator')
+
         if (testRunTimerRef.current) {
           window.clearTimeout(testRunTimerRef.current)
         }
@@ -152,7 +160,7 @@ const App = () => {
           testRunTimerRef.current = null
         }, 30000)
       } catch (err) {
-        throw new Error(friendlyError(err, 'Test run failed.'))
+        throw new Error(friendlyError(err, 'Test run en erreur.'))
       }
     },
     [capabilities.canDeploy, capabilities.canSelectScenario, capabilities.canStart],
@@ -162,7 +170,7 @@ const App = () => {
     try {
       await pauseStory()
     } catch (err) {
-      throw new Error(friendlyError(err, 'Unable to pause scenario.'))
+      throw new Error(friendlyError(err, 'Impossible de mettre en pause.'))
     }
   }, [])
 
@@ -170,7 +178,7 @@ const App = () => {
     try {
       await resumeStory()
     } catch (err) {
-      throw new Error(friendlyError(err, 'Unable to resume scenario.'))
+      throw new Error(friendlyError(err, 'Impossible de reprendre.'))
     }
   }, [])
 
@@ -178,7 +186,7 @@ const App = () => {
     try {
       await skipStory()
     } catch (err) {
-      throw new Error(friendlyError(err, 'Unable to skip step.'))
+      throw new Error(friendlyError(err, "Impossible de passer l'etape."))
     }
   }, [])
 
@@ -200,7 +208,7 @@ const App = () => {
     if (view === 'orchestrator') {
       return (
         <LiveOrchestrator
-          scenarioId={activeScenario || 'Unknown'}
+          scenarioId={activeScenario || 'INCONNU'}
           onBack={() => setView('selector')}
           onPause={handlePause}
           onResume={handleResume}
@@ -238,32 +246,34 @@ const App = () => {
 
   return (
     <div className="min-h-screen px-4 py-8 md:px-10">
-      <header className="glass-panel mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 rounded-3xl px-6 py-4">
-        <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-[var(--ink-500)]">
-            {FLAVOR_LABELS[apiFlavor]}
-          </p>
-          <h1 className="text-3xl font-semibold">Mission Control</h1>
-          <p className="text-xs text-[var(--ink-500)]">Target {resolvedBase}</p>
+      <Panel as="header" className="sticky top-4 z-20 mx-auto max-w-6xl px-6 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="space-y-2">
+            <p className="text-xs uppercase tracking-[0.3em] text-[var(--ink-500)]">{FLAVOR_LABELS[apiFlavor]}</p>
+            <h1 className="text-3xl font-semibold">Mission Control Zacus</h1>
+            <p className="text-xs text-[var(--ink-500)]">Cible: {resolvedBase}</p>
+            <div className="flex flex-wrap gap-2">
+              <Badge tone={error ? 'error' : loading ? 'warning' : 'success'}>
+                {error ? 'Hors ligne' : loading ? 'Connexion...' : 'Connecte'}
+              </Badge>
+              <Badge tone="neutral">Stream: {capabilities.streamKind.toUpperCase()}</Badge>
+            </div>
+          </div>
+          <nav className="flex flex-wrap gap-2" aria-label="Navigation principale">
+            {(Object.keys(VIEW_LABELS) as ViewKey[]).map((key) => (
+              <Button
+                key={key}
+                type="button"
+                onClick={() => setView(key)}
+                variant={view === key ? 'primary' : 'outline'}
+                aria-current={view === key ? 'page' : undefined}
+              >
+                {VIEW_LABELS[key]}
+              </Button>
+            ))}
+          </nav>
         </div>
-        <nav className="flex flex-wrap gap-2">
-          {(Object.keys(VIEW_LABELS) as ViewKey[]).map((key) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setView(key)}
-              className={`focus-ring min-h-[44px] rounded-full px-4 text-sm font-semibold transition ${
-                view === key
-                  ? 'bg-[var(--ink-700)] text-white'
-                  : 'border border-[var(--ink-500)] text-[var(--ink-700)]'
-              }`}
-              aria-current={view === key ? 'page' : undefined}
-            >
-              {VIEW_LABELS[key]}
-            </button>
-          ))}
-        </nav>
-      </header>
+      </Panel>
 
       <main className="mx-auto mt-8 max-w-6xl">{pageContent}</main>
     </div>

@@ -47,6 +47,8 @@ type DragState = {
 const NODE_WIDTH = 250
 const NODE_HEIGHT = 260
 const CANVAS_HEIGHT = 560
+const NODE_HORIZONTAL_GAP = 300
+const NODE_VERTICAL_GAP = 220
 
 const TEMPLATE_LIBRARY: Record<string, string> = {
   DEFAULT: `id: DEFAULT
@@ -228,6 +230,74 @@ steps: []
   return `${lines.join('\n')}\n`
 }
 
+const autoLayoutNodes = (nodes: EditorNode[], edges: EditorEdge[]) => {
+  const normalizedNodes = ensureInitialNode(nodes)
+  if (normalizedNodes.length === 0) {
+    return normalizedNodes
+  }
+
+  const nodeById = new Map(normalizedNodes.map((node) => [node.id, node]))
+  const adjacency = new Map<string, string[]>()
+  normalizedNodes.forEach((node) => adjacency.set(node.id, []))
+  edges.forEach((edge) => {
+    if (!nodeById.has(edge.fromNodeId) || !nodeById.has(edge.toNodeId)) {
+      return
+    }
+    const current = adjacency.get(edge.fromNodeId) ?? []
+    current.push(edge.toNodeId)
+    adjacency.set(edge.fromNodeId, current)
+  })
+
+  const startNode = normalizedNodes.find((node) => node.isInitial) ?? normalizedNodes[0]
+  const levelByNode = new Map<string, number>()
+  const queue: string[] = [startNode.id]
+  levelByNode.set(startNode.id, 0)
+
+  while (queue.length > 0) {
+    const currentId = queue.shift()
+    if (!currentId) {
+      continue
+    }
+    const currentLevel = levelByNode.get(currentId) ?? 0
+    ;(adjacency.get(currentId) ?? []).forEach((nextId) => {
+      if (levelByNode.has(nextId)) {
+        return
+      }
+      levelByNode.set(nextId, currentLevel + 1)
+      queue.push(nextId)
+    })
+  }
+
+  const assignedLevels = Array.from(levelByNode.values())
+  let maxLevel = assignedLevels.length > 0 ? Math.max(...assignedLevels) : 0
+  normalizedNodes.forEach((node) => {
+    if (levelByNode.has(node.id)) {
+      return
+    }
+    maxLevel += 1
+    levelByNode.set(node.id, maxLevel)
+  })
+
+  const rowsByLevel = new Map<number, string[]>()
+  normalizedNodes.forEach((node) => {
+    const level = levelByNode.get(node.id) ?? 0
+    const current = rowsByLevel.get(level) ?? []
+    current.push(node.id)
+    rowsByLevel.set(level, current)
+  })
+
+  return normalizedNodes.map((node) => {
+    const level = levelByNode.get(node.id) ?? 0
+    const levelRows = rowsByLevel.get(level) ?? [node.id]
+    const rowIndex = Math.max(0, levelRows.indexOf(node.id))
+    return {
+      ...node,
+      x: 32 + level * NODE_HORIZONTAL_GAP,
+      y: 40 + rowIndex * NODE_VERTICAL_GAP,
+    }
+  })
+}
+
 const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryDesignerProps) => {
   const [draft, setDraft] = useState<string>(() => localStorage.getItem('story-draft') ?? TEMPLATE_LIBRARY.DEFAULT)
   const [status, setStatus] = useState('')
@@ -238,6 +308,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
   const [nodes, setNodes] = useState<EditorNode[]>(() => createDefaultGraph().nodes)
   const [edges, setEdges] = useState<EditorEdge[]>(() => createDefaultGraph().edges)
   const [linkSourceId, setLinkSourceId] = useState<string | null>(null)
+  const [linkEventName, setLinkEventName] = useState('BTN_NEXT')
   const [dragState, setDragState] = useState<DragState | null>(null)
   const canvasRef = useRef<HTMLDivElement | null>(null)
 
@@ -283,6 +354,20 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
         .filter((edge): edge is { id: string; path: string; labelX: number; labelY: number; eventName: string } => edge !== null),
     [edges, nodeMap],
   )
+
+  const graphBounds = useMemo(() => {
+    const bounds = nodes.reduce(
+      (acc, node) => ({
+        width: Math.max(acc.width, node.x + NODE_WIDTH + 40),
+        height: Math.max(acc.height, node.y + NODE_HEIGHT + 40),
+      }),
+      { width: 980, height: CANVAS_HEIGHT },
+    )
+    return {
+      width: bounds.width,
+      height: Math.max(bounds.height, CANVAS_HEIGHT),
+    }
+  }, [nodes])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -340,21 +425,80 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
     }
   }
 
-  const handleAddNode = useCallback(() => {
-    setNodes((previous) => {
-      const nextNode = createNode(previous.length + 1)
-      if (previous.length === 0) {
+  const createAndAddNode = useCallback(
+    (options?: { x?: number; y?: number }) => {
+      const nextNode = createNode(nodes.length + 1)
+      if (typeof options?.x === 'number') {
+        nextNode.x = Math.max(10, options.x)
+      }
+      if (typeof options?.y === 'number') {
+        nextNode.y = Math.max(10, options.y)
+      }
+      if (nodes.length === 0) {
         nextNode.isInitial = true
       }
-      return [...previous, nextNode]
-    })
-  }, [])
+      setNodes((previous) => [...previous, nextNode])
+      return nextNode
+    },
+    [nodes.length],
+  )
+
+  const handleAddNode = useCallback(() => {
+    createAndAddNode()
+    setStatus('Node added.')
+    setErrors([])
+  }, [createAndAddNode])
+
+  const handleAddChildNode = useCallback(
+    (sourceNodeId: string) => {
+      const sourceNode = nodeMap.get(sourceNodeId)
+      if (!sourceNode) {
+        return
+      }
+      const newNode = createAndAddNode({
+        x: sourceNode.x + NODE_HORIZONTAL_GAP,
+        y: sourceNode.y,
+      })
+      if (!newNode) {
+        return
+      }
+      setEdges((previous) => [
+        ...previous,
+        {
+          id: `edge-${makeIdFragment()}`,
+          fromNodeId: sourceNodeId,
+          toNodeId: newNode.id,
+          eventName: linkEventName.trim() || 'BTN_NEXT',
+        },
+      ])
+      setStatus('Child node added and linked.')
+      setErrors([])
+    },
+    [createAndAddNode, linkEventName, nodeMap],
+  )
+
+  const handleCanvasDoubleClick = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (!canvasRef.current) {
+        return
+      }
+      const bounds = canvasRef.current.getBoundingClientRect()
+      const { scrollLeft, scrollTop } = canvasRef.current
+      const x = event.clientX - bounds.left + scrollLeft - NODE_WIDTH / 2
+      const y = event.clientY - bounds.top + scrollTop - 24
+      createAndAddNode({ x, y })
+      setStatus('Node added on canvas.')
+      setErrors([])
+    },
+    [createAndAddNode],
+  )
 
   const handleResetGraph = useCallback(() => {
     const graph = createDefaultGraph()
     setNodes(graph.nodes)
     setEdges(graph.edges)
     setLinkSourceId(null)
+    setLinkEventName('BTN_NEXT')
     setStatus('Node graph reset to default.')
     setErrors([])
   }, [])
@@ -376,13 +520,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
       if (!linkSourceId || linkSourceId === nodeId) {
         return
       }
-      const eventName = window.prompt('Transition event name', 'BTN_NEXT')
-      if (eventName === null) {
-        setStatus('Link creation cancelled.')
-        setLinkSourceId(null)
-        return
-      }
-      const trimmedEvent = eventName.trim()
+      const trimmedEvent = linkEventName.trim()
       if (!trimmedEvent) {
         setStatus('Link event cannot be empty.')
         return
@@ -416,7 +554,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
       setStatus('Nodes linked. Edit event directly inside the source node if needed.')
       setErrors([])
     },
-    [linkSourceId],
+    [linkEventName, linkSourceId],
   )
 
   const handleRemoveEdge = useCallback((edgeId: string) => {
@@ -433,10 +571,11 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
         return
       }
       const bounds = canvasRef.current.getBoundingClientRect()
+      const { scrollLeft, scrollTop } = canvasRef.current
       setDragState({
         nodeId,
-        offsetX: event.clientX - bounds.left - node.x,
-        offsetY: event.clientY - bounds.top - node.y,
+        offsetX: event.clientX - bounds.left + scrollLeft - node.x,
+        offsetY: event.clientY - bounds.top + scrollTop - node.y,
       })
       event.preventDefault()
       event.stopPropagation()
@@ -450,13 +589,14 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
         return
       }
       const bounds = canvasRef.current.getBoundingClientRect()
-      const maxX = Math.max(20, bounds.width - NODE_WIDTH - 10)
-      const maxY = Math.max(20, CANVAS_HEIGHT - NODE_HEIGHT - 10)
-      const nextX = Math.min(maxX, Math.max(10, event.clientX - bounds.left - dragState.offsetX))
-      const nextY = Math.min(maxY, Math.max(10, event.clientY - bounds.top - dragState.offsetY))
+      const { scrollLeft, scrollTop } = canvasRef.current
+      const maxX = Math.max(20, graphBounds.width - NODE_WIDTH - 10)
+      const maxY = Math.max(20, graphBounds.height - NODE_HEIGHT - 10)
+      const nextX = Math.min(maxX, Math.max(10, event.clientX - bounds.left + scrollLeft - dragState.offsetX))
+      const nextY = Math.min(maxY, Math.max(10, event.clientY - bounds.top + scrollTop - dragState.offsetY))
       updateNode(dragState.nodeId, { x: nextX, y: nextY })
     },
-    [dragState, updateNode],
+    [dragState, graphBounds.height, graphBounds.width, updateNode],
   )
 
   const handleGenerateFromNodes = useCallback(() => {
@@ -465,6 +605,11 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
     setStatus('YAML generated from linked nodes.')
     setErrors([])
   }, [edges, graphScenarioId, nodes])
+
+  const handleAutoLayout = useCallback(() => {
+    setNodes((previous) => autoLayoutNodes(previous, edges))
+    setStatus('Auto layout applied.')
+  }, [edges])
 
   const handleValidate = async () => {
     if (!validateEnabled) {
@@ -550,7 +695,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
       )}
 
       <div className="glass-panel rounded-3xl p-5">
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto_auto] md:items-end">
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] md:items-end">
           <label className="text-xs uppercase tracking-[0.2em] text-[var(--ink-500)]" htmlFor="graph-scenario-id">
             Scenario ID
             <input
@@ -576,6 +721,13 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
           </button>
           <button
             type="button"
+            onClick={handleAutoLayout}
+            className="focus-ring min-h-[44px] rounded-full border border-[var(--ink-500)] px-4 text-sm font-semibold text-[var(--ink-700)]"
+          >
+            Auto layout
+          </button>
+          <button
+            type="button"
             onClick={handleResetGraph}
             className="focus-ring min-h-[44px] rounded-full border border-[var(--ink-500)] px-4 text-sm font-semibold text-[var(--ink-500)]"
           >
@@ -584,12 +736,34 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
         </div>
         <p className="mt-3 text-xs text-[var(--ink-500)]">
           Click <span className="font-semibold">Link</span> on a source node, then click a target node to connect them.
-          Node parameters and transition events are edited directly inside each node.
+          Use <span className="font-semibold">Add node</span>, <span className="font-semibold">Add child</span>, or
+          double-click the canvas to create nodes quickly.
         </p>
         {linkSourceId && (
-          <p className="mt-2 rounded-xl border border-[var(--accent-700)] bg-white/70 px-3 py-2 text-xs text-[var(--accent-700)]">
-            Link mode active from <span className="font-semibold">{nodeMap.get(linkSourceId)?.stepId ?? linkSourceId}</span>. Click a target node.
-          </p>
+          <div className="mt-2 space-y-2 rounded-xl border border-[var(--accent-700)] bg-white/70 px-3 py-2 text-xs text-[var(--accent-700)]">
+            <p>
+              Link mode active from <span className="font-semibold">{nodeMap.get(linkSourceId)?.stepId ?? linkSourceId}</span>.
+              Click a target node.
+            </p>
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="text-[10px] uppercase tracking-[0.15em] text-[var(--accent-700)]" htmlFor="link-event-name">
+                Event
+                <input
+                  id="link-event-name"
+                  value={linkEventName}
+                  onChange={(event) => setLinkEventName(event.target.value)}
+                  className="focus-ring mt-1 min-h-[32px] rounded-lg border border-[var(--accent-700)] bg-white px-2 text-xs text-[var(--ink-900)]"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => setLinkSourceId(null)}
+                className="focus-ring min-h-[32px] rounded-lg border border-[var(--accent-700)] px-3 text-[10px] font-semibold uppercase tracking-[0.15em]"
+              >
+                Cancel link
+              </button>
+            </div>
+          </div>
         )}
 
         <div
@@ -599,145 +773,165 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
           onMouseMove={handleCanvasMouseMove}
           onMouseUp={() => setDragState(null)}
           onMouseLeave={() => setDragState(null)}
+          onDoubleClick={handleCanvasDoubleClick}
         >
-          <svg className="pointer-events-none absolute inset-0 h-full w-full">
-            {renderedEdges.map((edge) => (
-              <g key={edge.id}>
-                <path d={edge.path} fill="none" stroke="rgba(31,42,68,0.55)" strokeWidth={2.5} />
-                <text x={edge.labelX} y={edge.labelY} textAnchor="middle" fontSize={11} fill="#1f2a44">
-                  {edge.eventName}
-                </text>
-              </g>
-            ))}
-          </svg>
+          <div
+            className="relative"
+            style={{
+              width: `${graphBounds.width}px`,
+              height: `${graphBounds.height}px`,
+            }}
+          >
+            <svg className="pointer-events-none absolute left-0 top-0" width={graphBounds.width} height={graphBounds.height}>
+              {renderedEdges.map((edge) => (
+                <g key={edge.id}>
+                  <path d={edge.path} fill="none" stroke="rgba(31,42,68,0.55)" strokeWidth={2.5} />
+                  <text x={edge.labelX} y={edge.labelY} textAnchor="middle" fontSize={11} fill="#1f2a44">
+                    {edge.eventName}
+                  </text>
+                </g>
+              ))}
+            </svg>
 
-          {nodes.map((node) => {
-            const outgoing = outgoingEdgeMap.get(node.id) ?? []
-            return (
-              <div
-                key={node.id}
-                className={`absolute rounded-2xl border bg-white/90 p-3 shadow-lg ${
-                  linkSourceId === node.id ? 'border-[var(--accent-700)]' : 'border-[var(--mist-400)]'
-                }`}
-                style={{ left: `${node.x}px`, top: `${node.y}px`, width: `${NODE_WIDTH}px`, minHeight: `${NODE_HEIGHT}px` }}
-                onClick={() => handleNodeClick(node.id)}
-              >
+            {nodes.map((node) => {
+              const outgoing = outgoingEdgeMap.get(node.id) ?? []
+              return (
                 <div
-                  className="mb-2 flex cursor-move items-center justify-between rounded-xl bg-[var(--mist-200)] px-2 py-1 text-xs font-semibold text-[var(--ink-700)]"
-                  onMouseDown={(event) => handleDragStart(event, node.id)}
-                >
-                  <span>{node.stepId || 'STEP_NODE'}</span>
-                  <div className="flex gap-1">
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        handleStartLink(node.id)
-                      }}
-                      className="rounded-md border border-[var(--ink-500)] px-2 py-1 text-[10px]"
-                    >
-                      Link
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        handleRemoveNode(node.id)
-                      }}
-                      className="rounded-md border border-[var(--accent-700)] px-2 py-1 text-[10px] text-[var(--accent-700)]"
-                    >
-                      Del
-                    </button>
-                  </div>
-                </div>
-
-                <label className="block text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">
-                  Step ID
-                  <input
-                    value={node.stepId}
-                    onChange={(event) => updateNode(node.id, { stepId: event.target.value })}
-                    onClick={(event) => event.stopPropagation()}
-                    className="focus-ring mt-1 min-h-[32px] w-full rounded-lg border border-[var(--mist-400)] px-2 text-xs text-[var(--ink-900)]"
-                  />
-                </label>
-                <label className="mt-2 block text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">
-                  Screen
-                  <input
-                    value={node.screenSceneId}
-                    onChange={(event) => updateNode(node.id, { screenSceneId: event.target.value })}
-                    onClick={(event) => event.stopPropagation()}
-                    className="focus-ring mt-1 min-h-[32px] w-full rounded-lg border border-[var(--mist-400)] px-2 text-xs text-[var(--ink-900)]"
-                  />
-                </label>
-                <label className="mt-2 block text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">
-                  Audio pack
-                  <input
-                    value={node.audioPackId}
-                    onChange={(event) => updateNode(node.id, { audioPackId: event.target.value })}
-                    onClick={(event) => event.stopPropagation()}
-                    placeholder="PACK_BOOT_RADIO"
-                    className="focus-ring mt-1 min-h-[32px] w-full rounded-lg border border-[var(--mist-400)] px-2 text-xs text-[var(--ink-900)]"
-                  />
-                </label>
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    setInitialNode(node.id)
-                  }}
-                  className={`mt-2 min-h-[30px] w-full rounded-lg border px-2 text-[10px] uppercase tracking-[0.15em] ${
-                    node.isInitial
-                      ? 'border-[var(--teal-500)] bg-[var(--teal-500)] text-white'
-                      : 'border-[var(--ink-500)] text-[var(--ink-700)]'
+                  key={node.id}
+                  className={`absolute rounded-2xl border bg-white/90 p-3 shadow-lg ${
+                    linkSourceId === node.id ? 'border-[var(--accent-700)]' : 'border-[var(--mist-400)]'
                   }`}
+                  style={{ left: `${node.x}px`, top: `${node.y}px`, width: `${NODE_WIDTH}px`, minHeight: `${NODE_HEIGHT}px` }}
+                  onClick={() => handleNodeClick(node.id)}
+                  onDoubleClick={(event) => event.stopPropagation()}
                 >
-                  {node.isInitial ? 'Initial node' : 'Set initial'}
-                </button>
-
-                {outgoing.length > 0 && (
-                  <div className="mt-2 space-y-1 rounded-lg border border-[var(--mist-400)] p-2">
-                    <p className="text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">Transitions</p>
-                    {outgoing.map((edge) => (
-                      <div key={edge.id} className="space-y-1">
-                        <div className="text-[10px] text-[var(--ink-500)]">
-                          to {nodeMap.get(edge.toNodeId)?.stepId ?? 'Unknown'}
-                        </div>
-                        <div className="flex gap-1">
-                          <input
-                            value={edge.eventName}
-                            onClick={(event) => event.stopPropagation()}
-                            onChange={(event) =>
-                              setEdges((previous) =>
-                                previous.map((candidate) =>
-                                  candidate.id === edge.id
-                                    ? {
-                                        ...candidate,
-                                        eventName: event.target.value,
-                                      }
-                                    : candidate,
-                                ),
-                              )
-                            }
-                            className="focus-ring min-h-[28px] flex-1 rounded-md border border-[var(--mist-400)] px-2 text-[10px] text-[var(--ink-900)]"
-                          />
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              handleRemoveEdge(edge.id)
-                            }}
-                            className="rounded-md border border-[var(--accent-700)] px-2 text-[10px] text-[var(--accent-700)]"
-                          >
-                            x
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                  <div
+                    className="mb-2 flex cursor-move items-center justify-between rounded-xl bg-[var(--mist-200)] px-2 py-1 text-xs font-semibold text-[var(--ink-700)]"
+                    onMouseDown={(event) => handleDragStart(event, node.id)}
+                  >
+                    <span>{node.stepId || 'STEP_NODE'}</span>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          handleAddChildNode(node.id)
+                        }}
+                        className="rounded-md border border-[var(--teal-500)] px-2 py-1 text-[10px] text-[var(--teal-500)]"
+                      >
+                        +Child
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          handleStartLink(node.id)
+                        }}
+                        className="rounded-md border border-[var(--ink-500)] px-2 py-1 text-[10px]"
+                      >
+                        Link
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          handleRemoveNode(node.id)
+                        }}
+                        className="rounded-md border border-[var(--accent-700)] px-2 py-1 text-[10px] text-[var(--accent-700)]"
+                      >
+                        Del
+                      </button>
+                    </div>
                   </div>
-                )}
-              </div>
-            )
-          })}
+
+                  <label className="block text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">
+                    Step ID
+                    <input
+                      value={node.stepId}
+                      onChange={(event) => updateNode(node.id, { stepId: event.target.value })}
+                      onClick={(event) => event.stopPropagation()}
+                      className="focus-ring mt-1 min-h-[32px] w-full rounded-lg border border-[var(--mist-400)] px-2 text-xs text-[var(--ink-900)]"
+                    />
+                  </label>
+                  <label className="mt-2 block text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">
+                    Screen
+                    <input
+                      value={node.screenSceneId}
+                      onChange={(event) => updateNode(node.id, { screenSceneId: event.target.value })}
+                      onClick={(event) => event.stopPropagation()}
+                      className="focus-ring mt-1 min-h-[32px] w-full rounded-lg border border-[var(--mist-400)] px-2 text-xs text-[var(--ink-900)]"
+                    />
+                  </label>
+                  <label className="mt-2 block text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">
+                    Audio pack
+                    <input
+                      value={node.audioPackId}
+                      onChange={(event) => updateNode(node.id, { audioPackId: event.target.value })}
+                      onClick={(event) => event.stopPropagation()}
+                      placeholder="PACK_BOOT_RADIO"
+                      className="focus-ring mt-1 min-h-[32px] w-full rounded-lg border border-[var(--mist-400)] px-2 text-xs text-[var(--ink-900)]"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      setInitialNode(node.id)
+                    }}
+                    className={`mt-2 min-h-[30px] w-full rounded-lg border px-2 text-[10px] uppercase tracking-[0.15em] ${
+                      node.isInitial
+                        ? 'border-[var(--teal-500)] bg-[var(--teal-500)] text-white'
+                        : 'border-[var(--ink-500)] text-[var(--ink-700)]'
+                    }`}
+                  >
+                    {node.isInitial ? 'Initial node' : 'Set initial'}
+                  </button>
+
+                  {outgoing.length > 0 && (
+                    <div className="mt-2 space-y-1 rounded-lg border border-[var(--mist-400)] p-2">
+                      <p className="text-[10px] uppercase tracking-[0.15em] text-[var(--ink-500)]">Transitions</p>
+                      {outgoing.map((edge) => (
+                        <div key={edge.id} className="space-y-1">
+                          <div className="text-[10px] text-[var(--ink-500)]">
+                            to {nodeMap.get(edge.toNodeId)?.stepId ?? 'Unknown'}
+                          </div>
+                          <div className="flex gap-1">
+                            <input
+                              value={edge.eventName}
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={(event) =>
+                                setEdges((previous) =>
+                                  previous.map((candidate) =>
+                                    candidate.id === edge.id
+                                      ? {
+                                          ...candidate,
+                                          eventName: event.target.value,
+                                        }
+                                      : candidate,
+                                  ),
+                                )
+                              }
+                              className="focus-ring min-h-[28px] flex-1 rounded-md border border-[var(--mist-400)] px-2 text-[10px] text-[var(--ink-900)]"
+                            />
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                handleRemoveEdge(edge.id)
+                              }}
+                              className="rounded-md border border-[var(--accent-700)] px-2 text-[10px] text-[var(--accent-700)]"
+                            >
+                              x
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </div>
       </div>
 
@@ -821,4 +1015,3 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
 }
 
 export default StoryDesigner
-

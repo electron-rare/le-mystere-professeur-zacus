@@ -7,6 +7,7 @@ Mission Control frontend for Zacus devices.
 - `Scenario Selector`: browse and open scenarios.
 - `Live Orchestrator`: live stream, controls, and event log.
 - `Story Designer`: YAML editing, validate, deploy, and test-run.
+- `Nodal Story Generator`: generate node/transition YAML drafts (linear, fork/merge, hub).
 
 ## API Modes
 

@@ -21,6 +21,20 @@ type StoryDesignerProps = {
   capabilities: DeviceCapabilities
 }
 
+type NodalStyle = 'linear' | 'fork_merge' | 'hub'
+
+type NodalTransition = {
+  event: string
+  target: string
+}
+
+type NodalStep = {
+  id: string
+  screen: string
+  audio?: string
+  transitions: NodalTransition[]
+}
+
 const TEMPLATE_LIBRARY: Record<string, string> = {
   DEFAULT: `id: DEFAULT
 version: 2
@@ -75,12 +89,166 @@ steps:
 `,
 }
 
+const NODAL_STYLE_LABELS: Record<NodalStyle, string> = {
+  linear: 'Linear chain',
+  fork_merge: 'Fork and merge',
+  hub: 'Hub and spokes',
+}
+
+const SCENE_ROTATION = ['SCENE_LOCKED', 'SCENE_SEARCH', 'SCENE_BROKEN', 'SCENE_REWARD', 'SCENE_READY']
+const AUDIO_ROTATION = ['PACK_BOOT_RADIO', 'PACK_WIN']
+
+const clampNodeCount = (value: number) => Math.min(10, Math.max(3, Number.isFinite(value) ? value : 5))
+
+const sanitizeScenarioId = (value: string) => {
+  const normalized = value.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_')
+  return normalized.length > 0 ? normalized : 'NODAL_STORY'
+}
+
+const renderNodalYaml = (scenarioId: string, initialStepId: string, steps: NodalStep[]) => {
+  const lines: string[] = [`id: ${scenarioId}`, 'version: 2', `initial_step_id: ${initialStepId}`, 'steps:']
+
+  for (const step of steps) {
+    lines.push(`  - id: ${step.id}`)
+    lines.push(`    screen_scene_id: ${step.screen}`)
+    if (step.audio) {
+      lines.push(`    audio_pack_id: ${step.audio}`)
+    }
+    if (step.transitions.length > 0) {
+      lines.push('    transitions:')
+      for (const transition of step.transitions) {
+        lines.push(`      - event: ${transition.event}`)
+        lines.push(`        target: ${transition.target}`)
+      }
+    }
+  }
+
+  return `${lines.join('\n')}\n`
+}
+
+const makeLinearGraph = (nodeCount: number) => {
+  const steps: NodalStep[] = []
+  for (let index = 0; index < nodeCount; index += 1) {
+    const nodeId = index === 0 ? 'STEP_START' : `STEP_NODE_${index + 1}`
+    const nextNode = index === nodeCount - 1 ? 'STEP_DONE' : `STEP_NODE_${index + 2}`
+    const transitions: NodalTransition[] = []
+    if (index === 0) {
+      transitions.push({ event: 'UNLOCK', target: nextNode })
+    }
+    transitions.push({ event: 'BTN_NEXT', target: nextNode })
+    transitions.push({ event: 'FORCE_DONE', target: 'STEP_DONE' })
+    const audio = index % 2 === 1 ? AUDIO_ROTATION[index % AUDIO_ROTATION.length] : undefined
+
+    steps.push({
+      id: nodeId,
+      screen: SCENE_ROTATION[index % SCENE_ROTATION.length],
+      audio,
+      transitions,
+    })
+  }
+
+  steps.push({ id: 'STEP_DONE', screen: 'SCENE_READY', transitions: [] })
+  return { initialStepId: 'STEP_START', steps }
+}
+
+const makeForkMergeGraph = (nodeCount: number) => {
+  const branchDepth = Math.max(1, Math.min(3, Math.floor((nodeCount - 2) / 2)))
+  const steps: NodalStep[] = [
+    {
+      id: 'STEP_START',
+      screen: 'SCENE_LOCKED',
+      transitions: [
+        { event: 'UNLOCK', target: 'STEP_A_1' },
+        { event: 'BTN_NEXT', target: 'STEP_B_1' },
+      ],
+    },
+  ]
+
+  for (let depth = 1; depth <= branchDepth; depth += 1) {
+    const nextA = depth === branchDepth ? 'STEP_MERGE' : `STEP_A_${depth + 1}`
+    const nextB = depth === branchDepth ? 'STEP_MERGE' : `STEP_B_${depth + 1}`
+    steps.push({
+      id: `STEP_A_${depth}`,
+      screen: SCENE_ROTATION[(depth + 1) % SCENE_ROTATION.length],
+      audio: depth === branchDepth ? AUDIO_ROTATION[0] : undefined,
+      transitions: [{ event: 'BTN_NEXT', target: nextA }],
+    })
+    steps.push({
+      id: `STEP_B_${depth}`,
+      screen: SCENE_ROTATION[(depth + 2) % SCENE_ROTATION.length],
+      audio: depth === branchDepth ? AUDIO_ROTATION[1] : undefined,
+      transitions: [{ event: 'BTN_NEXT', target: nextB }],
+    })
+  }
+
+  steps.push({
+    id: 'STEP_MERGE',
+    screen: 'SCENE_REWARD',
+    transitions: [
+      { event: 'AUDIO_DONE', target: 'STEP_DONE' },
+      { event: 'BTN_NEXT', target: 'STEP_DONE' },
+    ],
+  })
+  steps.push({ id: 'STEP_DONE', screen: 'SCENE_READY', transitions: [] })
+
+  return { initialStepId: 'STEP_START', steps }
+}
+
+const makeHubGraph = (nodeCount: number) => {
+  const branchCount = Math.max(3, Math.min(5, nodeCount - 1))
+  const eventNames = ['UNLOCK', 'BTN_NEXT', 'FORCE_ETAPE2', 'PATH_4', 'PATH_5']
+  const steps: NodalStep[] = []
+  const startTransitions: NodalTransition[] = []
+
+  for (let index = 0; index < branchCount; index += 1) {
+    const branchId = `STEP_PATH_${index + 1}`
+    startTransitions.push({
+      event: eventNames[index] ?? `PATH_${index + 1}`,
+      target: branchId,
+    })
+    steps.push({
+      id: branchId,
+      screen: SCENE_ROTATION[(index + 1) % SCENE_ROTATION.length],
+      audio: index % 2 === 0 ? AUDIO_ROTATION[index % AUDIO_ROTATION.length] : undefined,
+      transitions: [{ event: 'BTN_NEXT', target: 'STEP_HUB_MERGE' }],
+    })
+  }
+
+  steps.unshift({ id: 'STEP_START', screen: 'SCENE_LOCKED', transitions: startTransitions })
+  steps.push({
+    id: 'STEP_HUB_MERGE',
+    screen: 'SCENE_REWARD',
+    transitions: [
+      { event: 'AUDIO_DONE', target: 'STEP_DONE' },
+      { event: 'BTN_NEXT', target: 'STEP_DONE' },
+    ],
+  })
+  steps.push({ id: 'STEP_DONE', screen: 'SCENE_READY', transitions: [] })
+
+  return { initialStepId: 'STEP_START', steps }
+}
+
+const buildNodalDraft = (scenarioId: string, style: NodalStyle, nodeCount: number) => {
+  const safeId = sanitizeScenarioId(scenarioId)
+  const safeNodeCount = clampNodeCount(nodeCount)
+  const graph =
+    style === 'linear'
+      ? makeLinearGraph(safeNodeCount)
+      : style === 'fork_merge'
+        ? makeForkMergeGraph(safeNodeCount)
+        : makeHubGraph(safeNodeCount)
+  return renderNodalYaml(safeId, graph.initialStepId, graph.steps)
+}
+
 const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryDesignerProps) => {
   const [draft, setDraft] = useState<string>(() => localStorage.getItem('story-draft') ?? TEMPLATE_LIBRARY.DEFAULT)
   const [status, setStatus] = useState('')
   const [errors, setErrors] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [selectedTemplate, setSelectedTemplate] = useState('')
+  const [nodalScenarioId, setNodalScenarioId] = useState('NODAL_STORY')
+  const [nodalStyle, setNodalStyle] = useState<NodalStyle>('fork_merge')
+  const [nodalNodeCount, setNodalNodeCount] = useState(5)
 
   const validateEnabled = capabilities.canValidate
   const deployEnabled = capabilities.canDeploy
@@ -114,6 +282,13 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
       setStatus('Template loaded. Review and adjust resources before deploy.')
       setErrors([])
     }
+  }
+
+  const handleGenerateNodalDraft = () => {
+    const generated = buildNodalDraft(nodalScenarioId, nodalStyle, nodalNodeCount)
+    setDraft(generated)
+    setStatus(`Nodal draft generated (${NODAL_STYLE_LABELS[nodalStyle]}, ${clampNodeCount(nodalNodeCount)} nodes).`)
+    setErrors([])
   }
 
   const handleValidate = async () => {
@@ -230,6 +405,57 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
             </p>
           </div>
 
+          <div className="space-y-3 border-t border-white/60 pt-4">
+            <p className="text-xs uppercase tracking-[0.2em] text-[var(--ink-500)]">Nodal generator</p>
+            <label className="block text-xs text-[var(--ink-500)]" htmlFor="nodal-scenario-id">
+              Scenario ID
+            </label>
+            <input
+              id="nodal-scenario-id"
+              value={nodalScenarioId}
+              onChange={(event) => setNodalScenarioId(event.target.value)}
+              className="focus-ring min-h-[44px] w-full rounded-xl border border-[var(--ink-500)] bg-white/70 px-3 text-sm"
+            />
+            <label className="block text-xs text-[var(--ink-500)]" htmlFor="nodal-style">
+              Graph style
+            </label>
+            <select
+              id="nodal-style"
+              value={nodalStyle}
+              onChange={(event) => setNodalStyle(event.target.value as NodalStyle)}
+              className="focus-ring min-h-[44px] w-full rounded-xl border border-[var(--ink-500)] bg-white/70 px-3 text-sm"
+            >
+              {(Object.keys(NODAL_STYLE_LABELS) as NodalStyle[]).map((style) => (
+                <option key={style} value={style}>
+                  {NODAL_STYLE_LABELS[style]}
+                </option>
+              ))}
+            </select>
+            <label className="block text-xs text-[var(--ink-500)]" htmlFor="nodal-node-count">
+              Approx node count
+            </label>
+            <input
+              id="nodal-node-count"
+              type="number"
+              min={3}
+              max={10}
+              value={nodalNodeCount}
+              onChange={(event) => setNodalNodeCount(clampNodeCount(Number.parseInt(event.target.value, 10)))}
+              className="focus-ring min-h-[44px] w-full rounded-xl border border-[var(--ink-500)] bg-white/70 px-3 text-sm"
+            />
+            <button
+              type="button"
+              onClick={handleGenerateNodalDraft}
+              disabled={busy}
+              className="focus-ring min-h-[44px] w-full rounded-full border border-[var(--ink-700)] px-4 text-sm font-semibold text-[var(--ink-700)] disabled:opacity-70"
+            >
+              Generate nodal draft
+            </button>
+            <p className="text-xs text-[var(--ink-500)]">
+              Creates a node-and-transition skeleton directly in YAML so you can iterate visually by flow.
+            </p>
+          </div>
+
           <div className="grid gap-3 sm:grid-cols-2">
             <button
               type="button"
@@ -277,4 +503,3 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
 }
 
 export default StoryDesigner
-

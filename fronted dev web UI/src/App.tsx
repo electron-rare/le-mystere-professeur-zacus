@@ -1,11 +1,12 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import LiveOrchestrator from './components/LiveOrchestrator'
 import ScenarioSelector from './components/ScenarioSelector'
-import { Badge, Button, Panel } from './components/ui'
+import { Badge, Button, InlineNotice, Panel } from './components/ui'
 import {
   API_BASE,
   type ApiFlavor,
   type DeviceCapabilities,
+  type FirmwareInfo,
   deployStory,
   getCapabilities,
   getRuntimeInfo,
@@ -65,6 +66,7 @@ const App = () => {
   const [apiFlavor, setApiFlavor] = useState<ApiFlavor>('unknown')
   const [capabilities, setCapabilities] = useState<DeviceCapabilities>(() => getCapabilities('unknown'))
   const [resolvedBase, setResolvedBase] = useState(API_BASE)
+  const [firmwareInfo, setFirmwareInfo] = useState<FirmwareInfo | null>(null)
   const testRunTimerRef = useRef<number | null>(null)
 
   const capabilityBadges = useMemo(
@@ -95,6 +97,7 @@ const App = () => {
       const runtime = await getRuntimeInfo()
       setApiFlavor(runtime.flavor)
       setCapabilities(runtime.capabilities)
+      setFirmwareInfo(runtime.firmwareInfo)
       setResolvedBase(runtime.base)
 
       const result = await listScenarios()
@@ -267,57 +270,81 @@ const App = () => {
 
   return (
     <div className="min-h-screen px-4 py-6 md:px-8 md:py-8">
-      <Panel as="header" className="sticky top-3 z-20 mx-auto max-w-6xl px-5 py-4 md:px-6">
-        <div className="flex flex-wrap items-start justify-between gap-5">
-          <div className="space-y-2">
-            <p className="text-[11px] uppercase tracking-[0.24em] text-[var(--ink-500)]">{FLAVOR_LABELS[apiFlavor]}</p>
-            <h1 className="text-2xl font-semibold sm:text-3xl">Mission Control Zacus</h1>
-            <p className="text-xs text-[var(--ink-500)]">Cible active: {resolvedBase}</p>
-          </div>
-          <nav
-            className="flex flex-wrap items-center gap-1.5 rounded-full border border-white/70 bg-white/55 p-1"
-            aria-label="Navigation principale"
-          >
-            {(Object.keys(VIEW_LABELS) as ViewKey[]).map((key) => (
-              <Button
-                key={key}
-                type="button"
-                onClick={() => setView(key)}
-                variant={view === key ? 'primary' : 'ghost'}
-                size="sm"
-                aria-current={view === key ? 'page' : undefined}
-              >
-                {VIEW_LABELS[key]}
-              </Button>
-            ))}
-          </nav>
-        </div>
-
-        <div className="mt-4 grid gap-3 lg:grid-cols-[auto_auto_1fr]">
-          <div className="flex flex-wrap gap-2">
-            <Badge tone={error ? 'error' : loading ? 'warning' : 'success'}>
-              {error ? 'Hors ligne' : loading ? 'Connexion...' : 'Connecte'}
-            </Badge>
-            <Badge tone="info">{FLAVOR_LABELS[apiFlavor]}</Badge>
-            <Badge tone="neutral">Stream: {capabilities.streamKind.toUpperCase()}</Badge>
+      <div className="mx-auto flex max-w-7xl flex-col gap-4">
+        <Panel as="header" className="sticky top-3 z-20 border-white/80 p-4 md:p-5">
+          <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
+            <div className="space-y-1.5">
+              <p className="text-[11px] uppercase tracking-[0.22em] text-[var(--ink-500)]">
+                {FLAVOR_LABELS[apiFlavor]}
+              </p>
+              <h1 className="text-2xl font-semibold sm:text-3xl">Mission Control Zacus</h1>
+              <p className="text-sm text-[var(--ink-500)]">Cible active : {resolvedBase}</p>
+            </div>
+            <nav
+              className="panel-stack flex flex-wrap items-center gap-2 rounded-full px-2 py-2"
+              aria-label="Navigation principale"
+            >
+              {(Object.keys(VIEW_LABELS) as ViewKey[]).map((key) => (
+                <Button
+                  key={key}
+                  type="button"
+                  onClick={() => setView(key)}
+                  variant={view === key ? 'primary' : 'ghost'}
+                  size="sm"
+                  aria-current={view === key ? 'page' : undefined}
+                  className="min-h-[34px] px-4"
+                >
+                  {VIEW_LABELS[key]}
+                </Button>
+              ))}
+            </nav>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            {capabilities.canNetworkControl ? <Badge tone="warning">Réseau control</Badge> : null}
-            {!capabilities.canDeploy ? <Badge tone="neutral">Mode édition local</Badge> : null}
-          </div>
-
-          <div className="flex flex-wrap justify-start gap-1.5 lg:justify-end">
-            {capabilityBadges.map((capability) => (
-              <Badge key={capability.key} tone={capability.enabled ? 'success' : 'neutral'}>
-                {capability.label}
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-[1.2fr_auto]">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              <Badge tone={error ? 'error' : loading ? 'warning' : 'success'}>
+                {error ? 'Hors ligne' : loading ? 'Connexion...' : 'Connecté'}
               </Badge>
-            ))}
+              <Badge tone={capabilities.streamKind === 'none' ? 'warning' : 'info'}>Flux : {capabilities.streamKind.toUpperCase()}</Badge>
+              <Badge tone={capabilities.canNetworkControl ? 'warning' : 'neutral'}>
+                {capabilities.canNetworkControl ? 'Mode réseau' : 'Mode classique'}
+              </Badge>
+              <Badge tone={capabilities.canDeploy ? 'success' : 'neutral'}>
+                {capabilities.canDeploy ? 'Déploiement' : 'Pas de déploiement'}
+              </Badge>
+            </div>
+            <div className="flex flex-wrap justify-start gap-1.5 lg:justify-end">
+              {capabilityBadges.map((capability) => (
+                <Badge key={capability.key} tone={capability.enabled ? 'success' : 'neutral'}>
+                  {capability.label}
+                </Badge>
+              ))}
+            </div>
           </div>
-        </div>
-      </Panel>
+        </Panel>
 
-      <main className="mx-auto mt-6 max-w-6xl">
+        {firmwareInfo ? (
+          <InlineNotice
+            tone={firmwareInfo.warnings.length ? 'warning' : 'success'}
+            className="border border-white/70"
+          >
+            <p className="font-semibold">
+              Firmware{firmwareInfo.version ? ` ${firmwareInfo.version}` : ' non versionné'} · OTA:{' '}
+              <strong>{firmwareInfo.canFirmwareUpdate ? 'actif' : 'non dispo'}</strong>, reboot:{' '}
+              <strong>{firmwareInfo.canFirmwareReboot ? 'actif' : 'non dispo'}</strong>
+            </p>
+            {firmwareInfo.warnings.length ? (
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                {firmwareInfo.warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            ) : null}
+          </InlineNotice>
+        ) : null}
+
+        <main>
+
         <Suspense
           fallback={
             <Panel className="p-6">
@@ -327,7 +354,8 @@ const App = () => {
         >
           {pageContent}
         </Suspense>
-      </main>
+        </main>
+      </div>
     </div>
   )
 }

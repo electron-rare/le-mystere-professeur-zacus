@@ -3,6 +3,17 @@ import type { ScenarioMeta, StreamMessage } from '../types/story'
 export type ApiFlavor = 'story_v2' | 'freenove_legacy' | 'unknown'
 export type StreamKind = 'ws' | 'sse' | 'none'
 
+type ProbeMethod = 'GET' | 'OPTIONS'
+
+type EndpointProbe = {
+  path: string
+  method: ProbeMethod
+  status: number
+  routeExists: boolean
+  allowedMethods: string[]
+  note: string
+}
+
 export type DeviceCapabilities = {
   canSelectScenario: boolean
   canStart: boolean
@@ -12,7 +23,25 @@ export type DeviceCapabilities = {
   canValidate: boolean
   canDeploy: boolean
   canNetworkControl: boolean
+  canFirmwareInfo: boolean
+  canFirmwareUpdate: boolean
+  canFirmwareReboot: boolean
   streamKind: StreamKind
+}
+
+export type FirmwareInfo = {
+  flavor: ApiFlavor
+  version?: string
+  versionPath?: string
+  canFirmwareInfo: boolean
+  canFirmwareUpdate: boolean
+  canFirmwareReboot: boolean
+  updateEndpoints: string[]
+  rebootEndpoints: string[]
+  versionChecks: EndpointProbe[]
+  updateChecks: EndpointProbe[]
+  rebootChecks: EndpointProbe[]
+  warnings: string[]
 }
 
 export type ApiError = Error & {
@@ -27,6 +56,27 @@ export type RuntimeInfo = {
   base: string
   flavor: ApiFlavor
   capabilities: DeviceCapabilities
+  firmwareInfo: FirmwareInfo
+  legacyControlSupport?: LegacyControlSupport
+}
+
+type LegacyControlSupport = {
+  scenarioNext: boolean
+  scenarioUnlock: boolean
+  control: boolean
+  wifiReconnect: boolean
+  espNowOn: boolean
+  espNowOff: boolean
+}
+
+export type StoryRuntimeState = 'running' | 'paused' | 'done' | 'idle' | 'stopped' | 'unknown'
+
+export type StoryRuntimeStatus = {
+  scenarioId?: string
+  currentStep?: string
+  status: StoryRuntimeState
+  progressPct: number
+  source: ApiFlavor
 }
 
 export type StreamStatus = 'connecting' | 'open' | 'closed' | 'error'
@@ -45,6 +95,38 @@ const DEFAULT_TIMEOUT_MS = 6000
 const FLAVOR_OVERRIDE = (import.meta.env.VITE_API_FLAVOR ?? 'auto').toLowerCase()
 const PROBE_PORTS_RAW = import.meta.env.VITE_API_PROBE_PORTS ?? '80,8080'
 const EXPLICIT_BASE = import.meta.env.VITE_API_BASE ?? ''
+const FIRMWARE_PROBE_TIMEOUT_MS = 2200
+const FIRMWARE_VERSION_PATHS = [
+  '/api/version',
+  '/api/firmware',
+  '/api/system/version',
+  '/api/system/info',
+  '/api/info',
+  '/api/status',
+] as const
+const FIRMWARE_UPDATE_PATHS = [
+  '/api/update',
+  '/api/ota',
+  '/api/ota/update',
+  '/api/system/update',
+  '/api/upgrade',
+  '/api/upgrade/firmware',
+] as const
+const FIRMWARE_REBOOT_PATHS = [
+  '/api/reboot',
+  '/api/system/reboot',
+  '/api/reset',
+  '/api/restart',
+] as const
+const LEGACY_CONTROL_PATHS = [
+  '/api/scenario/next',
+  '/api/scenario/unlock',
+  '/api/control',
+  '/api/network/wifi/reconnect',
+  '/api/network/espnow/on',
+  '/api/network/espnow/off',
+] as const
+const LEGACY_NETWORK_STATUS_PATHS = ['/api/network/wifi', '/api/network/espnow'] as const
 
 export const API_BASE =
   EXPLICIT_BASE ||
@@ -62,6 +144,9 @@ const CAPABILITIES: Record<ApiFlavor, DeviceCapabilities> = {
     canValidate: true,
     canDeploy: true,
     canNetworkControl: false,
+    canFirmwareInfo: true,
+    canFirmwareUpdate: false,
+    canFirmwareReboot: false,
     streamKind: 'ws',
   },
   freenove_legacy: {
@@ -73,6 +158,9 @@ const CAPABILITIES: Record<ApiFlavor, DeviceCapabilities> = {
     canValidate: false,
     canDeploy: false,
     canNetworkControl: true,
+    canFirmwareInfo: true,
+    canFirmwareUpdate: false,
+    canFirmwareReboot: false,
     streamKind: 'sse',
   },
   unknown: {
@@ -84,6 +172,9 @@ const CAPABILITIES: Record<ApiFlavor, DeviceCapabilities> = {
     canValidate: false,
     canDeploy: false,
     canNetworkControl: false,
+    canFirmwareInfo: false,
+    canFirmwareUpdate: false,
+    canFirmwareReboot: false,
     streamKind: 'none',
   },
 }
@@ -92,6 +183,269 @@ let runtimeCache: RuntimeInfo | null = null
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
+
+const stripVersion = (value: unknown) => {
+  if (typeof value !== 'string') {
+    return ''
+  }
+  const normalized = value.trim()
+  if (!normalized) {
+    return ''
+  }
+  const match = normalized.match(/\b\d+\.\d+(?:\.\d+)?(?:[-._][A-Za-z0-9._-]+)?\b/)
+  return match ? match[0] : normalized
+}
+
+const parseFirmwareVersionFromRecord = (value: Record<string, unknown>): string => {
+  const directFields = [
+    'version',
+    'version_name',
+    'firmware',
+    'firmware_version',
+    'fw_version',
+    'build_version',
+  ] as const
+
+  for (const field of directFields) {
+    const parsed = stripVersion(value[field])
+    if (parsed) {
+      return parsed
+    }
+  }
+
+  const nestedFields = ['system', 'meta', 'info', 'build', 'hardware'] as const
+  for (const field of nestedFields) {
+    const nested = value[field]
+    if (isRecord(nested)) {
+      const parsed: string = parseFirmwareVersionFromRecord(nested)
+      if (parsed) {
+        return parsed
+      }
+    }
+  }
+
+  return ''
+}
+
+const asString = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
+
+const parseStoryState = (value: unknown): StoryRuntimeState => {
+  const normalized = asString(value).toLowerCase()
+  if (normalized === 'running' || normalized === 'paused' || normalized === 'done' || normalized === 'idle' || normalized === 'stopped') {
+    return normalized
+  }
+  return 'unknown'
+}
+
+const firstKnownStatus = (states: Array<unknown>) => {
+  for (const entry of states) {
+    const parsed = parseStoryState(entry)
+    if (parsed !== 'unknown') {
+      return parsed
+    }
+  }
+  return 'unknown'
+}
+
+const normalizeProgress = (value: unknown) => {
+  const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN
+  if (Number.isFinite(parsed)) {
+    return Math.max(0, Math.min(100, Math.round(parsed)))
+  }
+  return 0
+}
+
+const pickFirstString = (value: Record<string, unknown>, keys: string[]) => {
+  for (const key of keys) {
+    const next = asString(value[key])
+    if (next) {
+      return next
+    }
+  }
+  return ''
+}
+
+const normalizeAllowedMethods = (value: string | null) => {
+  if (!value) {
+    return [] as string[]
+  }
+  return value
+    .split(',')
+    .map((entry) => entry.trim().toUpperCase())
+    .filter(Boolean)
+}
+
+const isEndpointReachable = (probe: EndpointProbe) => probe.status !== 0 && probe.status !== 404
+
+const probeSupportsPost = (probe: EndpointProbe) => {
+  if (!isEndpointReachable(probe)) {
+    return false
+  }
+  if (probe.method === 'OPTIONS' && probe.allowedMethods.length > 0) {
+    return probe.allowedMethods.includes('POST')
+  }
+  return isEndpointReachable(probe)
+}
+
+const probeCandidate = async (base: string, path: string, method: ProbeMethod): Promise<EndpointProbe> => {
+  try {
+    const response = await fetchWithTimeout(`${base}${path}`, { method }, FIRMWARE_PROBE_TIMEOUT_MS)
+    const routeExists = response.status !== 404
+    const allowedMethods = method === 'OPTIONS' ? normalizeAllowedMethods(response.headers.get('Allow')) : []
+    return {
+      path,
+      method,
+      status: response.status,
+      routeExists,
+      allowedMethods,
+      note: `${response.status} ${response.statusText || ''}`.trim(),
+    }
+  } catch {
+    return {
+      path,
+      method,
+      status: 0,
+      routeExists: false,
+      allowedMethods: [],
+      note: 'unreachable',
+    }
+  }
+}
+
+const probePostSupport = async (base: string, path: string) => {
+  const optionsProbe = await probeCandidate(base, path, 'OPTIONS')
+  if (probeSupportsPost(optionsProbe)) {
+    return true
+  }
+
+  const getProbe = await probeCandidate(base, path, 'GET')
+  if (getProbe.status !== 404 && getProbe.status !== 0) {
+    return true
+  }
+
+  return false
+}
+
+const probeCandidates = async (base: string, paths: readonly string[], methods: readonly ProbeMethod[]) => {
+  const tasks: Promise<EndpointProbe>[] = []
+  for (const path of paths) {
+    for (const method of methods) {
+      tasks.push(probeCandidate(base, path, method))
+    }
+  }
+  return Promise.all(tasks)
+}
+
+const detectFirmwareInfo = async (base: string): Promise<FirmwareInfo> => {
+  const versionProbes = await probeCandidates(base, FIRMWARE_VERSION_PATHS, ['GET'])
+  const versionChecks: EndpointProbe[] = [...versionProbes]
+  const bodyCache = new Map<string, unknown>()
+
+  const loadBody = async (path: string) => {
+    if (bodyCache.has(path)) {
+      return bodyCache.get(path)
+    }
+    try {
+      const response = await fetchWithTimeout(`${base}${path}`, {}, FIRMWARE_PROBE_TIMEOUT_MS)
+      const body = await parseResponseBody(response)
+      bodyCache.set(path, body)
+      return body
+    } catch {
+      return null
+    }
+  }
+
+  let version = ''
+  let versionPath = ''
+  for (const probe of versionProbes) {
+    if (!probe.routeExists || version || probe.status < 200 || probe.status >= 500) {
+      continue
+    }
+    const candidate = await loadBody(probe.path)
+    if (isRecord(candidate)) {
+      const parsed = parseFirmwareVersionFromRecord(candidate)
+      if (parsed) {
+        version = parsed
+        versionPath = probe.path
+      }
+      continue
+    }
+
+    const parsed = stripVersion(candidate)
+    if (parsed) {
+      version = parsed
+      versionPath = probe.path
+    }
+  }
+
+  const updateChecks = await probeCandidates(base, FIRMWARE_UPDATE_PATHS, ['GET', 'OPTIONS'])
+  const rebootChecks = await probeCandidates(base, FIRMWARE_REBOOT_PATHS, ['GET', 'OPTIONS'])
+
+  const isPostCapable = (probe: EndpointProbe) => {
+    if (!probe.routeExists) {
+      return false
+    }
+    if (probe.method === 'OPTIONS') {
+      return probe.allowedMethods.includes('POST')
+    }
+    if (probe.status >= 400) {
+      return false
+    }
+    return true
+  }
+
+  const updateEndpoints = [...new Set(updateChecks.filter(isPostCapable).map((probe) => probe.path))]
+  const rebootEndpoints = [...new Set(rebootChecks.filter(isPostCapable).map((probe) => probe.path))]
+  const firmwareRouteFound = versionChecks.some((probe) => probe.routeExists) || updateChecks.some((probe) => probe.routeExists) || rebootChecks.some((probe) => probe.routeExists)
+
+  const warnings: string[] = []
+  if (!version) {
+    warnings.push('Version non exposée par cette API.')
+  }
+  if (updateEndpoints.length === 0) {
+    warnings.push('Aucun endpoint de mise à jour OTA détecté.')
+  }
+  if (rebootEndpoints.length === 0) {
+    warnings.push('Aucun endpoint de redémarrage détecté.')
+  }
+
+  return {
+    flavor: firmwareRouteFound ? 'freenove_legacy' : 'unknown',
+    version,
+    versionPath: versionPath || undefined,
+    canFirmwareInfo: firmwareRouteFound,
+    canFirmwareUpdate: updateEndpoints.length > 0,
+    canFirmwareReboot: rebootEndpoints.length > 0,
+    updateEndpoints,
+    rebootEndpoints,
+    versionChecks,
+    updateChecks,
+    rebootChecks,
+    warnings,
+  }
+}
+
+const detectLegacyControlSupport = async (base: string): Promise<LegacyControlSupport> => {
+  const checks = await Promise.all(LEGACY_CONTROL_PATHS.map((path) => probePostSupport(base, path)))
+  const networkChecks = await Promise.all(LEGACY_NETWORK_STATUS_PATHS.map((path) => probeCandidate(base, path, 'GET')))
+  const values = Object.fromEntries(
+    LEGACY_CONTROL_PATHS.map((path, index) => [path, checks[index] ?? false]),
+  ) as Record<(typeof LEGACY_CONTROL_PATHS)[number], boolean>
+  const networkStatusMap = Object.fromEntries(
+    LEGACY_NETWORK_STATUS_PATHS.map((path, index) => [path, networkChecks[index]?.routeExists ?? false]),
+  ) as Record<(typeof LEGACY_NETWORK_STATUS_PATHS)[number], boolean>
+  const hasNetworkStatus = networkStatusMap['/api/network/wifi']
+  const hasEspNowStatus = networkStatusMap['/api/network/espnow']
+
+  return {
+    scenarioNext: values['/api/scenario/next'],
+    scenarioUnlock: values['/api/scenario/unlock'],
+    control: values['/api/control'],
+    wifiReconnect: values['/api/network/wifi/reconnect'] || hasNetworkStatus,
+    espNowOn: values['/api/network/espnow/on'] || hasEspNowStatus,
+    espNowOff: values['/api/network/espnow/off'] || hasEspNowStatus,
+  }
+}
 
 const ensureHttp = (value: string) => (/^https?:\/\//i.test(value) ? value : `http://${value}`)
 
@@ -201,6 +555,25 @@ const parseResponseBody = async (response: Response): Promise<unknown> => {
     return JSON.parse(text) as unknown
   } catch {
     return text
+  }
+}
+
+const normalizeLegacyStatusPayload = (body: Record<string, unknown>): Omit<StoryRuntimeStatus, 'source'> => {
+  const story = isRecord(body.story) ? body.story : {}
+  return {
+    scenarioId: pickFirstString(story, ['scenario', 'id']),
+    currentStep: pickFirstString(story, ['step', 'current_step', 'current']),
+    status: firstKnownStatus([story.status, story.state, body.status, body.state]),
+    progressPct: 0,
+  }
+}
+
+const normalizeStoryV2StatusPayload = (body: Record<string, unknown>): Omit<StoryRuntimeStatus, 'source'> => {
+  return {
+    scenarioId: pickFirstString(body, ['selected', 'scenario_id', 'scenario']),
+    currentStep: pickFirstString(body, ['current_step', 'currentStep']),
+    status: firstKnownStatus([body.status, body.state]),
+    progressPct: normalizeProgress(body.progress_pct),
   }
 }
 
@@ -323,10 +696,33 @@ const getRuntime = async (): Promise<RuntimeInfo> => {
     return runtimeCache
   }
   const detected = await detectRuntime()
+  const firmwareInfo = await detectFirmwareInfo(detected.base)
+  const legacyControlSupport =
+    detected.flavor === 'freenove_legacy' ? await detectLegacyControlSupport(detected.base) : undefined
+  const baseCapabilities = CAPABILITIES[detected.flavor]
+  const capabilities: DeviceCapabilities = {
+    ...baseCapabilities,
+    canSkip:
+      detected.flavor === 'freenove_legacy'
+        ? Boolean(legacyControlSupport && (legacyControlSupport.scenarioNext || legacyControlSupport.control))
+        : baseCapabilities.canSkip,
+    canNetworkControl:
+      detected.flavor === 'freenove_legacy'
+        ? Boolean(
+            legacyControlSupport &&
+              (legacyControlSupport.wifiReconnect || legacyControlSupport.espNowOn || legacyControlSupport.espNowOff),
+          )
+        : baseCapabilities.canNetworkControl,
+    canFirmwareInfo: firmwareInfo.canFirmwareInfo,
+    canFirmwareUpdate: firmwareInfo.canFirmwareUpdate,
+    canFirmwareReboot: firmwareInfo.canFirmwareReboot,
+  }
   runtimeCache = {
     base: detected.base,
     flavor: detected.flavor,
-    capabilities: CAPABILITIES[detected.flavor],
+    capabilities,
+    firmwareInfo,
+    legacyControlSupport,
   }
   return runtimeCache
 }
@@ -339,6 +735,54 @@ export const detectFlavor = async (baseUrl?: string) => {
 export const getCapabilities = (flavor: ApiFlavor) => CAPABILITIES[flavor]
 
 export const getRuntimeInfo = async () => getRuntime()
+export const getFirmwareInfo = async () => {
+  const runtime = await getRuntime()
+  return runtime.firmwareInfo
+}
+
+export const getStoryRuntimeStatus = async (): Promise<StoryRuntimeStatus> => {
+  const runtime = await getRuntime()
+
+  if (runtime.flavor === 'story_v2') {
+    const body = await requestJsonAt(runtime.base, runtime.flavor, '/api/story/status')
+    if (isRecord(body)) {
+      const status = normalizeStoryV2StatusPayload(body)
+      return {
+        ...status,
+        source: runtime.flavor,
+      }
+    }
+    throw createApiError('Réponse inattendue de /api/story/status', {
+      status: 502,
+      flavor: runtime.flavor,
+      base: runtime.base,
+      code: 'bad_payload',
+    })
+  }
+
+  if (runtime.flavor === 'freenove_legacy') {
+    const body = await requestJsonAt(runtime.base, runtime.flavor, '/api/status')
+    if (isRecord(body)) {
+      const status = normalizeLegacyStatusPayload(body)
+      return {
+        ...status,
+        source: runtime.flavor,
+      }
+    }
+    throw createApiError('Réponse inattendue de /api/status', {
+      status: 502,
+      flavor: runtime.flavor,
+      base: runtime.base,
+      code: 'bad_payload',
+    })
+  }
+
+  throw createApiError('Le statut runtime n`est pas disponible en mode API inconnu.', {
+    code: 'unsupported_capability',
+    flavor: runtime.flavor,
+    base: runtime.base,
+  })
+}
 
 export const listScenarios = async (): Promise<ScenarioMeta[]> => {
   const runtime = await getRuntime()
@@ -414,9 +858,37 @@ export const skipStory = async () => {
     return requestJsonAt(runtime.base, runtime.flavor, '/api/story/skip', { method: 'POST' })
   }
   if (runtime.flavor === 'freenove_legacy') {
-    return requestJsonAt(runtime.base, runtime.flavor, '/api/scenario/next', { method: 'POST' })
+    if (runtime.legacyControlSupport?.scenarioNext) {
+      return requestJsonAt(runtime.base, runtime.flavor, '/api/scenario/next', { method: 'POST' })
+    }
+
+    if (runtime.legacyControlSupport?.control) {
+      return requestJsonAt(runtime.base, runtime.flavor, '/api/control', {
+        method: 'POST',
+        body: JSON.stringify({ action: 'NEXT' }),
+      })
+    }
+
+    unsupported(runtime, 'Skip indisponible: aucune route legacy valide detectee.')
   }
   unsupported(runtime, 'Skip is unavailable because API flavor is unknown.')
+}
+
+export const unlockStory = async () => {
+  const runtime = await getRuntime()
+  if (runtime.flavor !== 'freenove_legacy') {
+    unsupported(runtime, 'Unlock is unavailable outside legacy mode.')
+  }
+  if (runtime.legacyControlSupport?.scenarioUnlock) {
+    return requestJsonAt(runtime.base, runtime.flavor, '/api/scenario/unlock', { method: 'POST' })
+  }
+  if (runtime.legacyControlSupport?.control) {
+    return requestJsonAt(runtime.base, runtime.flavor, '/api/control', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'UNLOCK' }),
+    })
+  }
+  unsupported(runtime, 'Unlock is unavailable: route legacy inconnue.')
 }
 
 export const validateStory = async (yaml: string) => {
@@ -446,7 +918,16 @@ export const wifiReconnect = async () => {
   if (runtime.flavor !== 'freenove_legacy') {
     unsupported(runtime, 'WiFi reconnect control is unavailable outside legacy mode.')
   }
-  return requestJsonAt(runtime.base, runtime.flavor, '/api/network/wifi/reconnect', { method: 'POST' })
+  if (runtime.legacyControlSupport?.wifiReconnect) {
+    return requestJsonAt(runtime.base, runtime.flavor, '/api/network/wifi/reconnect', { method: 'POST' })
+  }
+  if (runtime.legacyControlSupport?.control) {
+    return requestJsonAt(runtime.base, runtime.flavor, '/api/control', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'WIFI_RECONNECT' }),
+    })
+  }
+  unsupported(runtime, 'WiFi reconnect control is unavailable in this legacy firmware.')
 }
 
 export const setEspNowEnabled = async (enabled: boolean) => {
@@ -455,7 +936,16 @@ export const setEspNowEnabled = async (enabled: boolean) => {
     unsupported(runtime, 'ESP-NOW control is unavailable outside legacy mode.')
   }
   const path = enabled ? '/api/network/espnow/on' : '/api/network/espnow/off'
-  return requestJsonAt(runtime.base, runtime.flavor, path, { method: 'POST' })
+  if (enabled ? runtime.legacyControlSupport?.espNowOn : runtime.legacyControlSupport?.espNowOff) {
+    return requestJsonAt(runtime.base, runtime.flavor, path, { method: 'POST' })
+  }
+  if (runtime.legacyControlSupport?.control) {
+    return requestJsonAt(runtime.base, runtime.flavor, '/api/control', {
+      method: 'POST',
+      body: JSON.stringify({ action: enabled ? 'ESPNOW_ON' : 'ESPNOW_OFF' }),
+    })
+  }
+  unsupported(runtime, 'ESP-NOW control is unavailable in this legacy firmware.')
 }
 
 const parseStreamMessage = (raw: unknown): StreamMessage => {

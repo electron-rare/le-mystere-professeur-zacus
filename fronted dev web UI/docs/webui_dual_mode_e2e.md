@@ -75,6 +75,22 @@ npx playwright test
 npx playwright test --grep @live
 ```
 
+## Analyse firmware (automatique)
+
+Le frontend teste des endpoints non-intrusifs pour diagnostiquer le support firmware :
+
+- version disponible,
+- endpoint de mise à jour OTA,
+- endpoint de redemarrage.
+
+Sur le firmware branché en live (`192.168.0.91`), on attend :
+
+- version non connue (aucun endpoint firmware standard),
+- `Aucun endpoint de mise à jour OTA détecté`,
+- `Aucun endpoint de redémarrage détecté`.
+
+Ces limites sont visibles dans le panneau `Firmware` de l’application (et empêchent les actions de mise à jour automatisées).
+
 ## Scenarios verifies (mock)
 
 - detection `story_v2`

@@ -32,7 +32,9 @@ const ScenarioSelector = ({ scenarios, loading, flavor, capabilities, error, onR
   const [sortKey, setSortKey] = useState<SortKey>('name')
 
   const legacyMode = flavor === 'freenove_legacy'
-  const playLabel = capabilities.canSelectScenario || capabilities.canStart ? 'Lancer' : 'Ouvrir monitor'
+  const canLaunch = capabilities.canSelectScenario && capabilities.canStart
+  const playLabel = canLaunch ? 'Lancer' : 'Surveiller'
+  const modeLabel = legacyMode ? 'Legacy' : 'Story V2'
 
   const filteredScenarios = useMemo(() => {
     const normalizedQuery = query.trim().toUpperCase()
@@ -78,10 +80,10 @@ const ScenarioSelector = ({ scenarios, loading, flavor, capabilities, error, onR
 
   return (
     <section className="space-y-6">
-      <Panel>
+      <Panel className="space-y-3">
         <SectionHeader
-          title="Selection des scenarios"
-          subtitle="Choisis un scenario puis lance-le sur la cible active."
+          title="Sélection des scénarios"
+          subtitle="Choisis un scénario et lance-le sur la cible."
           actions={
             <Button type="button" variant="outline" onClick={onRetry} size="sm">
               Rafraichir
@@ -91,13 +93,24 @@ const ScenarioSelector = ({ scenarios, loading, flavor, capabilities, error, onR
 
         <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
           <Field label="Recherche" htmlFor="scenario-search">
-            <input
-              id="scenario-search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="ID scenario ou texte"
-              className="story-input mt-2"
-            />
+            <div className="relative">
+              <input
+                id="scenario-search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="ID scénario ou description"
+                className="story-input mt-2 pr-10"
+              />
+              {query ? (
+                <button
+                  type="button"
+                  className="focus-ring absolute right-2 top-1/2 mt-1 -translate-y-1/2 rounded-full border border-white/60 bg-white/70 px-2 text-xs text-[var(--ink-600)]"
+                  onClick={() => setQuery('')}
+                >
+                  ✕
+                </button>
+              ) : null}
+            </div>
           </Field>
 
           <Field label="Tri" htmlFor="scenario-sort">
@@ -108,16 +121,36 @@ const ScenarioSelector = ({ scenarios, loading, flavor, capabilities, error, onR
               className="story-input mt-2"
             >
               <option value="name">Nom</option>
-              <option value="duration">Duree</option>
+              <option value="duration">Durée</option>
             </select>
           </Field>
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2">
-          <Badge tone="info">Flavour: {flavor}</Badge>
-          <Badge tone="neutral">Scenarios: {scenarios.length}</Badge>
-          <Badge tone="neutral">Resultats: {filteredScenarios.length}</Badge>
-          {legacyMode ? <Badge tone="warning">Mode legacy</Badge> : <Badge tone="success">Mode Story V2</Badge>}
+          <Badge tone="info">Mode: {modeLabel}</Badge>
+          <Badge tone="neutral">Scénarios: {scenarios.length}</Badge>
+          <Badge tone="neutral">Résultats: {filteredScenarios.length}</Badge>
+          <Badge tone={legacyMode ? 'warning' : 'success'}>{legacyMode ? 'Mode Legacy' : 'Mode Story V2'}</Badge>
+        </div>
+
+        {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
+
+        <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+          <InlineNotice tone={canLaunch ? 'success' : 'warning'} className="md:col-span-2">
+            <p>
+              {canLaunch
+                ? 'Contrôles complets disponibles: sélection, lancement et actions de run.'
+                : 'Lancement direct indisponible: mode en lecture seule ou contrôles limités.'}
+            </p>
+          </InlineNotice>
+
+          <InlineNotice tone="info">
+            <p>Sortie: clic sur une carte pour lancer, ou sur "surveiller" pour ouvrir le monitor.</p>
+          </InlineNotice>
+
+          <InlineNotice tone="info">
+            <p>Scénarios disponibles: {scenarios.length}</p>
+          </InlineNotice>
         </div>
       </Panel>
 
@@ -128,8 +161,6 @@ const ScenarioSelector = ({ scenarios, loading, flavor, capabilities, error, onR
           ))}
         </div>
       ) : null}
-
-      {error ? <InlineNotice tone="error">{error}</InlineNotice> : null}
 
       {actionError ? <InlineNotice tone="error">{actionError}</InlineNotice> : null}
 
@@ -156,33 +187,52 @@ const ScenarioSelector = ({ scenarios, loading, flavor, capabilities, error, onR
             <Panel
               key={scenario.id}
               as="article"
-              className="group flex h-full flex-col justify-between gap-4 border border-white/70 p-5 transition duration-200 hover:-translate-y-0.5"
+              className="group panel-stack flex h-full flex-col justify-between gap-3 border border-white/70 p-5 transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_20px_45px_rgba(15,23,42,0.1)]"
             >
               <div className="space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-lg font-semibold text-[var(--ink-900)]">{scenario.id}</h3>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="space-y-1">
+                    <h3 className="text-lg font-semibold text-[var(--ink-900)]">{scenario.id}</h3>
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--ink-500)]">
+                      identifiant
+                    </p>
+                  </div>
                   {scenario.is_current ? <Badge tone="success">Courant</Badge> : <Badge tone="neutral">Disponible</Badge>}
                 </div>
                 <p className="text-xs uppercase tracking-[0.18em] text-[var(--ink-500)]">{formatDuration(scenario)}</p>
-                <p className="text-sm leading-relaxed text-[var(--ink-700)]">
+                <p className="line-clamp-3 text-sm leading-relaxed text-[var(--ink-700)]">
                   {scenario.description ?? 'Aucune description fournie.'}
                 </p>
                 {scenario.current_step ? (
-                  <p className="text-xs uppercase tracking-[0.16em] text-[var(--ink-500)]">Etape {scenario.current_step}</p>
+                  <p className="text-xs uppercase tracking-[0.16em] text-[var(--ink-500)]">
+                    Étape courante: {scenario.current_step}
+                  </p>
                 ) : null}
               </div>
 
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => {
-                  void handlePlay(scenario.id)
-                }}
-                disabled={activeId === scenario.id}
-                fullWidth
-              >
-                {activeId === scenario.id ? 'Ouverture...' : playLabel}
-              </Button>
+              <div className="grid gap-2 pt-1">
+                <div className="flex items-center gap-2 text-xs text-[var(--ink-500)]">
+                  <span>{scenario.is_current ? 'Actif' : 'Prêt'}</span>
+                  <span>•</span>
+                  <span>{formatDuration(scenario)}</span>
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    void handlePlay(scenario.id)
+                  }}
+                  disabled={activeId === scenario.id || !canLaunch && !legacyMode}
+                  fullWidth
+                >
+                  {activeId === scenario.id ? 'Connexion...' : playLabel}
+                </Button>
+                {scenario.is_current ? (
+                  <p className="text-xs text-[var(--ink-500)]">
+                    Scénario courant : <strong>{scenario.id}</strong>
+                  </p>
+                ) : null}
+              </div>
             </Panel>
           ))}
         </div>

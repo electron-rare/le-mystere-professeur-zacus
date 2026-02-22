@@ -67,6 +67,10 @@ type FlowNodeData = {
   screenSceneId: string
   audioPackId: string
   isInitial: boolean
+  appsCount: number
+  actionsCount: number
+  pendingLinkTarget: boolean
+  pendingLinkCandidate: boolean
 }
 
 type StoryCanvasNode = FlowNode<FlowNodeData, 'storyNode'>
@@ -124,18 +128,6 @@ const SIMPLE_BINDING_FIELDS: Partial<Record<AppBinding['app'], BindingField[]>> 
 }
 
 const normalizeTokenInput = (value: string) => value.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_')
-
-const parseCsvTokens = (value: string) =>
-  Array.from(
-    new Set(
-      value
-        .split(',')
-        .map((token) => normalizeTokenInput(token))
-        .filter((token) => token.length > 0),
-    ),
-  )
-
-const toCsv = (values: string[]) => values.join(', ')
 
 const stripLaDetectorConfig = (config?: AppBinding['config']) => {
   if (!config) {
@@ -290,20 +282,31 @@ const clampContextPosition = (x: number, y: number) => {
 }
 
 const nodeCardClass =
-  'rounded-2xl border bg-white/95 px-3 py-2 shadow-[0_8px_24px_rgba(15,23,42,0.14)] backdrop-blur-sm min-w-[220px]'
+  'rounded-2xl border bg-white/95 px-3 py-2 shadow-[0_8px_24px_rgba(15,23,42,0.14)] backdrop-blur-sm min-w-[230px] transition-all duration-200'
 
 const StoryFlowNode = ({ data, selected }: NodeProps<StoryCanvasNode>) => (
-  <div className={`${nodeCardClass} ${selected ? 'border-[var(--accent-700)]' : 'border-[var(--mist-400)]'}`}>
+  <div
+    className={`${nodeCardClass} ${
+      selected ? 'border-[var(--accent-700)]' : 'border-[var(--mist-400)]'
+    } ${data.pendingLinkCandidate ? 'ring-1 ring-[var(--mist-500)] ring-offset-1' : ''} ${
+      data.pendingLinkTarget ? 'ring-2 ring-[var(--accent-500)] ring-offset-2 ring-offset-white/50' : ''
+    }`}
+  >
     <Handle type="target" id="in" position={Position.Left} />
     <Handle type="source" id="out" position={Position.Right} />
     <div className="flex items-center justify-between gap-2">
       <p className="text-xs font-semibold text-[var(--ink-900)]">{data.stepId}</p>
       {data.isInitial ? <Badge tone="success">Initial</Badge> : null}
     </div>
-    <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[var(--ink-500)]">{data.screenSceneId}</p>
-    <p className="mt-1 text-[11px] text-[var(--ink-500)]">
-      {data.audioPackId ? `Audio: ${data.audioPackId}` : 'Audio: aucun'}
+    {data.pendingLinkTarget ? (
+      <p className="mt-1 text-[10px] font-semibold text-[var(--accent-800)]">Mode liaison activé - clic droit pour valider</p>
+    ) : null}
+    <p className="mt-1 text-[11px] uppercase tracking-[0.12em] text-[var(--ink-500)]">Scène: {data.screenSceneId}</p>
+    <p className="text-[11px] text-[var(--ink-500)]">
+      {data.audioPackId ? `Audio: ${data.audioPackId}` : 'Audio: non défini'}
     </p>
+    <p className="mt-2 text-[11px] text-[var(--ink-500)]">Apps liées: {data.appsCount}</p>
+    <p className="text-[11px] text-[var(--ink-500)]">Actions: {data.actionsCount}</p>
   </div>
 )
 
@@ -327,6 +330,8 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
   const [busyAction, setBusyAction] = useState<'validate' | 'deploy' | 'test' | null>(null)
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [pendingLinkSourceId, setPendingLinkSourceId] = useState<string | null>(null)
+  const [pendingLinkHoverNodeId, setPendingLinkHoverNodeId] = useState<string | null>(null)
+  const [actionDraft, setActionDraft] = useState('')
 
   const validateEnabled = capabilities.canValidate
   const deployEnabled = capabilities.canDeploy
@@ -419,38 +424,14 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
   }, [canRedo, historyFuture])
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'z') {
-        return
-      }
-      const target = event.target as HTMLElement | null
-      if (
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.tagName === 'SELECT' ||
-          target.isContentEditable)
-      ) {
-        return
-      }
-      event.preventDefault()
-      if (event.shiftKey) {
-        handleRedo()
-      } else {
-        handleUndo()
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [handleRedo, handleUndo])
-
-  useEffect(() => {
     if (!pendingLinkSourceId) {
+      setPendingLinkHoverNodeId(null)
       return
     }
     if (!document.nodes.some((node) => node.id === pendingLinkSourceId)) {
       setPendingLinkSourceId(null)
     }
+    setPendingLinkHoverNodeId(null)
   }, [document.nodes, pendingLinkSourceId])
 
   useEffect(() => {
@@ -470,6 +451,15 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
 
   const graphValidation = useMemo(() => validateStoryGraph(document), [document])
 
+  const duplicateBindingIds = useMemo(() => {
+    const countById = new Map<string, number>()
+    document.appBindings.forEach((binding) => {
+      const key = normalizeTokenInput(binding.id)
+      countById.set(key, (countById.get(key) ?? 0) + 1)
+    })
+    return new Set(Array.from(countById.entries()).filter((entry) => entry[1] > 1).map((entry) => entry[0]))
+  }, [document.appBindings])
+
   const selectedNode = useMemo(
     () => document.nodes.find((node) => node.id === selectedNodeId) ?? null,
     [document.nodes, selectedNodeId],
@@ -480,11 +470,72 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
     [document.edges, selectedEdgeId],
   )
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        if (pendingLinkSourceId) {
+          event.preventDefault()
+          setPendingLinkSourceId(null)
+          setPendingLinkHoverNodeId(null)
+          setContextMenu(null)
+          setStatus('Liaison annulée.')
+          setStatusTone('info')
+          return
+        }
+        if (contextMenu) {
+          event.preventDefault()
+          setContextMenu(null)
+          return
+        }
+      }
+
+      const target = event.target as HTMLElement | null
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return
+      }
+
+      if (event.key.toLowerCase() === 'l' && (event.ctrlKey || event.metaKey) && selectedNode) {
+        event.preventDefault()
+        setPendingLinkSourceId(selectedNode.id)
+        setStatus(`Liaison armée depuis ${selectedNode.stepId}. Clique un node cible.`)
+        setStatusTone('info')
+        return
+      }
+
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'z') {
+        return
+      }
+      event.preventDefault()
+      if (event.shiftKey) {
+        handleRedo()
+      } else {
+        handleUndo()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [contextMenu, handleRedo, handleUndo, pendingLinkSourceId, selectedNode])
+
   const nodeLookup = useMemo(() => new Map(document.nodes.map((node) => [node.id, node])), [document.nodes])
+  const bindingIdSet = useMemo(
+    () => new Set(document.appBindings.map((binding) => normalizeTokenInput(binding.id))),
+    [document.appBindings],
+  )
 
   const selectedNodeOutgoingEdges = useMemo(
     () => (selectedNode ? document.edges.filter((edge) => edge.fromNodeId === selectedNode.id) : []),
     [document.edges, selectedNode],
+  )
+
+  const selectedNodeMissingBindings = useMemo(
+    () => (selectedNode ? selectedNode.apps.filter((appId) => !bindingIdSet.has(normalizeTokenInput(appId))) : []),
+    [bindingIdSet, selectedNode],
   )
 
   const pendingLinkSource = useMemo(
@@ -503,9 +554,13 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
           screenSceneId: node.screenSceneId,
           audioPackId: node.audioPackId,
           isInitial: node.isInitial,
+          appsCount: node.apps.length,
+          actionsCount: node.actions.length,
+          pendingLinkCandidate: Boolean(pendingLinkSourceId && pendingLinkSourceId !== node.id),
+          pendingLinkTarget: pendingLinkHoverNodeId === node.id,
         },
       })),
-    [document.nodes],
+    [document.nodes, pendingLinkSourceId, pendingLinkHoverNodeId],
   )
 
   const flowEdges = useMemo<FlowEdge[]>(
@@ -515,7 +570,19 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
         source: edge.fromNodeId,
         target: edge.toNodeId,
         label: `${edge.eventType}:${edge.eventName}`,
-        markerEnd: { type: MarkerType.ArrowClosed },
+        labelStyle: {
+          fill: 'var(--ink-700)',
+          fontSize: 11,
+          fontWeight: 600,
+        },
+        style: {
+          stroke: 'var(--ink-700)',
+          strokeWidth: 2.2,
+        },
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: 'var(--ink-700)',
+        },
       })),
     [document.edges],
   )
@@ -708,6 +775,26 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
     addChildNodeFrom(selectedNode.id)
   }, [addChildNodeFrom, selectedNode])
 
+  const resetLinkMode = useCallback(() => {
+    setPendingLinkSourceId(null)
+    setPendingLinkHoverNodeId(null)
+  }, [])
+
+  const commitPendingLink = useCallback(
+    (targetId: string) => {
+      if (!pendingLinkSourceId) {
+        return false
+      }
+
+      const linked = linkNodes(pendingLinkSourceId, targetId)
+      if (linked) {
+        resetLinkMode()
+      }
+      return linked
+    },
+    [linkNodes, pendingLinkSourceId, resetLinkMode],
+  )
+
   const handleAutoLayout = useCallback(() => {
     const current = cloneDocument(documentRef.current)
     const laidOut = autoLayoutStoryGraph(current, {
@@ -723,8 +810,8 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
     applyDocumentWithHistory(fallback, 'Graphe réinitialisé.', 'warning')
     setSelectedNodeId(null)
     setSelectedEdgeId(null)
-    setPendingLinkSourceId(null)
-  }, [applyDocumentWithHistory])
+    resetLinkMode()
+  }, [applyDocumentWithHistory, resetLinkMode])
 
   const handleConnect = useCallback(
     (connection: Connection) => {
@@ -733,10 +820,10 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
       }
       const created = linkNodes(connection.source, connection.target)
       if (created) {
-        setPendingLinkSourceId(null)
+        resetLinkMode()
       }
     },
-    [linkNodes],
+    [linkNodes, resetLinkMode],
   )
 
   const handleNodeDragStop = useCallback(
@@ -833,20 +920,77 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
     }
   }, [handleDeleteEdgeById, handleDeleteNodeById, selectedEdge, selectedNode])
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Delete' && event.key !== 'Backspace') {
+        return
+      }
+      const target = event.target as HTMLElement | null
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return
+      }
+      if (!selectedNode && !selectedEdge) {
+        return
+      }
+      event.preventDefault()
+      handleDeleteSelected()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [handleDeleteSelected, selectedEdge, selectedNode])
+
   const handleNodeClick = useCallback(
     (_event: ReactMouseEvent, node: StoryCanvasNode) => {
       setContextMenu(null)
       if (pendingLinkSourceId) {
-        const linked = linkNodes(pendingLinkSourceId, node.id)
-        if (linked) {
-          setPendingLinkSourceId(null)
-        }
+        commitPendingLink(node.id)
         return
       }
       setSelectedNodeId(node.id)
       setSelectedEdgeId(null)
     },
-    [linkNodes, pendingLinkSourceId],
+    [commitPendingLink, pendingLinkSourceId],
+  )
+
+  const handleNodeMouseEnter = useCallback(
+    (_event: ReactMouseEvent, node: StoryCanvasNode) => {
+      if (!pendingLinkSourceId || node.id === pendingLinkSourceId) {
+        return
+      }
+      setPendingLinkHoverNodeId(node.id)
+    },
+    [pendingLinkSourceId],
+  )
+
+  const handleNodeMouseLeave = useCallback(
+    (_event: ReactMouseEvent, node: StoryCanvasNode) => {
+      if (pendingLinkHoverNodeId === node.id) {
+        setPendingLinkHoverNodeId(null)
+      }
+    },
+    [pendingLinkHoverNodeId],
+  )
+
+  const handlePaneMouseMove = useCallback(
+    () => {
+      if (pendingLinkSourceId && pendingLinkHoverNodeId) {
+        setPendingLinkHoverNodeId(null)
+      }
+    },
+    [pendingLinkHoverNodeId, pendingLinkSourceId],
+  )
+
+  const handleNodeDoubleClick = useCallback(
+    (_event: ReactMouseEvent, node: StoryCanvasNode) => {
+      addChildNodeFrom(node.id)
+    },
+    [addChildNodeFrom],
   )
 
   const handleEdgeClick = useCallback((_event: ReactMouseEvent, edge: FlowEdge) => {
@@ -859,6 +1003,22 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
     (event: ReactMouseEvent, node: StoryCanvasNode) => {
       event.preventDefault()
       event.stopPropagation()
+      if (pendingLinkSourceId && pendingLinkSourceId !== node.id) {
+        const linked = commitPendingLink(node.id)
+        if (linked) {
+          setStatus(
+            `Lien créé entre ${
+              nodeLookup.get(pendingLinkSourceId)?.stepId ?? pendingLinkSourceId
+            } → ${node.data.stepId}.`,
+            )
+          setStatusTone('success')
+        } else {
+          setStatus('Impossible de créer la liaison via clic-droit.')
+          setStatusTone('error')
+        }
+        return
+      }
+
       const position = clampContextPosition(event.clientX, event.clientY)
       setSelectedNodeId(node.id)
       setSelectedEdgeId(null)
@@ -869,7 +1029,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
         nodeId: node.id,
       })
     },
-    [],
+    [commitPendingLink, nodeLookup, pendingLinkSourceId],
   )
 
   const handleEdgeContextMenu = useCallback((event: ReactMouseEvent, edge: FlowEdge) => {
@@ -889,6 +1049,11 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
   const handlePaneContextMenu = useCallback((event: ReactMouseEvent | MouseEvent) => {
     event.preventDefault()
     event.stopPropagation()
+    if (pendingLinkSourceId) {
+      resetLinkMode()
+      setStatus('Liaison annulée.')
+      setStatusTone('info')
+    }
     const screenX = Number.isFinite(event.clientX) ? event.clientX : window.innerWidth * 0.5
     const screenY = Number.isFinite(event.clientY) ? event.clientY : window.innerHeight * 0.5
     const position = clampContextPosition(screenX, screenY)
@@ -903,7 +1068,7 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
       flowX: flowPosition?.x ?? 120,
       flowY: flowPosition?.y ?? 120,
     })
-  }, [])
+  }, [pendingLinkSourceId, resetLinkMode])
 
   const handleAddBinding = useCallback(() => {
     const current = cloneDocument(documentRef.current)
@@ -1052,6 +1217,64 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
     [contextMenu, document.edges],
   )
 
+  useEffect(() => {
+    setActionDraft('')
+  }, [selectedNodeId])
+
+  const addActionToSelectedNode = useCallback(
+    (rawAction: string) => {
+      const action = normalizeTokenInput(rawAction)
+      if (!action || !selectedNodeId) {
+        return
+      }
+      applyDocumentWithHistory(
+        {
+          ...documentRef.current,
+          nodes: documentRef.current.nodes.map((entry) =>
+            entry.id === selectedNodeId
+              ? {
+                  ...entry,
+                  actions: entry.actions.includes(action) ? entry.actions : [...entry.actions, action],
+                }
+              : entry,
+          ),
+        },
+        'Action ajoutée.',
+        'success',
+      )
+      setActionDraft('')
+    },
+    [applyDocumentWithHistory, selectedNodeId],
+  )
+
+  const removeActionFromSelectedNode = useCallback(
+    (actionToDelete: string) => {
+      if (!selectedNodeId) {
+        return
+      }
+      applyDocumentWithHistory(
+        {
+          ...documentRef.current,
+          nodes: documentRef.current.nodes.map((entry) =>
+            entry.id === selectedNodeId
+              ? {
+                  ...entry,
+                  actions: entry.actions.filter((action) => action !== actionToDelete),
+                }
+              : entry,
+          ),
+        },
+        'Action supprimée.',
+        'info',
+      )
+    },
+    [applyDocumentWithHistory, selectedNodeId],
+  )
+
+  const handleActionDraftSubmit = useCallback(() => {
+    addActionToSelectedNode(actionDraft)
+  }, [actionDraft, addActionToSelectedNode])
+
   return (
     <section className="space-y-6">
       <SectionHeader
@@ -1089,7 +1312,25 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
       </InlineNotice>
 
       <Panel>
-        <div role="toolbar" aria-label="Actions graphe" className="grid gap-3 md:grid-cols-[minmax(0,1fr)_repeat(8,auto)] md:items-end">
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-[var(--ink-500)]">
+          <span className="rounded-full border border-[var(--mist-400)] bg-white/70 px-2 py-1">
+            Lien: clic-glisser ou clic-droit
+          </span>
+          <span className="rounded-full border border-[var(--mist-400)] bg-white/70 px-2 py-1">Raccourci: Ctrl/Cmd + L</span>
+          <span className="rounded-full border border-[var(--mist-400)] bg-white/70 px-2 py-1">Annuler: Echap</span>
+          <span className="rounded-full border border-[var(--mist-400)] bg-white/70 px-2 py-1">
+            Edition rapide: double-clic sur node
+          </span>
+          <span className="rounded-full border border-[var(--mist-400)] bg-white/70 px-2 py-1">
+            Historique: Ctrl/Cmd+Z
+          </span>
+        </div>
+
+        <div
+          role="toolbar"
+          aria-label="Actions graphe"
+          className="grid gap-3 md:grid-cols-[minmax(0,1fr)_repeat(8,auto)] md:items-end"
+        >
           <Field label="Scenario ID" htmlFor="scenario-id">
             <input
               id="scenario-id"
@@ -1110,6 +1351,21 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
           </Button>
           <Button variant="outline" onClick={handleAddChildNode}>
             Ajouter enfant
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (selectedNode) {
+                setPendingLinkSourceId(selectedNode.id)
+                setStatus(`Liaison démarrée depuis ${selectedNode.stepId}.`)
+                setStatusTone('info')
+              } else {
+                setStatus("Sélectionne d'abord un node source.")
+                setStatusTone('warning')
+              }
+            }}
+          >
+            Lancer liaison
           </Button>
           <Button variant="outline" onClick={handleAutoLayout}>
             Auto-layout
@@ -1171,8 +1427,8 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
 
         {pendingLinkSource ? (
           <InlineNotice className="mt-3" tone="warning">
-            Liaison en attente depuis <strong>{pendingLinkSource.stepId}</strong>. Clique un node cible ou utilise clic
-            droit pour finaliser.
+            Liaison en attente depuis <strong>{pendingLinkSource.stepId}</strong>. Cible un node avec un clic ou un clic
+            droit pour finaliser la connexion.
           </InlineNotice>
         ) : null}
 
@@ -1208,20 +1464,36 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
               nodes={flowNodes}
               edges={flowEdges}
               nodeTypes={flowNodeTypes}
+              onPaneMouseMove={handlePaneMouseMove}
               fitView
               onInit={(instance) => {
                 flowInstanceRef.current = instance
               }}
               onConnect={handleConnect}
               onNodeClick={handleNodeClick}
+              onNodeDoubleClick={handleNodeDoubleClick}
+              onNodeMouseEnter={handleNodeMouseEnter}
+              onNodeMouseLeave={handleNodeMouseLeave}
               onEdgeClick={handleEdgeClick}
               onNodeContextMenu={handleNodeContextMenu}
               onEdgeContextMenu={handleEdgeContextMenu}
               onPaneContextMenu={handlePaneContextMenu}
-              onPaneClick={() => {
+              onPaneClick={(event) => {
+                if (event.detail >= 2) {
+                  const flowPosition = flowInstanceRef.current?.screenToFlowPosition({
+                    x: Number.isFinite(event.clientX) ? event.clientX : window.innerWidth * 0.5,
+                    y: Number.isFinite(event.clientY) ? event.clientY : window.innerHeight * 0.5,
+                  }) ?? { x: 120, y: 120 }
+
+                  addNodeAtPosition(flowPosition, 'Node ajouté au double-clic.')
+                  return
+                }
+
                 setContextMenu(null)
                 if (pendingLinkSourceId) {
-                  setPendingLinkSourceId(null)
+                  setStatus('Liaison annulée.')
+                  setStatusTone('warning')
+                  resetLinkMode()
                 }
                 setSelectedNodeId(null)
                 setSelectedEdgeId(null)
@@ -1251,6 +1523,11 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
             <div className="soft-scrollbar mt-4 max-h-[58vh] space-y-3 overflow-y-auto pr-1">
               {document.appBindings.map((binding) => (
                 <div key={binding.id} className="rounded-2xl border border-[var(--mist-400)] bg-white/80 p-3">
+                  {duplicateBindingIds.has(normalizeTokenInput(binding.id)) ? (
+                    <InlineNotice tone="warning" className="mb-2">
+                      L'ID de ce binding est dupliqué.
+                    </InlineNotice>
+                  ) : null}
                   <div className="grid gap-2 sm:grid-cols-[1fr_180px_auto_auto] sm:items-end">
                     <Field label="ID">
                       <input
@@ -1534,30 +1811,73 @@ const StoryDesigner = ({ onValidate, onDeploy, onTestRun, capabilities }: StoryD
                   />
                 </Field>
 
-                <Field label="Actions (CSV)">
-                  <input
-                    value={toCsv(selectedNode.actions)}
-                    onFocus={pushHistorySnapshot}
-                    onChange={(event) => {
-                      const actions = parseCsvTokens(event.target.value)
-                      setDocument((current) => ({
-                        ...current,
-                        nodes: current.nodes.map((node) =>
-                          node.id === selectedNode.id
-                            ? {
-                                ...node,
-                                actions,
-                              }
-                            : node,
-                        ),
-                      }))
-                    }}
-                    className="story-input mt-2 min-h-[40px]"
-                  />
+                <Field label="Actions (tokens)">
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(selectedNode.actions.length === 0 ? ['Aucune action'] : selectedNode.actions).map((action) => {
+                      if (action === 'Aucune action') {
+                        return (
+                          <span
+                            key={action}
+                            className="rounded-full border border-dashed border-[var(--mist-400)] bg-white/65 px-3 py-1 text-[11px] text-[var(--ink-500)]"
+                          >
+                            Aucune action
+                          </span>
+                        )
+                      }
+
+                      return (
+                        <button
+                          type="button"
+                          key={action}
+                          className="group inline-flex items-center gap-1 rounded-full border border-[var(--accent-500)] bg-white/75 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--accent-800)]"
+                          onClick={() => {
+                            removeActionFromSelectedNode(action)
+                          }}
+                          title="Supprimer cette action"
+                        >
+                          {action}
+                          <span className="text-[12px] text-[var(--accent-700)] transition group-hover:scale-110">×</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <input
+                      value={actionDraft}
+                      placeholder="NOUVELLE_ACTION"
+                      onChange={(event) => {
+                        setActionDraft(event.target.value.toUpperCase())
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          handleActionDraftSubmit()
+                        }
+                      }}
+                      className="story-input min-h-[40px] flex-1"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => {
+                        handleActionDraftSubmit()
+                      }}
+                    >
+                      Ajouter
+                    </Button>
+                  </div>
+                  <p className="mt-2 text-xs text-[var(--ink-500)]">
+                    Clique une action pour la retirer. Valide ou appuie sur Entrée pour ajouter.
+                  </p>
                 </Field>
 
                 <div className="space-y-2 rounded-2xl border border-[var(--mist-400)] bg-white/70 p-3">
                   <p className="text-xs uppercase tracking-[0.16em] text-[var(--ink-500)]">Apps liées</p>
+                  {selectedNodeMissingBindings.length > 0 ? (
+                    <InlineNotice tone="warning">
+                      {`Bindings non définis: ${selectedNodeMissingBindings.join(', ')}.`}
+                    </InlineNotice>
+                  ) : null}
                   <div className="grid gap-2 sm:grid-cols-2">
                     {document.appBindings.map((binding) => {
                       const checked = selectedNode.apps.includes(binding.id)

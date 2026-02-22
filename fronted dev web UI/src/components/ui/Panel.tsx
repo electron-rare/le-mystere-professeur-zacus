@@ -10,7 +10,7 @@ export const Panel = ({ as = 'div', className = '', children, ...props }: PanelP
   const Element = as
   return (
     <Element
-      className={`glass-panel rounded-3xl border border-white/70 p-5 shadow-[var(--panel-shadow)] transition duration-200 ${className}`}
+      className={`glass-panel rounded-3xl border border-white/75 p-5 backdrop-blur-sm shadow-[var(--panel-shadow)] transition duration-200 ${className}`}
       {...props}
     >
       {children}

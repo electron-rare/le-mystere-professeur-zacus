@@ -32,6 +32,9 @@
   --mist-400: #c6d4f1;
   --mist-500: #aebfdf;
   --panel-shadow: 0 20px 55px rgba(15, 23, 42, 0.14);
+  --panel-shadow-soft: 0 12px 34px rgba(14, 23, 48, 0.1);
+  --panel-border: rgba(255, 255, 255, 0.72);
+  --focus: rgba(255, 122, 89, 0.55);
 }
 
 * {
@@ -65,22 +68,45 @@ h3 {
 }
 
 .glass-panel {
-  background: linear-gradient(160deg, var(--glass-strong), var(--glass));
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.93), rgba(238, 246, 255, 0.74) 58%, rgba(214, 230, 255, 0.55));
   box-shadow:
     var(--panel-shadow),
     inset 0 1px 0 rgba(255, 255, 255, 0.45);
-  border: 1px solid rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--panel-border);
   backdrop-filter: blur(16px);
+  position: relative;
+  overflow: hidden;
+}
+
+.glass-panel::before {
+  pointer-events: none;
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 16% 20%, rgba(255, 255, 255, 0.5), transparent 32%);
+  opacity: 0.45;
 }
 
 .glass-panel:hover {
   box-shadow:
     0 22px 60px rgba(15, 23, 42, 0.16),
     inset 0 1px 0 rgba(255, 255, 255, 0.48);
+  transform: translateY(-1px);
+}
+
+.panel-stack {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(238, 246, 255, 0.72));
+  border: 1px solid rgba(221, 232, 255, 0.82);
+  box-shadow: var(--panel-shadow-soft);
+}
+
+.card-grid {
+  display: grid;
+  gap: 0.8rem;
 }
 
 .focus-ring:focus-visible {
-  outline: 3px solid rgba(255, 122, 89, 0.55);
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -114,6 +140,11 @@ h3 {
   border-color: rgba(198, 212, 241, 0.85);
 }
 
+.story-flow .react-flow__controls-button:hover {
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--ink-800);
+}
+
 .story-flow .react-flow__minimap {
   border-radius: 0.85rem;
   border: 1px solid rgba(198, 212, 241, 0.9);
@@ -128,6 +159,25 @@ h3 {
 .story-flow .react-flow__edge.selected .react-flow__edge-path {
   stroke: var(--accent-700);
   stroke-width: 2.4;
+}
+
+.story-flow .react-flow__node {
+  background: transparent;
+}
+
+.story-flow .react-flow__handle {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--ink-800);
+  background: #ffffff;
+}
+
+.story-flow .react-flow__handle:hover {
+  background: var(--accent-500);
+}
+
+.story-flow .react-flow__connectionline {
+  stroke: var(--accent-700);
 }
 
 .story-flow .react-flow__connection-path {

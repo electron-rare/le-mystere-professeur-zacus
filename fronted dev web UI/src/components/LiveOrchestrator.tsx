@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStoryStream } from '../hooks/useStoryStream'
 import { setEspNowEnabled, wifiReconnect } from '../lib/deviceApi'
-import type { DeviceCapabilities } from '../lib/deviceApi'
+import { getStoryRuntimeStatus, type DeviceCapabilities } from '../lib/deviceApi'
 import type { StreamMessage } from '../types/story'
-import { Badge, Button, Field, InlineNotice, Panel, SectionHeader } from './ui'
+import { Badge, Button, InlineNotice, Panel, SectionHeader } from './ui'
 
 type LiveOrchestratorProps = {
   scenarioId: string
@@ -65,13 +65,30 @@ const mapStatusFromPayload = (payload: unknown, fallback: RunStatus): RunStatus 
   return fallback
 }
 
+const mapStatusFromRuntime = (status: string | undefined, fallback: RunStatus): RunStatus => {
+  if (!status) {
+    return fallback
+  }
+  const value = status.toLowerCase()
+  if (value === 'running') {
+    return 'running'
+  }
+  if (value === 'paused') {
+    return 'paused'
+  }
+  if (value === 'done' || value === 'idle' || value === 'stopped') {
+    return 'done'
+  }
+  return fallback
+}
+
 const getDisabledReason = (enabled: boolean, reason: string) => (enabled ? '' : reason)
 
 const FILTER_OPTIONS: { value: FilterKey; label: string }[] = [
   { value: 'all', label: 'Tous' },
-  { value: 'status', label: 'status' },
-  { value: 'transition', label: 'transition' },
-  { value: 'error', label: 'error' },
+  { value: 'status', label: 'Status' },
+  { value: 'transition', label: 'Transition' },
+  { value: 'error', label: 'Erreur' },
 ]
 
 const LiveOrchestrator = ({ scenarioId, onSkip, onPause, onResume, onBack, capabilities }: LiveOrchestratorProps) => {
@@ -130,6 +147,33 @@ const LiveOrchestrator = ({ scenarioId, onSkip, onPause, onResume, onBack, capab
 
   const { status, transport, retryCount, recoveryState } = useStoryStream({ onMessage: handleMessage })
 
+  useEffect(() => {
+    let active = true
+    const refreshStatus = async () => {
+      try {
+        const runtimeStatus = await getStoryRuntimeStatus()
+        if (!active) {
+          return
+        }
+        setCurrentStep((previous) => runtimeStatus.currentStep || previous)
+        setProgress((previous) => (runtimeStatus.progressPct >= 0 ? runtimeStatus.progressPct : previous))
+        setRunStatus((previous) => mapStatusFromRuntime(runtimeStatus.status, previous))
+      } catch {
+        // Live polling is opportunistic.
+      }
+    }
+
+    void refreshStatus()
+    const timer = window.setInterval(() => {
+      void refreshStatus()
+    }, 2500)
+
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [])
+
   const runAction = useCallback(
     async (name: string, action: () => Promise<unknown>, fallbackError: string, expectedStatus?: RunStatus) => {
       setActionError('')
@@ -174,13 +218,15 @@ const LiveOrchestrator = ({ scenarioId, onSkip, onPause, onResume, onBack, capab
   }[runStatus]
 
   const streamTone = status === 'open' ? 'success' : status === 'connecting' ? 'warning' : 'error'
+  const streamLabel =
+    status === 'open' ? `${transport.toUpperCase()} connecté` : status === 'connecting' ? 'Connexion en cours' : 'Déconnecté'
 
   return (
     <section className="space-y-6">
       <Panel>
         <SectionHeader
           title="Orchestrateur live"
-          subtitle={`Scenario ${scenarioId} - supervision temps reel`}
+          subtitle={`Scénario ${scenarioId} — supervision temps réel`}
           actions={
             <Button type="button" variant="outline" onClick={onBack} size="sm">
               Retour
@@ -190,7 +236,7 @@ const LiveOrchestrator = ({ scenarioId, onSkip, onPause, onResume, onBack, capab
 
         <div className="mt-4 flex flex-wrap gap-2">
           <Badge className={statusBadgeClass}>{runStatus}</Badge>
-          <Badge tone={streamTone}>Stream: {status === 'open' ? `${transport.toUpperCase()} connecte` : status}</Badge>
+          <Badge tone={streamTone}>Flux {streamLabel}</Badge>
           <Badge tone="neutral">Recovery: {recoveryState}</Badge>
           <Badge tone="neutral">Retries: {retryCount}</Badge>
         </div>
@@ -200,7 +246,7 @@ const LiveOrchestrator = ({ scenarioId, onSkip, onPause, onResume, onBack, capab
         <Panel className="space-y-4">
           <p className="text-xs uppercase tracking-[0.18em] text-[var(--ink-500)]">Runtime</p>
           <div>
-            <p className="text-xs uppercase tracking-[0.18em] text-[var(--ink-500)]">Etape courante</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-[var(--ink-500)]">Étape courante</p>
             <h3 className="mt-2 text-2xl font-semibold text-[var(--ink-900)]">{currentStep}</h3>
           </div>
 
@@ -215,12 +261,12 @@ const LiveOrchestrator = ({ scenarioId, onSkip, onPause, onResume, onBack, capab
           </div>
 
           {status !== 'open' ? (
-            <InlineNotice tone="warning">Stream non connecte. Reconnexion automatique active.</InlineNotice>
+            <InlineNotice tone="warning">Stream non connecté. Reconnexion automatique active.</InlineNotice>
           ) : null}
         </Panel>
 
         <Panel className="space-y-4">
-          <p className="text-xs uppercase tracking-[0.18em] text-[var(--ink-500)]">Controles story</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-[var(--ink-500)]">Contrôles story</p>
 
           <div className="grid gap-3 sm:grid-cols-2">
             <Button
@@ -251,14 +297,14 @@ const LiveOrchestrator = ({ scenarioId, onSkip, onPause, onResume, onBack, capab
           </div>
 
           {!capabilities.canPause || !capabilities.canResume || !capabilities.canSkip ? (
-            <InlineNotice tone="info">Certaines actions sont desactivees selon les capabilities de la cible.</InlineNotice>
+            <InlineNotice tone="info">Certaines actions sont désactivées selon les capabilities de la cible.</InlineNotice>
           ) : null}
 
           {busyAction ? <InlineNotice tone="info">Action en cours: {busyAction}</InlineNotice> : null}
 
           {capabilities.canNetworkControl ? (
             <div className="space-y-3 rounded-2xl border border-[var(--mist-400)] bg-white/60 p-3">
-              <p className="text-xs uppercase tracking-[0.16em] text-[var(--ink-500)]">Controles reseau (legacy)</p>
+            <p className="text-xs uppercase tracking-[0.16em] text-[var(--ink-500)]">Contrôles réseau (legacy)</p>
               <div className="grid gap-2 sm:grid-cols-3">
                 <Button
                   type="button"
@@ -299,7 +345,7 @@ const LiveOrchestrator = ({ scenarioId, onSkip, onPause, onResume, onBack, capab
 
         <Panel className="space-y-3">
           <SectionHeader
-            title="Journal d'evenements"
+            title="Journal d’événements"
             subtitle="Historique borne a 100 lignes avec filtres."
             actions={
               <div className="flex items-center gap-2">
@@ -313,36 +359,38 @@ const LiveOrchestrator = ({ scenarioId, onSkip, onPause, onResume, onBack, capab
                   />
                   Auto-scroll
                 </label>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setEvents([])
-                  }}
-                >
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setEvents([])
+              }}
+            >
                   Vider
                 </Button>
               </div>
             }
           />
 
-          <Field label="Filtre" htmlFor="event-filter">
-            <select
-              id="event-filter"
-              value={eventFilter}
-              onChange={(event) => setEventFilter(event.target.value as FilterKey)}
-              className="story-input mt-2 min-h-[38px]"
-            >
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ink-500)]">Filtre</p>
+            <div className="flex flex-wrap gap-2">
               {FILTER_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
+                <Button
+                  key={option.value}
+                  type="button"
+                  size="sm"
+                  variant={eventFilter === option.value ? 'outline' : 'ghost'}
+                  onClick={() => setEventFilter(option.value)}
+                >
                   {option.label}
-                </option>
+                </Button>
               ))}
-            </select>
-          </Field>
+            </div>
+          </div>
 
           <div ref={logRef} className="soft-scrollbar max-h-[360px] space-y-3 overflow-y-auto pr-1 text-xs">
-            {visibleEvents.length === 0 ? <p className="text-[var(--ink-500)]">Aucun evenement pour ce filtre.</p> : null}
+            {visibleEvents.length === 0 ? <p className="text-[var(--ink-500)]">Aucun événement pour ce filtre.</p> : null}
 
             {visibleEvents.map((event) => (
               <div key={event.id} className="rounded-2xl border border-white/70 bg-white/75 p-3">

@@ -15,12 +15,22 @@ Frontend Mission Control pour les devices Zacus.
 
 ## Modes API (dual mode)
 
-Detection automatique du firmware connecte:
+Détection automatique du firmware connecté :
 
 - `story_v2`: endpoints `/api/story/*` + stream WebSocket.
 - `freenove_legacy`: endpoints `/api/status`, `/api/scenario/*`, `/api/stream` (SSE).
 
 Les actions non supportees en mode legacy sont desactivees avec message explicite.
+
+## Diagnostics firmware
+
+À la connexion, le front analyse aussi des endpoints firmware non intrusifs :
+
+- version firmware (`/api/version`, `/api/firmware`, `/api/system/info`, `/api/status`),
+- endpoints OTA (`/api/update`, `/api/ota*`, `/api/upgrade*`),
+- endpoints reboot (`/api/reboot`, `/api/reset`, `/api/system/reboot`, `/api/restart`).
+
+L'état est affiché dans le panneau "Firmware". En cas d'absence, le front affiche une alerte claire et les actions de mise à jour ne sont pas proposées.
 
 ## Variables d'environnement
 

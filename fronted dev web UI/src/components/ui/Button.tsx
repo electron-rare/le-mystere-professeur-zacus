@@ -13,14 +13,14 @@ type ButtonProps = PropsWithChildren<
 
 const VARIANT_CLASS: Record<ButtonVariant, string> = {
   primary:
-    'border border-transparent bg-[var(--ink-800)] text-white shadow-[0_12px_24px_rgba(31,42,68,0.22)] hover:-translate-y-px hover:bg-[var(--ink-900)]',
+    'border border-transparent bg-gradient-to-b from-[var(--accent-500)] to-[var(--accent-700)] text-white shadow-[0_10px_22px_rgba(255,122,89,0.25)] transition-all hover:-translate-y-0.5 hover:brightness-105 active:translate-y-0 disabled:opacity-70',
   secondary:
-    'border border-transparent bg-[var(--accent-500)] text-white shadow-[0_12px_24px_rgba(255,122,89,0.25)] hover:-translate-y-px hover:bg-[var(--accent-700)]',
+    'border border-transparent bg-[var(--ink-700)] text-white shadow-[0_10px_22px_rgba(15,23,42,0.25)] transition-all hover:-translate-y-0.5 hover:brightness-105 active:translate-y-0 disabled:opacity-70',
   outline:
-    'border border-[var(--mist-500)] bg-white/70 text-[var(--ink-700)] shadow-[0_4px_12px_rgba(15,23,42,0.08)] hover:-translate-y-px hover:bg-white',
-  ghost: 'border border-transparent text-[var(--ink-600)] hover:bg-white/60',
+    'border border-[var(--mist-500)] bg-white/72 text-[var(--ink-700)] shadow-[0_4px_12px_rgba(15,23,42,0.08)] backdrop-blur transition-all hover:-translate-y-0.5 hover:bg-white disabled:opacity-70',
+  ghost: 'border border-transparent text-[var(--ink-600)] hover:bg-white/60 disabled:opacity-70',
   danger:
-    'border border-transparent bg-[var(--danger-700)] text-white shadow-[0_12px_24px_rgba(159,47,47,0.24)] hover:-translate-y-px hover:bg-[var(--danger-800)]',
+    'border border-transparent bg-gradient-to-b from-[var(--danger-700)] to-[var(--danger-800)] text-white shadow-[0_10px_22px_rgba(159,47,47,0.25)] transition-all hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-70',
 }
 
 const SIZE_CLASS: Record<ButtonSize, string> = {

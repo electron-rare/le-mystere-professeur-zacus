@@ -42,10 +42,10 @@ test('@mock detects story_v2 and opens orchestrator', async ({ page }) => {
 
   await page.goto('/')
 
-  await expect(page.getByText('Story V2 API')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Play' }).first()).toBeVisible()
-  await page.getByRole('button', { name: 'Play' }).first().click()
-  await expect(page.getByRole('heading', { name: 'Live Orchestrator' })).toBeVisible()
+  await expect(page.getByText('API Story V2')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Lancer' }).first()).toBeVisible()
+  await page.getByRole('button', { name: 'Lancer' }).first().click()
+  await expect(page.getByRole('heading', { name: 'Orchestrateur live' })).toBeVisible()
 })
 
 test('@mock maps API 404 and 507 errors to friendly messages', async ({ page }) => {
@@ -77,11 +77,10 @@ test('@mock maps API 404 and 507 errors to friendly messages', async ({ page }) 
 
   await page.goto('/')
 
-  await page.getByRole('button', { name: 'Play' }).first().click()
-  await expect(page.getByText('Scenario not found. Browse available scenarios.')).toBeVisible()
+  await page.getByRole('button', { name: 'Lancer' }).first().click()
+  await expect(page.getByText('Scenario introuvable. Verifie la liste disponible.')).toBeVisible()
 
-  await page.getByRole('button', { name: 'Story Designer' }).click()
-  await page.getByRole('button', { name: 'Deploy' }).click()
-  await expect(page.getByText('Device storage full. Delete old scenarios.')).toBeVisible()
+  await page.getByRole('button', { name: 'Designer' }).click()
+  await page.getByRole('button', { name: 'Déployer' }).click()
+  await expect(page.getByText("Stockage du device plein. Supprime d'anciens scenarios.")).toBeVisible()
 })
-

@@ -43,13 +43,13 @@ test('@mock detects freenove_legacy and limits unsupported actions', async ({ pa
 
   await page.goto('/')
 
-  await expect(page.getByText('Freenove Legacy API')).toBeVisible()
+  await expect(page.getByText('API Legacy')).toBeVisible()
   await expect(
-    page.getByText('Legacy mode detected. Scenario selection and start are unavailable, but you can monitor'),
+    page.getByText('Mode legacy detecte: selection/start sont indisponibles.'),
   ).toBeVisible()
 
-  await page.getByRole('button', { name: 'Open monitor' }).first().click()
-  await expect(page.getByRole('heading', { name: 'Live Orchestrator' })).toBeVisible()
+  await page.getByRole('button', { name: 'Ouvrir monitor' }).first().click()
+  await expect(page.getByRole('heading', { name: 'Orchestrateur live' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Pause' })).toBeDisabled()
 
   await page.getByRole('button', { name: 'Skip' }).click()
@@ -75,12 +75,9 @@ test('@mock keeps Story Designer in read/edit mode for legacy APIs', async ({ pa
   })
 
   await page.goto('/')
-  await page.getByRole('button', { name: 'Story Designer' }).click()
+  await page.getByRole('button', { name: 'Designer' }).click()
 
-  await expect(
-    page.getByText('Story Designer is in read/edit mode. Validate/deploy actions require Story V2 API support.'),
-  ).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Validate' })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Deploy' })).toBeDisabled()
+  await expect(page.getByText('Mode lecture/edition: validate/deploy requierent les APIs Story V2.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Valider' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Déployer' })).toBeDisabled()
 })
-

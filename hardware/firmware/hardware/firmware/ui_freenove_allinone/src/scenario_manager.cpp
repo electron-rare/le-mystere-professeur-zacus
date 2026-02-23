@@ -217,53 +217,33 @@ void ScenarioManager::notifyUnlock(uint32_t now_ms) {
 }
 
 void ScenarioManager::notifyButton(uint8_t key, bool long_press, uint32_t now_ms) {
+  (void)long_press;
   const StepDef* step = currentStep();
-  if (step != nullptr && step->id != nullptr && std::strcmp(step->id, "STEP_WAIT_UNLOCK") == 0) {
-    // Contract: any single press (short or long) from lock screen jumps to LA detector.
-    if (key >= 1U && key <= 5U) {
+
+  if (step != nullptr && key >= 1U && key <= 5U && step->id != nullptr) {
+    const char* screen_scene_id = step->resources.screenSceneId;
+    if (std::strcmp(step->id, "STEP_WAIT_ETAPE2") == 0) {
+      timer_armed_ = true;
+      timer_fired_ = false;
+      etape2_due_at_ms_ = now_ms + (test_mode_ ? kEtape2TestDelayMs : kEtape2DelayMs);
+      return;
+    }
+    if (screen_scene_id != nullptr &&
+        (std::strcmp(screen_scene_id, "SCENE_LA_DETECTOR") == 0 ||
+         std::strcmp(screen_scene_id, "SCENE_LA_DETECT") == 0)) {
+      timer_armed_ = true;
+      timer_fired_ = false;
+      etape2_due_at_ms_ = now_ms + (test_mode_ ? kEtape2TestDelayMs : kEtape2DelayMs);
+      return;
+    }
+    if (std::strcmp(step->id, "STEP_WAIT_UNLOCK") == 0) {
+      // Contract: any short or long press from lock screen jumps to LA detector.
       if (dispatchEvent(StoryEventType::kSerial, "BTN_NEXT", now_ms, "btn_any_short")) {
         return;
       }
       dispatchEvent(StoryEventType::kSerial, "NEXT", now_ms, "btn_any_short_legacy");
       return;
     }
-  }
-
-  switch (key) {
-    case 1:
-      if (long_press) {
-        dispatchEvent(StoryEventType::kSerial, "FORCE_ETAPE2", now_ms, "btn1_long");
-      } else {
-        notifyUnlock(now_ms);
-      }
-      break;
-    case 2:
-      if (long_press) {
-        test_mode_ = !test_mode_;
-        Serial.printf("[SCENARIO] test_mode=%u\n", test_mode_ ? 1U : 0U);
-      }
-      break;
-    case 3:
-      if (long_press) {
-        dispatchEvent(StoryEventType::kSerial, "FORCE_ETAPE2", now_ms, "btn3_long");
-      }
-      break;
-    case 4:
-      if (long_press) {
-        dispatchEvent(StoryEventType::kSerial, "FORCE_DONE", now_ms, "btn4_long");
-      }
-      break;
-    case 5:
-      if (long_press) {
-        dispatchEvent(StoryEventType::kSerial, "FORCE_DONE", now_ms, "btn5_long");
-      } else {
-        if (!dispatchEvent(StoryEventType::kSerial, "BTN_NEXT", now_ms, "btn5_short")) {
-          dispatchEvent(StoryEventType::kSerial, "NEXT", now_ms, "btn5_short_legacy");
-        }
-      }
-      break;
-    default:
-      break;
   }
 }
 

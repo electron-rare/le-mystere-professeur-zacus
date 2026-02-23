@@ -20,7 +20,7 @@
 - [x] Run terrain 30 s + JSON, valider `max_stable_ms >= 3000` et `panic_seen=false`:  
       ✅ `max_stable_ms=3000` obtenu en cumulé, no panic (log `/tmp/zacus_la_music_30s_retry5.log`, json `/tmp/zacus_la_music_30s_retry5.json`).
 - [x] Vérification script renforcée côté scènes: alias `SCENE_LA_DETECT` accepté, et attente de `audio`/`AUDIO_STATUS` plus robuste.
-- [ ] Vérifier visuellement la montée continue de `Stabilite ...` sur l’écran LA.
+- [x] Vérifier visuellement la montée continue de `Stabilite ...` sur l’écran LA.
 - [x] Contrôle build ciblé post-ajustements: `pio run -e freenove_esp32s3` ✅.
 - [x] Ajustements fins de génération Python pour forcer davantage de LA cumulatif (anchor 70%, interruptions courtes) → passes 20/30 s.
 - [ ] Gate finale: build + smoke + run terrain validés.
@@ -79,6 +79,12 @@
 - Caméra (`camera_manager.cpp`) : framebuffer PSRAM activable via macro dédiée.
 - Runtime (`main.cpp`) : logs de profil mémoire/PSRAM en boot pour valider capacité disponible.
 
+### [2026-02-23] Alignement cible Freenove mémoire
+
+- Cible Freenove corrigée vers **ESP32-S3-WROOM-1-N16R8**.
+- Ajout d’un board custom `boards/freenove_esp32_s3_wroom_n16r8.json` pour refléter le profil 16MB/16MB (flash+PSRAM), avec alias utilisé par `env:freenove_esp32s3_full_with_ui`.
+- Docs de mapping mises à jour (`docs/RC_FINAL_BOARD.md`, `hardware/firmware/ui_freenove_allinone/RC_FINAL_BOARD.md`).
+
 ### Verrou opératoire (demande utilisateur)
 
 - Mode de travail verrouillé: utiliser uniquement les commandes `pio` pour build/flash/FS (`pio run ...`).
@@ -92,9 +98,20 @@
   - `storyNormalizeScreenSceneId` accepte l’alias et le mappe vers le canonical.
 - Alignement scénarios/payloads:
   - la plupart des sources de scenario/payload ont été migrées sur `SCENE_LA_DETECTOR`;
-  - les tests documentent la tolérance/normalisation (`generator.py`, `test_generator.py`, `test_story_fs_manager.cpp`).
+- les tests documentent la tolérance/normalisation (`generator.py`, `test_generator.py`, `test_story_fs_manager.cpp`).
 - Build hygiene:
   - suppression du warning `SUPPORT_TRANSACTIONS redefined` en retirant les redéfinitions CLI en doublon pour les envs qui incluent `ui_freenove_config.h`.
+
+## [2026-02-23] Freenove boutons + triggers (Codex)
+
+- Refactor lecture boutons Freenove vers tâche dédiée + queue RTOS:
+  - `ButtonManager` scanne les entrées en tâche dédiée (`scan_task`) et place les événements dans une queue.
+  - garde-fou fallback synchrone si création queue/tâche RTOS échoue.
+- Ajustement mapping runtime boutons:
+  - `STEP_WAIT_UNLOCK` : tout appui (court/long) 1..5 => `BTN_NEXT` (fallback `NEXT` via `dispatchEvent`).
+  - `SCENE_LA_DETECT` / `SCENE_LA_DETECTOR` (ou `STEP_WAIT_ETAPE2`) : réinitialisation du timeout scène LA sur tout appui 1..5.
+- Nettoyage du revalidation scénario (suppression des cas de test physiques non actifs).
+- Validation: `pio run -e freenove_esp32s3` ✅.
 
 ## [2026-02-23] Freenove audit + refactor agressif (RTOS/audio/wifi/esp-now/UI/story) (Codex)
 

@@ -234,7 +234,23 @@ bool shouldEnforceLaMatchOnly(const ScenarioSnapshot& snapshot) {
 
 bool notifyScenarioButtonGuarded(uint8_t key, bool long_press, uint32_t now_ms, const char* source_tag) {
   const ScenarioSnapshot snapshot = g_scenario.snapshot();
-  if (shouldEnforceLaMatchOnly(snapshot)) {
+  const bool is_la_trigger_step = LaTriggerService::isTriggerStep(snapshot);
+  const bool is_reset_key = (key >= 1U && key <= 5U);
+  const bool enforce_la_match_only = shouldEnforceLaMatchOnly(snapshot);
+  if (is_la_trigger_step && is_reset_key) {
+    const char* resolved_source = (source_tag != nullptr && source_tag[0] != '\0') ? source_tag : "unknown";
+    LaTriggerService::resetTimeout(&g_la_trigger, now_ms, resolved_source);
+    g_scenario.notifyButton(key, long_press, now_ms);
+    if (enforce_la_match_only) {
+      Serial.printf("[LA_TRIGGER] reset LA timeout for key=%u long=%u source=%s while waiting LA match\n",
+                    static_cast<unsigned int>(key),
+                    long_press ? 1U : 0U,
+                    resolved_source);
+      return false;
+    }
+    return true;
+  }
+  if (enforce_la_match_only) {
     Serial.printf("[LA_TRIGGER] ignore scenario button key=%u long=%u source=%s while waiting LA match\n",
                   static_cast<unsigned int>(key),
                   long_press ? 1U : 0U,
@@ -2502,10 +2518,7 @@ void runScenarioRevalidate(uint32_t now_ms) {
   };
   const HardwareProbe hardware_probes[] = {
       {1U, false, "BTN1_SHORT"},
-      {3U, true, "BTN3_LONG"},
-      {4U, true, "BTN4_LONG"},
       {5U, false, "BTN5_SHORT"},
-      {5U, true, "BTN5_LONG"},
   };
 
   g_scenario.reset();
@@ -2573,17 +2586,6 @@ void runScenarioRevalidate(uint32_t now_ms) {
         changed ? 1U : 0U,
         stepIdFromSnapshot(before),
         stepIdFromSnapshot(after));
-  }
-
-  {
-    const ScenarioSnapshot before = prepareStepXProbe();
-    g_scenario.notifyButton(5U, false, now_ms);
-    const ScenarioSnapshot after = g_scenario.snapshot();
-    const bool changed = std::strcmp(stepIdFromSnapshot(before), stepIdFromSnapshot(after)) != 0;
-    Serial.printf("SC_REVALIDATE_STEPX event=button label=BTN5_SHORT changed=%u anchor_step=%s step_after=%s\n",
-                  changed ? 1U : 0U,
-                  stepIdFromSnapshot(before),
-                  stepIdFromSnapshot(after));
   }
 
   Serial.println("SC_REVALIDATE_END");
@@ -3305,11 +3307,15 @@ void loop() {
 
   ButtonEvent event;
   while (g_buttons.pollEvent(&event)) {
-    Serial.printf("[MAIN] button key=%u long=%u\n", event.key, event.long_press ? 1 : 0);
+    const uint32_t event_ms = (event.ms != 0U) ? event.ms : now_ms;
+    Serial.printf("[MAIN] button key=%u long=%u ms=%lu\n",
+                  event.key,
+                  event.long_press ? 1U : 0U,
+                  static_cast<unsigned long>(event_ms));
     g_ui.handleButton(event.key, event.long_press);
-    notifyScenarioButtonGuarded(event.key, event.long_press, now_ms, "physical_button");
+    notifyScenarioButtonGuarded(event.key, event.long_press, event_ms, "physical_button");
     if (g_hardware_started) {
-      g_hardware.noteButton(event.key, event.long_press, now_ms);
+      g_hardware.noteButton(event.key, event.long_press, event_ms);
     }
   }
 

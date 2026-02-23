@@ -1,5 +1,7 @@
 ## Mapping Hardware Freenove ESP32-S3 Media Kit
 
+Cible matérielle cible : **ESP32-S3-WROOM-1-N16R8**.
+
 Référence canonique: `hardware/firmware/ui_freenove_allinone/include/ui_freenove_config.h`.
 
 | Domaine | Signal | Pin (ESP32-S3) | Macro |

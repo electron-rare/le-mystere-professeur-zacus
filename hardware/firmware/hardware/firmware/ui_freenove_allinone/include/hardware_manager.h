@@ -79,6 +79,13 @@ class HardwareManager {
                                uint16_t& out_freq,
                                int16_t& out_cents,
                                uint8_t& out_confidence);
+  void applyPitchSmoothing(uint32_t now_ms,
+                           uint16_t raw_freq,
+                           int16_t raw_cents,
+                           uint8_t raw_confidence,
+                           uint16_t& smoothed_freq,
+                           int16_t& smoothed_cents,
+                           uint8_t& smoothed_confidence);
   void setScenePalette(const char* scene_id);
   const LedPaletteEntry* findPaletteForScene(const char* scene_id) const;
   uint8_t batteryPercentFromMv(uint16_t cell_mv) const;
@@ -116,6 +123,15 @@ class HardwareManager {
   uint16_t mic_agc_gain_q8_ = 256U;
   uint16_t mic_noise_floor_raw_ = 120U;
   uint32_t mic_last_signal_ms_ = 0U;
+  float pitch_confidence_ema_ = 0.0f;
+  uint8_t pitch_smoothing_count_ = 0U;
+  uint8_t pitch_smoothing_index_ = 0U;
+  uint32_t pitch_smoothing_last_ms_ = 0U;
+  static constexpr uint8_t kPitchSmoothingSamples = 3U;
+  static constexpr uint16_t kPitchSmoothingStaleMs = 260U;
+  uint16_t pitch_freq_window_[kPitchSmoothingSamples] = {0U};
+  int16_t pitch_cents_window_[kPitchSmoothingSamples] = {0};
+  uint8_t pitch_conf_window_[kPitchSmoothingSamples] = {0U};
 
   // Keep DSP buffers off the loop task stack to avoid canary overflows.
   int32_t mic_raw_samples_[kMicReadSamples] = {};

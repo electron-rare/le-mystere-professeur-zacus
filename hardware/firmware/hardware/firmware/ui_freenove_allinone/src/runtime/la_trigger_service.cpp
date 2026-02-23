@@ -9,7 +9,7 @@
 
 namespace {
 
-constexpr uint16_t kLaDetectionToleranceHz = 10U;
+constexpr uint16_t kLaDetectionToleranceHz = 25U;
 constexpr uint16_t kLaMatchLevelDenom = 7000U;
 constexpr uint8_t kLaMatchLevelFloorPct = 20U;
 constexpr uint8_t kLaMatchConfidenceBoostMax = 12U;
@@ -18,6 +18,7 @@ constexpr uint8_t kLaMatchConfidenceFloor = 6U;
 constexpr uint8_t kLaMatchRelaxedBonus = 6U;
 constexpr uint8_t kLaMatchRelaxedConfidenceFloor = 10U;
 constexpr uint8_t kLaMatchRelaxedConfidencePenalty = 10U;
+constexpr uint8_t kLaMatchConsecutiveFrames = 2U;
 
 uint8_t estimatedLevelPct(const HardwareManager::Snapshot& hw) {
   if (hw.mic_level_percent > 0U) {
@@ -219,43 +220,48 @@ LaTriggerService::UpdateResult LaTriggerService::update(const RuntimeHardwareCon
     return result;
   }
 
+  const uint32_t effective_window_ms = (match_continuity_window_ms == 0U) ? 1U : match_continuity_window_ms;
   const bool sample_match = isSampleMatching(config, hw, false);
   const bool continuity_match = isSampleMatching(config, hw, true);
-  const uint32_t effective_window_ms = (match_continuity_window_ms == 0U) ? 1U : match_continuity_window_ms;
+  const uint32_t dt_ms = (state->last_match_ms == 0U) ? 0U : (now_ms - state->last_match_ms);
+  const bool match_window_expired = (dt_ms > 0U) && (dt_ms > effective_window_ms);
+  const bool seeded_by_strict_match =
+      (!match_window_expired) && (state->la_consecutive_match_count > 0U);
+  const bool has_match_for_progress = sample_match || (seeded_by_strict_match && continuity_match);
   state->sample_match = sample_match;
   bool has_stable_candidate = false;
-  const uint32_t dt_ms = (state->last_match_ms == 0U) ? 0U : (now_ms - state->last_match_ms);
-  const bool continuation_window_ok = (dt_ms > 0U) && (dt_ms <= effective_window_ms);
 
-  if (sample_match || (continuity_match && continuation_window_ok)) {
-    const bool starts_new_candidate = (state->last_match_ms == 0U) || (dt_ms > effective_window_ms);
-    if (starts_new_candidate && state->stable_since_ms == 0U) {
+  if (has_match_for_progress) {
+    const bool starts_new_window = (state->last_match_ms == 0U) || match_window_expired;
+    if (starts_new_window) {
+      state->la_match_start_ms = now_ms;
+      state->la_consecutive_match_count = sample_match ? 1U : 0U;
       state->stable_since_ms = now_ms;
+    } else if (sample_match && state->la_consecutive_match_count < 255U) {
+      ++state->la_consecutive_match_count;
     }
-    if (continuation_window_ok && state->stable_ms < config.mic_la_stable_ms) {
-      const uint32_t next_stable_ms = state->stable_ms + dt_ms;
+    const bool strict_stability_ready = (state->la_consecutive_match_count >= kLaMatchConsecutiveFrames);
+
+    const bool can_progress_stable =
+        (sample_match && (strict_stability_ready || state->stable_ms > 0U)) ||
+        ((state->stable_ms > 0U || state->la_consecutive_match_count > 0U) && continuity_match);
+    if (can_progress_stable && dt_ms > 0U &&
+        (state->stable_ms < config.mic_la_stable_ms)) {
+      const uint32_t stable_gain_ms = std::min<uint32_t>(dt_ms, effective_window_ms);
+      const uint32_t next_stable_ms = state->stable_ms + stable_gain_ms;
       state->stable_ms =
           (next_stable_ms >= config.mic_la_stable_ms) ? config.mic_la_stable_ms : next_stable_ms;
     }
+
     state->last_match_ms = now_ms;
     has_stable_candidate = true;
-  } else if (sample_match || continuity_match) {
-    if (state->last_match_ms == 0U && state->stable_since_ms == 0U) {
-      state->stable_since_ms = now_ms;
-      state->last_match_ms = now_ms;
-      has_stable_candidate = true;
-    } else if (state->last_match_ms != 0U && (now_ms - state->last_match_ms) <= effective_window_ms) {
-      state->last_match_ms = now_ms;
-      has_stable_candidate = true;
-    } else if (dt_ms > effective_window_ms) {
-      state->last_match_ms = now_ms;
-    }
   } else if (state->last_match_ms != 0U && dt_ms > effective_window_ms) {
     state->last_match_ms = 0U;
+    state->la_match_start_ms = 0U;
+    state->la_consecutive_match_count = 0U;
   }
 
-  if (!has_stable_candidate && state->last_match_ms == 0U && state->stable_ms == 0U) {
-    state->stable_ms = 0U;
+  if (!has_stable_candidate && state->stable_ms == 0U) {
     state->stable_since_ms = 0U;
   }
 

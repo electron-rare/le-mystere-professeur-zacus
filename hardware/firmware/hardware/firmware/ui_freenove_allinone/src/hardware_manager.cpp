@@ -12,6 +12,7 @@ namespace {
 
 constexpr uint8_t kDefaultLedBrightness = static_cast<uint8_t>(FREENOVE_WS2812_BRIGHTNESS);
 constexpr float kTwoPi = 6.2831853f;
+constexpr float kPitchConfidenceAlpha = 0.45f;
 constexpr float kTunerReferenceHz = 440.0f;
 constexpr uint16_t kTunerMinHz = 80U;
 constexpr uint16_t kTunerMaxHz = 1200U;
@@ -365,12 +366,23 @@ void HardwareManager::updateMic(uint32_t now_ms) {
                           freq_hz,
                           cents,
                           confidence);
-  const bool has_pitch = (confidence > 0U) && (freq_hz > 0U);
+  uint16_t smoothed_freq = 0U;
+  int16_t smoothed_cents = 0;
+  uint8_t smoothed_confidence = 0U;
+  applyPitchSmoothing(now_ms,
+                      freq_hz,
+                      cents,
+                      confidence,
+                      smoothed_freq,
+                      smoothed_cents,
+                      smoothed_confidence);
+
+  const bool has_pitch = (smoothed_confidence > 0U) && (smoothed_freq > 0U);
 
   if (has_pitch) {
-    snapshot_.mic_freq_hz = freq_hz;
-    snapshot_.mic_pitch_cents = cents;
-    snapshot_.mic_pitch_confidence = confidence;
+    snapshot_.mic_freq_hz = smoothed_freq;
+    snapshot_.mic_pitch_cents = smoothed_cents;
+    snapshot_.mic_pitch_confidence = smoothed_confidence;
   } else {
     snapshot_.mic_freq_hz = 0U;
     snapshot_.mic_pitch_cents = 0;
@@ -732,6 +744,71 @@ void HardwareManager::estimatePitch(uint16_t& freq_hz, int16_t& cents, uint8_t& 
   cents = snapshot_.mic_pitch_cents;
   confidence = snapshot_.mic_pitch_confidence;
   peak_for_window = snapshot_.mic_peak;
+}
+
+void HardwareManager::applyPitchSmoothing(uint32_t now_ms,
+                                         uint16_t raw_freq,
+                                         int16_t raw_cents,
+                                         uint8_t raw_confidence,
+                                         uint16_t& smoothed_freq,
+                                         int16_t& smoothed_cents,
+                                         uint8_t& smoothed_confidence) {
+  smoothed_freq = 0U;
+  smoothed_cents = 0;
+  smoothed_confidence = 0U;
+
+  if (raw_freq == 0U || raw_confidence == 0U) {
+    if (pitch_smoothing_last_ms_ != 0U && (now_ms - pitch_smoothing_last_ms_) > kPitchSmoothingStaleMs) {
+      pitch_confidence_ema_ = 0.0f;
+      pitch_smoothing_count_ = 0U;
+      pitch_smoothing_index_ = 0U;
+      pitch_smoothing_last_ms_ = now_ms;
+      return;
+    }
+    return;
+  }
+
+  if (pitch_smoothing_last_ms_ != 0U && (now_ms - pitch_smoothing_last_ms_) > kPitchSmoothingStaleMs) {
+    pitch_confidence_ema_ = 0.0f;
+    pitch_smoothing_count_ = 0U;
+    pitch_smoothing_index_ = 0U;
+  }
+  pitch_smoothing_last_ms_ = now_ms;
+
+  const uint8_t write_index = pitch_smoothing_index_;
+  pitch_freq_window_[write_index] = raw_freq;
+  pitch_cents_window_[write_index] = raw_cents;
+  pitch_conf_window_[write_index] = raw_confidence;
+  pitch_smoothing_index_ = static_cast<uint8_t>((pitch_smoothing_index_ + 1U) % kPitchSmoothingSamples);
+  if (pitch_smoothing_count_ < kPitchSmoothingSamples) {
+    ++pitch_smoothing_count_;
+  }
+
+  uint16_t freq_samples[kPitchSmoothingSamples] = {0U, 0U, 0U};
+  int16_t cents_samples[kPitchSmoothingSamples] = {0, 0, 0};
+  const uint8_t sample_count = pitch_smoothing_count_;
+  const uint8_t oldest_index =
+      static_cast<uint8_t>((pitch_smoothing_index_ + (kPitchSmoothingSamples - sample_count)) % kPitchSmoothingSamples);
+  for (uint8_t index = 0U; index < sample_count; ++index) {
+    const uint8_t src_index = static_cast<uint8_t>((oldest_index + index) % kPitchSmoothingSamples);
+    freq_samples[index] = pitch_freq_window_[src_index];
+    cents_samples[index] = pitch_cents_window_[src_index];
+  }
+
+  std::sort(freq_samples, freq_samples + sample_count);
+  std::sort(cents_samples, cents_samples + sample_count);
+  const uint8_t median_index = static_cast<uint8_t>(sample_count / 2U);
+  smoothed_freq = freq_samples[median_index];
+  smoothed_cents = cents_samples[median_index];
+
+  if (pitch_confidence_ema_ <= 0.1f) {
+    pitch_confidence_ema_ = static_cast<float>(raw_confidence);
+  } else {
+    pitch_confidence_ema_ =
+        (kPitchConfidenceAlpha * static_cast<float>(raw_confidence)) + ((1.0f - kPitchConfidenceAlpha) * pitch_confidence_ema_);
+  }
+  const uint8_t smoothed = static_cast<uint8_t>(std::round(pitch_confidence_ema_));
+  smoothed_confidence = (smoothed > 100U) ? 100U : smoothed;
 }
 
 void HardwareManager::estimatePitchFromSamples(const int16_t* samples,

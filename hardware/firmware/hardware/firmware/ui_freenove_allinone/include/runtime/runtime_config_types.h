@@ -32,12 +32,12 @@ struct RuntimeHardwareConfig {
   char mic_event_name[32] = "SERIAL:MIC_SPIKE";
   bool mic_la_trigger_enabled = true;
   uint16_t mic_la_target_hz = 440U;
-  uint16_t mic_la_tolerance_hz = 10U;
+  uint16_t mic_la_tolerance_hz = 18U;
   uint8_t mic_la_max_abs_cents = 42U;
   uint8_t mic_la_min_confidence = 28U;
   uint8_t mic_la_min_level_pct = 8U;
   uint16_t mic_la_stable_ms = 3000U;
-  uint16_t mic_la_release_ms = 50U;
+  uint16_t mic_la_release_ms = 180U;
   uint16_t mic_la_cooldown_ms = 1400U;
   uint32_t mic_la_timeout_ms = 60000U;
   char mic_la_event_name[32] = "SERIAL:BTN_NEXT";
@@ -57,6 +57,8 @@ struct LaTriggerRuntimeState {
   uint32_t stable_since_ms = 0U;
   uint32_t last_match_ms = 0U;
   uint32_t stable_ms = 0U;
+  uint8_t la_consecutive_match_count = 0U;
+  uint32_t la_match_start_ms = 0U;
   uint32_t last_trigger_ms = 0U;
   uint16_t last_freq_hz = 0U;
   int16_t last_cents = 0;

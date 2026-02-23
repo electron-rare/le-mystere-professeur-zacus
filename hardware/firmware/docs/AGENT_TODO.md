@@ -10,6 +10,68 @@
 7. Consigner les logs et artefacts produits (`logs/rc_live/*.log`, `artifacts/rc_live/<env>_<timestamp>/{meta.json,commands.txt,summary.md,...}`).
 8. Documenter toute anomalie ou fail dans AGENT_TODO.md.
 
+## TODO -- LA 440Hz en musique (en cours)
+
+- [x] Script `verify_la_music_chain.py` aligné aux délais réels scène + statut MP3 + `--bg-music` optionnel.
+- [x] Lissage DSP + matching LA en fenêtres courtes implémentés (cumul de stabilité).
+- [x] Defaults runtime appliqués (`la_stable_ms=3000`, `la_release_ms=180`).
+- [x] Run terrain 20 s sans `--bg-music` (musique externe déjà lancée), récupérer log et JSON:  
+      ❌ `max_stable_ms=0`, `lock=never reached` (log `/tmp/zacus_la_music_20s.log`, json `/tmp/zacus_la_music_20s.json`).
+- [x] Run terrain 30 s + JSON, valider `max_stable_ms >= 3000` et `panic_seen=false`:  
+      ❌ `max_stable_ms=0`, `lock=never reached` (log `/tmp/zacus_la_music_30s.log`, json `/tmp/zacus_la_music_30s.json`).
+- [x] Vérification script renforcée côté scènes: alias `SCENE_LA_DETECT` accepté, et attente de `audio`/`AUDIO_STATUS` plus robuste.
+- [ ] Vérifier visuellement la montée continue de `Stabilite ...` sur l’écran LA.
+- [x] Contrôle build ciblé post-ajustements: `pio run -e freenove_esp32s3` ✅.
+- [ ] Ajustements fins si besoin (tolérance / release) puis retest.
+- [ ] Gate finale: build + smoke + run terrain validés.
+
+## [2026-02-23] Ajustement détection LA musique (Freenove)
+
+- Mission: rendre la progression `la_stable_ms` cumulative sur `SCENE_LA_DETECTOR` (musique bruyante) sans relancer la fenêtre à chaque coupure courte.
+- Implémentation:
+  - ajout d'un lissage court pitch/confidence (3 trames) dans `HardwareManager` pour lisser `mic_freq_hz`, `mic_pitch_cents`, `mic_pitch_confidence`.
+  - logique `LaTriggerService::update` adaptée pour cumuler `stable_ms` sur plusieurs fenêtres + exigence de continuité série courte.
+  - état LA étendu avec `la_consecutive_match_count` / `la_match_start_ms` (`LaTriggerRuntimeState`).
+  - fenêtre de continuité élargie côté config: `la_release_ms` portée à `180` dans config runtime embarquée (`APP_HARDWARE`).
+  - nouveau script `tools/dev/verify_la_music_chain.py` ajouté:
+    - génération LA longue + segments hors-LA/noise,
+    - options: `--target-hz`, `--stable-ms`, `--duration`, `--bg-music`, `--bg-volume`, `--la-volume`, `--seed`, `--out-json`, `--log-file`,
+    - logs automatiques dans `hardware/firmware/logs/verify_la_music_chain_*.log`,
+    - sortie JSON métriques (`first_lock_ms`, `latency_to_lock`, `max_stable_ms`, `freq_at_lock`, `conf_max`, `panic_seen`),
+    - musique de fond externe pilotée uniquement via `--bg-music` (facultatif).
+- Vérification:
+  - `pio run -e freenove_esp32s3` ✅
+  - smoke/validation hardware en chaîne de test musique à lancer avec carte branchée (`tools/dev/verify_la_music_chain.py --duration 20 --target-hz 440`).
+- Ajustement script en cours:
+  - options ajoutées au test `verify_la_music_chain.py` pour les délais réels de scène: `--scene-stabilize-ms`, `--audio-warmup-ms`, `--first-tuner-sample-ms`.
+  - logique de démarrage:
+    - attente post-`SCENE_LA_DETECTOR`,
+    - détection d'audio scène via `STATUS` (`audio=1` ou `track!=n/a`),
+    - première capture de `MIC_TUNER_STATUS` avant chronométrage lock.
+  - amélioration livrée:
+    - polling `STATUS` + `AUDIO_STATUS` pour détecter le vrai démarrage audio scène,
+    - capture de `audio_ready_ms` (et `audio_ready_scene_ms` en JSON),
+    - logs de `stable_ms` à chaque variation (montées + reset),
+    - métriques JSON enrichies (`first_tuner_sample_ms`, `audio_ready_ms`).
+
+### [2026-02-23] Suite script LA musique — adaptation startup hardware
+
+- Script ciblé ajusté:
+  - `wait_screen()` renvoie désormais le temps réel d'entrée d'une scène (et exige des échantillons stables).
+  - `wait_scene_audio()` attend explicitement le démarrage piste/lecture en scène (`audio`, `media_play`, `track`).
+  - parseur `STATUS` renforcé pour capturer `media_play`, `track`, `pack` sans sur-généralisation.
+  - métriques enrichies: `scene_locked_ms`, `scene_la_entry_ms`, `expected_stable_ms`, `duration_s`.
+- Navigation renforcée:
+  - ajout de `ensure_scene_loaded()` pour garantir `SCENE_LA_DETECTOR` avant démarrage des mesures LA.
+  - enchaînement automatique BTN_NEXT (avec fallback `SC_LOAD DEFAULT`) si le script démarre depuis un écran inattendu.
+- Comportement:
+  - délai de démarrage scène/audio calculé à l'exécution, avec sauvegarde en JSON et logs détaillés.
+  - compatible avec son externe déjà actif: `--bg-music` reste optionnel, le script ne dépend plus d'un lancement forcé d'une piste locale.
+- Validation récente:
+  - `python3 tools/dev/verify_la_music_chain.py --help` ✅
+  - `python3 -m py_compile tools/dev/verify_la_music_chain.py` ✅
+  - `pio run -e freenove_esp32s3` ✅
+
 ### [2026-02-23] PSRAM Freenove (Codex)
 
 - Ajout des toggles build Freenove pour activer des allocations PSRAM ciblées (`FREENOVE_PSRAM_UI_DRAW_BUFFER`, `FREENOVE_PSRAM_CAMERA_FRAMEBUFFER`) et macro de profil (`FREENOVE_USE_PSRAM`).

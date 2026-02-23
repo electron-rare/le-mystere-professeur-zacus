@@ -13,7 +13,7 @@ Ce dossier contient les fichiers individuels pour chaque app écran et chaque sc
 - scenarios/DEFAULT/app_audio.yaml
 - scenarios/DEFAULT/scene_locked.yaml
 - scenarios/DEFAULT/scene_broken.yaml
-- scenarios/DEFAULT/scene_la_detect.yaml
+- scenarios/DEFAULT/scene_la_detector.yaml
 - scenarios/DEFAULT/scene_win.yaml
 - scenarios/DEFAULT/scene_ready.yaml
 

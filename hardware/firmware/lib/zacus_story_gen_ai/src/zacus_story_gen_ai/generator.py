@@ -124,7 +124,7 @@ SCENE_PROFILES: dict[str, dict[str, Any]] = {
             },
         ],
     },
-    "SCENE_LA_DETECT": {
+    "SCENE_LA_DETECTOR": {
         "title": "DETECTION",
         "subtitle": "Balayage en cours",
         "symbol": "SCAN",
@@ -154,7 +154,7 @@ SCENE_PROFILES: dict[str, dict[str, Any]] = {
         "effect": "scan",
         "effect_speed_ms": 920,
         "theme": {"bg": "#05261F", "accent": "#35E7B0", "text": "#EFFFF8"},
-        "transition": {"effect": "camera_flash", "duration_ms": 230},
+        "transition": {"effect": "glitch", "duration_ms": 230},
         "timeline": [
             {
                 "at_ms": 0,
@@ -183,7 +183,7 @@ SCENE_PROFILES: dict[str, dict[str, Any]] = {
         "effect": "radar",
         "effect_speed_ms": 840,
         "theme": {"bg": "#041A24", "accent": "#5CE6FF", "text": "#E9FBFF"},
-        "transition": {"effect": "wipe", "duration_ms": 230},
+        "transition": {"effect": "slide_left", "duration_ms": 230},
         "timeline": [
             {
                 "at_ms": 0,
@@ -212,7 +212,7 @@ SCENE_PROFILES: dict[str, dict[str, Any]] = {
         "effect": "wave",
         "effect_speed_ms": 260,
         "theme": {"bg": "#24090C", "accent": "#FF6A52", "text": "#FFF2EB"},
-        "transition": {"effect": "camera_flash", "duration_ms": 170},
+        "transition": {"effect": "glitch", "duration_ms": 170},
         "timeline": [
             {
                 "at_ms": 0,
@@ -333,6 +333,14 @@ SCENE_PROFILES: dict[str, dict[str, Any]] = {
         ],
     },
 }
+
+SCENE_ALIASES: dict[str, str] = {
+    "SCENE_LA_DETECT": "SCENE_LA_DETECTOR",
+}
+
+
+def _canonical_scene_id(scene_id: str) -> str:
+    return SCENE_ALIASES.get(scene_id, scene_id)
 
 DEFAULT_TEXT_OPTIONS: dict[str, Any] = {
     "show_title": False,
@@ -491,6 +499,17 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     if not isinstance(obj, dict):
         raise StoryGenerationError(f"YAML root must be a mapping: {path}")
     return obj
+
+
+def _normalize_scene_id(value: Any, issues: list[ValidationIssue], source: str) -> str:
+    scene_id = str(value).strip() if isinstance(value, str) else ""
+    if not scene_id:
+        return ""
+    scene_id = _canonical_scene_id(scene_id)
+    if scene_id not in SCENE_PROFILES:
+        issues.append(ValidationIssue(source, "screen_scene_id", f"unknown scene id '{scene_id}'"))
+        return ""
+    return scene_id
 
 
 def _normalize_story_specs(files: list[Path]) -> list[dict[str, Any]]:
@@ -656,11 +675,13 @@ def _normalize_story_specs(files: list[Path]) -> list[dict[str, Any]]:
                     }
                 )
 
+            raw_scene_id = str(step.get("screen_scene_id", "")).strip()
+            normalized_scene_id = _normalize_scene_id(raw_scene_id, issues, str(file_path))
             actions = [str(v).strip() for v in (step.get("actions") or []) if str(v).strip()]
             steps.append(
                 {
                     "step_id": step_id,
-                    "screen_scene_id": str(step.get("screen_scene_id", "")).strip(),
+                    "screen_scene_id": normalized_scene_id,
                     "audio_pack_id": str(step.get("audio_pack_id", "")).strip(),
                     "actions": actions,
                     "apps": apps,
@@ -849,8 +870,12 @@ def _resource_candidates(resource_root: Path, resource_type: str, resource_id: s
     return dedup
 
 
-def _load_resource_payload(resource_root: Path | None, resource_type: str, resource_id: str) -> dict[str, Any] | None:
+def _load_resource_payload(
+    resource_root: Path | None, resource_type: str, resource_id: str, required: bool = False
+) -> dict[str, Any] | None:
     if resource_root is None:
+        if required:
+            raise StoryGenerationError(f"Missing required {resource_type} resource '{resource_id}'")
         return None
     for path in _resource_candidates(resource_root, resource_type, resource_id):
         if not path.exists():
@@ -862,6 +887,8 @@ def _load_resource_payload(resource_root: Path | None, resource_type: str, resou
         if not isinstance(payload, dict):
             raise StoryGenerationError(f"Invalid resource type in {path}: expected object")
         return payload
+    if required:
+        raise StoryGenerationError(f"Missing required {resource_type} resource '{resource_id}'")
     return None
 
 
@@ -1265,7 +1292,7 @@ def generate_bundle_files(
         _write_json_with_checksum(out_dir, f"story/apps/{app_id}.json", app_payload)
 
     for screen_id in sorted(resources["screens"]):
-        source_payload = _load_resource_payload(resource_root, "screens", screen_id)
+        source_payload = _load_resource_payload(resource_root, "screens", screen_id, required=True)
         payload = _normalize_screen_payload(source_payload, screen_id)
         _write_json_with_checksum(out_dir, f"story/screens/{screen_id}.json", payload)
 

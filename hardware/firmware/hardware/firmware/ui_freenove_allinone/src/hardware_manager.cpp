@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstring>
 
+#include "resources/screen_scene_registry.h"
 #include "ui_freenove_config.h"
 
 namespace {
@@ -37,7 +38,6 @@ constexpr HardwareManager::LedPaletteEntry kLedPalette[] = {
     {"SCENE_LOCKED", 255U, 96U, 22U, 88U, true},
     {"SCENE_BROKEN", 255U, 40U, 18U, 86U, true},
     {"SCENE_SIGNAL_SPIKE", 255U, 40U, 18U, 86U, true},
-    {"SCENE_LA_DETECT", 32U, 224U, 170U, 56U, true},
     {"SCENE_LA_DETECTOR", 32U, 224U, 170U, 56U, true},
     {"SCENE_SEARCH", 32U, 224U, 170U, 56U, true},
     {"SCENE_WIN", 245U, 205U, 62U, 80U, true},
@@ -140,10 +140,12 @@ void HardwareManager::setSceneHint(const char* scene_id) {
   if (scene_id == nullptr || scene_id[0] == '\0') {
     return;
   }
-  if (std::strncmp(snapshot_.scene_id, scene_id, sizeof(snapshot_.scene_id) - 1U) == 0) {
+  const char* normalized_scene_id = storyNormalizeScreenSceneId(scene_id);
+  const char* effective_scene_id = (normalized_scene_id != nullptr) ? normalized_scene_id : scene_id;
+  if (std::strncmp(snapshot_.scene_id, effective_scene_id, sizeof(snapshot_.scene_id) - 1U) == 0) {
     return;
   }
-  setScenePalette(scene_id);
+  setScenePalette(effective_scene_id);
 }
 
 bool HardwareManager::setManualLed(uint8_t r, uint8_t g, uint8_t b, uint8_t brightness, bool pulse) {
@@ -497,8 +499,7 @@ bool HardwareManager::isBrokenSceneHint() const {
 }
 
 bool HardwareManager::isTunerSceneHint() const {
-  return (std::strcmp(snapshot_.scene_id, "SCENE_LA_DETECT") == 0) ||
-         (std::strcmp(snapshot_.scene_id, "SCENE_LA_DETECTOR") == 0) ||
+  return (std::strcmp(snapshot_.scene_id, "SCENE_LA_DETECTOR") == 0) ||
          (std::strcmp(snapshot_.scene_id, "SCENE_SEARCH") == 0);
 }
 

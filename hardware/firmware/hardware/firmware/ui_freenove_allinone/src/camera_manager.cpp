@@ -117,6 +117,35 @@ framesize_t frameSizeFromText(const char* text) {
   }
   return FRAMESIZE_VGA;
 }
+
+const char* frameSizeToText(framesize_t value) {
+  switch (value) {
+    case FRAMESIZE_QQVGA:
+      return "QQVGA";
+    case FRAMESIZE_HQVGA:
+      return "HQVGA";
+    case FRAMESIZE_QVGA:
+      return "QVGA";
+    case FRAMESIZE_CIF:
+      return "CIF";
+    case FRAMESIZE_VGA:
+      return "VGA";
+    case FRAMESIZE_SVGA:
+      return "SVGA";
+    case FRAMESIZE_XGA:
+      return "XGA";
+    case FRAMESIZE_SXGA:
+      return "SXGA";
+    case FRAMESIZE_UXGA:
+      return "UXGA";
+    case FRAMESIZE_HD:
+      return "HD";
+    case FRAMESIZE_FHD:
+      return "FHD";
+    default:
+      return "VGA";
+  }
+}
 #endif
 
 }  // namespace
@@ -186,8 +215,8 @@ bool CameraManager::start() {
   cfg.pin_pclk = FREENOVE_CAM_PCLK;
   cfg.pin_vsync = FREENOVE_CAM_VSYNC;
   cfg.pin_href = FREENOVE_CAM_HREF;
-  cfg.pin_sscb_sda = FREENOVE_CAM_SIOD;
-  cfg.pin_sscb_scl = FREENOVE_CAM_SIOC;
+  cfg.pin_sccb_sda = FREENOVE_CAM_SIOD;
+  cfg.pin_sccb_scl = FREENOVE_CAM_SIOC;
   cfg.pin_pwdn = FREENOVE_CAM_PWDN;
   cfg.pin_reset = FREENOVE_CAM_RESET;
   cfg.xclk_freq_hz = config_.xclk_hz;
@@ -198,11 +227,32 @@ bool CameraManager::start() {
 #if defined(CAMERA_GRAB_LATEST)
   cfg.grab_mode = CAMERA_GRAB_LATEST;
 #endif
-#if defined(CAMERA_FB_IN_PSRAM)
+#if defined(FREENOVE_PSRAM_CAMERA_FRAMEBUFFER) && defined(CAMERA_FB_IN_PSRAM)
   cfg.fb_location = CAMERA_FB_IN_PSRAM;
+  Serial.println("[CAM] framebuffer pinned to PSRAM");
 #endif
 
-  const esp_err_t status = esp_camera_init(&cfg);
+  esp_err_t status = esp_camera_init(&cfg);
+  if (status != ESP_OK) {
+    Serial.printf("[CAM] init failed err=0x%x, trying constrained fallback\n", static_cast<unsigned int>(status));
+    camera_config_t fallback_cfg = cfg;
+    fallback_cfg.frame_size = FRAMESIZE_QVGA;
+    if (fallback_cfg.jpeg_quality < 20U) {
+      fallback_cfg.jpeg_quality = 20U;
+    }
+    fallback_cfg.fb_count = 1U;
+#if defined(CAMERA_FB_IN_DRAM)
+    fallback_cfg.fb_location = CAMERA_FB_IN_DRAM;
+#endif
+    status = esp_camera_init(&fallback_cfg);
+    if (status == ESP_OK) {
+      cfg = fallback_cfg;
+      Serial.printf("[CAM] fallback init ok frame=%s quality=%u fb=%u\n",
+                    frameSizeToText(cfg.frame_size),
+                    static_cast<unsigned int>(cfg.jpeg_quality),
+                    static_cast<unsigned int>(cfg.fb_count));
+    }
+  }
   if (status != ESP_OK) {
     setLastError("camera_init_failed");
     Serial.printf("[CAM] init failed err=0x%x\n", static_cast<unsigned int>(status));
@@ -211,6 +261,9 @@ bool CameraManager::start() {
 
   snapshot_.initialized = true;
   snapshot_.enabled = true;
+  snapshot_.jpeg_quality = static_cast<uint8_t>(cfg.jpeg_quality);
+  snapshot_.fb_count = static_cast<uint8_t>(cfg.fb_count);
+  copyText(snapshot_.frame_size, sizeof(snapshot_.frame_size), frameSizeToText(cfg.frame_size));
   clearLastError();
   Serial.printf("[CAM] ready frame=%s quality=%u fb=%u xclk=%lu\n",
                 snapshot_.frame_size,

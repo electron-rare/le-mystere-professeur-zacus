@@ -57,6 +57,28 @@ Palette de reference pour `data/story/screens/*.json` et pour la generation auto
 }
 ```
 
+## Scene IDs (source de vérité)
+
+Source de vérité runtime: `hardware/libs/story/src/resources/screen_scene_registry.cpp` (`kScenes`).
+
+Scènes canoniques (source unique):
+- `SCENE_LOCKED`
+- `SCENE_BROKEN`
+- `SCENE_SEARCH`
+- `SCENE_LA_DETECTOR`
+- `SCENE_CAMERA_SCAN`
+- `SCENE_SIGNAL_SPIKE`
+- `SCENE_REWARD`
+- `SCENE_MEDIA_ARCHIVE`
+- `SCENE_READY`
+- `SCENE_WIN`
+
+La validation doit refuser toute `screenSceneId` hors registre.
+
+Fallback runtime attendu en cas d'id inconnu:
+- rejet côté build/revue + rejet en runtime (`SCREEN_SCENE_ID_UNKNOWN` / charge impossible),
+- aucune activation de fallback silencieux côté scène.
+
 ## Palette d'effets (scene)
 
 - `none`: scene statique.
@@ -73,9 +95,8 @@ Aliases normalises au build:
 - `reward -> celebrate`
 - `sonar -> radar`
 
-Fallback runtime:
-- effet inconnu contenant `scan|radar|wave|sonar` -> `scan`
-- sinon -> `pulse`
+Fallback runtime (non silencieux):
+- effet inconnu: log + `pulse`.
 
 ## Options texte
 
@@ -134,6 +155,9 @@ Aliases normalises au build:
 - `camera_flash -> glitch`
 
 `transition.duration_ms`: entier positif (fallback auto si invalide).
+
+Fallback runtime (non silencieux):
+- transition inconnue: log + fallback au transition courant de la scène.
 
 ## Triggers possibles pour passer a la scene suivante (Story Engine V2)
 

@@ -21,7 +21,7 @@ except ImportError:
 
 STATUS_RE = re.compile(r"\bSTATUS\b.*\bscreen=([A-Z0-9_]+)\b")
 
-SCENE_LA_OPTIONS = ("SCENE_LA_DETECT", "SCENE_LA_DETECTOR")
+SCENE_LA_OPTIONS = ("SCENE_LA_DETECTOR",)
 TUNER_RE = re.compile(
     r"\bMIC_TUNER_STATUS\b.*\bfreq=(\d+)\b.*\bcents=(-?\d+)\b.*\bconf=(\d+)\b.*\blevel=(\d+)\b.*\bpeak=(\d+)\b"
 )

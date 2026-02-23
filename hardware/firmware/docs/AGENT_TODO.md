@@ -10,10 +10,29 @@
 7. Consigner les logs et artefacts produits (`logs/rc_live/*.log`, `artifacts/rc_live/<env>_<timestamp>/{meta.json,commands.txt,summary.md,...}`).
 8. Documenter toute anomalie ou fail dans AGENT_TODO.md.
 
+### [2026-02-23] PSRAM Freenove (Codex)
+
+- Ajout des toggles build Freenove pour activer des allocations PSRAM ciblées (`FREENOVE_PSRAM_UI_DRAW_BUFFER`, `FREENOVE_PSRAM_CAMERA_FRAMEBUFFER`) et macro de profil (`FREENOVE_USE_PSRAM`).
+- UI (`ui_manager.cpp`) : allocation dynamique du draw buffer LVGL en PSRAM avec fallback DRAM + logs de source/mémoire.
+- Caméra (`camera_manager.cpp`) : framebuffer PSRAM activable via macro dédiée.
+- Runtime (`main.cpp`) : logs de profil mémoire/PSRAM en boot pour valider capacité disponible.
+
 ### Verrou opératoire (demande utilisateur)
 
 - Mode de travail verrouillé: utiliser uniquement les commandes `pio` pour build/flash/FS (`pio run ...`).
 - Ne pas exécuter les scripts `tools/dev/*` tant que ce verrou est actif.
+
+## [2026-02-23] SCENE_LA_DETECT: migration contrôlée vers `SCENE_LA_DETECTOR` (Codex)
+
+- Source de vérité des scènes: `hardware/libs/story/src/resources/screen_scene_registry.cpp` garde le schéma canonique.
+- Tolérance migration activée:
+  - alias unique: `SCENE_LA_DETECT -> SCENE_LA_DETECTOR` (runtime + générateur).
+  - `storyNormalizeScreenSceneId` accepte l’alias et le mappe vers le canonical.
+- Alignement scénarios/payloads:
+  - la plupart des sources de scenario/payload ont été migrées sur `SCENE_LA_DETECTOR`;
+  - les tests documentent la tolérance/normalisation (`generator.py`, `test_generator.py`, `test_story_fs_manager.cpp`).
+- Build hygiene:
+  - suppression du warning `SUPPORT_TRANSACTIONS redefined` en retirant les redéfinitions CLI en doublon pour les envs qui incluent `ui_freenove_config.h`.
 
 ## [2026-02-23] Freenove audit + refactor agressif (RTOS/audio/wifi/esp-now/UI/story) (Codex)
 
@@ -44,6 +63,41 @@
   - run #1 (01:39): FAIL sur `scenario_manager.cpp` (`JsonObjectConst::as<>` invalide), corrigé via passage `JsonVariantConst`.
   - run #2 (01:40): PASS (`freenove_esp32s3_full_with_ui SUCCESS`, RAM 55.3%, Flash 73.1%).
   - timestamp evidence: `2026-02-23 01:40:39 +0100`.
+- Ajustements audio + test ciblé (suite au passage précédent):
+  - `audio_manager.cpp` passe en mode pump dédié FreeRTOS + protections d'accès concurrents (mutex, queue d'événements `done`) afin de réduire les latences de lecture.
+  - `ui_freenove_config.h` stabilisé pour éviter la redéfinition `SUPPORT_TRANSACTIONS` (`#ifndef` avant `#define`).
+  - calibration runtime: passage `vTaskDelay(1)` -> `taskYIELD()` quand le playback est actif (réduction de jitter potentielle de boucle decode).
+  - build/flash vérifiés: `pio run -e freenove_esp32s3` ✅, `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅.
+
+## [2026-02-23] Migration Freenove vers ESP32-audioI2S (Codex)
+
+- Checkpoint sécurité exécuté avant modifs:
+  - branche: `main`
+  - patch/status: `/tmp/zacus_checkpoint/20260223_151405_wip.patch`, `/tmp/zacus_checkpoint/20260223_151405_status.txt`
+  - scan artefacts trackés (`.pio`, `.platformio`, `logs`, `dist`, `build`, `node_modules`, `.venv`): aucun.
+- Audio backend Freenove migré:
+  - `ui_freenove_allinone/src/audio_manager.cpp` réécrit sur `ESP32-audioI2S` (`Audio.h`) avec maintien de l’API publique (`play/stop/update/status/profiles/fx/callback`).
+  - normalisation des chemins audio (`/littlefs/...`, `/sd/...`) + validation de présence de fichier avant lecture.
+  - détection codec/bitrate conservée pour le reporting (`AUDIO_STATUS`) avec scan MP3 header.
+- Dépendances PlatformIO (env Freenove):
+  - ajout `esphome/ESP32-audioI2S@^2.3.0`.
+  - retrait de `earlephilhower/ESP8266Audio` sur l’env Freenove.
+  - `build_src_filter` Freenove réduit aux unités Story réellement utilisées (`core/scenario_def`, `generated/scenarios_gen`, `resources/screen_scene_registry`, `scenarios/default_scenario_v2`, `ui/player_ui_model`) pour découpler le build des modules legacy audio.
+- Validation:
+  - `pio run -e freenove_esp32s3_full_with_ui` ✅ (`SUCCESS`, RAM 56.2%, Flash 80.1%).
+  - `pio run -e freenove_esp32s3_full_with_ui` ✅ après découplage build Story (`SUCCESS`, RAM 56.2%, Flash 79.9%).
+  - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅.
+  - `pio device monitor -e freenove_esp32s3_full_with_ui --port /dev/cu.usbmodem5AB90753301` ✅.
+- Incident runtime (triage RTOS/audio):
+  - Repro stable d’un panic `Guru Meditation Error: Core 1 panic'ed (Double exception)` sur séquence série `AUDIO_STOP` puis `AUDIO_TEST_FS`.
+  - Correctif `audio_manager.cpp`:
+    - suppression du `stopSong()` redondant juste avant `connecttoFS`,
+    - ajout d’un démarrage différé (file d’attente + cooldown 80ms) pour éviter stop/reopen immédiat sur le backend `ESP32-audioI2S`.
+    - ajout d’un pump RTOS dédié audio (`audio_pump`, coeur 1, loop 1ms actif) avec mutex d’état + file d’événements `done` pour maintenir `Audio::loop()` hors charge UI/réseau et éviter la saccade.
+  - Vérification post-correctif:
+    - séquences répétées `AUDIO_STATUS`, `AUDIO_STOP`, `AUDIO_TEST_FS`, `AUDIO_STATUS` sans reboot/panic,
+    - profils `AUDIO_FX` / `AUDIO_PROFILE` + `STATUS` valides après arrêt/reprise audio.
+    - reflash + retest matériel validés (`pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301`) ; boot log confirme `pump task=1`.
 
 ## [2026-02-22] Verrou transition boutons -> LA detector (Codex)
 
@@ -854,3 +908,29 @@
 - Comportement attendu LA: `LA_TRIGGER timeout` puis reset vers `SCENE_LOCKED`.
 - Aucune régression panic/reboot observée sur la fenêtre de test.
 - Notes: scripts de validation demandés par le contrat firmware sont uniquement exécutés pour build + flash; logs hardware non versionnés et non archivés.
+
+## Test hardware runtime (séquence réseau/ESP-NOW) - 2026-02-23
+- Test en condition carte branchée sur `/dev/cu.usbmodem5AB90753301` après `pio run -e freenove_esp32s3_full_with_ui -t upload`.
+- Commandes série envoyées: `STATUS`, `NET_STATUS`, `WIFI_TEST`, `ESPNOW_STATUS`, `ESPNOW_ON`, `ESPNOW_STATUS_JSON`, `ESPNOW_PEER_LIST`, `WIFI_AP_ON`, `ESPNOW_SEND ff:ff:ff:ff:ff:ff {...}`.
+- Bilan WiFi:
+  - Boot initial déjà en `STA` connecté sur SSID `Les cils`, IP `192.168.0.91`.
+  - `WIFI_TEST` retourne `ACK WIFI_TEST ... ok=1`.
+  - `WIFI_DISCONNECT` provoque bien la logique de reconnect (`[NET] wifi disconnected` puis `[NET] wifi connect requested ...`).
+  - `WIFI_STATUS`/`WIFI_RECONN` : la commande `WIFI_RECONN` n’existe pas (retour `UNKNOWN WIFI_RECONN`).
+- Bilan ESP-NOW:
+  - `ESPNOW_ON` actif, `ESPNOW_STATUS` confirme `espnow=1` et compteur `peers=0` avant ajout.
+  - `ESPNOW_SEND` vers `ff:ff:ff:ff:ff:ff` renvoie `ACK ESPNOW_SEND ok=1`.
+  - Après send, statut indique `tx_ok=1`, peer broadcast visible via `ESPNOW_PEER_LIST` puis `NET_STATUS`.
+  - `ESPNOW_STATUS_JSON` retourne JSON attendu (`ready`, `peer_count`, compteurs).
+  - Pas de réception de payload externe observée (pas de `ESPNOW_RECV`, pas de `NET` RX event).
+- API test WebSocket/HTTP non testée en ce cycle (focal hardware UART/serial).
+- `status` global reste stable, pas de panic/reboot détecté pendant captures.
+
+## Hardening scènes (SCENE) - 2026-02-23
+- Scope: firmware Freenove (UI + registry scène).
+- Stabilisation demandée:
+  - Source de vérité `hardware/libs/story/src/resources/screen_scene_registry.cpp` avec `kScenes` sans alias.
+  - Validation runtime: `SCREEN_SCENE_ID_UNKNOWN` sur `screenSceneId` non reconnu.
+  - Chargement payload: normalisation stricte `screen_scene_id` avant lookup dans `StorageManager`.
+  - UI: règles d'effets/transitions explicites, logs sur token inconnu.
+- Tests: cas d'IDs inconnues + alias legacy dans validation de scénario + lookup.

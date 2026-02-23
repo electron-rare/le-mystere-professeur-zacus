@@ -16,6 +16,7 @@
 #include <cstring>
 #include <cctype>
 
+#include "resources/screen_scene_registry.h"
 #include "scenarios/default_scenario_v2.h"
 
 namespace {
@@ -71,16 +72,15 @@ constexpr EmbeddedStoryAsset kEmbeddedStoryAssets[] = {
     {"/story/scenarios/EXEMPLE_UNLOCK_EXPRESS_DONE.json", R"JSON({"id":"EXEMPLE_UNLOCK_EXPRESS_DONE","scenario":"EXEMPLE_UNLOCK_EXPRESS_DONE","version":2,"initial_step":"STEP_WAIT_UNLOCK","hardware_events":{"button_short_1":"UNLOCK","button_short_5":"BTN_NEXT","button_long_4":"FORCE_DONE"},"app_bindings":["APP_LA","APP_SCREEN","APP_GATE","APP_AUDIO","APP_WIFI","APP_ESPNOW"],"actions_catalog":["ACTION_TRACE_STEP","ACTION_REFRESH_SD"],"steps":[{"id":"STEP_WAIT_UNLOCK","screen_scene_id":"SCENE_LOCKED"},{"id":"STEP_WIN","screen_scene_id":"SCENE_REWARD","audio_pack_id":"PACK_WIN"},{"id":"STEP_DONE","screen_scene_id":"SCENE_READY"}],"source":"story_selector","screen_root":"/story/screens","audio_root":"/story/audio"})JSON"},
     {"/story/scenarios/SPECTRE_RADIO_LAB.json", R"JSON({"id":"SPECTRE_RADIO_LAB","scenario":"SPECTRE_RADIO_LAB","version":2,"initial_step":"STEP_WAIT_UNLOCK","hardware_events":{"button_short_1":"UNLOCK","button_short_5":"BTN_NEXT","button_long_4":"FORCE_DONE","espnow_event":"SERIAL:<payload>"},"app_bindings":["APP_LA","APP_AUDIO","APP_SCREEN","APP_GATE","APP_WIFI","APP_ESPNOW"],"actions_catalog":["ACTION_TRACE_STEP","ACTION_QUEUE_SONAR","ACTION_REFRESH_SD"],"steps":[{"id":"STEP_WAIT_UNLOCK","screen_scene_id":"SCENE_LOCKED"},{"id":"STEP_SONAR_SEARCH","screen_scene_id":"SCENE_SEARCH","audio_pack_id":"PACK_SONAR_HINT"},{"id":"STEP_MORSE_CLUE","screen_scene_id":"SCENE_SEARCH","audio_pack_id":"PACK_MORSE_HINT"},{"id":"STEP_WIN","screen_scene_id":"SCENE_REWARD","audio_pack_id":"PACK_WIN"},{"id":"STEP_DONE","screen_scene_id":"SCENE_READY"}],"source":"story_selector","screen_root":"/story/screens","audio_root":"/story/audio"})JSON"},
     {"/story/scenarios/ZACUS_V1_UNLOCK_ETAPE2.json", R"JSON({"id":"ZACUS_V1_UNLOCK_ETAPE2","scenario":"ZACUS_V1_UNLOCK_ETAPE2","version":2,"initial_step":"STEP_BOOT_WAIT","hardware_events":{"button_short_1":"UNLOCK","button_short_5":"BTN_NEXT","button_long_3":"FORCE_ETAPE2","button_long_4":"FORCE_DONE","espnow_event":"SERIAL:<payload>"},"app_bindings":["APP_LA","APP_AUDIO","APP_SCREEN","APP_GATE","APP_WIFI","APP_ESPNOW"],"actions_catalog":["ACTION_TRACE_STEP","ACTION_REFRESH_SD"],"steps":[{"id":"STEP_BOOT_WAIT","screen_scene_id":"SCENE_LOCKED"},{"id":"STEP_BOOT_USON","screen_scene_id":"SCENE_LOCKED","audio_pack_id":"PACK_BOOT_RADIO"},{"id":"STEP_LA_DETECT","screen_scene_id":"SCENE_SEARCH"},{"id":"STEP_WIN","screen_scene_id":"SCENE_REWARD","audio_pack_id":"PACK_WIN"},{"id":"STEP_DONE","screen_scene_id":"SCENE_READY"}],"source":"story_selector","screen_root":"/story/screens","audio_root":"/story/audio"})JSON"},
-    {"/story/screens/SCENE_BROKEN.json", R"JSON({"id":"SCENE_BROKEN","title":"PROTO U-SON","subtitle":"Signal brouille","symbol":"ALERT","effect":"blink","visual":{"show_title":false,"show_symbol":true,"effect_speed_ms":180},"theme":{"bg":"#2A0508","accent":"#FF4A45","text":"#FFF1F1"},"timeline":{"loop":true,"duration_ms":900,"keyframes":[{"at_ms":0,"effect":"blink","speed_ms":180,"theme":{"bg":"#2A0508","accent":"#FF4A45","text":"#FFF1F1"}},{"at_ms":900,"effect":"scan","speed_ms":520,"theme":{"bg":"#3A0A10","accent":"#FF7873","text":"#FFF7F7"}}]},"transition":{"effect":"camera_flash","duration_ms":160}})JSON"},
-    {"/story/screens/SCENE_CAMERA_SCAN.json", R"JSON({"id":"SCENE_CAMERA_SCAN","title":"CAMERA SCAN","subtitle":"Capture des indices visuels","symbol":"SCAN","effect":"radar","visual":{"show_title":false,"show_symbol":true,"effect_speed_ms":840},"theme":{"bg":"#041A24","accent":"#5CE6FF","text":"#E9FBFF"},"timeline":{"loop":true,"duration_ms":2200,"keyframes":[{"at_ms":0,"effect":"radar","speed_ms":840,"theme":{"bg":"#041A24","accent":"#5CE6FF","text":"#E9FBFF"}},{"at_ms":1200,"effect":"wave","speed_ms":620,"theme":{"bg":"#072838","accent":"#8AF1FF","text":"#F5FEFF"}},{"at_ms":2200,"effect":"radar","speed_ms":760,"theme":{"bg":"#041A24","accent":"#5CE6FF","text":"#E9FBFF"}}]},"transition":{"effect":"wipe","duration_ms":230}})JSON"},
-    {"/story/screens/SCENE_LA_DETECT.json", R"JSON({"id":"SCENE_LA_DETECT","title":"DETECTEUR DE RESONNANCE","subtitle":"","symbol":"AUDIO","effect":"wave","visual":{"show_title":true,"show_symbol":true,"effect_speed_ms":480,"waveform":{"enabled":true,"sample_count":16,"amplitude_pct":100,"jitter":true}},"theme":{"bg":"#000000","accent":"#49D9FF","text":"#E8F6FF"},"timeline":{"loop":true,"duration_ms":2400,"keyframes":[{"at_ms":0,"effect":"wave","speed_ms":480,"theme":{"bg":"#000000","accent":"#49D9FF","text":"#E8F6FF"}},{"at_ms":800,"effect":"radar","speed_ms":620,"theme":{"bg":"#000000","accent":"#7EE8FF","text":"#F2FAFF"}},{"at_ms":1600,"effect":"wave","speed_ms":340,"theme":{"bg":"#000000","accent":"#D8FF6B","text":"#F9FFD8"}},{"at_ms":2400,"effect":"radar","speed_ms":700,"theme":{"bg":"#000000","accent":"#49D9FF","text":"#E8F6FF"}}]},"transition":{"effect":"zoom","duration_ms":260}})JSON"},
+    {"/story/screens/SCENE_BROKEN.json", R"JSON({"id":"SCENE_BROKEN","title":"PROTO U-SON","subtitle":"Signal brouille","symbol":"ALERT","effect":"blink","visual":{"show_title":false,"show_symbol":true,"effect_speed_ms":180},"theme":{"bg":"#2A0508","accent":"#FF4A45","text":"#FFF1F1"},"timeline":{"loop":true,"duration_ms":900,"keyframes":[{"at_ms":0,"effect":"blink","speed_ms":180,"theme":{"bg":"#2A0508","accent":"#FF4A45","text":"#FFF1F1"}},{"at_ms":900,"effect":"scan","speed_ms":520,"theme":{"bg":"#3A0A10","accent":"#FF7873","text":"#FFF7F7"}}]},"transition":{"effect":"glitch","duration_ms":160}})JSON"},
+    {"/story/screens/SCENE_CAMERA_SCAN.json", R"JSON({"id":"SCENE_CAMERA_SCAN","title":"CAMERA SCAN","subtitle":"Capture des indices visuels","symbol":"SCAN","effect":"radar","visual":{"show_title":false,"show_symbol":true,"effect_speed_ms":840},"theme":{"bg":"#041A24","accent":"#5CE6FF","text":"#E9FBFF"},"timeline":{"loop":true,"duration_ms":2200,"keyframes":[{"at_ms":0,"effect":"radar","speed_ms":840,"theme":{"bg":"#041A24","accent":"#5CE6FF","text":"#E9FBFF"}},{"at_ms":1200,"effect":"wave","speed_ms":620,"theme":{"bg":"#072838","accent":"#8AF1FF","text":"#F5FEFF"}},{"at_ms":2200,"effect":"radar","speed_ms":760,"theme":{"bg":"#041A24","accent":"#5CE6FF","text":"#E9FBFF"}}]},"transition":{"effect":"slide_left","duration_ms":230}})JSON"},
     {"/story/screens/SCENE_LA_DETECTOR.json", R"JSON({"id":"SCENE_LA_DETECTOR","title":"DETECTEUR DE RESONNANCE","subtitle":"","symbol":"AUDIO","effect":"wave","visual":{"show_title":true,"show_symbol":true,"effect_speed_ms":480,"waveform":{"enabled":true,"sample_count":16,"amplitude_pct":100,"jitter":true}},"theme":{"bg":"#000000","accent":"#49D9FF","text":"#E8F6FF"},"timeline":{"loop":true,"duration_ms":2400,"keyframes":[{"at_ms":0,"effect":"wave","speed_ms":480,"theme":{"bg":"#000000","accent":"#49D9FF","text":"#E8F6FF"}},{"at_ms":800,"effect":"radar","speed_ms":620,"theme":{"bg":"#000000","accent":"#7EE8FF","text":"#F2FAFF"}},{"at_ms":1600,"effect":"wave","speed_ms":340,"theme":{"bg":"#000000","accent":"#D8FF6B","text":"#F9FFD8"}},{"at_ms":2400,"effect":"radar","speed_ms":700,"theme":{"bg":"#000000","accent":"#49D9FF","text":"#E8F6FF"}}]},"transition":{"effect":"zoom","duration_ms":260}})JSON"},
-    {"/story/screens/SCENE_LOCKED.json", R"JSON({"id":"SCENE_LOCKED","title":"Module U-SON PROTO","subtitle":"VERIFICATION EN COURS","symbol":"LOCK","effect":"glitch","visual":{"show_title":true,"show_symbol":true,"effect_speed_ms":90},"theme":{"bg":"#06060E","accent":"#FFC766","text":"#F8FCFF"},"demo":{"mode":"arcade","particle_count":4,"strobe_level":100},"timeline":{"loop":true,"duration_ms":1500,"keyframes":[{"at_ms":0,"effect":"glitch","speed_ms":90,"theme":{"bg":"#06060E","accent":"#FFC766","text":"#F8FCFF"}},{"at_ms":220,"effect":"celebrate","speed_ms":170,"theme":{"bg":"#0F0B15","accent":"#FFE17D","text":"#FFFDEE"}},{"at_ms":460,"effect":"glitch","speed_ms":80,"theme":{"bg":"#15090F","accent":"#FF6A5F","text":"#FFF3F0"}},{"at_ms":700,"effect":"wave","speed_ms":150,"theme":{"bg":"#050914","accent":"#6CB9FF","text":"#EAF5FF"}},{"at_ms":920,"effect":"glitch","speed_ms":70,"theme":{"bg":"#17090E","accent":"#FF8E78","text":"#FFF8F3"}},{"at_ms":1160,"effect":"celebrate","speed_ms":150,"theme":{"bg":"#0E0C14","accent":"#FFD86A","text":"#FFFCEB"}},{"at_ms":1360,"effect":"glitch","speed_ms":65,"theme":{"bg":"#16090E","accent":"#FF7A64","text":"#FFF6F1"}},{"at_ms":1500,"effect":"celebrate","speed_ms":180,"theme":{"bg":"#06060E","accent":"#FFE17D","text":"#FFFDEE"}}]},"transition":{"effect":"fade","duration_ms":70}})JSON"},
+    {"/story/screens/SCENE_LOCKED.json", R"JSON({"id":"SCENE_LOCKED","title":"Module U-SON PROTO","subtitle":"VERIFICATION EN COURS","symbol":"LOCK","effect":"blink","visual":{"show_title":true,"show_symbol":true,"effect_speed_ms":90},"theme":{"bg":"#06060E","accent":"#FFC766","text":"#F8FCFF"},"demo":{"mode":"arcade","particle_count":4,"strobe_level":100},"timeline":{"loop":true,"duration_ms":1500,"keyframes":[{"at_ms":0,"effect":"blink","speed_ms":90,"theme":{"bg":"#06060E","accent":"#FFC766","text":"#F8FCFF"}},{"at_ms":220,"effect":"celebrate","speed_ms":170,"theme":{"bg":"#0F0B15","accent":"#FFE17D","text":"#FFFDEE"}},{"at_ms":460,"effect":"blink","speed_ms":80,"theme":{"bg":"#15090F","accent":"#FF6A5F","text":"#FFF3F0"}},{"at_ms":700,"effect":"wave","speed_ms":150,"theme":{"bg":"#050914","accent":"#6CB9FF","text":"#EAF5FF"}},{"at_ms":920,"effect":"blink","speed_ms":70,"theme":{"bg":"#17090E","accent":"#FF8E78","text":"#FFF8F3"}},{"at_ms":1160,"effect":"celebrate","speed_ms":150,"theme":{"bg":"#0E0C14","accent":"#FFD86A","text":"#FFFCEB"}},{"at_ms":1360,"effect":"blink","speed_ms":65,"theme":{"bg":"#16090E","accent":"#FF7A64","text":"#FFF6F1"}},{"at_ms":1500,"effect":"celebrate","speed_ms":180,"theme":{"bg":"#06060E","accent":"#FFE17D","text":"#FFFDEE"}}]},"transition":{"effect":"fade","duration_ms":70}})JSON"},
     {"/story/screens/SCENE_MEDIA_ARCHIVE.json", R"JSON({"id":"SCENE_MEDIA_ARCHIVE","title":"ARCHIVES MEDIA","subtitle":"Photos et enregistrements sauvegardes","symbol":"READY","effect":"radar","visual":{"show_title":false,"show_symbol":true,"effect_speed_ms":760},"theme":{"bg":"#0D1A34","accent":"#7CB1FF","text":"#EEF4FF"},"timeline":{"loop":true,"duration_ms":2000,"keyframes":[{"at_ms":0,"effect":"radar","speed_ms":760,"theme":{"bg":"#0D1A34","accent":"#7CB1FF","text":"#EEF4FF"}},{"at_ms":1000,"effect":"pulse","speed_ms":620,"theme":{"bg":"#132245","accent":"#9CC7FF","text":"#F7FAFF"}},{"at_ms":2000,"effect":"radar","speed_ms":760,"theme":{"bg":"#0D1A34","accent":"#7CB1FF","text":"#EEF4FF"}}]},"transition":{"effect":"fade","duration_ms":240}})JSON"},
     {"/story/screens/SCENE_READY.json", R"JSON({"id":"SCENE_READY","title":"PRET","subtitle":"Scenario termine","symbol":"READY","effect":"wave","visual":{"show_title":false,"show_symbol":true,"effect_speed_ms":560},"theme":{"bg":"#0F2A12","accent":"#6CD96B","text":"#EDFFED"},"timeline":{"loop":true,"duration_ms":1600,"keyframes":[{"at_ms":0,"effect":"wave","speed_ms":560,"theme":{"bg":"#0F2A12","accent":"#6CD96B","text":"#EDFFED"}},{"at_ms":1600,"effect":"radar","speed_ms":740,"theme":{"bg":"#133517","accent":"#9EE49D","text":"#F4FFF4"}}]},"transition":{"effect":"fade","duration_ms":220}})JSON"},
     {"/story/screens/SCENE_REWARD.json", R"JSON({"id":"SCENE_REWARD","title":"RECOMPENSE","subtitle":"Indice debloque","symbol":"WIN","effect":"celebrate","visual":{"show_title":false,"show_symbol":true,"effect_speed_ms":420},"theme":{"bg":"#2A103E","accent":"#F9D860","text":"#FFF9E6"},"timeline":{"loop":true,"duration_ms":1200,"keyframes":[{"at_ms":0,"effect":"celebrate","speed_ms":420,"theme":{"bg":"#2A103E","accent":"#F9D860","text":"#FFF9E6"}},{"at_ms":1200,"effect":"pulse","speed_ms":280,"theme":{"bg":"#3E1A52","accent":"#FFD97D","text":"#FFFDF2"}}]},"transition":{"effect":"zoom","duration_ms":300}})JSON"},
-    {"/story/screens/SCENE_SEARCH.json", R"JSON({"id":"SCENE_SEARCH","title":"RECHERCHE","subtitle":"Analyse des indices","symbol":"SCAN","effect":"scan","visual":{"show_title":false,"show_symbol":true,"effect_speed_ms":920},"theme":{"bg":"#05261F","accent":"#35E7B0","text":"#EFFFF8"},"timeline":{"loop":true,"duration_ms":3000,"keyframes":[{"at_ms":0,"effect":"scan","speed_ms":920,"theme":{"bg":"#05261F","accent":"#35E7B0","text":"#EFFFF8"}},{"at_ms":1600,"effect":"wave","speed_ms":520,"theme":{"bg":"#07322A","accent":"#67F0C4","text":"#F2FFF9"}},{"at_ms":3000,"effect":"scan","speed_ms":820,"theme":{"bg":"#05261F","accent":"#35E7B0","text":"#EFFFF8"}}]},"transition":{"effect":"camera_flash","duration_ms":230}})JSON"},
-    {"/story/screens/SCENE_SIGNAL_SPIKE.json", R"JSON({"id":"SCENE_SIGNAL_SPIKE","title":"PIC DE SIGNAL","subtitle":"Interference soudaine detectee","symbol":"ALERT","effect":"wave","visual":{"show_title":false,"show_symbol":true,"effect_speed_ms":260},"theme":{"bg":"#24090C","accent":"#FF6A52","text":"#FFF2EB"},"timeline":{"loop":true,"duration_ms":1400,"keyframes":[{"at_ms":0,"effect":"wave","speed_ms":260,"theme":{"bg":"#24090C","accent":"#FF6A52","text":"#FFF2EB"}},{"at_ms":700,"effect":"blink","speed_ms":180,"theme":{"bg":"#2F1014","accent":"#FF8C73","text":"#FFF8F5"}},{"at_ms":1400,"effect":"wave","speed_ms":320,"theme":{"bg":"#24090C","accent":"#FF6A52","text":"#FFF2EB"}}]},"transition":{"effect":"camera_flash","duration_ms":170}})JSON"},
+    {"/story/screens/SCENE_SEARCH.json", R"JSON({"id":"SCENE_SEARCH","title":"RECHERCHE","subtitle":"Analyse des indices","symbol":"SCAN","effect":"scan","visual":{"show_title":false,"show_symbol":true,"effect_speed_ms":920},"theme":{"bg":"#05261F","accent":"#35E7B0","text":"#EFFFF8"},"timeline":{"loop":true,"duration_ms":3000,"keyframes":[{"at_ms":0,"effect":"scan","speed_ms":920,"theme":{"bg":"#05261F","accent":"#35E7B0","text":"#EFFFF8"}},{"at_ms":1600,"effect":"wave","speed_ms":520,"theme":{"bg":"#07322A","accent":"#67F0C4","text":"#F2FFF9"}},{"at_ms":3000,"effect":"scan","speed_ms":820,"theme":{"bg":"#05261F","accent":"#35E7B0","text":"#EFFFF8"}}]},"transition":{"effect":"glitch","duration_ms":230}})JSON"},
+    {"/story/screens/SCENE_SIGNAL_SPIKE.json", R"JSON({"id":"SCENE_SIGNAL_SPIKE","title":"PIC DE SIGNAL","subtitle":"Interference soudaine detectee","symbol":"ALERT","effect":"wave","visual":{"show_title":false,"show_symbol":true,"effect_speed_ms":260},"theme":{"bg":"#24090C","accent":"#FF6A52","text":"#FFF2EB"},"timeline":{"loop":true,"duration_ms":1400,"keyframes":[{"at_ms":0,"effect":"wave","speed_ms":260,"theme":{"bg":"#24090C","accent":"#FF6A52","text":"#FFF2EB"}},{"at_ms":700,"effect":"blink","speed_ms":180,"theme":{"bg":"#2F1014","accent":"#FF8C73","text":"#FFF8F5"}},{"at_ms":1400,"effect":"wave","speed_ms":320,"theme":{"bg":"#24090C","accent":"#FF6A52","text":"#FFF2EB"}}]},"transition":{"effect":"glitch","duration_ms":170}})JSON"},
     {"/story/screens/SCENE_WIN.json", R"JSON({"id":"SCENE_WIN","title":"VICTOIRE","subtitle":"Etape validee","symbol":"WIN","effect":"celebrate","visual":{"show_title":false,"show_symbol":true,"effect_speed_ms":420},"theme":{"bg":"#231038","accent":"#F4CB4A","text":"#FFF8E2"},"timeline":{"loop":true,"duration_ms":1000,"keyframes":[{"at_ms":0,"effect":"celebrate","speed_ms":420,"theme":{"bg":"#231038","accent":"#F4CB4A","text":"#FFF8E2"}},{"at_ms":1000,"effect":"blink","speed_ms":240,"theme":{"bg":"#341A4D","accent":"#FFE083","text":"#FFFDF3"}}]},"transition":{"effect":"zoom","duration_ms":280}})JSON"},
 };
 
@@ -417,29 +417,62 @@ String StorageManager::loadScenePayloadById(const char* scene_id) const {
     return String();
   }
 
-  const String id = scene_id;
-  const String slug = sceneIdToSlug(scene_id);
-  const String candidates[] = {
-      "/story/screens/" + id + ".json",
-      "/story/screens/" + slug + ".json",
-      "/screens/" + id + ".json",
-      "/screens/" + slug + ".json",
-      "/scenarios/data/scene_" + slug + ".json",
-      "/sd/story/screens/" + id + ".json",
-      "/sd/story/screens/" + slug + ".json",
+  const char* normalized_scene_id = storyNormalizeScreenSceneId(scene_id);
+  if (normalized_scene_id == nullptr) {
+    Serial.printf("[FS] scene payload missing for unknown scene id=%s\n", scene_id);
+    return String();
+  }
+  if (std::strcmp(scene_id, normalized_scene_id) != 0) {
+    Serial.printf("[FS] scene payload alias normalized: %s -> %s\n", scene_id, normalized_scene_id);
+  }
+
+  const String id = normalized_scene_id;
+  const String raw_id = scene_id;
+  String candidates[14];
+  size_t candidate_count = 0U;
+  auto add_candidate = [&candidate_count, &candidates](const String& value) {
+    for (size_t index = 0U; index < candidate_count; ++index) {
+      if (candidates[index] == value) {
+        return;
+      }
+    }
+    if (candidate_count < (sizeof(candidates) / sizeof(candidates[0]))) {
+      candidates[candidate_count] = value;
+      ++candidate_count;
+    }
   };
 
-  for (const String& candidate : candidates) {
+  auto add_scene_candidates = [&add_candidate](const String& scene_name) {
+    const String scene_slug = sceneIdToSlug(scene_name.c_str());
+    add_candidate("/story/screens/" + scene_name + ".json");
+    add_candidate("/story/screens/" + scene_slug + ".json");
+    add_candidate("/screens/" + scene_name + ".json");
+    add_candidate("/screens/" + scene_slug + ".json");
+    add_candidate("/scenarios/data/scene_" + scene_slug + ".json");
+    add_candidate("/sd/story/screens/" + scene_name + ".json");
+    add_candidate("/sd/story/screens/" + scene_slug + ".json");
+  };
+
+  add_scene_candidates(id);
+  if (raw_id != id) {
+    // Keep alias candidates during migration to tolerate legacy payload names.
+    add_scene_candidates(raw_id);
+  }
+  for (size_t index = 0U; index < candidate_count; ++index) {
+    const String& candidate = candidates[index];
     String payload;
     String origin;
     if (!readTextFileWithOrigin(candidate.c_str(), &payload, &origin)) {
       continue;
     }
-    Serial.printf("[FS] scene %s -> %s\n", scene_id, origin.c_str());
+    if (raw_id != id && candidate.indexOf(raw_id) >= 0) {
+      Serial.printf("[FS] scene payload loaded from legacy alias path: %s\n", candidate.c_str());
+    }
+    Serial.printf("[FS] scene %s -> %s (id=%s)\n", scene_id, origin.c_str(), normalized_scene_id);
     return payload;
   }
 
-  Serial.printf("[FS] scene payload missing for id=%s\n", scene_id);
+  Serial.printf("[FS] scene payload missing for id=%s (normalized=%s)\n", scene_id, normalized_scene_id);
   return String();
 }
 

@@ -3,7 +3,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from zacus_story_gen_ai.generator import StoryPaths, run_generate_bundle, run_generate_cpp, run_validate
+import pytest
+
+from zacus_story_gen_ai.generator import (
+    StoryGenerationError,
+    StoryPaths,
+    run_generate_bundle,
+    run_generate_cpp,
+    run_validate,
+)
 
 
 def _write(path: Path, content: str) -> None:
@@ -95,6 +103,17 @@ steps:
     return paths
 
 
+def _seed_default_screen_payloads(paths: StoryPaths) -> None:
+    _write(
+        paths.story_data_dir / "screens" / "SCENE_LOCKED.json",
+        json.dumps({"id": "SCENE_LOCKED", "title": "Locked"}),
+    )
+    _write(
+        paths.story_data_dir / "screens" / "SCENE_READY.json",
+        json.dumps({"id": "SCENE_READY", "title": "Ready"}),
+    )
+
+
 def test_validate(tmp_path: Path) -> None:
     paths = _seed(tmp_path)
     result = run_validate(paths)
@@ -105,6 +124,7 @@ def test_validate(tmp_path: Path) -> None:
 def test_generate_cpp_and_bundle(tmp_path: Path) -> None:
     paths = _seed(tmp_path)
     cpp = run_generate_cpp(paths)
+    _seed_default_screen_payloads(paths)
     bundle = run_generate_bundle(paths)
     assert cpp["spec_hash"]
     assert (paths.generated_cpp_dir / "scenarios_gen.cpp").exists()
@@ -116,6 +136,7 @@ def test_generate_cpp_and_bundle(tmp_path: Path) -> None:
 
 def test_generate_bundle_uses_resource_payloads(tmp_path: Path) -> None:
     paths = _seed(tmp_path)
+    _seed_default_screen_payloads(paths)
     _write(paths.story_data_dir / "screens" / "SCENE_LOCKED.json", '{"id":"SCENE_LOCKED","title":"Custom Locked"}')
     _write(
         paths.story_data_dir / "apps" / "APP_SCREEN.json",
@@ -139,8 +160,69 @@ def test_generate_bundle_uses_resource_payloads(tmp_path: Path) -> None:
     assert action_payload["config"]["serial_log"] is False
 
 
+def test_generate_bundle_rejects_unknown_scene_id(tmp_path: Path) -> None:
+    paths = _seed(tmp_path)
+    _write(
+        paths.story_specs_dir / "default.yaml",
+        """
+id: DEFAULT
+version: 2
+initial_step: STEP_WAIT_UNLOCK
+app_bindings:
+  - id: APP_SCREEN
+    app: SCREEN_SCENE
+steps:
+  - step_id: STEP_WAIT_UNLOCK
+    screen_scene_id: SCENE_UNKNOWN
+    audio_pack_id: ""
+    apps: [APP_SCREEN]
+    mp3_gate_open: false
+    actions: [ACTION_TRACE_STEP]
+    transitions: []
+""".strip(),
+    )
+    _seed_default_screen_payloads(paths)
+    with pytest.raises(StoryGenerationError, match="SCENE_UNKNOWN"):
+        run_generate_bundle(paths)
+
+
+def test_generate_bundle_accepts_legacy_scene_alias(tmp_path: Path) -> None:
+    paths = _seed(tmp_path)
+    _write(
+        paths.story_specs_dir / "default.yaml",
+        """
+id: DEFAULT
+version: 2
+initial_step: STEP_WAIT_UNLOCK
+app_bindings:
+  - id: APP_SCREEN
+    app: SCREEN_SCENE
+steps:
+  - step_id: STEP_WAIT_UNLOCK
+    screen_scene_id: SCENE_LA_DETECT
+    audio_pack_id: ""
+    apps: [APP_SCREEN]
+    mp3_gate_open: false
+    actions: [ACTION_TRACE_STEP]
+    transitions: []
+""".strip(),
+    )
+    _seed_default_screen_payloads(paths)
+    bundle = run_generate_bundle(paths)
+    assert bundle["scenario_count"] == 1
+    bundled = json.loads((paths.bundle_root / "story" / "scenarios" / "DEFAULT.json").read_text())
+    assert bundled["steps"][0]["screen_scene_id"] == "SCENE_LA_DETECTOR"
+
+
+def test_generate_bundle_rejects_missing_screen_asset(tmp_path: Path) -> None:
+    paths = _seed(tmp_path)
+    with pytest.raises(StoryGenerationError, match="Missing required screens resource 'SCENE_LOCKED'"):
+        run_generate_bundle(paths)
+
+
 def test_generate_bundle_normalizes_screen_timeline_and_transition(tmp_path: Path) -> None:
     paths = _seed(tmp_path)
+    _seed_default_screen_payloads(paths)
     _write(paths.story_data_dir / "screens" / "SCENE_READY.json", '{"id":"SCENE_READY","title":"Ready Lite"}')
 
     run_generate_bundle(paths)
@@ -163,6 +245,7 @@ def test_generate_bundle_normalizes_screen_timeline_and_transition(tmp_path: Pat
 
 def test_generate_bundle_normalizes_palette_options(tmp_path: Path) -> None:
     paths = _seed(tmp_path)
+    _seed_default_screen_payloads(paths)
     _write(
         paths.story_data_dir / "screens" / "SCENE_READY.json",
         """

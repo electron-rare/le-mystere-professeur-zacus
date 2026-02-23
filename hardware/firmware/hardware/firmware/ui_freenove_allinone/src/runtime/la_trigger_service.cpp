@@ -5,6 +5,8 @@
 #include <cmath>
 #include <cstring>
 
+#include "resources/screen_scene_registry.h"
+
 namespace {
 
 constexpr uint16_t kLaDetectionToleranceHz = 10U;
@@ -84,8 +86,11 @@ bool LaTriggerService::isTriggerStep(const ScenarioSnapshot& snapshot) {
   if (snapshot.screen_scene_id == nullptr) {
     return false;
   }
-  return (std::strcmp(snapshot.screen_scene_id, "SCENE_LA_DETECT") == 0 ||
-          std::strcmp(snapshot.screen_scene_id, "SCENE_LA_DETECTOR") == 0);
+  const char* normalized_scene_id = storyNormalizeScreenSceneId(snapshot.screen_scene_id);
+  if (normalized_scene_id == nullptr) {
+    return false;
+  }
+  return (std::strcmp(normalized_scene_id, "SCENE_LA_DETECTOR") == 0);
 }
 
 bool LaTriggerService::shouldEnforceMatchOnly(const RuntimeHardwareConfig& config,

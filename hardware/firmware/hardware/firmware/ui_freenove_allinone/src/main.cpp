@@ -9,11 +9,16 @@
 #include <cstdlib>
 #include <cstring>
 
+#if defined(ARDUINO_ARCH_ESP32)
+#include <esp_heap_caps.h>
+#endif
+
 #include "audio_manager.h"
 #include "button_manager.h"
 #include "camera_manager.h"
 #include "hardware_manager.h"
 #include "media_manager.h"
+#include "ui_freenove_config.h"
 #include "network_manager.h"
 #include "runtime/la_trigger_service.h"
 #include "runtime/runtime_config_service.h"
@@ -176,6 +181,26 @@ void copyText(char* out, size_t out_size, const char* text) {
   }
   std::strncpy(out, text, out_size - 1U);
   out[out_size - 1U] = '\0';
+}
+
+void logBootMemoryProfile() {
+#if defined(ARDUINO_ARCH_ESP32)
+  Serial.printf("[MEM] free_heap=%u min_free_heap=%u total_heap=%u\n",
+                static_cast<unsigned int>(ESP.getFreeHeap()),
+                static_cast<unsigned int>(ESP.getMinFreeHeap()),
+                static_cast<unsigned int>(ESP.getHeapSize()));
+#if defined(FREENOVE_USE_PSRAM)
+  const size_t psram_total = ESP.getPsramSize();
+  const size_t free_psram = (psram_total != 0U) ? heap_caps_get_free_size(MALLOC_CAP_SPIRAM) : 0U;
+  Serial.printf("[MEM] psram_found=%u total_psram=%u free_psram=%u\n",
+                (psram_total != 0U) ? 1U : 0U,
+                static_cast<unsigned int>(psram_total),
+                static_cast<unsigned int>(free_psram));
+  if (psram_total == 0U) {
+    Serial.println("[MEM] PSRAM expected by build flags but not detected");
+  }
+#endif
+#endif
 }
 
 bool parseBoolToken(const char* text, bool* out_value) {
@@ -977,7 +1002,7 @@ void printRuntimeStatus() {
   const char* step_id = stepIdFromSnapshot(snapshot);
   const char* screen_id = (snapshot.screen_scene_id != nullptr) ? snapshot.screen_scene_id : "n/a";
   const char* audio_pack = (snapshot.audio_pack_id != nullptr) ? snapshot.audio_pack_id : "n/a";
-  Serial.printf("STATUS scenario=%s step=%s screen=%s pack=%s audio=%u track=%s profile=%u:%s vol=%u "
+  Serial.printf("STATUS scenario=%s step=%s screen=%s pack=%s audio=%u track=%s codec=%s bitrate=%u profile=%u:%s fx=%u:%s vol=%u "
                 "net=%s/%s sta=%u connecting=%u ap=%u espnow=%u peers=%u ip=%s key=%u mv=%d "
                 "hw=%u mic=%u battery=%u cam=%u media_play=%u rec=%u\n",
                 scenario_id,
@@ -986,8 +1011,12 @@ void printRuntimeStatus() {
                 audio_pack,
                 g_audio.isPlaying() ? 1 : 0,
                 g_audio.currentTrack(),
+                g_audio.activeCodec(),
+                g_audio.activeBitrateKbps(),
                 g_audio.outputProfile(),
                 g_audio.outputProfileLabel(g_audio.outputProfile()),
+                g_audio.fxProfile(),
+                g_audio.fxProfileLabel(g_audio.fxProfile()),
                 g_audio.volume(),
                 net.state,
                 net.mode,
@@ -1955,6 +1984,11 @@ void webBuildStatusDocument(StaticJsonDocument<4096>* out_document) {
   JsonObject audio = (*out_document)["audio"].to<JsonObject>();
   audio["playing"] = g_audio.isPlaying();
   audio["track"] = g_audio.currentTrack();
+  audio["codec"] = g_audio.activeCodec();
+  audio["bitrate_kbps"] = g_audio.activeBitrateKbps();
+  audio["fx"] = g_audio.fxProfile();
+  audio["fx_label"] = g_audio.fxProfileLabel(g_audio.fxProfile());
+  audio["profile"] = g_audio.outputProfile();
   audio["volume"] = g_audio.volume();
 
   JsonObject hardware = (*out_document)["hardware"].to<JsonObject>();
@@ -2687,7 +2721,7 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
         "WIFI_AP_ON [ssid] [pass] WIFI_AP_OFF "
         "ESPNOW_ON ESPNOW_OFF ESPNOW_STATUS ESPNOW_STATUS_JSON ESPNOW_PEER_ADD <mac> ESPNOW_PEER_DEL <mac> ESPNOW_PEER_LIST "
         "ESPNOW_SEND <mac|broadcast> <text|json> "
-        "AUDIO_TEST AUDIO_TEST_FS AUDIO_PROFILE <idx> AUDIO_STATUS VOL <0..21> AUDIO_STOP STOP");
+        "AUDIO_TEST AUDIO_TEST_FS AUDIO_PROFILE <idx> AUDIO_FX <idx> AUDIO_STATUS VOL <0..21> AUDIO_STOP STOP");
     return;
   }
   if (std::strcmp(command, "STATUS") == 0) {
@@ -3071,12 +3105,38 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
     return;
   }
   if (std::strcmp(command, "AUDIO_STATUS") == 0) {
-    Serial.printf("AUDIO_STATUS playing=%u track=%s profile=%u:%s vol=%u\n",
+    Serial.printf("AUDIO_STATUS playing=%u track=%s codec=%s bitrate=%u profile=%u:%s fx=%u:%s vol=%u\n",
                   g_audio.isPlaying() ? 1U : 0U,
                   g_audio.currentTrack(),
+                  g_audio.activeCodec(),
+                  g_audio.activeBitrateKbps(),
                   g_audio.outputProfile(),
                   g_audio.outputProfileLabel(g_audio.outputProfile()),
+                  g_audio.fxProfile(),
+                  g_audio.fxProfileLabel(g_audio.fxProfile()),
                   g_audio.volume());
+    return;
+  }
+  if (std::strcmp(command, "AUDIO_FX") == 0) {
+    if (argument == nullptr) {
+      Serial.printf("AUDIO_FX current=%u label=%s count=%u\n",
+                    g_audio.fxProfile(),
+                    g_audio.fxProfileLabel(g_audio.fxProfile()),
+                    g_audio.fxProfileCount());
+      return;
+    }
+    char* end = nullptr;
+    const unsigned long parsed = std::strtoul(argument, &end, 10);
+    if (end == argument || (end != nullptr && *end != '\0') || parsed >= g_audio.fxProfileCount() || parsed > 255UL) {
+      Serial.println("ERR AUDIO_FX_ARG");
+      return;
+    }
+    const uint8_t fx = static_cast<uint8_t>(parsed);
+    const bool ok = g_audio.setFxProfile(fx);
+    Serial.printf("ACK AUDIO_FX %u %u %s\n",
+                  fx,
+                  ok ? 1U : 0U,
+                  ok ? g_audio.fxProfileLabel(fx) : "invalid");
     return;
   }
   if (std::strcmp(command, "VOL") == 0) {
@@ -3086,7 +3146,7 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
     }
     char* end = nullptr;
     const unsigned long parsed = std::strtoul(argument, &end, 10);
-    if (end == argument || (end != nullptr && *end != '\0') || parsed > 21UL) {
+    if (end == argument || (end != nullptr && *end != '\0') || parsed > static_cast<unsigned long>(FREENOVE_AUDIO_MAX_VOLUME)) {
       Serial.println("ERR VOL_ARG");
       return;
     }
@@ -3138,6 +3198,7 @@ void setup() {
   Serial.begin(115200);
   delay(100);
   Serial.println("[MAIN] Freenove all-in-one boot");
+  logBootMemoryProfile();
 
   if (!g_storage.begin()) {
     Serial.println("[MAIN] storage init failed");
@@ -3357,5 +3418,5 @@ void loop() {
       g_network.disconnectSta();
     }
   }
-  delay(5);
+  yield();
 }

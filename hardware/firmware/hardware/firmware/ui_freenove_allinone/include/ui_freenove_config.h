@@ -66,7 +66,9 @@
 #define TFT_BACKLIGHT_ON HIGH
 #define SPI_FREQUENCY 80000000
 #define SPI_READ_FREQUENCY 20000000
+#ifndef SUPPORT_TRANSACTIONS
 #define SUPPORT_TRANSACTIONS
+#endif
 #define USE_FSPI_PORT
 
 // Buttons: analog ladder by default (5 keys).
@@ -100,6 +102,31 @@
 #define FREENOVE_I2S_IN_SCK 3
 #define FREENOVE_I2S_IN_WS 14
 #define FREENOVE_I2S_IN_DIN 46
+
+// Audio output behavior tuning (embedded audio manager knobs).
+#ifndef FREENOVE_AUDIO_MAX_VOLUME
+#define FREENOVE_AUDIO_MAX_VOLUME 21U
+#endif
+
+#ifndef FREENOVE_AUDIO_VOLUME_RAMP_MS
+#define FREENOVE_AUDIO_VOLUME_RAMP_MS 140U
+#endif
+
+#ifndef FREENOVE_AUDIO_START_TIMEOUT_MS
+#define FREENOVE_AUDIO_START_TIMEOUT_MS 2200U
+#endif
+
+#ifndef FREENOVE_AUDIO_STALL_TIMEOUT_MS
+#define FREENOVE_AUDIO_STALL_TIMEOUT_MS 8000U
+#endif
+
+#ifndef FREENOVE_AUDIO_RETRY_MAX
+#define FREENOVE_AUDIO_RETRY_MAX 1U
+#endif
+
+#ifndef FREENOVE_AUDIO_RETRY_DELAY_MS
+#define FREENOVE_AUDIO_RETRY_DELAY_MS 800U
+#endif
 
 // WS2812 + battery defaults for Freenove ESP32-S3.
 #ifndef FREENOVE_WS2812_PIN

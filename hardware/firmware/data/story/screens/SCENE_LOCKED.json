@@ -3,7 +3,7 @@
   "title": "Module U-SON PROTO",
   "subtitle": "VERIFICATION EN COURS",
   "symbol": "LOCK",
-  "effect": "glitch",
+  "effect": "blink",
   "visual": {
     "show_title": true,
     "show_symbol": true,
@@ -31,7 +31,7 @@
     "keyframes": [
       {
         "at_ms": 0,
-        "effect": "glitch",
+        "effect": "blink",
         "speed_ms": 90,
         "theme": {
           "bg": "#06060E",
@@ -51,7 +51,7 @@
       },
       {
         "at_ms": 460,
-        "effect": "glitch",
+        "effect": "blink",
         "speed_ms": 80,
         "theme": {
           "bg": "#15090F",
@@ -71,7 +71,7 @@
       },
       {
         "at_ms": 920,
-        "effect": "glitch",
+        "effect": "blink",
         "speed_ms": 70,
         "theme": {
           "bg": "#17090E",
@@ -91,7 +91,7 @@
       },
       {
         "at_ms": 1360,
-        "effect": "glitch",
+        "effect": "blink",
         "speed_ms": 65,
         "theme": {
           "bg": "#16090E",

@@ -10,17 +10,28 @@
 #include <cstdlib>
 #include <cstring>
 
+#if defined(ARDUINO_ARCH_ESP32)
+#include <esp_heap_caps.h>
+#endif
+
 #include "ui_freenove_config.h"
+#include "resources/screen_scene_registry.h"
 #include "ui/scene_element.h"
 #include "ui/scene_state.h"
 
 namespace {
 
 constexpr uint16_t kDrawBufferLines = 24;
+constexpr uint16_t kPsramDrawBufferLines = 48;
+constexpr uint16_t kPsramDrawBufferLinesFallback = 32;
+constexpr size_t kPsramDrawBufferReserveBytes = 96U * 1024U;
 
 TFT_eSPI g_tft = TFT_eSPI(FREENOVE_LCD_WIDTH, FREENOVE_LCD_HEIGHT);
 lv_disp_draw_buf_t g_draw_buf;
-lv_color_t g_draw_pixels[FREENOVE_LCD_WIDTH * kDrawBufferLines];
+lv_color_t g_draw_pixels_local[FREENOVE_LCD_WIDTH * kDrawBufferLines];
+lv_color_t* g_draw_pixels = g_draw_pixels_local;
+size_t g_draw_pixels_count = FREENOVE_LCD_WIDTH * static_cast<size_t>(kDrawBufferLines);
+bool g_draw_buffer_in_psram = false;
 UiManager* g_instance = nullptr;
 
 int16_t activeDisplayWidth() {
@@ -99,6 +110,63 @@ uint32_t toLvKey(uint8_t key, bool long_press) {
     default:
       return LV_KEY_ENTER;
   }
+}
+
+bool tryAllocatePsramDrawBuffer(uint16_t draw_lines) {
+#if defined(ARDUINO_ARCH_ESP32) && defined(FREENOVE_PSRAM_UI_DRAW_BUFFER)
+  const size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  if (free_psram == 0U) {
+    return false;
+  }
+  const size_t pixels = static_cast<size_t>(draw_lines) * FREENOVE_LCD_WIDTH;
+  const size_t bytes = pixels * sizeof(lv_color_t);
+  if (free_psram <= (bytes + kPsramDrawBufferReserveBytes)) {
+    return false;
+  }
+  lv_color_t* const buffer = static_cast<lv_color_t*>(
+      heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (buffer == nullptr) {
+    return false;
+  }
+  g_draw_pixels = buffer;
+  g_draw_pixels_count = pixels;
+  g_draw_buffer_in_psram = true;
+  Serial.printf("[UI] draw buffer in PSRAM: lines=%u bytes=%u free_psram=%u\n",
+                static_cast<unsigned int>(draw_lines),
+                static_cast<unsigned int>(bytes),
+                static_cast<unsigned int>(free_psram));
+  return true;
+#else
+  (void)draw_lines;
+  return false;
+#endif
+}
+
+void initDrawBufferFromPsram() {
+  g_draw_pixels = g_draw_pixels_local;
+  g_draw_pixels_count = FREENOVE_LCD_WIDTH * static_cast<size_t>(kDrawBufferLines);
+  g_draw_buffer_in_psram = false;
+
+#if defined(ARDUINO_ARCH_ESP32) && defined(FREENOVE_PSRAM_UI_DRAW_BUFFER)
+  if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) == 0U) {
+    Serial.printf("[UI] PSRAM unavailable for draw buffer, using internal RAM (%u lines)\n",
+                  static_cast<unsigned int>(kDrawBufferLines));
+  } else if (tryAllocatePsramDrawBuffer(kPsramDrawBufferLines) ||
+             tryAllocatePsramDrawBuffer(kPsramDrawBufferLinesFallback)) {
+  } else {
+    Serial.printf("[UI] PSRAM insufficient, fallback draw buffer lines=%u in internal RAM\n",
+                  static_cast<unsigned int>(kDrawBufferLines));
+  }
+#else
+  Serial.printf("[UI] PSRAM draw buffer disabled, using internal RAM lines=%u\n",
+                static_cast<unsigned int>(kDrawBufferLines));
+#endif
+  const uint16_t effective_lines =
+      static_cast<uint16_t>(g_draw_pixels_count / static_cast<size_t>(FREENOVE_LCD_WIDTH));
+  Serial.printf("[UI] LVGL draw buffer ready: source=%s lines=%u bytes=%u\n",
+                g_draw_buffer_in_psram ? "PSRAM" : "DRAM",
+                static_cast<unsigned int>(effective_lines),
+                static_cast<unsigned int>(g_draw_pixels_count * sizeof(lv_color_t)));
 }
 
 bool parseHexRgb(const char* text, uint32_t* out_rgb) {
@@ -190,8 +258,9 @@ bool UiManager::begin() {
   g_tft.begin();
   g_tft.setRotation(FREENOVE_LCD_ROTATION);
   g_tft.fillScreen(TFT_BLACK);
+  initDrawBufferFromPsram();
 
-  lv_disp_draw_buf_init(&g_draw_buf, g_draw_pixels, nullptr, FREENOVE_LCD_WIDTH * kDrawBufferLines);
+  lv_disp_draw_buf_init(&g_draw_buf, g_draw_pixels, nullptr, g_draw_pixels_count);
 
   static lv_disp_drv_t disp_drv;
   lv_disp_drv_init(&disp_drv);
@@ -876,18 +945,27 @@ void UiManager::renderScene(const ScenarioDef* scenario,
                             const char* audio_pack_id,
                             bool audio_playing,
                             const char* screen_payload_json) {
-  (void)step_id;
   (void)audio_pack_id;
   if (!ready_) {
     return;
   }
 
   const char* scenario_id = (scenario != nullptr && scenario->id != nullptr) ? scenario->id : "N/A";
-  const char* scene_id = (screen_scene_id != nullptr && screen_scene_id[0] != '\0') ? screen_scene_id : "SCENE_READY";
+  const char* raw_scene_id = (screen_scene_id != nullptr && screen_scene_id[0] != '\0') ? screen_scene_id : "SCENE_READY";
+  const char* normalized_scene_id = storyNormalizeScreenSceneId(raw_scene_id);
+  const char* step_id_for_log = (step_id != nullptr && step_id[0] != '\0') ? step_id : "N/A";
+  if (normalized_scene_id == nullptr) {
+    Serial.printf("[UI] unknown scene id '%s' in scenario=%s step=%s\n", raw_scene_id, scenario_id, step_id_for_log);
+    return;
+  }
+  if (normalized_scene_id != nullptr && std::strcmp(raw_scene_id, normalized_scene_id) != 0) {
+    Serial.printf("[UI] scene alias normalized: %s -> %s\n", raw_scene_id, normalized_scene_id);
+  }
+  const char* scene_id = normalized_scene_id;
   const bool scene_changed = (std::strcmp(last_scene_id_, scene_id) != 0);
   const bool has_previous_scene = (last_scene_id_[0] != '\0');
 
-  auto parseEffectToken = [](const char* token, SceneEffect fallback) -> SceneEffect {
+  auto parseEffectToken = [](const char* token, SceneEffect fallback, const char* source) -> SceneEffect {
     if (token == nullptr || token[0] == '\0') {
       return fallback;
     }
@@ -920,14 +998,11 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     if (std::strcmp(normalized, "celebrate") == 0 || std::strcmp(normalized, "reward") == 0) {
       return SceneEffect::kCelebrate;
     }
-    if (std::strstr(normalized, "scan") != nullptr || std::strstr(normalized, "radar") != nullptr ||
-        std::strstr(normalized, "wave") != nullptr || std::strstr(normalized, "sonar") != nullptr) {
-      return SceneEffect::kScan;
-    }
+    Serial.printf("[UI] unknown effect token '%s' in %s, fallback\n", token, source);
     return SceneEffect::kPulse;
   };
 
-  auto parseTransitionToken = [](const char* token, SceneTransition fallback) -> SceneTransition {
+  auto parseTransitionToken = [](const char* token, SceneTransition fallback, const char* source) -> SceneTransition {
     if (token == nullptr || token[0] == '\0') {
       return fallback;
     }
@@ -967,6 +1042,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
         std::strcmp(normalized, "camera_flash") == 0) {
       return SceneTransition::kGlitch;
     }
+    Serial.printf("[UI] unknown transition token '%s' in %s, fallback\n", token, source);
     return fallback;
   };
 
@@ -1060,7 +1136,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     bg_rgb = 0x2A0508UL;
     accent_rgb = 0xFF4A45UL;
     text_rgb = 0xFFD5D1UL;
-  } else if (std::strcmp(scene_id, "SCENE_LA_DETECT") == 0 || std::strcmp(scene_id, "SCENE_LA_DETECTOR") == 0 ||
+  } else if (std::strcmp(scene_id, "SCENE_LA_DETECTOR") == 0 ||
              std::strcmp(scene_id, "SCENE_SEARCH") == 0 ||
              std::strcmp(scene_id, "SCENE_CAMERA_SCAN") == 0) {
     title = "DETECTEUR DE RESONNANCE";
@@ -1070,7 +1146,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     bg_rgb = 0x04141FUL;
     accent_rgb = 0x49D9FFUL;
     text_rgb = 0xE7F6FFUL;
-    if (std::strcmp(scene_id, "SCENE_LA_DETECT") == 0 || std::strcmp(scene_id, "SCENE_LA_DETECTOR") == 0) {
+    if (std::strcmp(scene_id, "SCENE_LA_DETECTOR") == 0) {
       bg_rgb = 0x000000UL;
       la_detection_scene_ = true;
       waveform_enabled = true;
@@ -1161,7 +1237,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
       title_align = parseAlignToken(document["text"]["title_align"] | "", title_align);
       subtitle_align = parseAlignToken(document["text"]["subtitle_align"] | "", subtitle_align);
 
-      effect = parseEffectToken(payload_effect, effect);
+      effect = parseEffectToken(payload_effect, effect, "scene payload effect");
 
       const char* payload_bg = document["theme"]["bg"] | document["visual"]["theme"]["bg"] | document["bg"] | "";
       const char* payload_accent =
@@ -1180,7 +1256,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
 
       const char* transition_token =
           document["transition"]["effect"] | document["transition"]["type"] | document["visual"]["transition"] | "";
-      transition = parseTransitionToken(transition_token, transition);
+      transition = parseTransitionToken(transition_token, transition, "scene payload transition");
       if (document["transition"]["duration_ms"].is<unsigned int>()) {
         transition_ms = static_cast<uint16_t>(document["transition"]["duration_ms"].as<unsigned int>());
       } else if (document["transition"]["ms"].is<unsigned int>()) {
@@ -1348,7 +1424,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
             at_ms = previous_at_ms;
           }
           candidate.at_ms = at_ms;
-          candidate.effect = parseEffectToken(frame["effect"] | frame["fx"] | "", candidate.effect);
+          candidate.effect = parseEffectToken(frame["effect"] | frame["fx"] | "", candidate.effect, "timeline frame effect");
 
           if (frame["speed_ms"].is<unsigned int>()) {
             candidate.speed_ms = static_cast<uint16_t>(frame["speed_ms"].as<unsigned int>());

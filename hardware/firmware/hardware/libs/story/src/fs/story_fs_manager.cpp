@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "resources/screen_scene_registry.h"
+
 namespace {
 
 constexpr size_t kSha256HexLen = 64U;
@@ -254,18 +256,40 @@ bool StoryFsManager::loadScenario(const char* scenario_id) {
 			continue;
 		}
 
-		const char* screenId = stepObj["screen_scene_id"] | "";
-		const char* audioId = stepObj["audio_pack_id"] | "";
-		if (screenId[0] != '\0') {
-			if (!validateChecksum("screens", screenId)) {
-				Serial.printf("[STORY_FS] screen checksum mismatch: %s\n", screenId);
-				return false;
+			const char* screenId = stepObj["screen_scene_id"] | "";
+			const char* audioId = stepObj["audio_pack_id"] | "";
+			if (screenId[0] != '\0') {
+				const char* normalizedScreenId = storyNormalizeScreenSceneId(screenId);
+				if (normalizedScreenId == nullptr) {
+					Serial.printf("[STORY_FS] unknown screen_scene_id: %s\n", screenId);
+					return false;
+				}
+				if (std::strcmp(screenId, normalizedScreenId) != 0) {
+					Serial.printf("[STORY_FS] screen_scene_id normalized: %s -> %s\n", screenId, normalizedScreenId);
+				}
+				const char* candidateIds[2] = {normalizedScreenId, screenId};
+				const bool hasAliasCandidate = (std::strcmp(screenId, normalizedScreenId) != 0);
+				const uint8_t candidateCount = hasAliasCandidate ? 2U : 1U;
+				bool screenResolved = false;
+				for (uint8_t candidateIndex = 0U; candidateIndex < candidateCount; ++candidateIndex) {
+					const char* candidateId = candidateIds[candidateIndex];
+					if (!validateChecksum("screens", candidateId)) {
+						continue;
+					}
+					if (!loadEntityJson("screens", candidateId)) {
+						continue;
+					}
+					if (candidateIndex == 1U) {
+						Serial.printf("[STORY_FS] screen alias payload accepted for migration: %s\n", candidateId);
+					}
+					screenResolved = true;
+					break;
+				}
+				if (!screenResolved) {
+					Serial.printf("[STORY_FS] screen file/checksum invalid for id=%s normalized=%s\n", screenId, normalizedScreenId);
+					return false;
+				}
 			}
-			if (!loadEntityJson("screens", screenId)) {
-				Serial.printf("[STORY_FS] screen file missing or invalid: %s\n", screenId);
-				return false;
-			}
-		}
 		if (audioId[0] != '\0') {
 			if (!validateChecksum("audio", audioId)) {
 				Serial.printf("[STORY_FS] audio checksum mismatch: %s\n", audioId);
@@ -279,8 +303,10 @@ bool StoryFsManager::loadScenario(const char* scenario_id) {
 
 		StepRuntime& runtime = stepRuntime_[stepCount_];
 		StepDef& step = steps_[stepCount_];
+		const char* rawScreenId = stepObj["screen_scene_id"] | "";
+		const char* normalizedScreenId = storyNormalizeScreenSceneId(rawScreenId);
 		step.id = storeString(stepObj["step_id"] | "");
-		step.resources.screenSceneId = storeString(stepObj["screen_scene_id"] | "");
+		step.resources.screenSceneId = storeString((normalizedScreenId != nullptr) ? normalizedScreenId : rawScreenId);
 		step.resources.audioPackId = storeString(stepObj["audio_pack_id"] | "");
 
 		JsonArray actions = stepObj["actions"].as<JsonArray>();

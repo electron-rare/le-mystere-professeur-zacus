@@ -1,5 +1,7 @@
 #include "scenario_def.h"
 
+#include "resources/screen_scene_registry.h"
+
 #include <cstring>
 
 namespace {
@@ -101,6 +103,18 @@ bool storyValidateScenarioDef(const ScenarioDef& scenario, StoryValidationError*
           tr.eventType == StoryEventType::kNone) {
         localError.code = "TRANSITION_EVENT_INVALID";
         localError.detail = tr.id;
+        if (outError != nullptr) {
+          *outError = localError;
+        }
+        return false;
+      }
+    }
+
+    if (step.resources.screenSceneId != nullptr && step.resources.screenSceneId[0] != '\0') {
+      const char* normalizedSceneId = storyNormalizeScreenSceneId(step.resources.screenSceneId);
+      if (normalizedSceneId == nullptr) {
+        localError.code = "SCREEN_SCENE_ID_UNKNOWN";
+        localError.detail = step.resources.screenSceneId;
         if (outError != nullptr) {
           *outError = localError;
         }

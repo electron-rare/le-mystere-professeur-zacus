@@ -36,12 +36,14 @@ Ces IDs sont utilises par le moteur Story V2 pour piloter l'UI. Ils sont mappes 
 |---|---|---|
 | `SCENE_LOCKED` | `LECTURE` | Etat verrouille / attente |
 | `SCENE_BROKEN` | `LECTURE` | Variante boot / proto U-SON |
-| `SCENE_INFO` | `LECTURE` | Infos generiques |
 | `SCENE_SEARCH` | `LISTE` | Recherche / detection |
-| `SCENE_LA_DETECT` | `LISTE` | Attente LA / detection |
+| `SCENE_LA_DETECTOR` | `LISTE` | Attente LA / detection |
+| `SCENE_CAMERA_SCAN` | `LISTE` | Capture visuelle |
+| `SCENE_SIGNAL_SPIKE` | `LISTE` | Interference détectée |
 | `SCENE_REWARD` | `REGLAGES` | Recompense |
 | `SCENE_WIN` | `REGLAGES` | Variante win |
 | `SCENE_READY` | `REGLAGES` | Etat pret / fin |
+| `SCENE_MEDIA_ARCHIVE` | `REGLAGES` | Fin de mission / recap |
 
 ## Gestes et interactions
 - Swipe horizontal: `next/prev`.

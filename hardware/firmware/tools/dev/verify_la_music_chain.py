@@ -419,60 +419,75 @@ def generate_segmented_wav(
     segments: list[tuple[float, float, float]] = []
     cursor = 0
     total_ms = max(4000, int(duration_s * 1000))
-    min_anchor_ms = max(4000, stable_ms + 700)
-    if total_ms <= min_anchor_ms + 1500:
-        min_anchor_ms = max(3000, total_ms - 2500)
+    la_anchor_ratio = 0.70
+    target_anchor_ms = int(total_ms * la_anchor_ratio)
+    min_anchor_ms = min(
+        max(stable_ms + 3000, 6500),
+        max(3000, total_ms - 2500),
+    )
+    anchor_length_ms = max(min_anchor_ms, min(target_anchor_ms, total_ms - 2500))
 
-    max_anchor_start = max(600, int(total_ms * 0.65))
-    anchor_start = random.randint(500, max_anchor_start) if max_anchor_start > 500 else 500
-    max_anchor_length = max(0, total_ms - anchor_start - 400)
-    if max_anchor_length <= 0:
-        anchor_start = 0
+    if anchor_length_ms >= total_ms - 500:
+        anchor_start = 500
         anchor_end = total_ms
     else:
-        anchor_length_min = min(min_anchor_ms, max_anchor_length)
-        anchor_length_max = max(anchor_length_min, min(max_anchor_length, min_anchor_ms + 2200))
-        anchor_length = random.randint(anchor_length_min, anchor_length_max)
-        anchor_end = min(total_ms, anchor_start + anchor_length)
+        anchor_start_min = 500
+        anchor_start_max = max(anchor_start_min, int(total_ms * 0.20))
+        anchor_start = random.randint(anchor_start_min, anchor_start_max)
+        anchor_end = min(total_ms - 300, anchor_start + anchor_length_ms)
         if anchor_end <= anchor_start:
-            anchor_start = 0
+            anchor_start = 500
             anchor_end = total_ms
 
     while cursor < total_ms:
+        remaining = total_ms - cursor
         if cursor < anchor_start:
-            seg_ms = min(random.randint(120, 450), anchor_start - cursor)
+            seg_ms = min(random.randint(80, 220), anchor_start - cursor)
             if random.random() < 0.45:
                 freq = float(random.randint(260, 1200))
-                amp = 0.09 + (random.random() * 0.20 * bg_volume)
+                amp = 0.05 + (random.random() * 0.22 * bg_volume)
             else:
                 freq = 0.0
-                amp = 0.03 * bg_volume
+                amp = 0.02 * bg_volume
             segments.append((seg_ms / 1000.0, freq, amp))
             cursor += seg_ms
             continue
 
         if cursor < anchor_end:
-            # Keep LA chunks mostly stable, with occasional short interruptions.
-            if random.random() < 0.22 and cursor + 180 < anchor_end:
-                seg_ms = random.randint(120, 320)
+            if cursor == anchor_start:
+                burst_ms = min(
+                    max(stable_ms + 1200, 4200),
+                    max(4000, anchor_end - cursor - 800),
+                )
+                segments.append((burst_ms / 1000.0, float(target_hz), 0.95))
+                cursor += burst_ms
+                continue
+
+            # Keep LA dominant, with short disturbances only.
+            if random.random() < 0.04 and (cursor + 60) < anchor_end:
+                seg_ms = random.randint(60, 120)
                 freq = float(random.randint(260, 1100))
-                amp = 0.08 + (random.random() * 0.22 * bg_volume)
+                amp = 0.08 + (random.random() * 0.08 * bg_volume)
                 segments.append((seg_ms / 1000.0, freq, amp))
                 cursor += seg_ms
                 continue
 
-            seg_ms = min(random.randint(260, 620), anchor_end - cursor)
-            freq = float(random.randint(max(260, target_hz - 4), target_hz + 4))
-            amp = max(0.08, 0.32 + (random.random() * 0.28) * la_volume)
-            amp = min(0.72, amp)
+            seg_ms = min(random.randint(450, 900), anchor_end - cursor)
+            freq = float(random.randint(max(260, target_hz - 3), target_hz + 3))
+            amp = max(0.2, (0.70 + (random.random() * 0.25)) * la_volume)
+            amp = min(0.95, amp)
             segments.append((seg_ms / 1000.0, freq, amp))
             cursor += seg_ms
             continue
 
-        seg_ms = min(random.randint(150, 460), total_ms - cursor)
-        if random.random() < 0.35:
-            freq = float(random.randint(260, 1200))
-            amp = 0.09 + (random.random() * 0.18 * bg_volume)
+        seg_ms = min(random.randint(120, 360), remaining)
+        if random.random() < 0.40:
+            if remaining > 2600 and random.random() < 0.15:
+                freq = float(random.randint(max(240, target_hz - 24), target_hz + 24))
+                amp = 0.22 + (random.random() * 0.22 * la_volume)
+            else:
+                freq = float(random.randint(260, 1200))
+                amp = 0.07 + (random.random() * 0.18 * bg_volume)
         else:
             freq = 0.0
             amp = 0.025 * bg_volume

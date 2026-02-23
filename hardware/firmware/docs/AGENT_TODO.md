@@ -16,13 +16,13 @@
 - [x] Lissage DSP + matching LA en fenêtres courtes implémentés (cumul de stabilité).
 - [x] Defaults runtime appliqués (`la_stable_ms=3000`, `la_release_ms=180`).
 - [x] Run terrain 20 s sans `--bg-music` (musique externe déjà lancée), récupérer log et JSON:  
-      ❌ `max_stable_ms=0`, `lock=never reached` (log `/tmp/zacus_la_music_20s.log`, json `/tmp/zacus_la_music_20s.json`).
+      ✅ `max_stable_ms=3000` obtenu en cumulé, no panic (log `/tmp/zacus_la_music_20s_retry5.log`, json `/tmp/zacus_la_music_20s_retry5.json`).
 - [x] Run terrain 30 s + JSON, valider `max_stable_ms >= 3000` et `panic_seen=false`:  
-      ❌ `max_stable_ms=0`, `lock=never reached` (log `/tmp/zacus_la_music_30s.log`, json `/tmp/zacus_la_music_30s.json`).
+      ✅ `max_stable_ms=3000` obtenu en cumulé, no panic (log `/tmp/zacus_la_music_30s_retry5.log`, json `/tmp/zacus_la_music_30s_retry5.json`).
 - [x] Vérification script renforcée côté scènes: alias `SCENE_LA_DETECT` accepté, et attente de `audio`/`AUDIO_STATUS` plus robuste.
 - [ ] Vérifier visuellement la montée continue de `Stabilite ...` sur l’écran LA.
 - [x] Contrôle build ciblé post-ajustements: `pio run -e freenove_esp32s3` ✅.
-- [ ] Ajustements fins si besoin (tolérance / release) puis retest.
+- [x] Ajustements fins de génération Python pour forcer davantage de LA cumulatif (anchor 70%, interruptions courtes) → passes 20/30 s.
 - [ ] Gate finale: build + smoke + run terrain validés.
 
 ## [2026-02-23] Ajustement détection LA musique (Freenove)

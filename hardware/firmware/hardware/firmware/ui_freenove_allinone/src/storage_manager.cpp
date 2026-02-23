@@ -66,7 +66,7 @@ constexpr EmbeddedStoryAsset kEmbeddedStoryAssets[] = {
     {"/story/audio/PACK_MORSE_HINT.json", R"JSON({"id":"PACK_MORSE_HINT","file":"/music/morse_hint.mp3","volume":100})JSON"},
     {"/story/audio/PACK_SONAR_HINT.json", R"JSON({"id":"PACK_SONAR_HINT","file":"/music/sonar_hint.mp3","volume":100})JSON"},
     {"/story/audio/PACK_WIN.json", R"JSON({"id":"PACK_WIN","file":"/music/win.mp3","volume":100})JSON"},
-    {"/story/scenarios/DEFAULT.json", R"JSON({"id":"DEFAULT","scenario":"DEFAULT","version":2,"initial_step":"STEP_WAIT_UNLOCK","hardware_events":{"button_short_1":"BTN_NEXT","button_short_2":"BTN_NEXT","button_short_3":"BTN_NEXT","button_short_4":"BTN_NEXT","button_short_5":"BTN_NEXT","button_long_3":"FORCE_ETAPE2","button_long_4":"FORCE_DONE","espnow_event":"SERIAL:<payload>"},"app_bindings":["APP_AUDIO","APP_SCREEN","APP_GATE","APP_WIFI","APP_ESPNOW","APP_HARDWARE","APP_CAMERA","APP_MEDIA"],"actions_catalog":["ACTION_TRACE_STEP","ACTION_FORCE_ETAPE2","ACTION_REFRESH_SD","ACTION_HW_LED_ALERT","ACTION_HW_LED_READY","ACTION_CAMERA_SNAPSHOT","ACTION_MEDIA_PLAY_FILE","ACTION_REC_START","ACTION_REC_STOP"],"steps":[{"id":"STEP_WAIT_UNLOCK","screen_scene_id":"SCENE_LOCKED","action_ids":["ACTION_TRACE_STEP","ACTION_HW_LED_READY"]},{"id":"STEP_U_SON_PROTO","screen_scene_id":"SCENE_BROKEN","audio_pack_id":"PACK_BOOT_RADIO","action_ids":["ACTION_TRACE_STEP","ACTION_HW_LED_ALERT","ACTION_MEDIA_PLAY_FILE"]},{"id":"STEP_WAIT_ETAPE2","screen_scene_id":"SCENE_LA_DETECTOR","action_ids":["ACTION_TRACE_STEP","ACTION_CAMERA_SNAPSHOT","ACTION_REC_START"]},{"id":"STEP_ETAPE2","screen_scene_id":"SCENE_SIGNAL_SPIKE","audio_pack_id":"PACK_WIN","action_ids":["ACTION_TRACE_STEP","ACTION_HW_LED_ALERT"]},{"id":"STEP_DONE","screen_scene_id":"SCENE_MEDIA_ARCHIVE","action_ids":["ACTION_TRACE_STEP","ACTION_REC_STOP","ACTION_HW_LED_READY","ACTION_REFRESH_SD"]}],"source":"story_selector","screen_root":"/story/screens","audio_root":"/story/audio"})JSON"},
+    {"/story/scenarios/DEFAULT.json", R"JSON({"id":"DEFAULT","scenario":"DEFAULT","version":2,"initial_step":"STEP_WAIT_UNLOCK","hardware_events":{"button_short_1":"BTN_NEXT","button_short_2":"BTN_NEXT","button_short_3":"BTN_NEXT","button_short_4":"BTN_NEXT","button_short_5":"BTN_NEXT","button_long_3":"FORCE_ETAPE2","button_long_4":"FORCE_DONE","espnow_event":"SERIAL:<payload>"},"app_bindings":["APP_AUDIO","APP_SCREEN","APP_GATE","APP_WIFI","APP_ESPNOW","APP_HARDWARE","APP_CAMERA","APP_MEDIA"],"actions_catalog":["ACTION_TRACE_STEP","ACTION_FORCE_ETAPE2","ACTION_REFRESH_SD","ACTION_HW_LED_ALERT","ACTION_HW_LED_READY","ACTION_CAMERA_SNAPSHOT","ACTION_QUEUE_SONAR","ACTION_REC_START","ACTION_REC_STOP"],"steps":[{"id":"STEP_WAIT_UNLOCK","screen_scene_id":"SCENE_LOCKED","action_ids":["ACTION_TRACE_STEP","ACTION_HW_LED_READY"]},{"id":"STEP_U_SON_PROTO","screen_scene_id":"SCENE_BROKEN","audio_pack_id":"PACK_BOOT_RADIO","action_ids":["ACTION_TRACE_STEP","ACTION_HW_LED_ALERT"]},{"id":"STEP_WAIT_ETAPE2","screen_scene_id":"SCENE_LA_DETECTOR","action_ids":["ACTION_TRACE_STEP","ACTION_QUEUE_SONAR","ACTION_CAMERA_SNAPSHOT","ACTION_REC_START"]},{"id":"STEP_ETAPE2","screen_scene_id":"SCENE_SIGNAL_SPIKE","audio_pack_id":"PACK_WIN","action_ids":["ACTION_TRACE_STEP","ACTION_HW_LED_ALERT"]},{"id":"STEP_DONE","screen_scene_id":"SCENE_MEDIA_ARCHIVE","action_ids":["ACTION_TRACE_STEP","ACTION_REC_STOP","ACTION_HW_LED_READY","ACTION_REFRESH_SD"]}],"source":"story_selector","screen_root":"/story/screens","audio_root":"/story/audio"})JSON"},
     {"/story/scenarios/EXAMPLE_UNLOCK_EXPRESS.json", R"JSON({"id":"EXAMPLE_UNLOCK_EXPRESS","scenario":"EXAMPLE_UNLOCK_EXPRESS","version":2,"initial_step":"STEP_WAIT_UNLOCK","hardware_events":{"button_short_1":"UNLOCK","button_short_5":"BTN_NEXT","button_long_4":"FORCE_DONE"},"app_bindings":["APP_LA","APP_SCREEN","APP_GATE","APP_AUDIO","APP_WIFI","APP_ESPNOW"],"actions_catalog":["ACTION_TRACE_STEP","ACTION_REFRESH_SD"],"steps":[{"id":"STEP_WAIT_UNLOCK","screen_scene_id":"SCENE_LOCKED"},{"id":"STEP_WIN","screen_scene_id":"SCENE_REWARD","audio_pack_id":"PACK_WIN"},{"id":"STEP_DONE","screen_scene_id":"SCENE_READY"}],"source":"story_selector","screen_root":"/story/screens","audio_root":"/story/audio"})JSON"},
     {"/story/scenarios/EXEMPLE_UNLOCK_EXPRESS_DONE.json", R"JSON({"id":"EXEMPLE_UNLOCK_EXPRESS_DONE","scenario":"EXEMPLE_UNLOCK_EXPRESS_DONE","version":2,"initial_step":"STEP_WAIT_UNLOCK","hardware_events":{"button_short_1":"UNLOCK","button_short_5":"BTN_NEXT","button_long_4":"FORCE_DONE"},"app_bindings":["APP_LA","APP_SCREEN","APP_GATE","APP_AUDIO","APP_WIFI","APP_ESPNOW"],"actions_catalog":["ACTION_TRACE_STEP","ACTION_REFRESH_SD"],"steps":[{"id":"STEP_WAIT_UNLOCK","screen_scene_id":"SCENE_LOCKED"},{"id":"STEP_WIN","screen_scene_id":"SCENE_REWARD","audio_pack_id":"PACK_WIN"},{"id":"STEP_DONE","screen_scene_id":"SCENE_READY"}],"source":"story_selector","screen_root":"/story/screens","audio_root":"/story/audio"})JSON"},
     {"/story/scenarios/SPECTRE_RADIO_LAB.json", R"JSON({"id":"SPECTRE_RADIO_LAB","scenario":"SPECTRE_RADIO_LAB","version":2,"initial_step":"STEP_WAIT_UNLOCK","hardware_events":{"button_short_1":"UNLOCK","button_short_5":"BTN_NEXT","button_long_4":"FORCE_DONE","espnow_event":"SERIAL:<payload>"},"app_bindings":["APP_LA","APP_AUDIO","APP_SCREEN","APP_GATE","APP_WIFI","APP_ESPNOW"],"actions_catalog":["ACTION_TRACE_STEP","ACTION_QUEUE_SONAR","ACTION_REFRESH_SD"],"steps":[{"id":"STEP_WAIT_UNLOCK","screen_scene_id":"SCENE_LOCKED"},{"id":"STEP_SONAR_SEARCH","screen_scene_id":"SCENE_SEARCH","audio_pack_id":"PACK_SONAR_HINT"},{"id":"STEP_MORSE_CLUE","screen_scene_id":"SCENE_SEARCH","audio_pack_id":"PACK_MORSE_HINT"},{"id":"STEP_WIN","screen_scene_id":"SCENE_REWARD","audio_pack_id":"PACK_WIN"},{"id":"STEP_DONE","screen_scene_id":"SCENE_READY"}],"source":"story_selector","screen_root":"/story/screens","audio_root":"/story/audio"})JSON"},
@@ -664,6 +664,27 @@ bool StorageManager::copyStoryDirectoryFromSd(const char* relative_dir) {
 #endif
 }
 
+bool StorageManager::provisionEmbeddedAsset(const char* path,
+                                            const char* payload,
+                                            bool* out_written) const {
+  if (out_written != nullptr) {
+    *out_written = false;
+  }
+  if (path == nullptr || path[0] == '\0' || payload == nullptr) {
+    return false;
+  }
+  if (pathExistsOnLittleFs(path)) {
+    return true;
+  }
+  if (!writeTextToLittleFs(path, payload)) {
+    return false;
+  }
+  if (out_written != nullptr) {
+    *out_written = true;
+  }
+  return true;
+}
+
 bool StorageManager::syncStoryTreeFromSd() {
   if (!sd_ready_) {
     return false;
@@ -682,13 +703,8 @@ bool StorageManager::syncStoryTreeFromSd() {
 bool StorageManager::ensureDefaultStoryBundle() {
   uint16_t written_count = 0U;
   for (const EmbeddedStoryAsset& asset : kEmbeddedStoryAssets) {
-    if (asset.path == nullptr || asset.payload == nullptr) {
-      continue;
-    }
-    if (pathExistsOnLittleFs(asset.path)) {
-      continue;
-    }
-    if (writeTextToLittleFs(asset.path, asset.payload)) {
+    bool written = false;
+    if (provisionEmbeddedAsset(asset.path, asset.payload, &written) && written) {
       ++written_count;
     }
   }

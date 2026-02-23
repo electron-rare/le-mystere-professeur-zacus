@@ -65,23 +65,9 @@ bool loadScenarioIdFromFile(const char* scenario_file_path, String* out_scenario
     return false;
   }
 
-  const char* scenario_id = nullptr;
-  JsonVariantConst candidate = document["scenario"];
-  if (candidate.is<const char*>()) {
-    scenario_id = candidate.as<const char*>();
-  }
-  if ((scenario_id == nullptr || scenario_id[0] == '\0')) {
-    candidate = document["scenario_id"];
-    if (candidate.is<const char*>()) {
-      scenario_id = candidate.as<const char*>();
-    }
-  }
-  if ((scenario_id == nullptr || scenario_id[0] == '\0')) {
-    candidate = document["id"];
-    if (candidate.is<const char*>()) {
-      scenario_id = candidate.as<const char*>();
-    }
-  }
+  const char* const id_candidates[] = {"scenario", "scenario_id", "id"};
+  const char* scenario_id = ScenarioManager::readScenarioField(
+      document.as<JsonVariantConst>(), id_candidates, sizeof(id_candidates) / sizeof(id_candidates[0]));
   if (scenario_id == nullptr || scenario_id[0] == '\0') {
     Serial.printf("[SCENARIO] missing scenario id in config: %s\n", scenario_file_path);
     return false;
@@ -92,6 +78,33 @@ bool loadScenarioIdFromFile(const char* scenario_file_path, String* out_scenario
 }
 
 }  // namespace
+
+const char* ScenarioManager::readScenarioField(JsonVariantConst root,
+                                               const char* const* candidates,
+                                               size_t candidate_count) {
+  if (candidates == nullptr || candidate_count == 0U || root.isNull()) {
+    return nullptr;
+  }
+  JsonObjectConst object = root.as<JsonObjectConst>();
+  if (object.isNull()) {
+    return nullptr;
+  }
+  for (size_t index = 0U; index < candidate_count; ++index) {
+    const char* key = candidates[index];
+    if (key == nullptr || key[0] == '\0') {
+      continue;
+    }
+    JsonVariantConst candidate = object[key];
+    if (!candidate.is<const char*>()) {
+      continue;
+    }
+    const char* text = candidate.as<const char*>();
+    if (text != nullptr && text[0] != '\0') {
+      return text;
+    }
+  }
+  return nullptr;
+}
 
 bool ScenarioManager::begin(const char* scenario_file_path) {
   scenario_ = nullptr;
@@ -517,10 +530,9 @@ void ScenarioManager::loadStepResourceOverrides(const char* scenario_file_path) 
     return;
   }
 
-  const char* initial_step = stringOrNull(document["initial_step"]);
-  if (initial_step == nullptr) {
-    initial_step = stringOrNull(document["initialStepId"]);
-  }
+  const char* const initial_step_keys[] = {"initial_step", "initialStepId"};
+  const char* initial_step =
+      readScenarioField(document.as<JsonVariantConst>(), initial_step_keys, sizeof(initial_step_keys) / sizeof(initial_step_keys[0]));
   if (initial_step != nullptr) {
     initial_step_override_ = initial_step;
     Serial.printf("[SCENARIO] override initial_step=%s\n", initial_step_override_.c_str());
@@ -541,26 +553,21 @@ void ScenarioManager::loadStepResourceOverrides(const char* scenario_file_path) 
       continue;
     }
 
-    const char* screen_scene_id = stringOrNull(step_obj["screen_scene_id"]);
+    const char* const screen_keys[] = {"screen_scene_id", "screenSceneId"};
+    const char* screen_scene_id =
+        readScenarioField(variant, screen_keys, sizeof(screen_keys) / sizeof(screen_keys[0]));
     if (screen_scene_id == nullptr) {
-      screen_scene_id = stringOrNull(step_obj["screenSceneId"]);
-    }
-    if (screen_scene_id == nullptr) {
-      screen_scene_id = stringOrNull(step_obj["resources"]["screen_scene_id"]);
-    }
-    if (screen_scene_id == nullptr) {
-      screen_scene_id = stringOrNull(step_obj["resources"]["screenSceneId"]);
+      screen_scene_id = readScenarioField(
+          step_obj["resources"], screen_keys, sizeof(screen_keys) / sizeof(screen_keys[0]));
     }
 
-    const char* audio_pack_id = stringOrNull(step_obj["audio_pack_id"]);
+    const char* const audio_keys[] = {"audio_pack_id", "audioPackId"};
+    const char* audio_pack_id =
+        readScenarioField(variant, audio_keys, sizeof(audio_keys) / sizeof(audio_keys[0]));
     if (audio_pack_id == nullptr) {
-      audio_pack_id = stringOrNull(step_obj["audioPackId"]);
-    }
-    if (audio_pack_id == nullptr) {
-      audio_pack_id = stringOrNull(step_obj["resources"]["audio_pack_id"]);
-    }
-    if (audio_pack_id == nullptr) {
-      audio_pack_id = stringOrNull(step_obj["resources"]["audioPackId"]);
+      audio_pack_id = readScenarioField(step_obj["resources"],
+                                        audio_keys,
+                                        sizeof(audio_keys) / sizeof(audio_keys[0]));
     }
 
     JsonArrayConst action_ids = step_obj["action_ids"].as<JsonArrayConst>();

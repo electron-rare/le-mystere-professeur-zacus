@@ -10,9 +10,10 @@
 
 class UiManager {
  public:
- bool begin();
+  bool begin();
   void update();
   void setHardwareSnapshot(const HardwareManager::Snapshot& snapshot);
+  void setHardwareSnapshotRef(const HardwareManager::Snapshot* snapshot);
   void setLaDetectionState(bool locked,
                            uint8_t stability_pct,
                            uint32_t stable_ms,
@@ -149,6 +150,7 @@ class UiManager {
   uint32_t pending_key_code_ = LV_KEY_ENTER;
   bool key_press_pending_ = false;
   bool key_release_pending_ = false;
+  const HardwareManager::Snapshot* waveform_snapshot_ref_ = nullptr;
   HardwareManager::Snapshot waveform_snapshot_ = {};
   bool waveform_snapshot_valid_ = false;
   bool waveform_overlay_enabled_ = false;

@@ -15,6 +15,9 @@
 #include "hardware_manager.h"
 #include "media_manager.h"
 #include "network_manager.h"
+#include "runtime/la_trigger_service.h"
+#include "runtime/runtime_config_service.h"
+#include "runtime/runtime_config_types.h"
 #include "scenario_manager.h"
 #include "scenarios/default_scenario_v2.h"
 #include "storage_manager.h"
@@ -25,80 +28,8 @@ namespace {
 
 constexpr const char* kDefaultScenarioFile = "/story/scenarios/DEFAULT.json";
 constexpr const char* kDiagAudioFile = "/music/boot_radio.mp3";
-constexpr const char* kDefaultWifiHostname = "zacus-freenove";
-constexpr const char* kDefaultWifiTestSsid = "Les cils";
-constexpr const char* kDefaultWifiTestPassword = "mascarade";
-constexpr uint32_t kDefaultLocalRetryMs = 15000U;
 constexpr size_t kSerialLineCapacity = 192U;
-constexpr uint8_t kMaxEspNowBootPeers = 10U;
 constexpr bool kBootDiagnosticTone = true;
-constexpr uint16_t kLaDetectionToleranceHz = 10U;
-constexpr uint16_t kLaMatchLevelDenom = 7000U;
-constexpr uint8_t kLaMatchLevelFloorPct = 20U;
-constexpr uint8_t kLaMatchConfidenceBoostMax = 12U;
-constexpr uint8_t kLaMatchConfidenceBoostScale = 4U;
-constexpr uint8_t kLaMatchConfidenceFloor = 6U;
-constexpr uint8_t kLaMatchRelaxedBonus = 6U;
-constexpr uint8_t kLaMatchRelaxedConfidenceFloor = 10U;
-constexpr uint8_t kLaMatchRelaxedConfidencePenalty = 10U;
-
-struct RuntimeNetworkConfig {
-  char hostname[33] = "zacus-freenove";
-  char wifi_test_ssid[33] = "Les cils";
-  char wifi_test_password[65] = "mascarade";
-  char local_ssid[33] = "Les cils";
-  char local_password[65] = "mascarade";
-  char ap_default_ssid[33] = "Freenove-Setup";
-  char ap_default_password[65] = "mascarade";
-  bool force_ap_if_not_local = false;
-  bool pause_local_retry_when_ap_client = false;
-  uint32_t local_retry_ms = kDefaultLocalRetryMs;
-  bool espnow_enabled_on_boot = true;
-  bool espnow_bridge_to_story_event = true;
-  uint8_t espnow_boot_peer_count = 0U;
-  char espnow_boot_peers[kMaxEspNowBootPeers][18] = {};
-};
-
-struct RuntimeHardwareConfig {
-  bool enabled_on_boot = true;
-  uint32_t telemetry_period_ms = 2500U;
-  bool led_auto_from_scene = true;
-  bool mic_enabled = true;
-  uint8_t mic_event_threshold_pct = 72U;
-  char mic_event_name[32] = "SERIAL:MIC_SPIKE";
-  bool mic_la_trigger_enabled = true;
-  uint16_t mic_la_target_hz = 440U;
-  uint16_t mic_la_tolerance_hz = kLaDetectionToleranceHz;
-  uint8_t mic_la_max_abs_cents = 42U;
-  uint8_t mic_la_min_confidence = 28U;
-  uint8_t mic_la_min_level_pct = 8U;
-  uint16_t mic_la_stable_ms = 3000U;
-  uint16_t mic_la_release_ms = 50U;
-  uint16_t mic_la_cooldown_ms = 1400U;
-  uint32_t mic_la_timeout_ms = 60000U;
-  char mic_la_event_name[32] = "SERIAL:BTN_NEXT";
-  bool battery_enabled = true;
-  uint8_t battery_low_pct = 20U;
-  char battery_low_event_name[32] = "SERIAL:BATTERY_LOW";
-};
-
-struct LaTriggerRuntimeState {
-  bool gate_active = false;
-  bool sample_match = false;
-  bool locked = false;
-  bool dispatched = false;
-  bool timeout_pending = false;
-  uint32_t gate_entered_ms = 0U;
-  uint32_t timeout_deadline_ms = 0U;
-  uint32_t stable_since_ms = 0U;
-  uint32_t last_match_ms = 0U;
-  uint32_t stable_ms = 0U;
-  uint32_t last_trigger_ms = 0U;
-  uint16_t last_freq_hz = 0U;
-  int16_t last_cents = 0;
-  uint8_t last_confidence = 0U;
-  uint8_t last_level_pct = 0U;
-};
 
 AudioManager g_audio;
 ScenarioManager g_scenario;
@@ -247,59 +178,6 @@ void copyText(char* out, size_t out_size, const char* text) {
   out[out_size - 1U] = '\0';
 }
 
-uint8_t laEstimatedLevelPct(const HardwareManager::Snapshot& hw) {
-  if (hw.mic_level_percent > 0U) {
-    return hw.mic_level_percent;
-  }
-  const uint16_t noise_floor = hw.mic_noise_floor;
-  const uint16_t effective_peak = (hw.mic_peak > noise_floor) ? static_cast<uint16_t>(hw.mic_peak - noise_floor) : 0U;
-  return static_cast<uint8_t>(std::min<uint16_t>(100U, static_cast<uint16_t>((effective_peak * 100U) / kLaMatchLevelDenom)));
-}
-
-uint16_t laToleranceForTarget() {
-  const uint16_t configured = g_hardware_cfg.mic_la_tolerance_hz;
-  if (configured == 0U) {
-    return 0U;
-  }
-  return (configured > kLaDetectionToleranceHz) ? kLaDetectionToleranceHz : configured;
-}
-
-uint8_t laCentsLimitForTarget(uint16_t effective_tolerance_hz) {
-  uint8_t limit = g_hardware_cfg.mic_la_max_abs_cents;
-  if (g_hardware_cfg.mic_la_target_hz > 0U && effective_tolerance_hz > 0U &&
-      g_hardware_cfg.mic_la_target_hz >= effective_tolerance_hz) {
-    const float target_hz = static_cast<float>(g_hardware_cfg.mic_la_target_hz);
-    const float upper_hz = target_hz + static_cast<float>(effective_tolerance_hz);
-    const float tolerance_cents_f = 1200.0f * std::log2(upper_hz / target_hz);
-    if (std::isfinite(tolerance_cents_f) && tolerance_cents_f > 0.0f) {
-      const uint8_t tolerance_cents = static_cast<uint8_t>(std::min<float>(120.0f, std::ceil(tolerance_cents_f)));
-      if (tolerance_cents > limit) {
-        limit = tolerance_cents;
-      }
-    }
-  }
-  return limit;
-}
-
-uint8_t laDynamicConfidenceFloor(uint8_t base_confidence, uint8_t level_pct, bool relaxed_for_continuity) {
-  uint8_t dynamic_boost = 0U;
-  if (level_pct > kLaMatchLevelFloorPct) {
-    const uint8_t raw_boost =
-        static_cast<uint8_t>((level_pct - kLaMatchLevelFloorPct) / kLaMatchConfidenceBoostScale);
-    dynamic_boost = (raw_boost > kLaMatchConfidenceBoostMax) ? kLaMatchConfidenceBoostMax : raw_boost;
-  }
-  if (relaxed_for_continuity && dynamic_boost >= kLaMatchRelaxedBonus) {
-    dynamic_boost -= kLaMatchRelaxedBonus;
-  }
-  if (base_confidence <= dynamic_boost) {
-    return kLaMatchConfidenceFloor;
-  }
-  const uint16_t raw_floor = base_confidence - dynamic_boost;
-  return (raw_floor < kLaMatchConfidenceFloor) ? kLaMatchConfidenceFloor : static_cast<uint8_t>(raw_floor);
-}
-
-bool isLaSampleMatching(const HardwareManager::Snapshot& hw, bool relaxed_for_continuity);
-
 bool parseBoolToken(const char* text, bool* out_value) {
   if (text == nullptr || out_value == nullptr) {
     return false;
@@ -322,42 +200,11 @@ bool parseBoolToken(const char* text, bool* out_value) {
 }
 
 void resetLaTriggerState(bool keep_cooldown = true) {
-  const uint32_t last_trigger_ms = g_la_trigger.last_trigger_ms;
-  g_la_trigger = LaTriggerRuntimeState();
-  if (keep_cooldown) {
-    g_la_trigger.last_trigger_ms = last_trigger_ms;
-  }
-}
-
-bool isLaTriggerStep(const ScenarioSnapshot& snapshot) {
-  if (snapshot.step != nullptr && snapshot.step->id != nullptr &&
-      std::strcmp(snapshot.step->id, "STEP_WAIT_ETAPE2") == 0) {
-    return true;
-  }
-  if (snapshot.screen_scene_id == nullptr) {
-    return false;
-  }
-  return (std::strcmp(snapshot.screen_scene_id, "SCENE_LA_DETECT") == 0 ||
-          std::strcmp(snapshot.screen_scene_id, "SCENE_LA_DETECTOR") == 0);
+  LaTriggerService::resetState(&g_la_trigger, keep_cooldown);
 }
 
 bool shouldEnforceLaMatchOnly(const ScenarioSnapshot& snapshot) {
-  return g_hardware_cfg.mic_la_trigger_enabled && isLaTriggerStep(snapshot);
-}
-
-void resetLaTriggerTimeout(uint32_t now_ms, const char* source_tag) {
-  if (!g_la_trigger.gate_active) {
-    return;
-  }
-
-  g_la_trigger.gate_entered_ms = now_ms;
-  g_la_trigger.timeout_pending = false;
-  g_la_trigger.timeout_deadline_ms = 0U;
-
-  Serial.printf(
-      "[LA_TRIGGER] timer reset by %s at %lu ms\n",
-      (source_tag != nullptr && source_tag[0] != '\0') ? source_tag : "unknown",
-      static_cast<unsigned long>(now_ms));
+  return LaTriggerService::shouldEnforceMatchOnly(g_hardware_cfg, snapshot);
 }
 
 bool notifyScenarioButtonGuarded(uint8_t key, bool long_press, uint32_t now_ms, const char* source_tag) {
@@ -373,65 +220,8 @@ bool notifyScenarioButtonGuarded(uint8_t key, bool long_press, uint32_t now_ms, 
   return true;
 }
 
-bool isLaSampleMatching(const HardwareManager::Snapshot& hw, bool relaxed_for_continuity) {
-  if (!hw.mic_ready || hw.mic_freq_hz == 0U) {
-    return false;
-  }
-
-  const uint8_t detected_level = laEstimatedLevelPct(hw);
-  if (relaxed_for_continuity) {
-    // For continuity mode, don't hard-fail when level is momentarily at 0.
-    // Keep a minimum floor using pitch confidence to avoid matching pure noise.
-    if (detected_level == 0U && hw.mic_pitch_confidence < kLaMatchRelaxedConfidenceFloor) {
-      return false;
-    }
-  } else if (detected_level < g_hardware_cfg.mic_la_min_level_pct) {
-    return false;
-  }
-
-  const uint8_t dynamic_min_confidence = laDynamicConfidenceFloor(g_hardware_cfg.mic_la_min_confidence,
-                                                                 detected_level,
-                                                                 relaxed_for_continuity);
-  uint8_t required_confidence = dynamic_min_confidence;
-  if (relaxed_for_continuity && required_confidence > kLaMatchRelaxedConfidencePenalty) {
-    required_confidence -= kLaMatchRelaxedConfidencePenalty;
-  }
-  if (required_confidence < kLaMatchRelaxedConfidenceFloor) {
-    required_confidence = kLaMatchRelaxedConfidenceFloor;
-  }
-  if (hw.mic_pitch_confidence < required_confidence) {
-    return false;
-  }
-
-  int16_t abs_cents = hw.mic_pitch_cents;
-  if (abs_cents < 0) {
-    abs_cents = static_cast<int16_t>(-abs_cents);
-  }
-  uint8_t cents_limit = laCentsLimitForTarget(laToleranceForTarget());
-  if (relaxed_for_continuity && cents_limit < 120U) {
-    cents_limit = static_cast<uint8_t>(std::min<uint16_t>(120U, static_cast<uint16_t>(cents_limit + 4U)));
-  }
-  if (static_cast<uint8_t>(abs_cents) > cents_limit) {
-    return false;
-  }
-  const uint16_t tolerance_hz = static_cast<uint16_t>(laToleranceForTarget() + (relaxed_for_continuity ? 2U : 0U));
-  const int32_t delta_hz = static_cast<int32_t>(hw.mic_freq_hz) - static_cast<int32_t>(g_hardware_cfg.mic_la_target_hz);
-  const int32_t abs_delta_hz = (delta_hz < 0) ? -delta_hz : delta_hz;
-  return abs_delta_hz <= static_cast<int32_t>(tolerance_hz);
-}
-
 uint8_t laStablePercent() {
-  if (!g_hardware_cfg.mic_la_trigger_enabled) {
-    return 0U;
-  }
-  if (g_hardware_cfg.mic_la_stable_ms == 0U) {
-    return g_la_trigger.locked ? 100U : 0U;
-  }
-  uint32_t percent = (g_la_trigger.stable_ms * 100U) / g_hardware_cfg.mic_la_stable_ms;
-  if (percent > 100U) {
-    percent = 100U;
-  }
-  return static_cast<uint8_t>(percent);
+  return LaTriggerService::stablePercent(g_hardware_cfg, g_la_trigger);
 }
 
 void startLaTimeoutRecovery(const ScenarioSnapshot& snapshot, uint32_t now_ms) {
@@ -449,79 +239,14 @@ void startLaTimeoutRecovery(const ScenarioSnapshot& snapshot, uint32_t now_ms) {
   if (g_hardware_started) {
     g_hardware.clearManualLed();
   }
-  resetLaTriggerState(false);
+  LaTriggerService::resetState(&g_la_trigger, false);
   Serial.println("[LA_TRIGGER] timeout -> scenario reset (SCENE_LOCKED)");
 }
 
 void updateLaGameplayTrigger(const ScenarioSnapshot& snapshot, const HardwareManager::Snapshot& hw, uint32_t now_ms) {
-  g_la_trigger.last_freq_hz = hw.mic_freq_hz;
-  g_la_trigger.last_cents = hw.mic_pitch_cents;
-  g_la_trigger.last_confidence = hw.mic_pitch_confidence;
-  g_la_trigger.last_level_pct = hw.mic_level_percent;
-  const uint32_t match_continuity_window_ms = static_cast<uint32_t>(g_hardware_cfg.mic_la_release_ms);
-
-  const bool gate_was_active = g_la_trigger.gate_active;
-  const bool gate_active = g_hardware_cfg.mic_enabled && g_hardware_cfg.mic_la_trigger_enabled && isLaTriggerStep(snapshot);
-  g_la_trigger.gate_active = gate_active;
-  if (!gate_active) {
-    resetLaTriggerState();
-    g_la_trigger.gate_active = false;
-    return;
-  }
-  if (!gate_was_active) {
-    g_la_trigger.gate_entered_ms = now_ms;
-    g_la_trigger.timeout_pending = false;
-    g_la_trigger.timeout_deadline_ms = 0U;
-  }
-  if (g_la_trigger.timeout_pending) {
-    return;
-  }
-
-  const bool sample_match = isLaSampleMatching(hw, false);
-  const bool continuity_match = isLaSampleMatching(hw, true);
-  const uint32_t effective_window_ms = (match_continuity_window_ms == 0U) ? 1U : match_continuity_window_ms;
-  g_la_trigger.sample_match = sample_match;
-  bool has_stable_candidate = false;
-  const uint32_t dt_ms = (g_la_trigger.last_match_ms == 0U) ? 0U : (now_ms - g_la_trigger.last_match_ms);
-  const bool continuation_window_ok = (dt_ms > 0U) && (dt_ms <= effective_window_ms);
-
-  if (sample_match || (continuity_match && continuation_window_ok)) {
-    const bool starts_new_candidate = (g_la_trigger.last_match_ms == 0U) || (dt_ms > effective_window_ms);
-    if (starts_new_candidate && g_la_trigger.stable_since_ms == 0U) {
-      g_la_trigger.stable_since_ms = now_ms;
-    }
-    if (continuation_window_ok && g_la_trigger.stable_ms < g_hardware_cfg.mic_la_stable_ms) {
-      const uint32_t next_stable_ms = g_la_trigger.stable_ms + dt_ms;
-      g_la_trigger.stable_ms =
-          (next_stable_ms >= g_hardware_cfg.mic_la_stable_ms) ? g_hardware_cfg.mic_la_stable_ms : next_stable_ms;
-    }
-    g_la_trigger.last_match_ms = now_ms;
-    has_stable_candidate = true;
-  } else if (sample_match || continuity_match) {
-    // continuity_match on a fresh state starts/sticks to match tracking but does not accumulate instantly.
-    if (g_la_trigger.last_match_ms == 0U && g_la_trigger.stable_since_ms == 0U) {
-      g_la_trigger.stable_since_ms = now_ms;
-      g_la_trigger.last_match_ms = now_ms;
-      has_stable_candidate = true;
-    } else if (g_la_trigger.last_match_ms != 0U && (now_ms - g_la_trigger.last_match_ms) <= effective_window_ms) {
-      g_la_trigger.last_match_ms = now_ms;
-      has_stable_candidate = true;
-    } else if (dt_ms > effective_window_ms) {
-      g_la_trigger.last_match_ms = now_ms;
-    }
-  } else if (g_la_trigger.last_match_ms != 0U && dt_ms > effective_window_ms) {
-    // Stop incrementing after grace period, but keep accumulated value for observability.
-    g_la_trigger.last_match_ms = 0U;
-  }
-
-  if (!has_stable_candidate && g_la_trigger.last_match_ms == 0U && g_la_trigger.stable_ms == 0U) {
-    g_la_trigger.stable_ms = 0U;
-    g_la_trigger.stable_since_ms = 0U;
-  }
-
-  g_la_trigger.locked = g_la_trigger.stable_ms >= g_hardware_cfg.mic_la_stable_ms;
-  if (!g_la_trigger.locked && g_hardware_cfg.mic_la_timeout_ms > 0U &&
-      g_la_trigger.gate_entered_ms > 0U && (now_ms - g_la_trigger.gate_entered_ms) >= g_hardware_cfg.mic_la_timeout_ms) {
+  const LaTriggerService::UpdateResult update =
+      LaTriggerService::update(g_hardware_cfg, &g_la_trigger, snapshot, hw, now_ms);
+  if (update.timed_out) {
     Serial.printf(
         "[LA_TRIGGER] timeout after %lu ms (freq=%u cents=%d conf=%u level=%u)\n",
         static_cast<unsigned long>(now_ms - g_la_trigger.gate_entered_ms),
@@ -532,12 +257,7 @@ void updateLaGameplayTrigger(const ScenarioSnapshot& snapshot, const HardwareMan
     startLaTimeoutRecovery(snapshot, now_ms);
     return;
   }
-  if (!g_la_trigger.locked || g_la_trigger.dispatched) {
-    return;
-  }
-
-  if (g_la_trigger.last_trigger_ms > 0U &&
-      (now_ms - g_la_trigger.last_trigger_ms) < g_hardware_cfg.mic_la_cooldown_ms) {
+  if (!update.lock_ready) {
     return;
   }
 
@@ -560,35 +280,11 @@ void updateLaGameplayTrigger(const ScenarioSnapshot& snapshot, const HardwareMan
       static_cast<unsigned int>(hw.mic_pitch_confidence),
       static_cast<unsigned int>(hw.mic_level_percent),
       static_cast<unsigned long>(g_la_trigger.stable_ms),
-      gate_active ? 1U : 0U);
+      update.gate_active ? 1U : 0U);
   if (dispatched) {
     g_la_trigger.dispatched = true;
     g_la_trigger.last_trigger_ms = now_ms;
   }
-}
-
-void clearEspNowBootPeers() {
-  g_network_cfg.espnow_boot_peer_count = 0U;
-  for (uint8_t index = 0U; index < kMaxEspNowBootPeers; ++index) {
-    g_network_cfg.espnow_boot_peers[index][0] = '\0';
-  }
-}
-
-void addEspNowBootPeer(const char* mac_text) {
-  if (mac_text == nullptr || mac_text[0] == '\0' || g_network_cfg.espnow_boot_peer_count >= kMaxEspNowBootPeers) {
-    return;
-  }
-
-  for (uint8_t index = 0U; index < g_network_cfg.espnow_boot_peer_count; ++index) {
-    if (std::strcmp(g_network_cfg.espnow_boot_peers[index], mac_text) == 0) {
-      return;
-    }
-  }
-
-  copyText(g_network_cfg.espnow_boot_peers[g_network_cfg.espnow_boot_peer_count],
-           sizeof(g_network_cfg.espnow_boot_peers[g_network_cfg.espnow_boot_peer_count]),
-           mac_text);
-  ++g_network_cfg.espnow_boot_peer_count;
 }
 
 bool startsWithIgnoreCase(const char* text, const char* prefix) {
@@ -672,372 +368,6 @@ const char* defaultEventNameForType(StoryEventType type) {
     default:
       return "";
   }
-}
-
-void resetRuntimeNetworkConfig() {
-  copyText(g_network_cfg.hostname, sizeof(g_network_cfg.hostname), kDefaultWifiHostname);
-  copyText(g_network_cfg.wifi_test_ssid, sizeof(g_network_cfg.wifi_test_ssid), kDefaultWifiTestSsid);
-  copyText(g_network_cfg.wifi_test_password, sizeof(g_network_cfg.wifi_test_password), kDefaultWifiTestPassword);
-  copyText(g_network_cfg.local_ssid, sizeof(g_network_cfg.local_ssid), kDefaultWifiTestSsid);
-  copyText(g_network_cfg.local_password, sizeof(g_network_cfg.local_password), kDefaultWifiTestPassword);
-  copyText(g_network_cfg.ap_default_ssid, sizeof(g_network_cfg.ap_default_ssid), "Freenove-Setup");
-  copyText(g_network_cfg.ap_default_password, sizeof(g_network_cfg.ap_default_password), kDefaultWifiTestPassword);
-  g_network_cfg.force_ap_if_not_local = false;
-  g_network_cfg.pause_local_retry_when_ap_client = false;
-  g_network_cfg.local_retry_ms = kDefaultLocalRetryMs;
-  g_network_cfg.espnow_enabled_on_boot = true;
-  g_network_cfg.espnow_bridge_to_story_event = true;
-  clearEspNowBootPeers();
-}
-
-void resetRuntimeHardwareConfig() {
-  g_hardware_cfg = RuntimeHardwareConfig();
-}
-
-void resetRuntimeCameraConfig() {
-  g_camera_cfg = CameraManager::Config();
-}
-
-void resetRuntimeMediaConfig() {
-  g_media_cfg = MediaManager::Config();
-}
-
-void loadRuntimeNetworkConfig() {
-  resetRuntimeNetworkConfig();
-  resetRuntimeHardwareConfig();
-  resetRuntimeCameraConfig();
-  resetRuntimeMediaConfig();
-
-  const String wifi_payload = g_storage.loadTextFile("/story/apps/APP_WIFI.json");
-  if (!wifi_payload.isEmpty()) {
-    StaticJsonDocument<768> document;
-    const DeserializationError error = deserializeJson(document, wifi_payload);
-    if (!error) {
-      JsonVariantConst config = document["config"];
-      const char* hostname = config["hostname"] | "";
-      const char* local_ssid = config["local_ssid"] | config["test_ssid"] | config["ssid"] | "";
-      const char* local_password = config["local_password"] | config["test_password"] | config["password"] | "";
-      const char* test_ssid = config["test_ssid"] | config["ssid"] | "";
-      const char* test_password = config["test_password"] | config["password"] | "";
-      const char* ap_ssid = config["ap_default_ssid"] | config["ap_ssid"] | "";
-      const char* ap_password = config["ap_default_password"] | config["ap_password"] | "";
-      const char* ap_policy = config["ap_policy"] | "";
-      const bool ap_policy_bool = config["ap_policy_force_if_not_local"] | false;
-      const bool pause_retry_when_ap_client = config["pause_local_retry_when_ap_client"] | false;
-      const uint32_t local_retry_ms = config["local_retry_ms"] | kDefaultLocalRetryMs;
-      if (hostname[0] != '\0') {
-        copyText(g_network_cfg.hostname, sizeof(g_network_cfg.hostname), hostname);
-      }
-      if (local_ssid[0] != '\0') {
-        copyText(g_network_cfg.local_ssid, sizeof(g_network_cfg.local_ssid), local_ssid);
-      }
-      if (local_password[0] != '\0') {
-        copyText(g_network_cfg.local_password, sizeof(g_network_cfg.local_password), local_password);
-      }
-      if (test_ssid[0] != '\0') {
-        copyText(g_network_cfg.wifi_test_ssid, sizeof(g_network_cfg.wifi_test_ssid), test_ssid);
-      }
-      if (test_password[0] != '\0') {
-        copyText(g_network_cfg.wifi_test_password, sizeof(g_network_cfg.wifi_test_password), test_password);
-      }
-      if (ap_ssid[0] != '\0') {
-        copyText(g_network_cfg.ap_default_ssid, sizeof(g_network_cfg.ap_default_ssid), ap_ssid);
-      }
-      if (ap_password[0] != '\0') {
-        copyText(g_network_cfg.ap_default_password, sizeof(g_network_cfg.ap_default_password), ap_password);
-      }
-
-      if (ap_policy[0] != '\0') {
-        char policy_normalized[32] = {0};
-        copyText(policy_normalized, sizeof(policy_normalized), ap_policy);
-        toLowerAsciiInPlace(policy_normalized);
-        if (std::strcmp(policy_normalized, "force_if_not_local") == 0) {
-          g_network_cfg.force_ap_if_not_local = true;
-        } else if (std::strcmp(policy_normalized, "if_no_known_wifi") == 0) {
-          g_network_cfg.force_ap_if_not_local = false;
-        }
-      } else {
-        g_network_cfg.force_ap_if_not_local = ap_policy_bool;
-      }
-      g_network_cfg.pause_local_retry_when_ap_client = pause_retry_when_ap_client;
-      if (local_retry_ms >= 1000U) {
-        g_network_cfg.local_retry_ms = local_retry_ms;
-      }
-
-      // Backward compatibility: if legacy test fields are absent, keep them aligned with local WiFi target.
-      if (test_ssid[0] == '\0' && g_network_cfg.local_ssid[0] != '\0') {
-        copyText(g_network_cfg.wifi_test_ssid, sizeof(g_network_cfg.wifi_test_ssid), g_network_cfg.local_ssid);
-      }
-      if (test_password[0] == '\0' && g_network_cfg.local_password[0] != '\0') {
-        copyText(g_network_cfg.wifi_test_password, sizeof(g_network_cfg.wifi_test_password), g_network_cfg.local_password);
-      }
-    } else {
-      Serial.printf("[NET] APP_WIFI invalid json (%s)\n", error.c_str());
-    }
-  }
-
-  const String espnow_payload = g_storage.loadTextFile("/story/apps/APP_ESPNOW.json");
-  if (!espnow_payload.isEmpty()) {
-    StaticJsonDocument<512> document;
-    const DeserializationError error = deserializeJson(document, espnow_payload);
-    if (!error) {
-      JsonVariantConst config = document["config"];
-      if (config["enabled_on_boot"].is<bool>()) {
-        g_network_cfg.espnow_enabled_on_boot = config["enabled_on_boot"].as<bool>();
-      }
-      if (config["bridge_to_story_event"].is<bool>()) {
-        g_network_cfg.espnow_bridge_to_story_event = config["bridge_to_story_event"].as<bool>();
-      }
-      if (config["peers"].is<JsonArrayConst>()) {
-        clearEspNowBootPeers();
-        for (JsonVariantConst peer_variant : config["peers"].as<JsonArrayConst>()) {
-          const char* peer_text = peer_variant | "";
-          if (peer_text[0] == '\0') {
-            continue;
-          }
-          addEspNowBootPeer(peer_text);
-        }
-      }
-    } else {
-      Serial.printf("[NET] APP_ESPNOW invalid json (%s)\n", error.c_str());
-    }
-  }
-
-  const String hardware_payload = g_storage.loadTextFile("/story/apps/APP_HARDWARE.json");
-  if (!hardware_payload.isEmpty()) {
-    StaticJsonDocument<1024> document;
-    const DeserializationError error = deserializeJson(document, hardware_payload);
-    if (!error) {
-      JsonVariantConst config = document["config"];
-      if (config["enabled_on_boot"].is<bool>()) {
-        g_hardware_cfg.enabled_on_boot = config["enabled_on_boot"].as<bool>();
-      }
-      if (config["telemetry_period_ms"].is<unsigned int>()) {
-        const uint32_t telemetry = config["telemetry_period_ms"].as<unsigned int>();
-        if (telemetry >= 250U) {
-          g_hardware_cfg.telemetry_period_ms = telemetry;
-        }
-      }
-      if (config["led_auto_from_scene"].is<bool>()) {
-        g_hardware_cfg.led_auto_from_scene = config["led_auto_from_scene"].as<bool>();
-      }
-      if (config["mic_enabled"].is<bool>()) {
-        g_hardware_cfg.mic_enabled = config["mic_enabled"].as<bool>();
-      }
-      if (config["mic_event_threshold_pct"].is<unsigned int>()) {
-        uint8_t threshold = static_cast<uint8_t>(config["mic_event_threshold_pct"].as<unsigned int>());
-        if (threshold > 100U) {
-          threshold = 100U;
-        }
-        g_hardware_cfg.mic_event_threshold_pct = threshold;
-      }
-      const char* mic_event_name = config["mic_event_name"] | "";
-      if (mic_event_name[0] != '\0') {
-        copyText(g_hardware_cfg.mic_event_name, sizeof(g_hardware_cfg.mic_event_name), mic_event_name);
-      }
-      if (config["la_trigger_enabled"].is<bool>()) {
-        g_hardware_cfg.mic_la_trigger_enabled = config["la_trigger_enabled"].as<bool>();
-      }
-      if (config["la_target_hz"].is<unsigned int>()) {
-        uint16_t target = static_cast<uint16_t>(config["la_target_hz"].as<unsigned int>());
-        if (target < 220U) {
-          target = 220U;
-        } else if (target > 880U) {
-          target = 880U;
-        }
-        g_hardware_cfg.mic_la_target_hz = target;
-      }
-      if (config["la_tolerance_hz"].is<unsigned int>()) {
-        uint16_t tolerance = static_cast<uint16_t>(config["la_tolerance_hz"].as<unsigned int>());
-        if (tolerance < 2U) {
-          tolerance = 2U;
-        } else if (tolerance > kLaDetectionToleranceHz) {
-          tolerance = kLaDetectionToleranceHz;
-        }
-        g_hardware_cfg.mic_la_tolerance_hz = tolerance;
-      }
-      if (config["la_max_abs_cents"].is<unsigned int>()) {
-        uint8_t max_abs_cents = static_cast<uint8_t>(config["la_max_abs_cents"].as<unsigned int>());
-        if (max_abs_cents > 120U) {
-          max_abs_cents = 120U;
-        }
-        g_hardware_cfg.mic_la_max_abs_cents = max_abs_cents;
-      }
-      if (config["la_min_confidence"].is<unsigned int>()) {
-        uint8_t min_conf = static_cast<uint8_t>(config["la_min_confidence"].as<unsigned int>());
-        if (min_conf > 100U) {
-          min_conf = 100U;
-        }
-        g_hardware_cfg.mic_la_min_confidence = min_conf;
-      }
-      if (config["la_min_level_pct"].is<unsigned int>()) {
-        uint8_t min_level = static_cast<uint8_t>(config["la_min_level_pct"].as<unsigned int>());
-        if (min_level > 100U) {
-          min_level = 100U;
-        }
-        g_hardware_cfg.mic_la_min_level_pct = min_level;
-      }
-      if (config["la_stable_ms"].is<unsigned int>()) {
-        uint16_t stable_ms = static_cast<uint16_t>(config["la_stable_ms"].as<unsigned int>());
-        if (stable_ms < 120U) {
-          stable_ms = 120U;
-        } else if (stable_ms > 5000U) {
-          stable_ms = 5000U;
-        }
-        g_hardware_cfg.mic_la_stable_ms = stable_ms;
-      }
-      if (config["la_release_ms"].is<unsigned int>()) {
-        uint16_t release_ms = static_cast<uint16_t>(config["la_release_ms"].as<unsigned int>());
-        if (release_ms > 2000U) {
-          release_ms = 2000U;
-        }
-        g_hardware_cfg.mic_la_release_ms = release_ms;
-      }
-      if (config["la_cooldown_ms"].is<unsigned int>()) {
-        uint16_t cooldown_ms = static_cast<uint16_t>(config["la_cooldown_ms"].as<unsigned int>());
-        if (cooldown_ms < 100U) {
-          cooldown_ms = 100U;
-        } else if (cooldown_ms > 15000U) {
-          cooldown_ms = 15000U;
-        }
-        g_hardware_cfg.mic_la_cooldown_ms = cooldown_ms;
-      }
-      if (config["la_timeout_ms"].is<unsigned int>()) {
-        uint32_t timeout_ms = config["la_timeout_ms"].as<unsigned int>();
-        if (timeout_ms > 600000U) {
-          timeout_ms = 600000U;
-        }
-        g_hardware_cfg.mic_la_timeout_ms = timeout_ms;
-      }
-      const char* la_event_name = config["la_event_name"] | "";
-      if (la_event_name[0] != '\0') {
-        copyText(g_hardware_cfg.mic_la_event_name, sizeof(g_hardware_cfg.mic_la_event_name), la_event_name);
-      }
-      if (config["battery_enabled"].is<bool>()) {
-        g_hardware_cfg.battery_enabled = config["battery_enabled"].as<bool>();
-      }
-      if (config["battery_low_pct"].is<unsigned int>()) {
-        uint8_t threshold = static_cast<uint8_t>(config["battery_low_pct"].as<unsigned int>());
-        if (threshold > 100U) {
-          threshold = 100U;
-        }
-        g_hardware_cfg.battery_low_pct = threshold;
-      }
-      const char* battery_event_name = config["battery_low_event_name"] | "";
-      if (battery_event_name[0] != '\0') {
-        copyText(g_hardware_cfg.battery_low_event_name,
-                 sizeof(g_hardware_cfg.battery_low_event_name),
-                 battery_event_name);
-      }
-    } else {
-      Serial.printf("[HW] APP_HARDWARE invalid json (%s)\n", error.c_str());
-    }
-  }
-
-  const String camera_payload = g_storage.loadTextFile("/story/apps/APP_CAMERA.json");
-  if (!camera_payload.isEmpty()) {
-    StaticJsonDocument<512> document;
-    const DeserializationError error = deserializeJson(document, camera_payload);
-    if (!error) {
-      JsonVariantConst config = document["config"];
-      if (config["enabled_on_boot"].is<bool>()) {
-        g_camera_cfg.enabled_on_boot = config["enabled_on_boot"].as<bool>();
-      }
-      const char* frame_size = config["frame_size"] | "";
-      if (frame_size[0] != '\0') {
-        copyText(g_camera_cfg.frame_size, sizeof(g_camera_cfg.frame_size), frame_size);
-      }
-      if (config["jpeg_quality"].is<unsigned int>()) {
-        g_camera_cfg.jpeg_quality = static_cast<uint8_t>(config["jpeg_quality"].as<unsigned int>());
-      }
-      if (config["fb_count"].is<unsigned int>()) {
-        g_camera_cfg.fb_count = static_cast<uint8_t>(config["fb_count"].as<unsigned int>());
-      }
-      if (config["xclk_hz"].is<unsigned int>()) {
-        g_camera_cfg.xclk_hz = config["xclk_hz"].as<unsigned int>();
-      }
-      const char* snapshot_dir = config["snapshot_dir"] | "";
-      if (snapshot_dir[0] != '\0') {
-        copyText(g_camera_cfg.snapshot_dir, sizeof(g_camera_cfg.snapshot_dir), snapshot_dir);
-      }
-    } else {
-      Serial.printf("[CAM] APP_CAMERA invalid json (%s)\n", error.c_str());
-    }
-  }
-
-  const String media_payload = g_storage.loadTextFile("/story/apps/APP_MEDIA.json");
-  if (!media_payload.isEmpty()) {
-    StaticJsonDocument<512> document;
-    const DeserializationError error = deserializeJson(document, media_payload);
-    if (!error) {
-      JsonVariantConst config = document["config"];
-      const char* music_dir = config["music_dir"] | "";
-      const char* picture_dir = config["picture_dir"] | "";
-      const char* record_dir = config["record_dir"] | "";
-      if (music_dir[0] != '\0') {
-        copyText(g_media_cfg.music_dir, sizeof(g_media_cfg.music_dir), music_dir);
-      }
-      if (picture_dir[0] != '\0') {
-        copyText(g_media_cfg.picture_dir, sizeof(g_media_cfg.picture_dir), picture_dir);
-      }
-      if (record_dir[0] != '\0') {
-        copyText(g_media_cfg.record_dir, sizeof(g_media_cfg.record_dir), record_dir);
-      }
-      if (config["record_max_seconds"].is<unsigned int>()) {
-        g_media_cfg.record_max_seconds = static_cast<uint16_t>(config["record_max_seconds"].as<unsigned int>());
-      }
-      if (config["auto_stop_record_on_step_change"].is<bool>()) {
-        g_media_cfg.auto_stop_record_on_step_change = config["auto_stop_record_on_step_change"].as<bool>();
-      }
-    } else {
-      Serial.printf("[MEDIA] APP_MEDIA invalid json (%s)\n", error.c_str());
-    }
-  }
-
-  Serial.printf(
-      "[NET] cfg host=%s local=%s wifi_test=%s ap_default=%s ap_policy=%u pause_retry_on_ap_client=%u retry_ms=%lu "
-      "espnow_boot=%u bridge_story=%u peers=%u\n",
-                g_network_cfg.hostname,
-                g_network_cfg.local_ssid,
-                g_network_cfg.wifi_test_ssid,
-                g_network_cfg.ap_default_ssid,
-                g_network_cfg.force_ap_if_not_local ? 1U : 0U,
-                g_network_cfg.pause_local_retry_when_ap_client ? 1U : 0U,
-                static_cast<unsigned long>(g_network_cfg.local_retry_ms),
-                g_network_cfg.espnow_enabled_on_boot ? 1U : 0U,
-                g_network_cfg.espnow_bridge_to_story_event ? 1U : 0U,
-                g_network_cfg.espnow_boot_peer_count);
-  Serial.printf(
-      "[HW] cfg boot=%u telemetry_ms=%lu led_auto=%u mic=%u threshold=%u la_trigger=%u target=%u tol=%u "
-      "cents=%u conf_min=%u level_min=%u stable=%ums timeout=%lums battery=%u low_pct=%u\n",
-      g_hardware_cfg.enabled_on_boot ? 1U : 0U,
-      static_cast<unsigned long>(g_hardware_cfg.telemetry_period_ms),
-      g_hardware_cfg.led_auto_from_scene ? 1U : 0U,
-      g_hardware_cfg.mic_enabled ? 1U : 0U,
-      g_hardware_cfg.mic_event_threshold_pct,
-      g_hardware_cfg.mic_la_trigger_enabled ? 1U : 0U,
-      static_cast<unsigned int>(g_hardware_cfg.mic_la_target_hz),
-      static_cast<unsigned int>(g_hardware_cfg.mic_la_tolerance_hz),
-      static_cast<unsigned int>(g_hardware_cfg.mic_la_max_abs_cents),
-      static_cast<unsigned int>(g_hardware_cfg.mic_la_min_confidence),
-      static_cast<unsigned int>(g_hardware_cfg.mic_la_min_level_pct),
-      static_cast<unsigned int>(g_hardware_cfg.mic_la_stable_ms),
-      static_cast<unsigned long>(g_hardware_cfg.mic_la_timeout_ms),
-      g_hardware_cfg.battery_enabled ? 1U : 0U,
-      g_hardware_cfg.battery_low_pct);
-  Serial.printf("[CAM] cfg boot=%u frame=%s quality=%u fb=%u xclk=%lu dir=%s\n",
-                g_camera_cfg.enabled_on_boot ? 1U : 0U,
-                g_camera_cfg.frame_size,
-                static_cast<unsigned int>(g_camera_cfg.jpeg_quality),
-                static_cast<unsigned int>(g_camera_cfg.fb_count),
-                static_cast<unsigned long>(g_camera_cfg.xclk_hz),
-                g_camera_cfg.snapshot_dir);
-  Serial.printf("[MEDIA] cfg music=%s picture=%s record=%s max_sec=%u auto_stop=%u\n",
-                g_media_cfg.music_dir,
-                g_media_cfg.picture_dir,
-                g_media_cfg.record_dir,
-                static_cast<unsigned int>(g_media_cfg.record_max_seconds),
-                g_media_cfg.auto_stop_record_on_step_change ? 1U : 0U);
 }
 
 bool buildEventTokenFromTypeName(StoryEventType type,
@@ -1289,7 +619,7 @@ struct EspNowCommandResult {
 void appendCompactRuntimeStatus(JsonObject out) {
   const NetworkManager::Snapshot net = g_network.snapshot();
   const ScenarioSnapshot scenario = g_scenario.snapshot();
-  const HardwareManager::Snapshot hardware = g_hardware.snapshot();
+  const HardwareManager::Snapshot& hardware = g_hardware.snapshotRef();
   const CameraManager::Snapshot camera = g_camera.snapshot();
   const MediaManager::Snapshot media = g_media.snapshot();
   out["state"] = net.state;
@@ -1640,7 +970,7 @@ void printButtonRead() {
 void printRuntimeStatus() {
   const ScenarioSnapshot snapshot = g_scenario.snapshot();
   const NetworkManager::Snapshot net = g_network.snapshot();
-  const HardwareManager::Snapshot hw = g_hardware.snapshot();
+  const HardwareManager::Snapshot& hw = g_hardware.snapshotRef();
   const CameraManager::Snapshot camera = g_camera.snapshot();
   const MediaManager::Snapshot media = g_media.snapshot();
   const char* scenario_id = scenarioIdFromSnapshot(snapshot);
@@ -1678,7 +1008,7 @@ void printRuntimeStatus() {
 }
 
 void printHardwareStatus() {
-  const HardwareManager::Snapshot hw = g_hardware.snapshot();
+  const HardwareManager::Snapshot& hw = g_hardware.snapshotRef();
   Serial.printf(
       "HW_STATUS ready=%u ws2812=%u mic=%u battery=%u auto=%u manual=%u led=%u,%u,%u br=%u "
       "mic_pct=%u mic_peak=%u mic_noise=%u mic_gain=%u mic_freq=%u mic_cents=%d mic_conf=%u "
@@ -1714,7 +1044,7 @@ void printHardwareStatus() {
 }
 
 void printMicTunerStatus() {
-  const HardwareManager::Snapshot hw = g_hardware.snapshot();
+  const HardwareManager::Snapshot& hw = g_hardware.snapshotRef();
   Serial.printf(
       "MIC_TUNER_STATUS freq=%u cents=%d conf=%u level=%u peak=%u noise=%u gain=%u scene=%s stream=%u period_ms=%u "
       "la_gate=%u la_match=%u la_lock=%u la_pending=%u la_stable_ms=%lu la_pct=%u\n",
@@ -1950,7 +1280,7 @@ void webFillWifiStatus(JsonObject out, const NetworkManager::Snapshot& net) {
 }
 
 void webFillHardwareStatus(JsonObject out) {
-  const HardwareManager::Snapshot hw = g_hardware.snapshot();
+  const HardwareManager::Snapshot& hw = g_hardware.snapshotRef();
   out["ready"] = hw.ready;
   out["enabled_on_boot"] = g_hardware_cfg.enabled_on_boot;
   out["led_auto_from_scene"] = g_hardware_cfg.led_auto_from_scene;
@@ -2141,7 +1471,7 @@ void maybeEmitHardwareEvents(uint32_t now_ms) {
   if (!g_hardware_started) {
     return;
   }
-  const HardwareManager::Snapshot hw = g_hardware.snapshot();
+  const HardwareManager::Snapshot& hw = g_hardware.snapshotRef();
   const ScenarioSnapshot scenario = g_scenario.snapshot();
 
   if (g_hardware_cfg.mic_enabled && hw.mic_ready) {
@@ -2176,7 +1506,7 @@ void maybeLogHardwareTelemetry(uint32_t now_ms) {
     return;
   }
   g_next_hw_telemetry_ms = now_ms + g_hardware_cfg.telemetry_period_ms;
-  const HardwareManager::Snapshot hw = g_hardware.snapshot();
+  const HardwareManager::Snapshot& hw = g_hardware.snapshotRef();
   Serial.printf("[HW] telemetry mic=%u%% peak=%u battery=%u%% (%umV) led=%u,%u,%u auto=%u\n",
                 hw.mic_level_percent,
                 hw.mic_peak,
@@ -2253,6 +1583,27 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
     if (ok) {
       dispatchScenarioEventByName(event_name, now_ms);
     }
+    return ok;
+  }
+
+  if (std::strcmp(action_id, "ACTION_QUEUE_SONAR") == 0 || std::strcmp(action_type, "queue_audio_pack") == 0) {
+    const char* pack_id = action_doc["config"]["pack_id"] | action_doc["config"]["pack"] | "";
+    String audio_path = g_storage.resolveAudioPathByPackId(pack_id);
+    if (audio_path.isEmpty()) {
+      const char* fallback_file = action_doc["config"]["file"] | action_doc["config"]["path"] | "";
+      if (fallback_file[0] != '\0') {
+        audio_path = fallback_file;
+      }
+    }
+    if (audio_path.isEmpty()) {
+      Serial.printf("[ACTION] QUEUE_AUDIO_PACK missing path pack=%s\n", pack_id);
+      return false;
+    }
+    const bool ok = g_audio.play(audio_path.c_str());
+    Serial.printf("[ACTION] QUEUE_AUDIO_PACK pack=%s path=%s ok=%u\n",
+                  pack_id[0] != '\0' ? pack_id : "n/a",
+                  audio_path.c_str(),
+                  ok ? 1U : 0U);
     return ok;
   }
 
@@ -3813,7 +3164,7 @@ void setup() {
   if (g_storage.hasSdCard()) {
     g_storage.syncStoryFileFromSd(kDefaultScenarioFile);
   }
-  loadRuntimeNetworkConfig();
+  RuntimeConfigService::load(g_storage, &g_network_cfg, &g_hardware_cfg, &g_camera_cfg, &g_media_cfg);
   Serial.printf("[MAIN] default scenario checksum=%lu\n",
                 static_cast<unsigned long>(g_storage.checksum(kDefaultScenarioFile)));
   Serial.printf("[MAIN] story storage sd=%u\n", g_storage.hasSdCard() ? 1U : 0U);
@@ -3882,7 +3233,7 @@ void setup() {
 
   g_ui.begin();
   g_ui.setLaDetectionState(false, 0U, 0U, g_hardware_cfg.mic_la_stable_ms, 0U, g_hardware_cfg.mic_la_timeout_ms);
-  g_ui.setHardwareSnapshot(g_hardware.snapshot());
+  g_ui.setHardwareSnapshotRef(&g_hardware.snapshotRef());
   refreshSceneIfNeeded(true);
   startPendingAudioIfAny();
 }
@@ -3996,7 +3347,6 @@ void loop() {
                            g_hardware_cfg.mic_la_stable_ms,
                            la_gate_elapsed_ms,
                            g_hardware_cfg.mic_la_timeout_ms);
-  g_ui.setHardwareSnapshot(g_hardware.snapshot());
   refreshSceneIfNeeded(false);
   g_ui.update();
   if (g_web_started) {

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 
 #include "core/scenario_def.h"
 
@@ -17,6 +18,10 @@ struct ScenarioSnapshot {
 
 class ScenarioManager {
  public:
+  static const char* readScenarioField(JsonVariantConst root,
+                                       const char* const* candidates,
+                                       size_t candidate_count);
+
   bool begin(const char* scenario_file_path);
   bool beginById(const char* scenario_id);
   void reset();

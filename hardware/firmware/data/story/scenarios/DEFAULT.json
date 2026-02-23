@@ -30,7 +30,7 @@
     "ACTION_HW_LED_ALERT",
     "ACTION_HW_LED_READY",
     "ACTION_CAMERA_SNAPSHOT",
-    "ACTION_MEDIA_PLAY_FILE",
+    "ACTION_QUEUE_SONAR",
     "ACTION_REC_START",
     "ACTION_REC_STOP"
   ],
@@ -49,8 +49,7 @@
       "audio_pack_id": "PACK_BOOT_RADIO",
       "action_ids": [
         "ACTION_TRACE_STEP",
-        "ACTION_HW_LED_ALERT",
-        "ACTION_MEDIA_PLAY_FILE"
+        "ACTION_HW_LED_ALERT"
       ]
     },
     {
@@ -58,6 +57,7 @@
       "screen_scene_id": "SCENE_LA_DETECTOR",
       "action_ids": [
         "ACTION_TRACE_STEP",
+        "ACTION_QUEUE_SONAR",
         "ACTION_CAMERA_SNAPSHOT",
         "ACTION_REC_START"
       ]

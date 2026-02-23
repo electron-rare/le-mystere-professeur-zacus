@@ -576,23 +576,70 @@ bool NetworkManager::consumeEspNowMessage(char* out_payload,
   }
 
   const EspNowMessage& entry = rx_queue_[rx_queue_head_];
+  char normalized_payload[kPayloadCapacity] = {0};
+  copyText(normalized_payload, sizeof(normalized_payload), entry.payload);
+  char msg_id[32] = {0};
+  uint32_t seq = 0U;
+  char envelope_type[24] = {0};
+  bool ack_requested = false;
+
+  if (entry.payload[0] == '{') {
+    StaticJsonDocument<512> document;
+    if (!deserializeJson(document, entry.payload) && looksLikeEspNowEnvelope(document.as<JsonVariantConst>())) {
+      JsonVariantConst root = document.as<JsonVariantConst>();
+      copyText(msg_id, sizeof(msg_id), root["msg_id"] | "");
+      seq = root["seq"] | 0U;
+      copyText(envelope_type, sizeof(envelope_type), root["type"] | "");
+      const bool envelope_ack = root["ack"] | false;
+      const bool ack_response = envelope_ack && std::strcmp(envelope_type, "ack") == 0;
+      if (ack_response) {
+        rx_queue_head_ = static_cast<uint8_t>((rx_queue_head_ + 1U) % kRxQueueSize);
+        --rx_queue_count_;
+        return consumeEspNowMessage(out_payload,
+                                    payload_capacity,
+                                    out_peer,
+                                    peer_capacity,
+                                    out_msg_id,
+                                    msg_id_capacity,
+                                    out_seq,
+                                    out_type,
+                                    type_capacity,
+                                    out_ack_requested);
+      }
+      ack_requested = envelope_ack;
+      if (root["payload"].is<const char*>()) {
+        copyText(normalized_payload, sizeof(normalized_payload), root["payload"].as<const char*>());
+      } else if (!root["payload"].isNull()) {
+        String payload_text;
+        serializeJson(root["payload"], payload_text);
+        copyText(normalized_payload, sizeof(normalized_payload), payload_text.c_str());
+      }
+      if (envelope_type[0] == '\0') {
+        copyText(envelope_type, sizeof(envelope_type), inferEnvelopeType(normalized_payload));
+      }
+    }
+  }
+  if (envelope_type[0] == '\0') {
+    copyText(envelope_type, sizeof(envelope_type), inferEnvelopeType(normalized_payload));
+  }
+
   if (out_payload != nullptr && payload_capacity > 0U) {
-    copyText(out_payload, payload_capacity, entry.payload);
+    copyText(out_payload, payload_capacity, normalized_payload);
   }
   if (out_peer != nullptr && peer_capacity > 0U) {
     copyText(out_peer, peer_capacity, entry.peer);
   }
   if (out_msg_id != nullptr && msg_id_capacity > 0U) {
-    copyText(out_msg_id, msg_id_capacity, entry.msg_id);
+    copyText(out_msg_id, msg_id_capacity, msg_id);
   }
   if (out_seq != nullptr) {
-    *out_seq = entry.seq;
+    *out_seq = seq;
   }
   if (out_type != nullptr && type_capacity > 0U) {
-    copyText(out_type, type_capacity, entry.type);
+    copyText(out_type, type_capacity, envelope_type);
   }
   if (out_ack_requested != nullptr) {
-    *out_ack_requested = entry.ack_requested;
+    *out_ack_requested = ack_requested;
   }
   rx_queue_head_ = static_cast<uint8_t>((rx_queue_head_ + 1U) % kRxQueueSize);
   --rx_queue_count_;
@@ -877,51 +924,12 @@ void NetworkManager::handleEspNowRecv(const uint8_t* mac_addr, const uint8_t* da
     std::memcpy(payload, data, copy_len);
   }
   payload[copy_len] = '\0';
-  String payload_text = payload;
-  bool is_envelope = false;
-  bool envelope_ack = false;
-  uint32_t envelope_seq = 0U;
-  char envelope_msg_id[sizeof(snapshot_.last_msg_id)] = {0};
-  char envelope_type[sizeof(snapshot_.last_type)] = {0};
-
-  if (payload[0] == '{') {
-    StaticJsonDocument<512> document;
-    if (!deserializeJson(document, payload) && looksLikeEspNowEnvelope(document.as<JsonVariantConst>())) {
-      JsonVariantConst root = document.as<JsonVariantConst>();
-      copyText(envelope_msg_id, sizeof(envelope_msg_id), root["msg_id"] | "");
-      copyText(envelope_type, sizeof(envelope_type), root["type"] | "");
-      envelope_seq = root["seq"] | 0U;
-      envelope_ack = root["ack"] | false;
-      payload_text.remove(0);
-      if (root["payload"].is<const char*>()) {
-        payload_text = root["payload"].as<const char*>();
-      } else if (!root["payload"].isNull()) {
-        serializeJson(root["payload"], payload_text);
-      }
-      is_envelope = true;
-    }
-  }
-
-  snapshot_.espnow_last_seq = envelope_seq;
-  snapshot_.espnow_last_ack = envelope_ack;
-  copyText(snapshot_.last_msg_id, sizeof(snapshot_.last_msg_id), envelope_msg_id);
-  if (envelope_type[0] == '\0') {
-    copyText(envelope_type, sizeof(envelope_type), inferEnvelopeType(payload_text.c_str()));
-  }
-  copyText(snapshot_.last_type, sizeof(snapshot_.last_type), envelope_type);
-  copyText(snapshot_.last_payload, sizeof(snapshot_.last_payload), payload_text.c_str());
-
-  const bool ack_response = is_envelope && envelope_ack && std::strcmp(envelope_type, "ack") == 0;
-  const bool ack_requested = is_envelope && envelope_ack && !ack_response;
-  if (ack_response) {
-    return;
-  }
-  queueEspNowMessage(payload_text.c_str(),
-                     peer_text,
-                     envelope_msg_id,
-                     envelope_seq,
-                     envelope_type,
-                     ack_requested);
+  snapshot_.espnow_last_seq = 0U;
+  snapshot_.espnow_last_ack = false;
+  snapshot_.last_msg_id[0] = '\0';
+  copyText(snapshot_.last_type, sizeof(snapshot_.last_type), inferEnvelopeType(payload));
+  copyText(snapshot_.last_payload, sizeof(snapshot_.last_payload), payload);
+  queueEspNowMessage(payload, peer_text, "", 0U, "", false);
 }
 
 void NetworkManager::handleEspNowSend(const uint8_t* mac_addr, esp_now_send_status_t status) {

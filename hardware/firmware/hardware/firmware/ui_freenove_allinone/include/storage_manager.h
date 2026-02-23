@@ -29,6 +29,7 @@ class StorageManager {
   bool pathExistsOnSdCard(const char* path) const;
   bool ensureParentDirectoriesOnLittleFs(const char* file_path) const;
   bool writeTextToLittleFs(const char* path, const char* payload) const;
+  bool provisionEmbeddedAsset(const char* path, const char* payload, bool* out_written = nullptr) const;
   bool copyFileFromSdToLittleFs(const char* src_path, const char* dst_path) const;
   bool copyStoryDirectoryFromSd(const char* relative_dir);
   String resolveReadableAssetPath(const String& absolute_path) const;

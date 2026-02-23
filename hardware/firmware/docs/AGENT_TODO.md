@@ -15,6 +15,36 @@
 - Mode de travail verrouillé: utiliser uniquement les commandes `pio` pour build/flash/FS (`pio run ...`).
 - Ne pas exécuter les scripts `tools/dev/*` tant que ce verrou est actif.
 
+## [2026-02-23] Freenove audit + refactor agressif (RTOS/audio/wifi/esp-now/UI/story) (Codex)
+
+- Checkpoint sécurité exécuté avant modifs:
+  - branche: `main`
+  - patch/status: `/tmp/zacus_checkpoint/20260223-011928_wip.patch`, `/tmp/zacus_checkpoint/20260223-011928_status.txt`
+  - scan artefacts trackés (`.pio`, `.platformio`, `logs`, `dist`, `build`, `node_modules`, `.venv`): aucun match.
+- Audit runtime (focus Freenove) et constats:
+  - `main.cpp` concentrait bootstrap + orchestration loop + parsing commandes série + bridge ESP-NOW + routes web + actions story (`hardware/firmware/ui_freenove_allinone/src/main.cpp:3137`, `hardware/firmware/ui_freenove_allinone/src/main.cpp:3241`, `hardware/firmware/ui_freenove_allinone/src/main.cpp:1532`).
+  - callback ESP-NOW RX faisait trop de travail en chemin critique; allègement effectué: enqueue brut en callback, parsing envelope au `consume` (`hardware/firmware/ui_freenove_allinone/src/network_manager.cpp:910`, `hardware/firmware/ui_freenove_allinone/src/network_manager.cpp:564`).
+  - duplication parsing JSON multi-clés dans ScenarioManager; factorisé via helper canonique (`hardware/firmware/ui_freenove_allinone/src/scenario_manager.cpp:82`, `hardware/firmware/ui_freenove_allinone/src/scenario_manager.cpp:506`).
+  - provisioning LittleFS embarqué du bundle story répétitif; factorisé avec `provisionEmbeddedAsset` (`hardware/firmware/ui_freenove_allinone/src/storage_manager.cpp:667`, `hardware/firmware/ui_freenove_allinone/src/storage_manager.cpp:703`).
+  - UI LVGL présentait des séquences style/hide/show répétées sur rings + overlay LA; extraction helpers `SceneElement`/`SceneState` (`hardware/firmware/ui_freenove_allinone/src/ui_manager.cpp:312`, `hardware/firmware/ui_freenove_allinone/src/ui_manager.cpp:1516`).
+- Refactor/optimisations appliqués:
+  - extraction config runtime APP_* dans service dédié (`hardware/firmware/ui_freenove_allinone/src/runtime/runtime_config_service.cpp:102`, usage `hardware/firmware/ui_freenove_allinone/src/main.cpp:3167`).
+  - extraction logique LA/matching/timeout dans service dédié (`hardware/firmware/ui_freenove_allinone/src/runtime/la_trigger_service.cpp:183`, usage `hardware/firmware/ui_freenove_allinone/src/main.cpp:248`).
+  - `HardwareManager` expose `snapshotRef()` + palette LED centralisée scène->RGB (`hardware/firmware/ui_freenove_allinone/src/hardware_manager.cpp:172`, `hardware/firmware/ui_freenove_allinone/src/hardware_manager.cpp:875`).
+  - `UiManager` lit le snapshot hardware par référence stable (moins de copies hot-loop) via `setHardwareSnapshotRef` (`hardware/firmware/ui_freenove_allinone/src/main.cpp:3236`, `hardware/firmware/ui_freenove_allinone/src/ui_manager.cpp:252`).
+  - action story `queue_audio_pack` branchée (ACTION_QUEUE_SONAR) pour audio hint piloté par scénario (`hardware/firmware/ui_freenove_allinone/src/main.cpp:1589`).
+- Update scénario DEFAULT:
+  - suppression redondance audio sur `STEP_U_SON_PROTO` (action media file doublonnait `audio_pack_id`).
+  - ajout `ACTION_QUEUE_SONAR` sur `STEP_WAIT_ETAPE2`.
+  - synchronisation fallback embarqué LittleFS avec le même contenu (`data/story/scenarios/DEFAULT.json:33`, `data/story/scenarios/DEFAULT.json:60`, `hardware/firmware/ui_freenove_allinone/src/storage_manager.cpp:69`).
+- Fichiers manifests demandés:
+  - `zacus_v1_audio.yaml` et `zacus_v1_printables.yaml` introuvables dans ce scope `hardware/firmware`; ignorés conformément à la consigne utilisateur.
+- Validation build demandée par verrou utilisateur:
+  - commande unique exécutée: `pio run -e freenove_esp32s3_full_with_ui`
+  - run #1 (01:39): FAIL sur `scenario_manager.cpp` (`JsonObjectConst::as<>` invalide), corrigé via passage `JsonVariantConst`.
+  - run #2 (01:40): PASS (`freenove_esp32s3_full_with_ui SUCCESS`, RAM 55.3%, Flash 73.1%).
+  - timestamp evidence: `2026-02-23 01:40:39 +0100`.
+
 ## [2026-02-22] Verrou transition boutons -> LA detector (Codex)
 
 - [x] Contrat verrouillé: depuis `STEP_WAIT_UNLOCK` (`SCENE_LOCKED`), tout appui bouton (`1..5`, court/long) déclenche `BTN_NEXT` et enchaîne vers `STEP_WAIT_ETAPE2`.
@@ -814,3 +844,13 @@
   - `pio run -e esp8266_oled` ✅ (build complet OK après réparation).
 [20260222-113849] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260222-113849, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260222-113849/summary.md
 [20260222-204146] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260222-204146, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260222-204146/summary.md
+
+## Audit test hardware Freenove (2026-02-23)
+- Commande: `pio run -e freenove_esp32s3_full_with_ui -t upload`
+- Résultat: flash OK vers `/dev/cu.usbmodem5AB90753301`.
+- Port auto-détecté, upload réussi (RAM/Flash: 55.3% / 73.1%).
+- Monitoring runtime (capture locale via `python3 + pyserial`, 60s) : boot OK, scénario `DEFAULT` exécuté, logs HW/LA/SCENARIO/FS/UI cohérents.
+- Événement constaté: erreur caméra récurrente lors de la première action `ACTION_CAMERA_SNAPSHOT` (`cam_dma_config(301): frame buffer malloc failed`, `camera config failed`) sur ce lot matériel.
+- Comportement attendu LA: `LA_TRIGGER timeout` puis reset vers `SCENE_LOCKED`.
+- Aucune régression panic/reboot observée sur la fenêtre de test.
+- Notes: scripts de validation demandés par le contrat firmware sont uniquement exécutés pour build + flash; logs hardware non versionnés et non archivés.

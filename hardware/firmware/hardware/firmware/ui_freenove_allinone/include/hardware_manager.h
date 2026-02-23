@@ -9,6 +9,14 @@
 class HardwareManager {
  public:
   static constexpr uint8_t kMicWaveformCapacity = 16U;
+  struct LedPaletteEntry {
+    const char* scene_id;
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+    uint8_t brightness;
+    bool pulse;
+  };
 
   struct Snapshot {
     bool ready = false;
@@ -50,6 +58,7 @@ class HardwareManager {
   bool setManualLed(uint8_t r, uint8_t g, uint8_t b, uint8_t brightness, bool pulse);
   void clearManualLed();
   Snapshot snapshot() const;
+  const Snapshot& snapshotRef() const;
 
  private:
   bool beginMic();
@@ -71,6 +80,7 @@ class HardwareManager {
                                int16_t& out_cents,
                                uint8_t& out_confidence);
   void setScenePalette(const char* scene_id);
+  const LedPaletteEntry* findPaletteForScene(const char* scene_id) const;
   uint8_t batteryPercentFromMv(uint16_t cell_mv) const;
   static uint8_t clampColor(int value);
 

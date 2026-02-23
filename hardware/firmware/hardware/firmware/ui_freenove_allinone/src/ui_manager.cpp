@@ -11,6 +11,8 @@
 #include <cstring>
 
 #include "ui_freenove_config.h"
+#include "ui/scene_element.h"
+#include "ui/scene_state.h"
 
 namespace {
 
@@ -244,8 +246,17 @@ void UiManager::update() {
 }
 
 void UiManager::setHardwareSnapshot(const HardwareManager::Snapshot& snapshot) {
+  waveform_snapshot_ref_ = nullptr;
   waveform_snapshot_ = snapshot;
   waveform_snapshot_valid_ = true;
+}
+
+void UiManager::setHardwareSnapshotRef(const HardwareManager::Snapshot* snapshot) {
+  waveform_snapshot_ref_ = snapshot;
+  waveform_snapshot_valid_ = (snapshot != nullptr);
+  if (snapshot != nullptr) {
+    waveform_snapshot_ = *snapshot;
+  }
 }
 
 void UiManager::setLaDetectionState(bool locked,
@@ -266,11 +277,12 @@ void UiManager::setLaDetectionState(bool locked,
 }
 
 void UiManager::configureWaveformOverlay(const HardwareManager::Snapshot* snapshot,
-                                        bool enabled,
-                                        uint8_t sample_count,
-                                        uint8_t amplitude_pct,
-                                        bool jitter) {
+                                         bool enabled,
+                                         uint8_t sample_count,
+                                         uint8_t amplitude_pct,
+                                         bool jitter) {
   waveform_overlay_enabled_ = enabled;
+  waveform_snapshot_ref_ = snapshot;
   waveform_snapshot_valid_ = (snapshot != nullptr);
   if (snapshot != nullptr) {
     waveform_snapshot_ = *snapshot;
@@ -344,46 +356,14 @@ void UiManager::updateLaOverlay(bool visible,
     return;
   }
 
-  if (stability_pct > 100U) {
-    stability_pct = 100U;
-  }
-  if (confidence > 100U) {
-    confidence = 100U;
-  }
-  if (level_pct > 100U) {
-    level_pct = 100U;
-  }
+  const SceneState scene_state = SceneState::fromLaSample(
+      la_detection_locked_, freq_hz, cents, confidence, level_pct, stability_pct);
   const int16_t info_shift_y = 36;
   const int16_t hz_line_shift_y = 8;
   const int16_t meter_shift_y = 32;
   const int16_t analyzer_shift_y = 52;
-
-  int16_t abs_cents = cents;
-  if (abs_cents < 0) {
-    abs_cents = static_cast<int16_t>(-abs_cents);
-  }
-
-  const char* status_text = "ECOUTE...";
-  uint32_t status_rgb = 0x86CCFFUL;
-  if (la_detection_locked_) {
-    status_text = "SIGNAL VERROUILLE";
-    status_rgb = 0x9DFF63UL;
-  } else if (freq_hz == 0U || confidence < 20U) {
-    status_text = "AUCUN SIGNAL";
-    status_rgb = 0x66B7FFUL;
-  } else if (abs_cents <= 8) {
-    status_text = "SIGNAL STABLE";
-    status_rgb = 0xC9FF6EUL;
-  } else if (cents < 0) {
-    status_text = "MONTE EN FREQUENCE";
-    status_rgb = 0xFFD772UL;
-  } else {
-    status_text = "DESCENDS EN FREQUENCE";
-    status_rgb = 0xFFAA66UL;
-  }
-
-  lv_label_set_text(scene_la_status_label_, status_text);
-  lv_obj_set_style_text_color(scene_la_status_label_, lv_color_hex(status_rgb), LV_PART_MAIN);
+  lv_label_set_text(scene_la_status_label_, scene_state.status_text);
+  lv_obj_set_style_text_color(scene_la_status_label_, lv_color_hex(scene_state.status_rgb), LV_PART_MAIN);
   lv_obj_align(scene_la_status_label_, LV_ALIGN_TOP_RIGHT, -8, static_cast<lv_coord_t>(8 + info_shift_y));
   lv_obj_clear_flag(scene_la_status_label_, LV_OBJ_FLAG_HIDDEN);
 
@@ -393,8 +373,8 @@ void UiManager::updateLaOverlay(bool visible,
                 "%3u Hz  %+d c  C%u  S%u",
                 static_cast<unsigned int>(freq_hz),
                 static_cast<int>(cents),
-                static_cast<unsigned int>(confidence),
-                static_cast<unsigned int>(stability_pct));
+                static_cast<unsigned int>(scene_state.confidence),
+                static_cast<unsigned int>(scene_state.stability_pct));
   lv_label_set_text(scene_la_pitch_label_, pitch_line);
   lv_obj_align(scene_la_pitch_label_, LV_ALIGN_BOTTOM_MID, 0, static_cast<lv_coord_t>(-30 + hz_line_shift_y));
   lv_obj_clear_flag(scene_la_pitch_label_, LV_OBJ_FLAG_HIDDEN);
@@ -435,9 +415,15 @@ void UiManager::updateLaOverlay(bool visible,
   if (meter_width < 96) {
     meter_width = 96;
   }
+
+  lv_obj_set_size(scene_la_meter_bg_, meter_width, 10);
+  lv_obj_align(scene_la_meter_bg_, LV_ALIGN_BOTTOM_MID, 0, static_cast<lv_coord_t>(-12 - meter_shift_y));
+  lv_obj_clear_flag(scene_la_meter_bg_, LV_OBJ_FLAG_HIDDEN);
+
   const uint8_t meter_pct =
-      static_cast<uint8_t>(((static_cast<uint16_t>(confidence) * 35U) + (static_cast<uint16_t>(level_pct) * 30U) +
-                            (static_cast<uint16_t>(stability_pct) * 35U)) /
+      static_cast<uint8_t>(((static_cast<uint16_t>(scene_state.confidence) * 35U) +
+                            (static_cast<uint16_t>(scene_state.level_pct) * 30U) +
+                            (static_cast<uint16_t>(scene_state.stability_pct) * 35U)) /
                            100U);
   int16_t fill_width = static_cast<int16_t>((static_cast<int32_t>(meter_width - 4) * meter_pct) / 100);
   if (fill_width < 6) {
@@ -446,19 +432,14 @@ void UiManager::updateLaOverlay(bool visible,
   if (fill_width > (meter_width - 4)) {
     fill_width = meter_width - 4;
   }
-
-  lv_obj_set_size(scene_la_meter_bg_, meter_width, 10);
-  lv_obj_align(scene_la_meter_bg_, LV_ALIGN_BOTTOM_MID, 0, static_cast<lv_coord_t>(-12 - meter_shift_y));
-  lv_obj_clear_flag(scene_la_meter_bg_, LV_OBJ_FLAG_HIDDEN);
-
   lv_obj_set_size(scene_la_meter_fill_, fill_width, 6);
   lv_obj_align_to(scene_la_meter_fill_, scene_la_meter_bg_, LV_ALIGN_LEFT_MID, 2, 0);
   uint32_t meter_rgb = 0x4AD0FFUL;
-  if (la_detection_locked_) {
+  if (scene_state.locked) {
     meter_rgb = 0x8DFF63UL;
-  } else if (abs_cents <= 12 && confidence >= 55U) {
+  } else if (scene_state.abs_cents <= 12 && scene_state.confidence >= 55U) {
     meter_rgb = 0xD8FF74UL;
-  } else if (abs_cents > 30) {
+  } else if (scene_state.abs_cents > 30) {
     meter_rgb = 0xFF8259UL;
   } else {
     meter_rgb = 0xFFC56EUL;
@@ -473,7 +454,7 @@ void UiManager::updateLaOverlay(bool visible,
     ring_radius = 40;
   }
 
-  int16_t tuned_cents = cents;
+  int16_t tuned_cents = scene_state.cents;
   if (tuned_cents < -60) {
     tuned_cents = -60;
   } else if (tuned_cents > 60) {
@@ -482,7 +463,7 @@ void UiManager::updateLaOverlay(bool visible,
   constexpr float kPi = 3.14159265f;
   constexpr float kHalfPi = 1.57079632f;
   const float normalized = static_cast<float>(tuned_cents) / 60.0f;
-  const float jitter = (100U - confidence) * 0.0007f;
+  const float jitter = (100U - scene_state.confidence) * 0.0007f;
   const float angle = (-kHalfPi) + (normalized * (kPi / 2.6f)) + jitter;
   const int16_t needle_radius = static_cast<int16_t>(ring_radius - 2);
   const int16_t x = static_cast<int16_t>(center_x + std::cos(angle) * static_cast<float>(needle_radius));
@@ -493,7 +474,7 @@ void UiManager::updateLaOverlay(bool visible,
   la_needle_points_[1].y = y;
   lv_line_set_points(scene_la_needle_, la_needle_points_, 2);
   lv_obj_set_pos(scene_la_needle_, 0, 0);
-  lv_obj_set_style_line_width(scene_la_needle_, la_detection_locked_ ? 4 : 3, LV_PART_MAIN);
+  lv_obj_set_style_line_width(scene_la_needle_, scene_state.locked ? 4 : 3, LV_PART_MAIN);
   lv_obj_set_style_line_color(scene_la_needle_, lv_color_hex(meter_rgb), LV_PART_MAIN);
   lv_obj_clear_flag(scene_la_needle_, LV_OBJ_FLAG_HIDDEN);
 
@@ -504,7 +485,8 @@ void UiManager::updateLaOverlay(bool visible,
                               ? 0.0f
                               : ((freq_hz >= 560U) ? 1.0f : (static_cast<float>(freq_hz - 320U) / 240.0f));
   const float freq_bin_pos = freq_norm * static_cast<float>(kLaAnalyzerBarCount - 1U);
-  const float signal_gain = (static_cast<float>(level_pct) / 100.0f) * (0.45f + static_cast<float>(confidence) / 200.0f);
+  const float signal_gain = (static_cast<float>(scene_state.level_pct) / 100.0f) *
+                            (0.45f + static_cast<float>(scene_state.confidence) / 200.0f);
   for (uint8_t index = 0U; index < kLaAnalyzerBarCount; ++index) {
     lv_obj_t* bar = scene_la_analyzer_bars_[index];
     if (bar == nullptr) {
@@ -516,9 +498,9 @@ void UiManager::updateLaOverlay(bool visible,
       profile = 0.0f;
     }
     float energy = profile * signal_gain;
-    if (freq_hz == 0U || confidence < 8U) {
+    if (freq_hz == 0U || scene_state.confidence < 8U) {
       const uint32_t seed = pseudoRandom32(static_cast<uint32_t>(millis()) + static_cast<uint32_t>(index * 97U));
-      energy = (static_cast<float>((seed % 26U) + 8U) / 100.0f) * (static_cast<float>(level_pct) / 100.0f);
+      energy = (static_cast<float>((seed % 26U) + 8U) / 100.0f) * (static_cast<float>(scene_state.level_pct) / 100.0f);
     }
     int16_t height = static_cast<int16_t>(6 + (energy * 44.0f));
     if (height < 6) {
@@ -532,7 +514,7 @@ void UiManager::updateLaOverlay(bool visible,
     lv_obj_set_size(bar, 8, height);
     lv_obj_set_pos(bar, x, y);
     uint32_t bar_color = 0x3CCBFFUL;
-    if (distance <= 0.7f && confidence >= 24U) {
+    if (distance <= 0.7f && scene_state.confidence >= 24U) {
       bar_color = 0xA5FF72UL;
     } else if (distance <= 1.8f) {
       bar_color = 0xFFD27AUL;
@@ -540,7 +522,7 @@ void UiManager::updateLaOverlay(bool visible,
       bar_color = 0x5F86FFUL;
     }
     lv_obj_set_style_bg_color(bar, lv_color_hex(bar_color), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(bar, static_cast<lv_opa_t>(120 + (confidence / 2U)), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(bar, static_cast<lv_opa_t>(120 + (scene_state.confidence / 2U)), LV_PART_MAIN);
     lv_obj_clear_flag(bar, LV_OBJ_FLAG_HIDDEN);
   }
 }
@@ -558,17 +540,22 @@ void UiManager::renderMicrophoneWaveform() {
   if (!ready_ || scene_waveform_ == nullptr) {
     return;
   }
-  const uint16_t freq_hz = waveform_snapshot_valid_ ? waveform_snapshot_.mic_freq_hz : 0U;
-  const int16_t cents = waveform_snapshot_valid_ ? waveform_snapshot_.mic_pitch_cents : 0;
-  const uint8_t confidence = waveform_snapshot_valid_ ? waveform_snapshot_.mic_pitch_confidence : 0U;
-  const uint8_t level_pct = waveform_snapshot_valid_ ? waveform_snapshot_.mic_level_percent : 0U;
+  const HardwareManager::Snapshot* active_snapshot = waveform_snapshot_ref_;
+  if (active_snapshot == nullptr && waveform_snapshot_valid_) {
+    active_snapshot = &waveform_snapshot_;
+  }
+  const uint16_t freq_hz = (active_snapshot != nullptr) ? active_snapshot->mic_freq_hz : 0U;
+  const int16_t cents = (active_snapshot != nullptr) ? active_snapshot->mic_pitch_cents : 0;
+  const uint8_t confidence = (active_snapshot != nullptr) ? active_snapshot->mic_pitch_confidence : 0U;
+  const uint8_t level_pct = (active_snapshot != nullptr) ? active_snapshot->mic_level_percent : 0U;
   const uint8_t stability_pct = la_detection_stability_pct_;
 
-  if (!waveform_overlay_enabled_ || !waveform_snapshot_valid_ || waveform_snapshot_.mic_waveform_count == 0U) {
+  if (!waveform_overlay_enabled_ || active_snapshot == nullptr || active_snapshot->mic_waveform_count == 0U) {
     hide_waveform();
     updateLaOverlay(la_detection_scene_, freq_hz, cents, confidence, level_pct, stability_pct);
     return;
   }
+  const HardwareManager::Snapshot& snapshot = *active_snapshot;
 
   if (scene_core_ == nullptr || scene_ring_outer_ == nullptr) {
     hide_waveform();
@@ -576,8 +563,8 @@ void UiManager::renderMicrophoneWaveform() {
     return;
   }
 
-  uint8_t first = waveform_snapshot_.mic_waveform_head;
-  uint8_t count = waveform_snapshot_.mic_waveform_count;
+  uint8_t first = snapshot.mic_waveform_head;
+  uint8_t count = snapshot.mic_waveform_count;
   if (count > HardwareManager::kMicWaveformCapacity) {
     count = HardwareManager::kMicWaveformCapacity;
   }
@@ -701,7 +688,7 @@ void UiManager::renderMicrophoneWaveform() {
     uint8_t point_index = 0U;
     for (uint8_t index = 0U; index < points_to_draw; ++index) {
       const uint16_t sample_index = static_cast<uint16_t>(start + index) % HardwareManager::kMicWaveformCapacity;
-      uint8_t sample = waveform_snapshot_.mic_waveform[sample_index];
+      uint8_t sample = snapshot.mic_waveform[sample_index];
       if (sample > 100U) {
         sample = 100U;
       }
@@ -797,11 +784,11 @@ void UiManager::renderMicrophoneWaveform() {
   if (radius_span > max_span) {
     radius_span = max_span;
   }
-  const int16_t level_boost = static_cast<int16_t>(waveform_snapshot_.mic_level_percent / 9U);
+  const int16_t level_boost = static_cast<int16_t>(snapshot.mic_level_percent / 9U);
   const int16_t jitter_amp = waveform_overlay_jitter_ ? 2 : 0;
   constexpr float kTau = 6.28318530718f;
   constexpr float kHalfPi = 1.57079632679f;
-  int16_t outer_offset = static_cast<int16_t>(2 + (static_cast<int16_t>(waveform_snapshot_.mic_level_percent) / 28));
+  int16_t outer_offset = static_cast<int16_t>(2 + (static_cast<int16_t>(snapshot.mic_level_percent) / 28));
   if (la_detection_scene_) {
     outer_offset = static_cast<int16_t>(outer_offset + 2 + (static_cast<int16_t>(stability_pct) / 20));
   }
@@ -811,7 +798,7 @@ void UiManager::renderMicrophoneWaveform() {
   uint8_t point_index = 0U;
   for (uint8_t index = 0U; index < points_to_draw; ++index) {
     const uint16_t sample_index = static_cast<uint16_t>(start + index) % HardwareManager::kMicWaveformCapacity;
-    uint8_t sample = waveform_snapshot_.mic_waveform[sample_index];
+    uint8_t sample = snapshot.mic_waveform[sample_index];
     if (sample > 100U) {
       sample = 100U;
     }
@@ -876,10 +863,10 @@ void UiManager::renderMicrophoneWaveform() {
   lv_obj_set_pos(scene_waveform_, 0, 0);
   lv_obj_clear_flag(scene_waveform_, LV_OBJ_FLAG_HIDDEN);
   updateLaOverlay(la_detection_scene_,
-                  waveform_snapshot_.mic_freq_hz,
-                  waveform_snapshot_.mic_pitch_cents,
-                  waveform_snapshot_.mic_pitch_confidence,
-                  waveform_snapshot_.mic_level_percent,
+                  snapshot.mic_freq_hz,
+                  snapshot.mic_pitch_cents,
+                  snapshot.mic_pitch_confidence,
+                  snapshot.mic_level_percent,
                   stability_pct);
 }
 
@@ -1416,7 +1403,9 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   if (waveform_amplitude_pct > 100U) {
     waveform_amplitude_pct = 100U;
   }
-  configureWaveformOverlay(waveform_snapshot_valid_ ? &waveform_snapshot_ : nullptr,
+  configureWaveformOverlay((waveform_snapshot_ref_ != nullptr) ? waveform_snapshot_ref_
+                                                                : (waveform_snapshot_valid_ ? &waveform_snapshot_
+                                                                                            : nullptr),
                           waveform_enabled,
                           waveform_sample_count,
                           waveform_amplitude_pct,
@@ -1536,28 +1525,28 @@ void UiManager::createWidgets() {
   lv_obj_clear_flag(scene_root_, LV_OBJ_FLAG_SCROLLABLE);
 
   scene_ring_outer_ = lv_obj_create(scene_root_);
-  lv_obj_remove_style_all(scene_ring_outer_);
-  lv_obj_set_style_radius(scene_ring_outer_, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(scene_ring_outer_, LV_OPA_TRANSP, LV_PART_MAIN);
-  lv_obj_set_style_border_width(scene_ring_outer_, 3, LV_PART_MAIN);
-  lv_obj_set_style_border_opa(scene_ring_outer_, LV_OPA_70, LV_PART_MAIN);
-  lv_obj_set_style_border_color(scene_ring_outer_, lv_color_hex(0x2A76FF), LV_PART_MAIN);
+  SceneElement::initCircle(scene_ring_outer_,
+                           lv_color_hex(0x000000),
+                           LV_OPA_TRANSP,
+                           lv_color_hex(0x2A76FF),
+                           3,
+                           LV_OPA_70);
 
   scene_ring_inner_ = lv_obj_create(scene_root_);
-  lv_obj_remove_style_all(scene_ring_inner_);
-  lv_obj_set_style_radius(scene_ring_inner_, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(scene_ring_inner_, LV_OPA_TRANSP, LV_PART_MAIN);
-  lv_obj_set_style_border_width(scene_ring_inner_, 2, LV_PART_MAIN);
-  lv_obj_set_style_border_opa(scene_ring_inner_, LV_OPA_80, LV_PART_MAIN);
-  lv_obj_set_style_border_color(scene_ring_inner_, lv_color_hex(0xC8DCFF), LV_PART_MAIN);
+  SceneElement::initCircle(scene_ring_inner_,
+                           lv_color_hex(0x000000),
+                           LV_OPA_TRANSP,
+                           lv_color_hex(0xC8DCFF),
+                           2,
+                           LV_OPA_80);
 
   scene_core_ = lv_obj_create(scene_root_);
-  lv_obj_remove_style_all(scene_core_);
-  lv_obj_set_style_radius(scene_core_, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(scene_core_, LV_OPA_90, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(scene_core_, lv_color_hex(0x2A76FF), LV_PART_MAIN);
-  lv_obj_set_style_border_width(scene_core_, 2, LV_PART_MAIN);
-  lv_obj_set_style_border_color(scene_core_, lv_color_hex(0xE8F1FF), LV_PART_MAIN);
+  SceneElement::initCircle(scene_core_,
+                           lv_color_hex(0x2A76FF),
+                           LV_OPA_90,
+                           lv_color_hex(0xE8F1FF),
+                           2,
+                           LV_OPA_COVER);
 
   scene_fx_bar_ = lv_obj_create(scene_root_);
   lv_obj_remove_style_all(scene_fx_bar_);

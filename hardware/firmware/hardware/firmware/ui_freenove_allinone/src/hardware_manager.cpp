@@ -33,6 +33,18 @@ constexpr uint16_t kMicAgcAmbientGateDiv = 10U;
 constexpr uint16_t kMicAgcGainDeadbandQ8 = 18U;
 constexpr uint16_t kMicAgcMaxGainStepUp = 48U;
 constexpr uint16_t kMicAgcMaxGainStepDown = 16U;
+constexpr HardwareManager::LedPaletteEntry kLedPalette[] = {
+    {"SCENE_LOCKED", 255U, 96U, 22U, 88U, true},
+    {"SCENE_BROKEN", 255U, 40U, 18U, 86U, true},
+    {"SCENE_SIGNAL_SPIKE", 255U, 40U, 18U, 86U, true},
+    {"SCENE_LA_DETECT", 32U, 224U, 170U, 56U, true},
+    {"SCENE_LA_DETECTOR", 32U, 224U, 170U, 56U, true},
+    {"SCENE_SEARCH", 32U, 224U, 170U, 56U, true},
+    {"SCENE_WIN", 245U, 205U, 62U, 80U, true},
+    {"SCENE_REWARD", 245U, 205U, 62U, 80U, true},
+    {"SCENE_READY", 88U, 214U, 92U, 52U, true},
+    {"__DEFAULT__", 50U, 122U, 255U, 50U, true},
+};
 uint8_t clampU8(int value) {
   if (value < 0) {
     return 0U;
@@ -154,6 +166,10 @@ void HardwareManager::clearManualLed() {
 }
 
 HardwareManager::Snapshot HardwareManager::snapshot() const {
+  return snapshot_;
+}
+
+const HardwareManager::Snapshot& HardwareManager::snapshotRef() const {
   return snapshot_;
 }
 
@@ -857,43 +873,42 @@ void HardwareManager::estimatePitchFromSamples(const int16_t* samples,
 }
 
 void HardwareManager::setScenePalette(const char* scene_id) {
+  if (scene_id == nullptr || scene_id[0] == '\0') {
+    scene_id = "SCENE_READY";
+  }
   std::strncpy(snapshot_.scene_id, scene_id, sizeof(snapshot_.scene_id) - 1U);
   snapshot_.scene_id[sizeof(snapshot_.scene_id) - 1U] = '\0';
 
-  scene_brightness_ = kDefaultLedBrightness;
-  led_pulse_ = true;
-
-  if (std::strcmp(scene_id, "SCENE_LOCKED") == 0) {
-    scene_r_ = 255U;
-    scene_g_ = 96U;
-    scene_b_ = 22U;
-    scene_brightness_ = 88U;
-  } else if (std::strcmp(scene_id, "SCENE_BROKEN") == 0 || std::strcmp(scene_id, "SCENE_SIGNAL_SPIKE") == 0) {
-    scene_r_ = 255U;
-    scene_g_ = 40U;
-    scene_b_ = 18U;
-    scene_brightness_ = 86U;
-  } else if (std::strcmp(scene_id, "SCENE_LA_DETECT") == 0 || std::strcmp(scene_id, "SCENE_SEARCH") == 0) {
-    scene_r_ = 32U;
-    scene_g_ = 224U;
-    scene_b_ = 170U;
-    scene_brightness_ = 56U;
-  } else if (std::strcmp(scene_id, "SCENE_WIN") == 0 || std::strcmp(scene_id, "SCENE_REWARD") == 0) {
-    scene_r_ = 245U;
-    scene_g_ = 205U;
-    scene_b_ = 62U;
-    scene_brightness_ = 80U;
-  } else if (std::strcmp(scene_id, "SCENE_READY") == 0) {
-    scene_r_ = 88U;
-    scene_g_ = 214U;
-    scene_b_ = 92U;
-    scene_brightness_ = 52U;
-  } else {
+  const LedPaletteEntry* palette = findPaletteForScene(scene_id);
+  if (palette == nullptr) {
     scene_r_ = 50U;
     scene_g_ = 122U;
     scene_b_ = 255U;
-    scene_brightness_ = 50U;
+    scene_brightness_ = kDefaultLedBrightness;
+    led_pulse_ = true;
+    return;
   }
+  scene_r_ = palette->r;
+  scene_g_ = palette->g;
+  scene_b_ = palette->b;
+  scene_brightness_ = palette->brightness;
+  led_pulse_ = palette->pulse;
+}
+
+const HardwareManager::LedPaletteEntry* HardwareManager::findPaletteForScene(const char* scene_id) const {
+  if (scene_id == nullptr || scene_id[0] == '\0') {
+    return &kLedPalette[(sizeof(kLedPalette) / sizeof(kLedPalette[0])) - 1U];
+  }
+  for (size_t index = 0U; index < (sizeof(kLedPalette) / sizeof(kLedPalette[0])); ++index) {
+    const LedPaletteEntry& entry = kLedPalette[index];
+    if (std::strcmp(entry.scene_id, "__DEFAULT__") == 0) {
+      continue;
+    }
+    if (std::strcmp(entry.scene_id, scene_id) == 0) {
+      return &entry;
+    }
+  }
+  return &kLedPalette[(sizeof(kLedPalette) / sizeof(kLedPalette[0])) - 1U];
 }
 
 uint8_t HardwareManager::batteryPercentFromMv(uint16_t cell_mv) const {

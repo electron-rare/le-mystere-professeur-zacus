@@ -1,3 +1,90 @@
+## [2026-02-24] SCENE_WIN_ETAPE demoscene runtime hardening (B1/B2 + morph + TXT/JSON)
+
+- Skills chain appliquee pour la scene:
+  1) `demoscene-demomaking-generic`
+  2) `firmware-graphics-stack`
+  3) `firmware-scene-ui-editor`
+- Correctifs firmware (`ui_manager.h/.cpp`):
+  - phase B split runtime: `B1` crash court (ms clamp 700..1000) puis `B2` interlude jusqu'a `B=15000`.
+  - copper rendu circulaire/wavy via rings animees (pool existant reutilise, sans alloc per-frame).
+  - wirecube: morph geometrique cube<->sphere (interpolation vertices + projection perspective existante).
+  - scroller C: ping-pong wavy borne sur bande verticale demi-ecran (centre).
+  - overrides runtime etendus: TXT+JSON (`MID_A_SCROLL`, `BOT_A_SCROLL`, `B1_MS`, `SPEED_MID_A`, `SPEED_BOT_A`, etc.).
+  - instrumentation start/phase gardee et enrichie (B1, vitesses scroll).
+- Docs/livrables:
+  - calibration refraichie: `docs/ui/SCENE_WIN_ETAPE_demoscene_calibration.md`.
+  - exemple override TXT: `data/ui/scene_win_etape.txt`.
+  - README scene mis a jour (A/B/C + B1/B2, contrat overrides TXT+JSON, notes perf).
+- Checkpoint securite execute:
+  - `/tmp/zacus_checkpoint/20260224_021234_wip.patch`
+  - `/tmp/zacus_checkpoint/20260224_021234_status.txt`
+
+## [2026-02-24] SCENE_WIN_ETAPE timing lock update (A/B/C long format)
+
+- Timings Freenove verrouilles pour la sequence intro:
+  - A = `30000 ms`
+  - B = `15000 ms`
+  - C = `20000 ms` (puis boucle C infinie tant que la scene reste active)
+- Alignement doc runtime:
+  - `hardware/firmware/ui_freenove_allinone/README.md` (section Intro Amiga92)
+  - `docs/ui/SCENE_WIN_ETAPE_demoscene_calibration.md` (table calibration + defaults)
+- Correctif build LVGL:
+  - `LV_OPA_35` remplace par `LV_OPA_30` dans `ui_manager.cpp` pour compat LVGL 8.4.
+- Checkpoint securite execute:
+  - `/tmp/zacus_checkpoint/20260224_014020_wip.patch`
+  - `/tmp/zacus_checkpoint/20260224_014020_status.txt`
+- Verification:
+  - `pio run -e freenove_esp32s3` ✅
+
+## [2026-02-24] Skill pack demoscene v1.2 + UI skill sync
+
+- Creation du skill global `demoscene-demomaking-generic` dans `~/.codex/skills/`:
+  - `SKILL.md`, `agents/openai.yaml`, `references/*`, `templates/*.schema.json`,
+  - scripts: `build_reference_pack.py`, `validate_reference_pack.py`, `validate_demo_spec.py`, `emit_trackset_example.py`.
+- Contrat skill v1.2 aligne:
+  - pipeline obligatoire `References -> ReferencePack -> StyleSheet/Timeline/TrackSet/FxGraph`,
+  - baseline parametres chiffrés cracktro/clean/glitch/fireworks,
+  - mode clean scroller par defaut: rollback `ping_pong`.
+- Skills UI synchronises:
+  - `~/.codex/skills/firmware-graphics-stack/SKILL.md` mis a jour (adapter workflow ReferencePack -> runtime LVGL).
+  - `~/.codex/skills/firmware-scene-ui-editor/SKILL.md` mis a jour (scene tuning via tracks + validation `SCENE_GOTO`).
+  - ajout metadata UI: `~/.codex/skills/firmware-scene-ui-editor/agents/openai.yaml`.
+- Playbook repo synchronise:
+  - `docs/AGENTS_COPILOT_PLAYBOOK.md` ajoute le nouveau skill et l'ordre recommande:
+    1) `$demoscene-demomaking-generic`, 2) skill adapter UI, 3) validation hardware.
+- Checkpoint securite execute:
+  - `/tmp/zacus_checkpoint/20260224_011756_wip.patch`
+  - `/tmp/zacus_checkpoint/20260224_011756_status.txt`
+
+## [2026-02-24] SCENE_WIN_ETAPE intro Amiga92 JSON-first
+
+- UiManager: intro A/B/C dediee a `SCENE_WIN_ETAPE` (state machine + `lv_timer` 33 ms), skip bouton/touch, cleanup strict des anims/objets intro.
+- Runtime override JSON-only ajoute:
+  - chemin canonique: `/SCENE_WIN_ETAPE.json`
+  - compat lecture: `/ui/SCENE_WIN_ETAPE.json`
+  - schema flexible: `logo_text`, `crack_scroll`, `clean_title`, `clean_scroll` (+ aliases legacy).
+- Assets/exemple:
+  - fichier exemple ajoute: `data/SCENE_WIN_ETAPE.json`.
+- Documentation:
+  - section `Intro Amiga92` + `References consulted` ajoutees dans `hardware/firmware/ui_freenove_allinone/README.md`.
+- Verification:
+  - `pio run -e freenove_esp32s3` OK.
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` OK.
+  - `pio run -e freenove_esp32s3 -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` OK.
+  - serial: `SCENE_GOTO SCENE_WIN_ETAPE` -> `ACK SCENE_GOTO ok=1`, override JSON charge depuis `/SCENE_WIN_ETAPE.json`.
+
+## [2026-02-24] SCENE_WIN_ETAPE UI sequence (cracktro -> crash -> demo clean)
+
+- UI sequence ajoutee pour `SCENE_WIN_ETAPE` en mode Freenove fireworks:
+  - phase A (4-5s): raster/copper bars + starfield multi-couches + logo `PROFESSEUR ZACUS` en overshoot + scrolltext bas.
+  - phase B (~0.9s): crash/glitch (blink + jitter + fade) avec burst firework.
+  - phase C (6-8s): fond sobre type degrade, reveal titre `BRAVO BRIGADE Z`, puis scroll lent avec oscillation sinus.
+- Implementation principale: `hardware/firmware/ui_freenove_allinone/src/ui_manager.cpp` + nouveaux widgets/etat dans `include/ui_manager.h`.
+- Verification:
+  - `pio run -e freenove_esp32s3` OK
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` OK
+  - passage direct scene valide via serie: `SCENE_GOTO SCENE_WIN_ETAPE` (`ACK SCENE_GOTO ok=1`).
+
 ## [2026-02-23] Audit coherence global (source de verite: firmware Freenove)
 
 - Validation story spec OK: `./tools/dev/story-gen validate`.

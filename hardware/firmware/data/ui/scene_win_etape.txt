@@ -1,0 +1,21 @@
+# SCENE_WIN_ETAPE runtime overrides (TXT)
+# If absent, firmware falls back to hardcoded defaults.
+
+LOGO_TEXT=Professeur ZACUS
+MID_A_SCROLL=PROUDLY PRESENTS • LE MYSTERE DU PROFESSEUR ZACUS • NO CLOUD • PURE SIGNAL •
+BOT_A_SCROLL=... Le Professeur SAILLANT Franck HOTAMP vous salue bien ...
+C_TITLE=BRAVO Brigade Z
+C_SCROLL=Vous n'avez plus qu'a valider sur le telephone qui sonne
+
+A_MS=30000
+B_MS=15000
+C_MS=20000
+B1_MS=900
+
+SPEED_MID_A=216
+SPEED_BOT_A=108
+SPEED_C=72
+
+STARS=auto
+FX_3D=wirecube
+FX_3D_QUALITY=auto

@@ -1,0 +1,17 @@
+{
+  "logo_text": "Professeur ZACUS",
+  "mid_a_scroll": "PROUDLY PRESENTS • LE MYSTERE DU PROFESSEUR ZACUS • NO CLOUD • PURE SIGNAL •",
+  "bot_a_scroll": "... Le Professeur SAILLANT Franck HOTAMP vous salue bien ...",
+  "clean_title": "BRAVO Brigade Z",
+  "clean_scroll": "Vous n’avez plus qu’a valider sur le téléphone qui sonne",
+  "a_ms": 30000,
+  "b_ms": 15000,
+  "c_ms": 20000,
+  "b1_ms": 900,
+  "speed_mid_a": 216,
+  "speed_bot_a": 108,
+  "speed_c": 72,
+  "stars": "auto",
+  "fx_3d": "wirecube",
+  "fx_3d_quality": "auto"
+}

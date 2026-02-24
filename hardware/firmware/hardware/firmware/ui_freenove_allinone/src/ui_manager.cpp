@@ -3,6 +3,8 @@
 
 #include <ArduinoJson.h>
 #include <TFT_eSPI.h>
+#include <FS.h>
+#include <LittleFS.h>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -397,6 +399,138 @@ int16_t signedNoise(uint32_t value, uintptr_t salt, int16_t amplitude) {
   return static_cast<int16_t>(static_cast<int32_t>(mixed % static_cast<uint32_t>(span)) - amplitude);
 }
 
+constexpr const char* kWinEtapeCracktroTitle = "PROFESSEUR ZACUS";
+constexpr const char* kWinEtapeCracktroScroll =
+    "PROUDLY PRESENTS • LE MYSTERE DU PROFESSEUR ZACUS • NO CLOUD • PURE SIGNAL •";
+constexpr const char* kWinEtapeCracktroBottomScroll =
+    "... Le Professeur SAILLANT Franck HOTAMP vous salue bien ...";
+constexpr const char* kWinEtapeDemoTitle = "BRAVO Brigade Z";
+constexpr const char* kWinEtapeDemoScroll =
+    "Vous n’avez plus qu’a valider sur le téléphone qui sonne";
+constexpr const char* kWinEtapeWaitingSubtitle = "Validation par reponse au telephone";
+
+constexpr uint16_t kIntroTickMs = 33U;
+constexpr uint32_t kIntroCracktroMsDefault = 30000U;
+constexpr uint32_t kIntroTransitionMsDefault = 15000U;
+constexpr uint32_t kIntroCleanMsDefault = 20000U;
+constexpr uint16_t kIntroB1CrashMsDefault = 900U;
+constexpr uint16_t kIntroOutroMs = 400U;
+constexpr uint32_t kIntroCracktroMsMin = 1000U;
+constexpr uint32_t kIntroCracktroMsMax = 120000U;
+constexpr uint32_t kIntroTransitionMsMin = 300U;
+constexpr uint32_t kIntroTransitionMsMax = 60000U;
+constexpr uint32_t kIntroCleanMsMin = 1000U;
+constexpr uint32_t kIntroCleanMsMax = 120000U;
+constexpr uint16_t kIntroB1CrashMsMin = 700U;
+constexpr uint16_t kIntroB1CrashMsMax = 1000U;
+constexpr uint16_t kIntroScrollApxPerSecDefault = 216U;
+constexpr uint16_t kIntroScrollBotApxPerSecDefault = 108U;
+constexpr uint16_t kIntroScrollCpxPerSecDefault = 72U;
+constexpr uint16_t kIntroScrollSpeedMin = 10U;
+constexpr uint16_t kIntroScrollSpeedMax = 400U;
+constexpr uint16_t kIntroScrollBotSpeedMin = 60U;
+constexpr uint16_t kIntroScrollBotSpeedMax = 160U;
+constexpr uint8_t kIntroSineAmpApxDefault = 18U;
+constexpr uint8_t kIntroSineAmpCpxDefault = 12U;
+constexpr uint8_t kIntroSineAmpMin = 1U;
+constexpr uint8_t kIntroSineAmpMax = 32U;
+constexpr uint16_t kIntroSinePeriodPxDefault = 104U;
+constexpr uint16_t kIntroSinePeriodMin = 40U;
+constexpr uint16_t kIntroSinePeriodMax = 220U;
+constexpr float kIntroSinePhaseSpeedDefault = 1.9f;
+constexpr float kIntroSinePhaseSpeedMin = 0.1f;
+constexpr float kIntroSinePhaseSpeedMax = 5.0f;
+constexpr uint16_t kIntroCubeFov = 156U;
+constexpr uint16_t kIntroCubeZOffset = 320U;
+constexpr uint16_t kIntroCubeScale = 88U;
+constexpr int16_t kIntroBottomScrollMarginPx = 8;
+
+template <typename T>
+T clampValue(T value, T min_value, T max_value) {
+  if (value < min_value) {
+    return min_value;
+  }
+  if (value > max_value) {
+    return max_value;
+  }
+  return value;
+}
+
+void copyStringBounded(char* dst, size_t dst_size, const char* src) {
+  if (dst == nullptr || dst_size == 0U) {
+    return;
+  }
+  dst[0] = '\0';
+  if (src == nullptr || src[0] == '\0') {
+    return;
+  }
+  std::strncpy(dst, src, dst_size - 1U);
+  dst[dst_size - 1U] = '\0';
+}
+
+String trimCopy(String text) {
+  text.trim();
+  return text;
+}
+
+bool parseUint32Text(const String& text, uint32_t* out_value) {
+  if (out_value == nullptr) {
+    return false;
+  }
+  if (text.length() == 0U) {
+    return false;
+  }
+  char* end = nullptr;
+  const unsigned long value = strtoul(text.c_str(), &end, 10);
+  if (end == text.c_str() || *end != '\0') {
+    return false;
+  }
+  *out_value = static_cast<uint32_t>(value);
+  return true;
+}
+
+bool parseInt16Text(const String& text, int16_t* out_value) {
+  if (out_value == nullptr) {
+    return false;
+  }
+  if (text.length() == 0U) {
+    return false;
+  }
+  char* end = nullptr;
+  const long value = strtol(text.c_str(), &end, 10);
+  if (end == text.c_str() || *end != '\0') {
+    return false;
+  }
+  if (value < -32768L || value > 32767L) {
+    return false;
+  }
+  *out_value = static_cast<int16_t>(value);
+  return true;
+}
+
+bool parseFloatText(const String& text, float* out_value) {
+  if (out_value == nullptr) {
+    return false;
+  }
+  if (text.length() == 0U) {
+    return false;
+  }
+  char* end = nullptr;
+  const float value = strtof(text.c_str(), &end);
+  if (end == text.c_str() || *end != '\0') {
+    return false;
+  }
+  *out_value = value;
+  return true;
+}
+
+float easeOutBack(float t) {
+  const float c1 = 1.70158f;
+  const float c3 = c1 + 1.0f;
+  const float one_minus = t - 1.0f;
+  return 1.0f + c3 * one_minus * one_minus * one_minus + c1 * one_minus * one_minus;
+}
+
 }  // namespace
 
 bool UiManager::begin() {
@@ -496,6 +630,2007 @@ void UiManager::setLaDetectionState(bool locked,
   la_detection_gate_elapsed_ms_ = gate_elapsed_ms;
   la_detection_gate_timeout_ms_ = gate_timeout_ms;
 }
+
+void UiManager::resetIntroConfigDefaults() {
+  copyStringBounded(intro_config_.logo_text, sizeof(intro_config_.logo_text), "Professeur ZACUS");
+  copyStringBounded(intro_config_.crack_scroll,
+                    sizeof(intro_config_.crack_scroll),
+                    kWinEtapeCracktroScroll);
+  copyStringBounded(intro_config_.crack_bottom_scroll,
+                    sizeof(intro_config_.crack_bottom_scroll),
+                    kWinEtapeCracktroBottomScroll);
+  copyStringBounded(intro_config_.clean_title, sizeof(intro_config_.clean_title), kWinEtapeDemoTitle);
+  copyStringBounded(intro_config_.clean_scroll, sizeof(intro_config_.clean_scroll), kWinEtapeDemoScroll);
+  intro_config_.a_duration_ms = kIntroCracktroMsDefault;
+  intro_config_.b_duration_ms = kIntroTransitionMsDefault;
+  intro_config_.c_duration_ms = kIntroCleanMsDefault;
+  intro_config_.b1_crash_ms = kIntroB1CrashMsDefault;
+  intro_config_.scroll_a_px_per_sec = kIntroScrollApxPerSecDefault;
+  intro_config_.scroll_bot_a_px_per_sec = kIntroScrollBotApxPerSecDefault;
+  intro_config_.scroll_c_px_per_sec = kIntroScrollCpxPerSecDefault;
+  intro_config_.sine_amp_a_px = kIntroSineAmpApxDefault;
+  intro_config_.sine_amp_c_px = kIntroSineAmpCpxDefault;
+  intro_config_.sine_period_px = kIntroSinePeriodPxDefault;
+  intro_config_.sine_phase_speed = kIntroSinePhaseSpeedDefault;
+  intro_config_.stars_override = -1;
+  copyStringBounded(intro_config_.fx_3d, sizeof(intro_config_.fx_3d), "rotozoom");
+  copyStringBounded(intro_config_.fx_3d_quality, sizeof(intro_config_.fx_3d_quality), "auto");
+}
+
+void UiManager::parseSceneWinEtapeTxtOverrides(const char* payload) {
+  if (payload == nullptr || payload[0] == '\0') {
+    return;
+  }
+  String text(payload);
+  int32_t start = 0;
+  while (start <= text.length()) {
+    int32_t end = text.indexOf('\n', start);
+    if (end < 0) {
+      end = text.length();
+    }
+    String line = text.substring(start, end);
+    start = end + 1;
+    line = trimCopy(line);
+    if (line.length() == 0U || line.startsWith("#")) {
+      continue;
+    }
+    const int32_t comment_pos = line.indexOf('#');
+    if (comment_pos >= 0) {
+      line = trimCopy(line.substring(0, comment_pos));
+    }
+    if (line.length() == 0U) {
+      continue;
+    }
+
+    const int32_t sep = line.indexOf('=');
+    if (sep <= 0) {
+      continue;
+    }
+    String key = trimCopy(line.substring(0, sep));
+    String value = trimCopy(line.substring(sep + 1));
+    key.toUpperCase();
+
+    if (key == "LOGO_TEXT") {
+      copyStringBounded(intro_config_.logo_text, sizeof(intro_config_.logo_text), value.c_str());
+      continue;
+    }
+    if (key == "A_SCROLL" || key == "MID_A_SCROLL" || key == "CRACK_SCROLL") {
+      copyStringBounded(intro_config_.crack_scroll, sizeof(intro_config_.crack_scroll), value.c_str());
+      continue;
+    }
+    if (key == "A_SCROLL_BOTTOM" || key == "BOTTOM_SCROLL" || key == "BOT_A_SCROLL") {
+      copyStringBounded(intro_config_.crack_bottom_scroll,
+                        sizeof(intro_config_.crack_bottom_scroll),
+                        value.c_str());
+      continue;
+    }
+    if (key == "C_TITLE" || key == "CLEAN_TITLE") {
+      copyStringBounded(intro_config_.clean_title, sizeof(intro_config_.clean_title), value.c_str());
+      continue;
+    }
+    if (key == "C_SCROLL" || key == "CLEAN_SCROLL") {
+      copyStringBounded(intro_config_.clean_scroll, sizeof(intro_config_.clean_scroll), value.c_str());
+      continue;
+    }
+
+    uint32_t parsed_u32 = 0U;
+    if (key == "A_MS" && parseUint32Text(value, &parsed_u32)) {
+      intro_config_.a_duration_ms = parsed_u32;
+      continue;
+    }
+    if (key == "B_MS" && parseUint32Text(value, &parsed_u32)) {
+      intro_config_.b_duration_ms = parsed_u32;
+      continue;
+    }
+    if (key == "C_MS" && parseUint32Text(value, &parsed_u32)) {
+      intro_config_.c_duration_ms = parsed_u32;
+      continue;
+    }
+    if ((key == "B1_MS" || key == "B1_CRASH_MS") && parseUint32Text(value, &parsed_u32)) {
+      intro_config_.b1_crash_ms = static_cast<uint16_t>(parsed_u32);
+      continue;
+    }
+    if ((key == "SPEED_A" || key == "SPEED_MID_A") && parseUint32Text(value, &parsed_u32)) {
+      intro_config_.scroll_a_px_per_sec = static_cast<uint16_t>(parsed_u32);
+      continue;
+    }
+    if ((key == "SPEED_BOT_A" || key == "SPEED_A_BOTTOM") && parseUint32Text(value, &parsed_u32)) {
+      intro_config_.scroll_bot_a_px_per_sec = static_cast<uint16_t>(parsed_u32);
+      continue;
+    }
+    if (key == "SPEED_C" && parseUint32Text(value, &parsed_u32)) {
+      intro_config_.scroll_c_px_per_sec = static_cast<uint16_t>(parsed_u32);
+      continue;
+    }
+    if (key == "SINE_AMP_A" && parseUint32Text(value, &parsed_u32)) {
+      intro_config_.sine_amp_a_px = static_cast<uint8_t>(parsed_u32);
+      continue;
+    }
+    if (key == "SINE_AMP_C" && parseUint32Text(value, &parsed_u32)) {
+      intro_config_.sine_amp_c_px = static_cast<uint8_t>(parsed_u32);
+      continue;
+    }
+    if (key == "SINE_PERIOD" && parseUint32Text(value, &parsed_u32)) {
+      intro_config_.sine_period_px = static_cast<uint16_t>(parsed_u32);
+      continue;
+    }
+
+    float parsed_float = 0.0f;
+    if (key == "SINE_PHASE_SPEED" && parseFloatText(value, &parsed_float)) {
+      intro_config_.sine_phase_speed = parsed_float;
+      continue;
+    }
+
+    if (key == "STARS") {
+      String normalized = value;
+      normalized.toLowerCase();
+      if (normalized == "auto") {
+        intro_config_.stars_override = -1;
+      } else {
+        int16_t parsed_i16 = 0;
+        if (parseInt16Text(value, &parsed_i16)) {
+          intro_config_.stars_override = parsed_i16;
+        }
+      }
+      continue;
+    }
+
+    if (key == "FX_3D") {
+      copyStringBounded(intro_config_.fx_3d, sizeof(intro_config_.fx_3d), value.c_str());
+      continue;
+    }
+    if (key == "FX_3D_QUALITY") {
+      copyStringBounded(intro_config_.fx_3d_quality,
+                        sizeof(intro_config_.fx_3d_quality),
+                        value.c_str());
+      continue;
+    }
+  }
+}
+
+void UiManager::parseSceneWinEtapeJsonOverrides(const char* payload, const char* path_for_log) {
+  if (payload == nullptr || payload[0] == '\0') {
+    return;
+  }
+  DynamicJsonDocument doc(4096);
+  const DeserializationError err = deserializeJson(doc, payload);
+  if (err) {
+    Serial.printf("[UI] intro overrides parse error path=%s err=%s defaults\n",
+                  (path_for_log != nullptr) ? path_for_log : "n/a",
+                  err.c_str());
+    return;
+  }
+
+  const char* logo_text = doc["logo_text"] | doc["LOGO_TEXT"] | doc["logoText"] | "";
+  const char* crack_scroll =
+      doc["crack_scroll"] | doc["CRACK_SCROLL"] | doc["A_SCROLL"] | doc["MID_A_SCROLL"] |
+      doc["mid_a_scroll"] |
+      doc["crackScroll"] | "";
+  const char* crack_bottom_scroll =
+      doc["crack_bottom_scroll"] | doc["BOTTOM_SCROLL"] | doc["A_SCROLL_BOTTOM"] |
+      doc["bot_a_scroll"] |
+      doc["BOT_A_SCROLL"] | "";
+  const char* clean_title =
+      doc["clean_title"] | doc["CLEAN_TITLE"] | doc["C_TITLE"] | doc["cleanTitle"] | "";
+  const char* clean_scroll =
+      doc["clean_scroll"] | doc["CLEAN_SCROLL"] | doc["C_SCROLL"] | doc["cleanScroll"] | "";
+
+  if (logo_text[0] != '\0') {
+    copyStringBounded(intro_config_.logo_text, sizeof(intro_config_.logo_text), logo_text);
+  }
+  if (crack_scroll[0] != '\0') {
+    copyStringBounded(intro_config_.crack_scroll, sizeof(intro_config_.crack_scroll), crack_scroll);
+  }
+  if (crack_bottom_scroll[0] != '\0') {
+    copyStringBounded(intro_config_.crack_bottom_scroll,
+                      sizeof(intro_config_.crack_bottom_scroll),
+                      crack_bottom_scroll);
+  }
+  if (clean_title[0] != '\0') {
+    copyStringBounded(intro_config_.clean_title, sizeof(intro_config_.clean_title), clean_title);
+  }
+  if (clean_scroll[0] != '\0') {
+    copyStringBounded(intro_config_.clean_scroll, sizeof(intro_config_.clean_scroll), clean_scroll);
+  }
+
+  if (doc["A_MS"].is<unsigned int>()) {
+    intro_config_.a_duration_ms = doc["A_MS"].as<unsigned int>();
+  } else if (doc["a_ms"].is<unsigned int>()) {
+    intro_config_.a_duration_ms = doc["a_ms"].as<unsigned int>();
+  }
+  if (doc["B_MS"].is<unsigned int>()) {
+    intro_config_.b_duration_ms = doc["B_MS"].as<unsigned int>();
+  } else if (doc["b_ms"].is<unsigned int>()) {
+    intro_config_.b_duration_ms = doc["b_ms"].as<unsigned int>();
+  }
+  if (doc["C_MS"].is<unsigned int>()) {
+    intro_config_.c_duration_ms = doc["C_MS"].as<unsigned int>();
+  } else if (doc["c_ms"].is<unsigned int>()) {
+    intro_config_.c_duration_ms = doc["c_ms"].as<unsigned int>();
+  }
+  if (doc["B1_MS"].is<unsigned int>()) {
+    intro_config_.b1_crash_ms = static_cast<uint16_t>(doc["B1_MS"].as<unsigned int>());
+  } else if (doc["b1_ms"].is<unsigned int>()) {
+    intro_config_.b1_crash_ms = static_cast<uint16_t>(doc["b1_ms"].as<unsigned int>());
+  }
+  if (doc["SPEED_MID_A"].is<unsigned int>()) {
+    intro_config_.scroll_a_px_per_sec = static_cast<uint16_t>(doc["SPEED_MID_A"].as<unsigned int>());
+  } else if (doc["speed_mid_a"].is<unsigned int>()) {
+    intro_config_.scroll_a_px_per_sec = static_cast<uint16_t>(doc["speed_mid_a"].as<unsigned int>());
+  } else if (doc["SPEED_A"].is<unsigned int>()) {
+    intro_config_.scroll_a_px_per_sec = static_cast<uint16_t>(doc["SPEED_A"].as<unsigned int>());
+  } else if (doc["speed_a"].is<unsigned int>()) {
+    intro_config_.scroll_a_px_per_sec = static_cast<uint16_t>(doc["speed_a"].as<unsigned int>());
+  }
+  if (doc["SPEED_BOT_A"].is<unsigned int>()) {
+    intro_config_.scroll_bot_a_px_per_sec = static_cast<uint16_t>(doc["SPEED_BOT_A"].as<unsigned int>());
+  } else if (doc["speed_bot_a"].is<unsigned int>()) {
+    intro_config_.scroll_bot_a_px_per_sec = static_cast<uint16_t>(doc["speed_bot_a"].as<unsigned int>());
+  }
+  if (doc["SPEED_C"].is<unsigned int>()) {
+    intro_config_.scroll_c_px_per_sec = static_cast<uint16_t>(doc["SPEED_C"].as<unsigned int>());
+  } else if (doc["speed_c"].is<unsigned int>()) {
+    intro_config_.scroll_c_px_per_sec = static_cast<uint16_t>(doc["speed_c"].as<unsigned int>());
+  }
+  if (doc["SINE_AMP_A"].is<unsigned int>()) {
+    intro_config_.sine_amp_a_px = static_cast<uint8_t>(doc["SINE_AMP_A"].as<unsigned int>());
+  } else if (doc["sine_amp_a"].is<unsigned int>()) {
+    intro_config_.sine_amp_a_px = static_cast<uint8_t>(doc["sine_amp_a"].as<unsigned int>());
+  }
+  if (doc["SINE_AMP_C"].is<unsigned int>()) {
+    intro_config_.sine_amp_c_px = static_cast<uint8_t>(doc["SINE_AMP_C"].as<unsigned int>());
+  } else if (doc["sine_amp_c"].is<unsigned int>()) {
+    intro_config_.sine_amp_c_px = static_cast<uint8_t>(doc["sine_amp_c"].as<unsigned int>());
+  }
+  if (doc["SINE_PERIOD"].is<unsigned int>()) {
+    intro_config_.sine_period_px = static_cast<uint16_t>(doc["SINE_PERIOD"].as<unsigned int>());
+  } else if (doc["sine_period"].is<unsigned int>()) {
+    intro_config_.sine_period_px = static_cast<uint16_t>(doc["sine_period"].as<unsigned int>());
+  }
+  if (doc["SINE_PHASE_SPEED"].is<float>()) {
+    intro_config_.sine_phase_speed = doc["SINE_PHASE_SPEED"].as<float>();
+  } else if (doc["sine_phase_speed"].is<float>()) {
+    intro_config_.sine_phase_speed = doc["sine_phase_speed"].as<float>();
+  }
+
+  if (doc["STARS"].is<const char*>()) {
+    const char* stars_text = doc["STARS"].as<const char*>();
+    if (stars_text != nullptr && std::strcmp(stars_text, "auto") == 0) {
+      intro_config_.stars_override = -1;
+    }
+  } else if (doc["stars"].is<const char*>()) {
+    const char* stars_text = doc["stars"].as<const char*>();
+    if (stars_text != nullptr && std::strcmp(stars_text, "auto") == 0) {
+      intro_config_.stars_override = -1;
+    }
+  }
+  if (doc["STARS"].is<int>()) {
+    intro_config_.stars_override = static_cast<int16_t>(doc["STARS"].as<int>());
+  } else if (doc["stars"].is<int>()) {
+    intro_config_.stars_override = static_cast<int16_t>(doc["stars"].as<int>());
+  }
+
+  const char* fx_3d = doc["FX_3D"] | doc["fx_3d"] | "";
+  if (fx_3d[0] != '\0') {
+    copyStringBounded(intro_config_.fx_3d, sizeof(intro_config_.fx_3d), fx_3d);
+  }
+  const char* fx_3d_quality = doc["FX_3D_QUALITY"] | doc["fx_3d_quality"] | "";
+  if (fx_3d_quality[0] != '\0') {
+    copyStringBounded(intro_config_.fx_3d_quality,
+                      sizeof(intro_config_.fx_3d_quality),
+                      fx_3d_quality);
+  }
+
+  Serial.printf("[UI] intro overrides loaded from %s\n",
+                (path_for_log != nullptr) ? path_for_log : "json");
+}
+
+void UiManager::loadSceneWinEtapeOverrides() {
+  resetIntroConfigDefaults();
+  const char* const candidates[] = {
+      "/ui/scene_win_etape.txt",
+      "/ui/scene_win_etape.json",
+      "/SCENE_WIN_ETAPE.json",
+      "/ui/SCENE_WIN_ETAPE.json",
+  };
+
+  String payload;
+  String loaded_path;
+
+  for (const char* path : candidates) {
+    if (path == nullptr || path[0] == '\0') {
+      continue;
+    }
+    if (!LittleFS.exists(path)) {
+      continue;
+    }
+    File file = LittleFS.open(path, "r");
+    if (!file) {
+      continue;
+    }
+    payload = file.readString();
+    file.close();
+    if (payload.isEmpty()) {
+      continue;
+    }
+    loaded_path = path;
+    break;
+  }
+
+  if (!payload.isEmpty()) {
+    String lower_path = loaded_path;
+    lower_path.toLowerCase();
+    if (lower_path.endsWith(".txt")) {
+      parseSceneWinEtapeTxtOverrides(payload.c_str());
+      Serial.printf("[UI] intro overrides loaded from %s\n", loaded_path.c_str());
+    } else {
+      parseSceneWinEtapeJsonOverrides(payload.c_str(), loaded_path.c_str());
+    }
+  } else {
+    Serial.println("[UI] intro overrides: no file, defaults");
+  }
+
+  intro_config_.a_duration_ms =
+      clampValue<uint32_t>(intro_config_.a_duration_ms, kIntroCracktroMsMin, kIntroCracktroMsMax);
+  intro_config_.b_duration_ms =
+      clampValue<uint32_t>(intro_config_.b_duration_ms, kIntroTransitionMsMin, kIntroTransitionMsMax);
+  intro_config_.c_duration_ms =
+      clampValue<uint32_t>(intro_config_.c_duration_ms, kIntroCleanMsMin, kIntroCleanMsMax);
+  intro_config_.b1_crash_ms =
+      clampValue<uint16_t>(intro_config_.b1_crash_ms, kIntroB1CrashMsMin, kIntroB1CrashMsMax);
+  intro_config_.scroll_a_px_per_sec =
+      clampValue<uint16_t>(intro_config_.scroll_a_px_per_sec, kIntroScrollSpeedMin, kIntroScrollSpeedMax);
+  intro_config_.scroll_bot_a_px_per_sec =
+      clampValue<uint16_t>(intro_config_.scroll_bot_a_px_per_sec, kIntroScrollBotSpeedMin, kIntroScrollBotSpeedMax);
+  intro_config_.scroll_c_px_per_sec =
+      clampValue<uint16_t>(intro_config_.scroll_c_px_per_sec, kIntroScrollSpeedMin, kIntroScrollSpeedMax);
+  intro_config_.sine_amp_a_px =
+      clampValue<uint8_t>(intro_config_.sine_amp_a_px, kIntroSineAmpMin, kIntroSineAmpMax);
+  intro_config_.sine_amp_c_px =
+      clampValue<uint8_t>(intro_config_.sine_amp_c_px, kIntroSineAmpMin, kIntroSineAmpMax);
+  intro_config_.sine_period_px =
+      clampValue<uint16_t>(intro_config_.sine_period_px, kIntroSinePeriodMin, kIntroSinePeriodMax);
+  intro_config_.sine_phase_speed =
+      clampValue<float>(intro_config_.sine_phase_speed, kIntroSinePhaseSpeedMin, kIntroSinePhaseSpeedMax);
+
+  if (intro_config_.stars_override < 0) {
+    intro_config_.stars_override = -1;
+  } else {
+    intro_config_.stars_override =
+        clampValue<int16_t>(intro_config_.stars_override, static_cast<int16_t>(60), static_cast<int16_t>(220));
+  }
+  if (intro_config_.fx_3d[0] == '\0') {
+    copyStringBounded(intro_config_.fx_3d, sizeof(intro_config_.fx_3d), "rotozoom");
+  }
+  if (intro_config_.fx_3d_quality[0] == '\0') {
+    copyStringBounded(intro_config_.fx_3d_quality, sizeof(intro_config_.fx_3d_quality), "auto");
+  }
+
+  intro_b1_crash_ms_ = intro_config_.b1_crash_ms;
+  intro_scroll_mid_a_px_per_sec_ = intro_config_.scroll_a_px_per_sec;
+  intro_scroll_bot_a_px_per_sec_ = intro_config_.scroll_bot_a_px_per_sec;
+}
+
+void UiManager::ensureIntroCreated() {
+  if (intro_created_ || scene_root_ == nullptr) {
+    return;
+  }
+
+  intro_root_ = lv_obj_create(scene_root_);
+  lv_obj_remove_style_all(intro_root_);
+  lv_obj_set_size(intro_root_, LV_PCT(100), LV_PCT(100));
+  lv_obj_set_style_bg_color(intro_root_, lv_color_hex(0x000022UL), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(intro_root_, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_clear_flag(intro_root_, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(intro_root_, LV_OBJ_FLAG_HIDDEN);
+
+  for (uint8_t i = 0U; i < 4U; ++i) {
+    intro_gradient_layers_[i] = lv_obj_create(intro_root_);
+    lv_obj_remove_style_all(intro_gradient_layers_[i]);
+    lv_obj_set_size(intro_gradient_layers_[i], LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_opa(intro_gradient_layers_[i], LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_add_flag(intro_gradient_layers_[i], LV_OBJ_FLAG_HIDDEN);
+  }
+
+  for (lv_obj_t* bar : scene_cracktro_bars_) {
+    if (bar == nullptr) {
+      continue;
+    }
+    lv_obj_set_parent(bar, intro_root_);
+    lv_obj_add_flag(bar, LV_OBJ_FLAG_HIDDEN);
+  }
+
+  for (lv_obj_t* star : scene_starfield_) {
+    if (star == nullptr) {
+      continue;
+    }
+    lv_obj_set_parent(star, intro_root_);
+    lv_obj_add_flag(star, LV_OBJ_FLAG_HIDDEN);
+  }
+
+  intro_logo_shadow_label_ = lv_label_create(intro_root_);
+  intro_logo_label_ = lv_label_create(intro_root_);
+  intro_crack_scroll_label_ = lv_label_create(intro_root_);
+  intro_bottom_scroll_label_ = lv_label_create(intro_root_);
+  intro_clean_title_shadow_label_ = lv_label_create(intro_root_);
+  intro_clean_title_label_ = lv_label_create(intro_root_);
+  intro_clean_scroll_label_ = lv_label_create(intro_root_);
+  intro_debug_label_ = lv_label_create(intro_root_);
+
+  if (intro_logo_shadow_label_ != nullptr) {
+    lv_obj_set_style_text_font(intro_logo_shadow_label_, &lv_font_montserrat_18, LV_PART_MAIN);
+    lv_obj_set_style_text_color(intro_logo_shadow_label_, lv_color_hex(0x000000UL), LV_PART_MAIN);
+    lv_obj_set_style_text_opa(intro_logo_shadow_label_, LV_OPA_70, LV_PART_MAIN);
+    lv_obj_set_style_text_letter_space(intro_logo_shadow_label_, 2, LV_PART_MAIN);
+    lv_obj_add_flag(intro_logo_shadow_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (intro_logo_label_ != nullptr) {
+    lv_obj_set_style_text_font(intro_logo_label_, &lv_font_montserrat_18, LV_PART_MAIN);
+    lv_obj_set_style_text_color(intro_logo_label_, lv_color_hex(0xFFFFFFUL), LV_PART_MAIN);
+    lv_obj_set_style_text_letter_space(intro_logo_label_, 2, LV_PART_MAIN);
+    lv_obj_add_flag(intro_logo_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (intro_crack_scroll_label_ != nullptr) {
+    lv_obj_set_style_text_font(intro_crack_scroll_label_, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(intro_crack_scroll_label_, lv_color_hex(0xFFFFFFUL), LV_PART_MAIN);
+    lv_obj_add_flag(intro_crack_scroll_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (intro_bottom_scroll_label_ != nullptr) {
+    lv_obj_set_style_text_font(intro_bottom_scroll_label_, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(intro_bottom_scroll_label_, lv_color_hex(0xFFF3A7UL), LV_PART_MAIN);
+    lv_obj_set_style_text_opa(intro_bottom_scroll_label_, LV_OPA_90, LV_PART_MAIN);
+    lv_obj_add_flag(intro_bottom_scroll_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (intro_clean_title_shadow_label_ != nullptr) {
+    lv_obj_set_style_text_font(intro_clean_title_shadow_label_, &lv_font_montserrat_18, LV_PART_MAIN);
+    lv_obj_set_style_text_color(intro_clean_title_shadow_label_, lv_color_hex(0x000000UL), LV_PART_MAIN);
+    lv_obj_set_style_text_opa(intro_clean_title_shadow_label_, LV_OPA_70, LV_PART_MAIN);
+    lv_obj_set_style_text_letter_space(intro_clean_title_shadow_label_, 1, LV_PART_MAIN);
+    lv_obj_add_flag(intro_clean_title_shadow_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (intro_clean_title_label_ != nullptr) {
+    lv_obj_set_style_text_font(intro_clean_title_label_, &lv_font_montserrat_18, LV_PART_MAIN);
+    lv_obj_set_style_text_color(intro_clean_title_label_, lv_color_hex(0xFFFFFFUL), LV_PART_MAIN);
+    lv_obj_set_style_text_letter_space(intro_clean_title_label_, 1, LV_PART_MAIN);
+    lv_obj_add_flag(intro_clean_title_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (intro_clean_scroll_label_ != nullptr) {
+    lv_obj_set_style_text_font(intro_clean_scroll_label_, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(intro_clean_scroll_label_, lv_color_hex(0xFFFFFFUL), LV_PART_MAIN);
+    lv_obj_add_flag(intro_clean_scroll_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (intro_debug_label_ != nullptr) {
+    lv_obj_set_style_text_font(intro_debug_label_, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(intro_debug_label_, lv_color_hex(0x7FD7FFUL), LV_PART_MAIN);
+    lv_obj_set_style_text_opa(intro_debug_label_, LV_OPA_80, LV_PART_MAIN);
+    lv_obj_align(intro_debug_label_, LV_ALIGN_TOP_LEFT, 6, 6);
+    lv_obj_add_flag(intro_debug_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+
+  for (uint8_t i = 0U; i < kIntroWaveGlyphMax; ++i) {
+    IntroGlyphSlot& slot = intro_wave_slots_[i];
+    slot.shadow = lv_label_create(intro_root_);
+    slot.glyph = lv_label_create(intro_root_);
+    if (slot.shadow != nullptr) {
+      lv_obj_set_style_text_font(slot.shadow, &lv_font_montserrat_14, LV_PART_MAIN);
+      lv_obj_set_style_text_color(slot.shadow, lv_color_hex(0x000000UL), LV_PART_MAIN);
+      lv_obj_set_style_text_opa(slot.shadow, LV_OPA_50, LV_PART_MAIN);
+      lv_label_set_text(slot.shadow, " ");
+      lv_obj_add_flag(slot.shadow, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (slot.glyph != nullptr) {
+      lv_obj_set_style_text_font(slot.glyph, &lv_font_montserrat_14, LV_PART_MAIN);
+      lv_obj_set_style_text_color(slot.glyph, lv_color_hex(0xFFFFFFUL), LV_PART_MAIN);
+      lv_label_set_text(slot.glyph, " ");
+      lv_obj_add_flag(slot.glyph, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+
+  for (uint8_t i = 0U; i < kIntroWireEdgeCount; ++i) {
+    intro_wire_points_[i][0] = {0, 0};
+    intro_wire_points_[i][1] = {0, 0};
+    intro_wire_lines_[i] = lv_line_create(intro_root_);
+    lv_line_set_points(intro_wire_lines_[i], intro_wire_points_[i], 2);
+    lv_obj_set_style_line_width(intro_wire_lines_[i], 1, LV_PART_MAIN);
+    lv_obj_set_style_line_color(intro_wire_lines_[i], lv_color_hex(0x00FFFFUL), LV_PART_MAIN);
+    lv_obj_set_style_line_rounded(intro_wire_lines_[i], true, LV_PART_MAIN);
+    lv_obj_set_style_opa(intro_wire_lines_[i], LV_OPA_70, LV_PART_MAIN);
+    lv_obj_set_size(intro_wire_lines_[i], LV_PCT(100), LV_PCT(100));
+    lv_obj_add_flag(intro_wire_lines_[i], LV_OBJ_FLAG_HIDDEN);
+  }
+
+  for (uint8_t i = 0U; i < kIntroRotoStripeMax; ++i) {
+    intro_roto_stripes_[i] = lv_obj_create(intro_root_);
+    lv_obj_remove_style_all(intro_roto_stripes_[i]);
+    lv_obj_set_size(intro_roto_stripes_[i], 20, 3);
+    lv_obj_set_style_bg_color(intro_roto_stripes_[i], lv_color_hex(0x1C3558UL), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(intro_roto_stripes_[i], LV_OPA_30, LV_PART_MAIN);
+    lv_obj_add_flag(intro_roto_stripes_[i], LV_OBJ_FLAG_HIDDEN);
+  }
+
+  for (uint8_t i = 0U; i < 72U; ++i) {
+    intro_firework_particles_[i] = lv_obj_create(intro_root_);
+    lv_obj_remove_style_all(intro_firework_particles_[i]);
+    lv_obj_set_size(intro_firework_particles_[i], 3, 3);
+    lv_obj_set_style_bg_opa(intro_firework_particles_[i], LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(intro_firework_particles_[i], LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(intro_firework_particles_[i], lv_color_hex(0xFFFFFFUL), LV_PART_MAIN);
+    lv_obj_add_flag(intro_firework_particles_[i], LV_OBJ_FLAG_HIDDEN);
+    intro_firework_states_[i] = {};
+  }
+
+  intro_created_ = true;
+  resetIntroConfigDefaults();
+}
+
+uint32_t UiManager::nextIntroRandom() {
+  intro_rng_state_ = pseudoRandom32(intro_rng_state_ + 0x9E3779B9UL);
+  return intro_rng_state_;
+}
+
+void UiManager::createCopperBars(uint8_t count) {
+  createCopperWavyRings(count);
+}
+
+void UiManager::updateCopperBars(uint32_t t_ms) {
+  updateCopperWavyRings(t_ms);
+}
+
+void UiManager::createCopperWavyRings(uint8_t count) {
+  count = clampValue<uint8_t>(count, 0U, kCracktroBarCount);
+  intro_copper_count_ = count;
+  const int16_t width = activeDisplayWidth();
+  const int16_t height = activeDisplayHeight();
+  const int16_t min_dim = static_cast<int16_t>((width < height) ? width : height);
+  const int16_t base_d = static_cast<int16_t>(min_dim / 4);
+  const int16_t max_d = static_cast<int16_t>(min_dim - 10);
+  int16_t spacing = (count > 0U) ? static_cast<int16_t>((max_d - base_d) / static_cast<int16_t>(count + 1U)) : 6;
+  if (spacing < 4) {
+    spacing = 4;
+  }
+
+  for (uint8_t i = 0U; i < kCracktroBarCount; ++i) {
+    lv_obj_t* bar = scene_cracktro_bars_[i];
+    if (bar == nullptr) {
+      continue;
+    }
+    lv_anim_del(bar, nullptr);
+    if (i < intro_copper_count_) {
+      int16_t diameter = static_cast<int16_t>(base_d + static_cast<int16_t>(i * spacing));
+      if (diameter > max_d) {
+        diameter = max_d;
+      }
+      lv_obj_set_size(bar, diameter, diameter);
+      lv_obj_set_pos(bar,
+                     static_cast<lv_coord_t>((width - diameter) / 2),
+                     static_cast<lv_coord_t>((height - diameter) / 2));
+      lv_obj_clear_flag(bar, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_add_flag(bar, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_set_style_radius(bar, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(bar, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_opa(bar, LV_OPA_70, LV_PART_MAIN);
+    lv_obj_set_style_border_color(bar, lv_color_hex(0x00FFFFUL), LV_PART_MAIN);
+    lv_obj_set_style_translate_x(bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(bar, 0, LV_PART_MAIN);
+  }
+}
+
+void UiManager::updateCopperWavyRings(uint32_t t_ms) {
+  if (intro_copper_count_ == 0U) {
+    return;
+  }
+  static constexpr uint32_t kPalette[] = {0x00FFFFUL, 0xFF00FFUL, 0xFFFF00UL, 0xFFFFFFUL};
+  const int16_t width = activeDisplayWidth();
+  const int16_t height = activeDisplayHeight();
+  const int16_t min_dim = static_cast<int16_t>((width < height) ? width : height);
+  const int16_t base_d = static_cast<int16_t>(min_dim / 4);
+  const int16_t max_d = static_cast<int16_t>(min_dim - 10);
+  int16_t spacing =
+      static_cast<int16_t>((max_d - base_d) / static_cast<int16_t>(intro_copper_count_ + 1U));
+  if (spacing < 4) {
+    spacing = 4;
+  }
+  const float t = static_cast<float>(t_ms) * 0.001f;
+  const float phase_speed = 1.35f;
+  for (uint8_t i = 0U; i < intro_copper_count_; ++i) {
+    lv_obj_t* bar = scene_cracktro_bars_[i];
+    if (bar == nullptr) {
+      continue;
+    }
+    const float phase = (t * phase_speed) + static_cast<float>(i) * 0.44f;
+    int16_t diameter = static_cast<int16_t>(base_d + static_cast<int16_t>(i * spacing));
+    diameter = static_cast<int16_t>(diameter + static_cast<int16_t>(std::sin(phase * 1.25f) * 8.0f));
+    diameter = clampValue<int16_t>(diameter, 18, max_d);
+    const int16_t x = static_cast<int16_t>((width - diameter) / 2 +
+                                           static_cast<int16_t>(std::sin(phase * 0.83f) * 7.0f));
+    const int16_t y = static_cast<int16_t>((height - diameter) / 2 +
+                                           static_cast<int16_t>(std::cos(phase * 0.91f) * 6.0f));
+    const uint8_t palette_index =
+        static_cast<uint8_t>((i + static_cast<uint8_t>((t_ms / 220U) % 4U)) % 4U);
+    const float pulse = (std::sin(phase * 2.2f) + 1.0f) * 0.5f;
+    lv_opa_t opa = static_cast<lv_opa_t>(80 + static_cast<uint8_t>(pulse * 130.0f));
+    if (intro_state_ == IntroState::PHASE_B_TRANSITION && intro_b1_done_) {
+      opa = static_cast<lv_opa_t>(40 + static_cast<uint8_t>(pulse * 90.0f));
+    }
+    lv_obj_set_pos(bar, x, y);
+    lv_obj_set_size(bar, diameter, diameter);
+    lv_obj_set_style_border_color(bar, lv_color_hex(kPalette[palette_index]), LV_PART_MAIN);
+    lv_obj_set_style_border_opa(bar, opa, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_TRANSP, LV_PART_MAIN);
+  }
+}
+
+void UiManager::createStarfield(uint8_t count, uint8_t layers) {
+  if (layers == 0U) {
+    layers = 1U;
+  }
+  count = clampValue<uint8_t>(count, 0U, kStarfieldCount);
+  intro_star_count_ = count;
+  const int16_t width = activeDisplayWidth();
+  const int16_t height = activeDisplayHeight();
+  const bool clean_mode = (intro_state_ == IntroState::PHASE_C_CLEAN || intro_state_ == IntroState::PHASE_C_LOOP);
+  const int16_t speeds_fast[3] = {38, 96, 182};
+  const int16_t speeds_clean[3] = {20, 58, 118};
+
+  const uint16_t layer0_end = static_cast<uint16_t>((count * 50U) / 100U);
+  const uint16_t layer1_end = static_cast<uint16_t>((count * 80U) / 100U);
+
+  for (uint8_t i = 0U; i < kStarfieldCount; ++i) {
+    lv_obj_t* star = scene_starfield_[i];
+    if (star == nullptr) {
+      continue;
+    }
+    lv_anim_del(star, nullptr);
+    if (i >= intro_star_count_) {
+      lv_obj_add_flag(star, LV_OBJ_FLAG_HIDDEN);
+      continue;
+    }
+
+    uint8_t layer = 0U;
+    if (layers >= 3U) {
+      if (i < layer0_end) {
+        layer = 0U;
+      } else if (i < layer1_end) {
+        layer = 1U;
+      } else {
+        layer = 2U;
+      }
+    } else {
+      layer = static_cast<uint8_t>(i % layers);
+    }
+
+    IntroStarState& state = intro_star_states_[i];
+    state.layer = layer;
+    state.size_px = static_cast<uint8_t>(1U + layer);
+    const int16_t base_speed = clean_mode ? speeds_clean[layer] : speeds_fast[layer];
+    state.speed_px_per_s = base_speed;
+    state.x_q8 = static_cast<int32_t>(nextIntroRandom() % static_cast<uint32_t>(width)) << 8;
+    state.y_q8 = static_cast<int32_t>(nextIntroRandom() % static_cast<uint32_t>(height)) << 8;
+
+    lv_obj_set_size(star, state.size_px, state.size_px);
+    lv_obj_set_style_radius(star, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(star, lv_color_hex(layer == 2U ? 0xFFFFFFUL : 0xBEEBFFUL), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(star,
+                            (layer == 0U) ? LV_OPA_30 : ((layer == 1U) ? LV_OPA_60 : LV_OPA_COVER),
+                            LV_PART_MAIN);
+    lv_obj_set_pos(star,
+                   static_cast<lv_coord_t>(state.x_q8 >> 8),
+                   static_cast<lv_coord_t>(state.y_q8 >> 8));
+    lv_obj_clear_flag(star, LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+void UiManager::updateStarfield(uint32_t dt_ms) {
+  if (intro_star_count_ == 0U || dt_ms == 0U) {
+    return;
+  }
+  const int16_t width = activeDisplayWidth();
+  const int16_t height = activeDisplayHeight();
+
+  for (uint8_t i = 0U; i < intro_star_count_; ++i) {
+    lv_obj_t* star = scene_starfield_[i];
+    if (star == nullptr || lv_obj_has_flag(star, LV_OBJ_FLAG_HIDDEN)) {
+      continue;
+    }
+
+    IntroStarState& state = intro_star_states_[i];
+    state.y_q8 += static_cast<int32_t>((static_cast<uint32_t>(state.speed_px_per_s) * dt_ms * 256U) / 1000U);
+    if (state.y_q8 > ((static_cast<int32_t>(height) + 4) << 8)) {
+      state.y_q8 = -static_cast<int32_t>((nextIntroRandom() % 36U) << 8);
+      state.x_q8 = static_cast<int32_t>(nextIntroRandom() % static_cast<uint32_t>(width)) << 8;
+    }
+
+    if ((nextIntroRandom() & 0x7U) == 0U) {
+      const lv_opa_t twinkle = static_cast<lv_opa_t>(96U + (nextIntroRandom() % 160U));
+      lv_obj_set_style_bg_opa(star, twinkle, LV_PART_MAIN);
+    }
+    lv_obj_set_pos(star,
+                   static_cast<lv_coord_t>(state.x_q8 >> 8),
+                   static_cast<lv_coord_t>(state.y_q8 >> 8));
+  }
+}
+
+void UiManager::createLogoLabel(const char* text) {
+  if (intro_logo_label_ == nullptr || intro_logo_shadow_label_ == nullptr) {
+    return;
+  }
+  copyStringBounded(intro_logo_ascii_, sizeof(intro_logo_ascii_), asciiFallbackForUiText(text).c_str());
+  lv_label_set_text(intro_logo_label_, intro_logo_ascii_);
+  lv_label_set_text(intro_logo_shadow_label_, intro_logo_ascii_);
+  lv_obj_align(intro_logo_shadow_label_, LV_ALIGN_TOP_MID, 1, 23);
+  lv_obj_align(intro_logo_label_, LV_ALIGN_TOP_MID, 0, 22);
+  lv_obj_set_style_translate_y(intro_logo_shadow_label_, -80, LV_PART_MAIN);
+  lv_obj_set_style_translate_y(intro_logo_label_, -80, LV_PART_MAIN);
+  lv_obj_clear_flag(intro_logo_shadow_label_, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_clear_flag(intro_logo_label_, LV_OBJ_FLAG_HIDDEN);
+}
+
+void UiManager::configureWavySineScroller(const char* text,
+                                          uint16_t speed_px_per_sec,
+                                          uint8_t amp_px,
+                                          uint16_t period_px,
+                                          bool ping_pong,
+                                          int16_t base_y,
+                                          bool large_text,
+                                          bool limit_to_half_width) {
+  String padded = asciiFallbackForUiText(text);
+  // Keep some visual breathing room so the scroller does not look clipped on screen edges.
+  padded = String("        ") + padded + String("        ");
+  copyStringBounded(intro_wave_text_ascii_, sizeof(intro_wave_text_ascii_), padded.c_str());
+  intro_wave_text_len_ = static_cast<uint16_t>(std::strlen(intro_wave_text_ascii_));
+  intro_wave_pingpong_mode_ = ping_pong;
+  intro_wave_speed_px_per_sec_ = speed_px_per_sec;
+  intro_wave_amp_px_ = amp_px;
+  intro_wave_period_px_ = period_px;
+  intro_wave_phase_speed_ = intro_config_.sine_phase_speed;
+  intro_wave_base_y_ = base_y;
+  intro_wave_phase_ = 0.0f;
+  intro_wave_head_index_ = 0U;
+  intro_wave_dir_ = -1;
+  intro_wave_half_height_mode_ = false;
+  intro_wave_band_top_ = 0;
+  intro_wave_band_bottom_ = activeDisplayHeight();
+
+  const int16_t width = activeDisplayWidth();
+  const lv_font_t* wave_font = large_text ? &lv_font_montserrat_18 : &lv_font_montserrat_14;
+  intro_wave_char_width_ = large_text ? ((width >= 460) ? 13 : 12) : ((width >= 460) ? 10 : 9);
+
+  if (intro_wave_text_len_ == 0U) {
+    intro_wave_glyph_count_ = 0U;
+    for (uint8_t i = 0U; i < kIntroWaveGlyphMax; ++i) {
+      if (intro_wave_slots_[i].glyph != nullptr) {
+        lv_obj_add_flag(intro_wave_slots_[i].glyph, LV_OBJ_FLAG_HIDDEN);
+      }
+      if (intro_wave_slots_[i].shadow != nullptr) {
+        lv_obj_add_flag(intro_wave_slots_[i].shadow, LV_OBJ_FLAG_HIDDEN);
+      }
+    }
+    return;
+  }
+
+  if (ping_pong) {
+    intro_wave_glyph_count_ =
+        clampValue<uint8_t>(static_cast<uint8_t>(intro_wave_text_len_), 12U, kIntroWaveGlyphMax);
+  } else {
+    const uint8_t desired = static_cast<uint8_t>((width / intro_wave_char_width_) + 6);
+    intro_wave_glyph_count_ = clampValue<uint8_t>(desired, 24U, kIntroWaveGlyphMax);
+  }
+
+  const int32_t text_width = static_cast<int32_t>(intro_wave_text_len_) * intro_wave_char_width_;
+  int32_t pingpong_min_x = (static_cast<int32_t>(width) - text_width - 8);
+  int32_t pingpong_max_x = 8;
+  if (limit_to_half_width && ping_pong) {
+    const int32_t half_band = width / 2;
+    const int32_t band_left = (static_cast<int32_t>(width) - half_band) / 2;
+    pingpong_max_x = band_left + 8;
+    pingpong_min_x = band_left + half_band - text_width - 8;
+  }
+  if (pingpong_min_x > pingpong_max_x) {
+    pingpong_min_x = static_cast<int32_t>((width - text_width) / 2);
+    pingpong_max_x = pingpong_min_x;
+  }
+  intro_wave_pingpong_max_x_q8_ = pingpong_max_x << 8;
+  intro_wave_pingpong_min_x_q8_ = pingpong_min_x << 8;
+  if (intro_wave_pingpong_min_x_q8_ > intro_wave_pingpong_max_x_q8_) {
+    const int32_t centered = static_cast<int32_t>((width - text_width) / 2);
+    intro_wave_pingpong_min_x_q8_ = centered << 8;
+    intro_wave_pingpong_max_x_q8_ = centered << 8;
+  }
+  intro_wave_pingpong_x_q8_ = ping_pong ? intro_wave_pingpong_max_x_q8_ : 0;
+
+  for (uint8_t i = 0U; i < kIntroWaveGlyphMax; ++i) {
+    IntroGlyphSlot& slot = intro_wave_slots_[i];
+    if (slot.glyph == nullptr || slot.shadow == nullptr) {
+      continue;
+    }
+    lv_obj_set_style_text_font(slot.glyph, wave_font, LV_PART_MAIN);
+    lv_obj_set_style_text_font(slot.shadow, wave_font, LV_PART_MAIN);
+    if (i < intro_wave_glyph_count_) {
+      lv_obj_clear_flag(slot.glyph, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_clear_flag(slot.shadow, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_add_flag(slot.glyph, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(slot.shadow, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+}
+
+void UiManager::clampWaveYToBand(int16_t* y) const {
+  if (y == nullptr || !intro_wave_half_height_mode_) {
+    return;
+  }
+  if (*y < intro_wave_band_top_) {
+    *y = intro_wave_band_top_;
+  } else if (*y > intro_wave_band_bottom_) {
+    *y = intro_wave_band_bottom_;
+  }
+}
+
+void UiManager::updateWavySineScroller(uint32_t dt_ms, uint32_t now_ms) {
+  if (intro_wave_glyph_count_ == 0U || intro_wave_text_len_ == 0U) {
+    return;
+  }
+  const int16_t width = activeDisplayWidth();
+
+  if (dt_ms > 0U) {
+    const float dt_s = static_cast<float>(dt_ms) * 0.001f;
+    intro_wave_phase_ += intro_wave_phase_speed_ * dt_s;
+
+    if (intro_wave_pingpong_mode_) {
+      const int32_t delta = static_cast<int32_t>((static_cast<uint32_t>(intro_wave_speed_px_per_sec_) * dt_ms * 256U) / 1000U);
+      intro_wave_pingpong_x_q8_ += static_cast<int32_t>(intro_wave_dir_) * delta;
+      if (intro_wave_pingpong_x_q8_ < intro_wave_pingpong_min_x_q8_) {
+        intro_wave_pingpong_x_q8_ = intro_wave_pingpong_min_x_q8_;
+        intro_wave_dir_ = 1;
+      } else if (intro_wave_pingpong_x_q8_ > intro_wave_pingpong_max_x_q8_) {
+        intro_wave_pingpong_x_q8_ = intro_wave_pingpong_max_x_q8_;
+        intro_wave_dir_ = -1;
+      }
+    } else {
+      intro_wave_pingpong_x_q8_ +=
+          static_cast<int32_t>((static_cast<uint32_t>(intro_wave_speed_px_per_sec_) * dt_ms * 256U) /
+                               1000U);
+      const int16_t char_width_q8 = static_cast<int16_t>(intro_wave_char_width_ << 8);
+      while (intro_wave_pingpong_x_q8_ >= char_width_q8) {
+        intro_wave_pingpong_x_q8_ -= char_width_q8;
+        intro_wave_head_index_ = static_cast<uint16_t>((intro_wave_head_index_ + 1U) % intro_wave_text_len_);
+      }
+    }
+  }
+
+  const float phase = intro_wave_phase_ + (static_cast<float>(now_ms & 0x3FFU) * 0.0008f);
+  for (uint8_t i = 0U; i < intro_wave_glyph_count_; ++i) {
+    IntroGlyphSlot& slot = intro_wave_slots_[i];
+    if (slot.glyph == nullptr || slot.shadow == nullptr) {
+      continue;
+    }
+
+    uint16_t char_index = 0U;
+    int16_t x = 0;
+    if (intro_wave_pingpong_mode_) {
+      char_index = static_cast<uint16_t>(i % intro_wave_text_len_);
+      x = static_cast<int16_t>((intro_wave_pingpong_x_q8_ >> 8) + static_cast<int16_t>(i * intro_wave_char_width_));
+    } else {
+      char_index = static_cast<uint16_t>((intro_wave_head_index_ + i) % intro_wave_text_len_);
+      x = static_cast<int16_t>(i * intro_wave_char_width_ - (intro_wave_pingpong_x_q8_ >> 8));
+    }
+
+    char glyph_text[2] = {intro_wave_text_ascii_[char_index], '\0'};
+    lv_label_set_text(slot.glyph, glyph_text);
+    lv_label_set_text(slot.shadow, glyph_text);
+
+    const float radians =
+        phase + (static_cast<float>(x) * 6.28318530718f / static_cast<float>(intro_wave_period_px_));
+    const int16_t y_offset = static_cast<int16_t>(std::sin(radians) * static_cast<float>(intro_wave_amp_px_));
+    int16_t y = static_cast<int16_t>(intro_wave_base_y_ + y_offset);
+    clampWaveYToBand(&y);
+
+    lv_obj_set_pos(slot.shadow, static_cast<lv_coord_t>(x + 1), static_cast<lv_coord_t>(y + 1));
+    lv_obj_set_pos(slot.glyph, static_cast<lv_coord_t>(x), static_cast<lv_coord_t>(y));
+
+    const bool visible = (x > -intro_wave_char_width_ * 3) && (x < width + intro_wave_char_width_ * 3);
+    if (visible) {
+      lv_obj_clear_flag(slot.shadow, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_clear_flag(slot.glyph, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_add_flag(slot.shadow, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(slot.glyph, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+}
+
+void UiManager::configureBottomRollbackScroller(const char* text) {
+  if (intro_bottom_scroll_label_ == nullptr) {
+    return;
+  }
+  copyStringBounded(intro_crack_bottom_scroll_ascii_,
+                    sizeof(intro_crack_bottom_scroll_ascii_),
+                    asciiFallbackForUiText(text).c_str());
+  lv_label_set_text(intro_bottom_scroll_label_, intro_crack_bottom_scroll_ascii_);
+  lv_obj_set_width(intro_bottom_scroll_label_, LV_SIZE_CONTENT);
+  lv_obj_clear_flag(intro_bottom_scroll_label_, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_update_layout(intro_bottom_scroll_label_);
+
+  const int16_t width = activeDisplayWidth();
+  const int16_t height = activeDisplayHeight();
+  const int16_t text_width = lv_obj_get_width(intro_bottom_scroll_label_);
+  intro_bottom_scroll_base_y_ = static_cast<int16_t>(height - 26);
+  intro_bottom_scroll_max_x_q8_ = kIntroBottomScrollMarginPx << 8;
+  intro_bottom_scroll_min_x_q8_ =
+      (static_cast<int32_t>(width - text_width - kIntroBottomScrollMarginPx)) << 8;
+  if (intro_bottom_scroll_min_x_q8_ > intro_bottom_scroll_max_x_q8_) {
+    const int32_t centered = static_cast<int32_t>((width - text_width) / 2);
+    intro_bottom_scroll_min_x_q8_ = centered << 8;
+    intro_bottom_scroll_max_x_q8_ = centered << 8;
+  }
+  intro_bottom_scroll_x_q8_ = intro_bottom_scroll_max_x_q8_;
+  intro_bottom_scroll_dir_ = -1;
+  intro_bottom_scroll_speed_px_per_sec_ = intro_scroll_bot_a_px_per_sec_;
+  lv_obj_set_pos(intro_bottom_scroll_label_, intro_bottom_scroll_x_q8_ >> 8, intro_bottom_scroll_base_y_);
+}
+
+void UiManager::updateBottomRollbackScroller(uint32_t dt_ms) {
+  if (intro_bottom_scroll_label_ == nullptr || lv_obj_has_flag(intro_bottom_scroll_label_, LV_OBJ_FLAG_HIDDEN) ||
+      dt_ms == 0U) {
+    return;
+  }
+  const int32_t delta = static_cast<int32_t>((static_cast<uint32_t>(intro_bottom_scroll_speed_px_per_sec_) * dt_ms * 256U) / 1000U);
+  intro_bottom_scroll_x_q8_ += static_cast<int32_t>(intro_bottom_scroll_dir_) * delta;
+  if (intro_bottom_scroll_x_q8_ < intro_bottom_scroll_min_x_q8_) {
+    intro_bottom_scroll_x_q8_ = intro_bottom_scroll_min_x_q8_;
+    intro_bottom_scroll_dir_ = 1;
+  } else if (intro_bottom_scroll_x_q8_ > intro_bottom_scroll_max_x_q8_) {
+    intro_bottom_scroll_x_q8_ = intro_bottom_scroll_max_x_q8_;
+    intro_bottom_scroll_dir_ = -1;
+  }
+  lv_obj_set_pos(intro_bottom_scroll_label_, intro_bottom_scroll_x_q8_ >> 8, intro_bottom_scroll_base_y_);
+}
+
+void UiManager::createWireCube() {
+  for (uint8_t i = 0U; i < kIntroWireEdgeCount; ++i) {
+    if (intro_wire_lines_[i] == nullptr) {
+      continue;
+    }
+    lv_obj_clear_flag(intro_wire_lines_[i], LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_size(intro_wire_lines_[i], LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_line_width(intro_wire_lines_[i], 1, LV_PART_MAIN);
+  }
+}
+
+void UiManager::updateWireCube(uint32_t dt_ms, bool crash_boost) {
+  static bool lut_ready = false;
+  static int16_t sin_lut_q14[256] = {};
+  if (!lut_ready) {
+    for (uint16_t i = 0U; i < 256U; ++i) {
+      const float radians = (static_cast<float>(i) * 6.28318530718f) / 256.0f;
+      sin_lut_q14[i] = static_cast<int16_t>(std::sin(radians) * 16384.0f);
+    }
+    lut_ready = true;
+  }
+
+  auto sin_q14 = [&](uint8_t angle) -> int32_t { return sin_lut_q14[angle]; };
+  auto cos_q14 = [&](uint8_t angle) -> int32_t { return sin_lut_q14[static_cast<uint8_t>(angle + 64U)]; };
+
+  const uint16_t speed_mul = crash_boost ? 3U : 1U;
+  intro_cube_yaw_ = static_cast<uint16_t>((intro_cube_yaw_ + (2U * speed_mul)) & 0xFFU);
+  intro_cube_pitch_ = static_cast<uint16_t>((intro_cube_pitch_ + (1U * speed_mul)) & 0xFFU);
+  intro_cube_roll_ = static_cast<uint16_t>((intro_cube_roll_ + speed_mul) & 0xFFU);
+  if (intro_cube_morph_enabled_) {
+    const float phase_step =
+        static_cast<float>(dt_ms) * 0.001f * intro_cube_morph_speed_ * (crash_boost ? 1.8f : 1.0f);
+    intro_cube_morph_phase_ += phase_step;
+    if (intro_cube_morph_phase_ > 6.28318530718f) {
+      intro_cube_morph_phase_ = std::fmod(intro_cube_morph_phase_, 6.28318530718f);
+    }
+  }
+  float morph = intro_cube_morph_enabled_ ? (0.5f * (1.0f - std::cos(intro_cube_morph_phase_))) : 0.0f;
+  if (crash_boost) {
+    morph = clampValue<float>(morph + 0.25f, 0.0f, 1.0f);
+  }
+
+  const int16_t width = activeDisplayWidth();
+  const int16_t height = activeDisplayHeight();
+  const int16_t cx = static_cast<int16_t>(width / 2);
+  const int16_t cy = (intro_state_ == IntroState::PHASE_A_CRACKTRO ||
+                      intro_state_ == IntroState::PHASE_B_TRANSITION)
+                         ? static_cast<int16_t>((height / 2) - 24)
+                         : static_cast<int16_t>((height / 2) + 4);
+
+  const int16_t base[8][3] = {
+      {-static_cast<int16_t>(kIntroCubeScale), -static_cast<int16_t>(kIntroCubeScale), -static_cast<int16_t>(kIntroCubeScale)},
+      {static_cast<int16_t>(kIntroCubeScale), -static_cast<int16_t>(kIntroCubeScale), -static_cast<int16_t>(kIntroCubeScale)},
+      {static_cast<int16_t>(kIntroCubeScale), static_cast<int16_t>(kIntroCubeScale), -static_cast<int16_t>(kIntroCubeScale)},
+      {-static_cast<int16_t>(kIntroCubeScale), static_cast<int16_t>(kIntroCubeScale), -static_cast<int16_t>(kIntroCubeScale)},
+      {-static_cast<int16_t>(kIntroCubeScale), -static_cast<int16_t>(kIntroCubeScale), static_cast<int16_t>(kIntroCubeScale)},
+      {static_cast<int16_t>(kIntroCubeScale), -static_cast<int16_t>(kIntroCubeScale), static_cast<int16_t>(kIntroCubeScale)},
+      {static_cast<int16_t>(kIntroCubeScale), static_cast<int16_t>(kIntroCubeScale), static_cast<int16_t>(kIntroCubeScale)},
+      {-static_cast<int16_t>(kIntroCubeScale), static_cast<int16_t>(kIntroCubeScale), static_cast<int16_t>(kIntroCubeScale)},
+  };
+  const uint8_t edges[12][2] = {
+      {0, 1}, {1, 2}, {2, 3}, {3, 0},
+      {4, 5}, {5, 6}, {6, 7}, {7, 4},
+      {0, 4}, {1, 5}, {2, 6}, {3, 7},
+  };
+
+  int16_t projected[8][2] = {};
+  const int32_t sy = sin_q14(static_cast<uint8_t>(intro_cube_yaw_));
+  const int32_t cy_q14 = cos_q14(static_cast<uint8_t>(intro_cube_yaw_));
+  const int32_t sx = sin_q14(static_cast<uint8_t>(intro_cube_pitch_));
+  const int32_t cx_q14 = cos_q14(static_cast<uint8_t>(intro_cube_pitch_));
+  const int32_t sz = sin_q14(static_cast<uint8_t>(intro_cube_roll_));
+  const int32_t cz_q14 = cos_q14(static_cast<uint8_t>(intro_cube_roll_));
+
+  for (uint8_t i = 0U; i < 8U; ++i) {
+    const float cube_x = static_cast<float>(base[i][0]);
+    const float cube_y = static_cast<float>(base[i][1]);
+    const float cube_z = static_cast<float>(base[i][2]);
+    const float length = std::sqrt((cube_x * cube_x) + (cube_y * cube_y) + (cube_z * cube_z));
+    const float sphere_scale = (length > 0.01f) ? (static_cast<float>(kIntroCubeScale) / length) : 1.0f;
+    const float sphere_x = cube_x * sphere_scale;
+    const float sphere_y = cube_y * sphere_scale;
+    const float sphere_z = cube_z * sphere_scale;
+    const float blended_x = cube_x + ((sphere_x - cube_x) * morph);
+    const float blended_y = cube_y + ((sphere_y - cube_y) * morph);
+    const float blended_z = cube_z + ((sphere_z - cube_z) * morph);
+
+    int32_t x = static_cast<int32_t>(blended_x);
+    int32_t y = static_cast<int32_t>(blended_y);
+    int32_t z = static_cast<int32_t>(blended_z);
+
+    const int32_t x1 = (x * cy_q14 + z * sy) >> 14;
+    const int32_t z1 = (-x * sy + z * cy_q14) >> 14;
+    const int32_t y2 = (y * cx_q14 - z1 * sx) >> 14;
+    const int32_t z2 = (y * sx + z1 * cx_q14) >> 14;
+    const int32_t x3 = (x1 * cz_q14 - y2 * sz) >> 14;
+    const int32_t y3 = (x1 * sz + y2 * cz_q14) >> 14;
+
+    int32_t zproj = z2 + static_cast<int32_t>(kIntroCubeZOffset);
+    if (zproj < 64) {
+      zproj = 64;
+    }
+
+    const int16_t out_x = static_cast<int16_t>(cx + ((x3 * static_cast<int32_t>(kIntroCubeFov)) / zproj));
+    const int16_t out_y = static_cast<int16_t>(cy + ((y3 * static_cast<int32_t>(kIntroCubeFov)) / zproj));
+    projected[i][0] = out_x;
+    projected[i][1] = out_y;
+  }
+
+  lv_opa_t base_opa = LV_OPA_70;
+  if (intro_3d_quality_resolved_ == Intro3DQuality::kHigh) {
+    base_opa = LV_OPA_80;
+  } else if (intro_3d_quality_resolved_ == Intro3DQuality::kLow) {
+    base_opa = LV_OPA_60;
+  }
+  if (crash_boost) {
+    base_opa = LV_OPA_COVER;
+  }
+
+  for (uint8_t e = 0U; e < kIntroWireEdgeCount; ++e) {
+    lv_obj_t* line = intro_wire_lines_[e];
+    if (line == nullptr) {
+      continue;
+    }
+    const uint8_t a = edges[e][0];
+    const uint8_t b = edges[e][1];
+    intro_wire_points_[e][0].x = projected[a][0];
+    intro_wire_points_[e][0].y = projected[a][1];
+    intro_wire_points_[e][1].x = projected[b][0];
+    intro_wire_points_[e][1].y = projected[b][1];
+    lv_line_set_points(line, intro_wire_points_[e], 2);
+    lv_obj_set_style_line_color(line,
+                                lv_color_hex((e % 2U) == 0U ? 0x00FFFFUL : 0xFF00FFUL),
+                                LV_PART_MAIN);
+    lv_obj_set_style_opa(line, base_opa, LV_PART_MAIN);
+    lv_obj_clear_flag(line, LV_OBJ_FLAG_HIDDEN);
+  }
+  (void)dt_ms;
+}
+
+void UiManager::createRotoZoom() {
+  const bool force_b2_interlude = (intro_state_ == IntroState::PHASE_B_TRANSITION && intro_b1_done_);
+  const bool enable_roto =
+      force_b2_interlude ||
+      (intro_3d_mode_ == Intro3DMode::kRotoZoom || intro_3d_mode_ == Intro3DMode::kTunnel ||
+       intro_3d_mode_ == Intro3DMode::kPerspectiveStarfield);
+  for (uint8_t i = 0U; i < kIntroRotoStripeMax; ++i) {
+    if (intro_roto_stripes_[i] == nullptr) {
+      continue;
+    }
+    if (enable_roto) {
+      lv_obj_clear_flag(intro_roto_stripes_[i], LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_add_flag(intro_roto_stripes_[i], LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+}
+
+void UiManager::updateRotoZoom(uint32_t dt_ms) {
+  const bool force_b2_interlude = (intro_state_ == IntroState::PHASE_B_TRANSITION && intro_b1_done_);
+  const bool enable_roto =
+      force_b2_interlude ||
+      (intro_3d_mode_ == Intro3DMode::kRotoZoom || intro_3d_mode_ == Intro3DMode::kTunnel ||
+       intro_3d_mode_ == Intro3DMode::kPerspectiveStarfield);
+  if (!enable_roto) {
+    for (uint8_t i = 0U; i < kIntroRotoStripeMax; ++i) {
+      if (intro_roto_stripes_[i] != nullptr) {
+        lv_obj_add_flag(intro_roto_stripes_[i], LV_OBJ_FLAG_HIDDEN);
+      }
+    }
+    return;
+  }
+
+  const int16_t width = activeDisplayWidth();
+  const int16_t height = activeDisplayHeight();
+  uint8_t active_count = 12U;
+  if (intro_3d_quality_resolved_ == Intro3DQuality::kLow) {
+    active_count = 8U;
+  } else if (intro_3d_quality_resolved_ == Intro3DQuality::kHigh) {
+    active_count = 16U;
+  }
+  active_count = clampValue<uint8_t>(active_count, 4U, kIntroRotoStripeMax);
+
+  intro_roto_phase_ += static_cast<float>(dt_ms) * 0.0028f;
+
+  for (uint8_t i = 0U; i < kIntroRotoStripeMax; ++i) {
+    lv_obj_t* stripe = intro_roto_stripes_[i];
+    if (stripe == nullptr) {
+      continue;
+    }
+    if (i >= active_count) {
+      lv_obj_add_flag(stripe, LV_OBJ_FLAG_HIDDEN);
+      continue;
+    }
+
+    const float depth = static_cast<float>(i + 1U) / static_cast<float>(active_count);
+    const float curve = depth * depth;
+    const int16_t stripe_h = static_cast<int16_t>(2 + (intro_3d_quality_resolved_ == Intro3DQuality::kHigh ? 2 : 1));
+    const int16_t stripe_w =
+        static_cast<int16_t>(static_cast<float>(width) * (0.24f + depth * 0.92f));
+    const float sway = std::sin(intro_roto_phase_ * 0.9f + depth * 6.8f);
+    const int16_t cx = static_cast<int16_t>((width / 2) + sway * (static_cast<float>(width) * 0.20f * (1.0f - depth)));
+    const int16_t y = static_cast<int16_t>(height - 18 - curve * (static_cast<float>(height) * 0.72f));
+    const int16_t x = static_cast<int16_t>(cx - stripe_w / 2);
+
+    lv_obj_set_pos(stripe, x, y);
+    lv_obj_set_size(stripe, stripe_w, stripe_h);
+    const bool checker = ((i + static_cast<uint8_t>(intro_roto_phase_ * 3.0f)) & 1U) == 0U;
+    lv_obj_set_style_bg_color(stripe,
+                              lv_color_hex(checker ? 0x17335AUL : 0x0F2746UL),
+                              LV_PART_MAIN);
+    const lv_opa_t opa = static_cast<lv_opa_t>(20 + static_cast<uint8_t>(depth * 90.0f));
+    lv_obj_set_style_bg_opa(stripe, opa, LV_PART_MAIN);
+    lv_obj_clear_flag(stripe, LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+void UiManager::resolveIntro3DModeAndQuality() {
+  String mode = intro_config_.fx_3d;
+  mode.toLowerCase();
+  if (mode == "wirecube") {
+    intro_3d_mode_ = Intro3DMode::kWireCube;
+  } else if (mode == "tunnel") {
+    intro_3d_mode_ = Intro3DMode::kTunnel;
+  } else if (mode == "starfield3d") {
+    intro_3d_mode_ = Intro3DMode::kPerspectiveStarfield;
+  } else {
+    intro_3d_mode_ = Intro3DMode::kRotoZoom;
+  }
+
+  String quality = intro_config_.fx_3d_quality;
+  quality.toLowerCase();
+  if (quality == "low") {
+    intro_3d_quality_ = Intro3DQuality::kLow;
+  } else if (quality == "med" || quality == "medium") {
+    intro_3d_quality_ = Intro3DQuality::kMed;
+  } else if (quality == "high") {
+    intro_3d_quality_ = Intro3DQuality::kHigh;
+  } else {
+    intro_3d_quality_ = Intro3DQuality::kAuto;
+  }
+
+  if (intro_3d_quality_ == Intro3DQuality::kAuto) {
+    const int32_t area = static_cast<int32_t>(activeDisplayWidth()) * activeDisplayHeight();
+    if (area < 70000) {
+      intro_3d_quality_resolved_ = Intro3DQuality::kLow;
+    } else if (area < 140000) {
+      intro_3d_quality_resolved_ = Intro3DQuality::kMed;
+    } else {
+      intro_3d_quality_resolved_ = Intro3DQuality::kHigh;
+    }
+  } else {
+    intro_3d_quality_resolved_ = intro_3d_quality_;
+  }
+}
+
+void UiManager::startIntroIfNeeded(bool force_restart) {
+  ensureIntroCreated();
+  if (!intro_created_ || intro_root_ == nullptr) {
+    return;
+  }
+  if (force_restart) {
+    intro_skip_latched_ = false;
+  }
+  if (intro_skip_latched_ && !force_restart) {
+    return;
+  }
+  if (intro_active_ && !force_restart) {
+    return;
+  }
+  loadSceneWinEtapeOverrides();
+  startIntro();
+}
+
+void UiManager::startIntro() {
+  if (!intro_created_ || intro_root_ == nullptr) {
+    return;
+  }
+
+  copyStringBounded(intro_logo_ascii_,
+                    sizeof(intro_logo_ascii_),
+                    asciiFallbackForUiText(intro_config_.logo_text).c_str());
+  copyStringBounded(intro_crack_scroll_ascii_,
+                    sizeof(intro_crack_scroll_ascii_),
+                    asciiFallbackForUiText(intro_config_.crack_scroll).c_str());
+  copyStringBounded(intro_crack_bottom_scroll_ascii_,
+                    sizeof(intro_crack_bottom_scroll_ascii_),
+                    asciiFallbackForUiText(intro_config_.crack_bottom_scroll).c_str());
+  copyStringBounded(intro_clean_title_ascii_,
+                    sizeof(intro_clean_title_ascii_),
+                    asciiFallbackForUiText(intro_config_.clean_title).c_str());
+  copyStringBounded(intro_clean_scroll_ascii_,
+                    sizeof(intro_clean_scroll_ascii_),
+                    asciiFallbackForUiText(intro_config_.clean_scroll).c_str());
+
+  resolveIntro3DModeAndQuality();
+
+  intro_skip_latched_ = false;
+  intro_skip_requested_ = false;
+  intro_clean_loop_only_ = false;
+  intro_active_ = true;
+  intro_state_ = IntroState::DONE;
+  intro_total_start_ms_ = lv_tick_get();
+  last_tick_ms_ = intro_total_start_ms_;
+  intro_wave_last_ms_ = intro_total_start_ms_;
+  intro_debug_next_ms_ = intro_total_start_ms_;
+  intro_debug_overlay_enabled_ = false;
+  intro_b1_done_ = false;
+  intro_next_b2_pulse_ms_ = 0U;
+  intro_wave_half_height_mode_ = false;
+  intro_wave_band_top_ = 0;
+  intro_wave_band_bottom_ = activeDisplayHeight();
+  intro_cube_morph_enabled_ = true;
+  intro_cube_morph_phase_ = 0.0f;
+  intro_cube_morph_speed_ = 1.2f;
+  intro_b1_crash_ms_ = intro_config_.b1_crash_ms;
+  intro_scroll_mid_a_px_per_sec_ = intro_config_.scroll_a_px_per_sec;
+  intro_scroll_bot_a_px_per_sec_ = intro_config_.scroll_bot_a_px_per_sec;
+  lv_obj_set_style_opa(intro_root_, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_translate_x(intro_root_, 0, LV_PART_MAIN);
+  lv_obj_set_style_translate_y(intro_root_, 0, LV_PART_MAIN);
+  lv_obj_clear_flag(intro_root_, LV_OBJ_FLAG_HIDDEN);
+
+  transitionIntroState(IntroState::PHASE_A_CRACKTRO);
+
+  if (intro_timer_ == nullptr) {
+    intro_timer_ = lv_timer_create(introTimerCb, kIntroTickMs, this);
+  } else {
+    lv_timer_set_period(intro_timer_, kIntroTickMs);
+    lv_timer_resume(intro_timer_);
+  }
+
+  Serial.printf("[UI][WIN_ETAPE] start A=%lu B=%lu C=%lu B1=%u speedMidA=%u speedBotA=%u speedC=%u quality=%u mode=%u\n",
+                static_cast<unsigned long>(intro_config_.a_duration_ms),
+                static_cast<unsigned long>(intro_config_.b_duration_ms),
+                static_cast<unsigned long>(intro_config_.c_duration_ms),
+                static_cast<unsigned int>(intro_b1_crash_ms_),
+                static_cast<unsigned int>(intro_scroll_mid_a_px_per_sec_),
+                static_cast<unsigned int>(intro_scroll_bot_a_px_per_sec_),
+                static_cast<unsigned int>(intro_config_.scroll_c_px_per_sec),
+                static_cast<unsigned int>(intro_3d_quality_resolved_),
+                static_cast<unsigned int>(intro_3d_mode_));
+}
+
+void UiManager::requestIntroSkip() {
+  if (!intro_active_) {
+    return;
+  }
+  if (intro_state_ == IntroState::PHASE_A_CRACKTRO || intro_state_ == IntroState::PHASE_B_TRANSITION) {
+    intro_skip_latched_ = true;
+    intro_skip_requested_ = true;
+  }
+}
+
+void UiManager::transitionIntroState(IntroState next_state) {
+  intro_state_ = next_state;
+  t_state0_ms_ = lv_tick_get();
+
+  const int16_t w = activeDisplayWidth();
+  const int16_t h = activeDisplayHeight();
+  const int32_t area = static_cast<int32_t>(w) * h;
+
+  auto hide_wave_text = [this]() {
+    for (uint8_t i = 0U; i < kIntroWaveGlyphMax; ++i) {
+      if (intro_wave_slots_[i].glyph != nullptr) {
+        lv_obj_add_flag(intro_wave_slots_[i].glyph, LV_OBJ_FLAG_HIDDEN);
+      }
+      if (intro_wave_slots_[i].shadow != nullptr) {
+        lv_obj_add_flag(intro_wave_slots_[i].shadow, LV_OBJ_FLAG_HIDDEN);
+      }
+    }
+  };
+
+  if (next_state == IntroState::PHASE_A_CRACKTRO) {
+    intro_b1_done_ = false;
+    intro_next_b2_pulse_ms_ = 0U;
+    intro_wave_half_height_mode_ = false;
+    intro_cube_morph_phase_ = 0.0f;
+    const uint8_t bar_count = static_cast<uint8_t>(clampValue<int16_t>(h / 22, 8, 18));
+    int16_t stars = static_cast<int16_t>(clampValue<int32_t>(area / 1200, 60, 220));
+    if (intro_config_.stars_override > 0) {
+      stars = intro_config_.stars_override;
+    }
+    if (stars > static_cast<int16_t>(kStarfieldCount)) {
+      stars = static_cast<int16_t>(kStarfieldCount);
+    }
+
+    createCopperBars(bar_count);
+    createStarfield(static_cast<uint8_t>(stars), 3U);
+    createLogoLabel(intro_logo_ascii_);
+    intro_logo_anim_start_ms_ = t_state0_ms_;
+
+    configureWavySineScroller(intro_crack_scroll_ascii_,
+                              intro_scroll_mid_a_px_per_sec_,
+                              intro_config_.sine_amp_a_px,
+                              intro_config_.sine_period_px,
+                              false,
+                              static_cast<int16_t>((h / 2) - 14),
+                              true);
+    configureBottomRollbackScroller(intro_crack_bottom_scroll_ascii_);
+
+    if (intro_clean_title_label_ != nullptr) {
+      lv_obj_add_flag(intro_clean_title_label_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (intro_clean_title_shadow_label_ != nullptr) {
+      lv_obj_add_flag(intro_clean_title_shadow_label_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (intro_clean_scroll_label_ != nullptr) {
+      lv_obj_add_flag(intro_clean_scroll_label_, LV_OBJ_FLAG_HIDDEN);
+    }
+    for (lv_obj_t* layer : intro_gradient_layers_) {
+      if (layer != nullptr) {
+        lv_obj_add_flag(layer, LV_OBJ_FLAG_HIDDEN);
+      }
+    }
+    createWireCube();
+    createRotoZoom();
+    for (uint8_t i = 0U; i < kIntroRotoStripeMax; ++i) {
+      if (intro_roto_stripes_[i] != nullptr) {
+        lv_obj_add_flag(intro_roto_stripes_[i], LV_OBJ_FLAG_HIDDEN);
+      }
+    }
+
+    Serial.printf("[UI][WIN_ETAPE] phase=A obj=%u stars=%u particles=%u quality=%u\n",
+                  static_cast<unsigned int>(intro_copper_count_ + intro_star_count_ + (intro_wave_glyph_count_ * 2U) + kIntroWireEdgeCount + 8U),
+                  static_cast<unsigned int>(intro_star_count_),
+                  static_cast<unsigned int>(intro_firework_active_count_),
+                  static_cast<unsigned int>(intro_3d_quality_resolved_));
+    return;
+  }
+
+  if (next_state == IntroState::PHASE_B_TRANSITION) {
+    configureBPhaseStart();
+    Serial.printf("[UI][WIN_ETAPE] phase=B obj=%u stars=%u particles=%u quality=%u\n",
+                  static_cast<unsigned int>(intro_copper_count_ + intro_star_count_ + intro_firework_active_count_ + (intro_wave_glyph_count_ * 2U) + kIntroWireEdgeCount + 8U),
+                  static_cast<unsigned int>(intro_star_count_),
+                  static_cast<unsigned int>(intro_firework_active_count_),
+                  static_cast<unsigned int>(intro_3d_quality_resolved_));
+    return;
+  }
+
+  if (next_state == IntroState::PHASE_C_CLEAN || next_state == IntroState::PHASE_C_LOOP) {
+    startCleanReveal();
+    int16_t stars = static_cast<int16_t>(clampValue<int32_t>(area / 1500, 60, 140));
+    if (stars > static_cast<int16_t>(kStarfieldCount)) {
+      stars = static_cast<int16_t>(kStarfieldCount);
+    }
+    createStarfield(static_cast<uint8_t>(stars), 3U);
+    createCopperBars(0U);
+
+    configureWavySineScroller(intro_clean_scroll_ascii_,
+                              intro_config_.scroll_c_px_per_sec,
+                              intro_config_.sine_amp_c_px,
+                              intro_config_.sine_period_px,
+                              true,
+                              static_cast<int16_t>(h / 2),
+                              true,
+                              false);
+    intro_wave_half_height_mode_ = true;
+    intro_wave_band_top_ = static_cast<int16_t>(h / 4);
+    intro_wave_band_bottom_ = static_cast<int16_t>((h * 3) / 4);
+    if (intro_bottom_scroll_label_ != nullptr) {
+      lv_obj_add_flag(intro_bottom_scroll_label_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (intro_logo_label_ != nullptr) {
+      lv_obj_add_flag(intro_logo_label_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (intro_logo_shadow_label_ != nullptr) {
+      lv_obj_add_flag(intro_logo_shadow_label_, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    if (intro_3d_mode_ == Intro3DMode::kWireCube) {
+      createWireCube();
+      for (uint8_t i = 0U; i < kIntroRotoStripeMax; ++i) {
+        if (intro_roto_stripes_[i] != nullptr) {
+          lv_obj_add_flag(intro_roto_stripes_[i], LV_OBJ_FLAG_HIDDEN);
+        }
+      }
+    } else {
+      for (uint8_t i = 0U; i < kIntroWireEdgeCount; ++i) {
+        if (intro_wire_lines_[i] != nullptr) {
+          lv_obj_add_flag(intro_wire_lines_[i], LV_OBJ_FLAG_HIDDEN);
+        }
+      }
+      createRotoZoom();
+    }
+
+    Serial.printf("[UI][WIN_ETAPE] phase=%s obj=%u stars=%u particles=%u quality=%u\n",
+                  (next_state == IntroState::PHASE_C_CLEAN) ? "C" : "C_LOOP",
+                  static_cast<unsigned int>(intro_star_count_ + (intro_wave_glyph_count_ * 2U) + 18U),
+                  static_cast<unsigned int>(intro_star_count_),
+                  static_cast<unsigned int>(intro_firework_active_count_),
+                  static_cast<unsigned int>(intro_3d_quality_resolved_));
+    return;
+  }
+
+  if (next_state == IntroState::OUTRO) {
+    lv_obj_set_style_translate_x(intro_root_, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(intro_root_, 0, LV_PART_MAIN);
+    return;
+  }
+
+  if (next_state == IntroState::DONE) {
+    stopIntroAndCleanup();
+    hide_wave_text();
+  }
+}
+
+void UiManager::configureBPhaseStart() {
+  intro_b1_done_ = false;
+  intro_wave_half_height_mode_ = false;
+  intro_next_b2_pulse_ms_ = t_state0_ms_ + static_cast<uint32_t>(intro_b1_crash_ms_) + 2400U;
+  createRotoZoom();
+  startGlitch(intro_b1_crash_ms_);
+  startFireworks();
+}
+
+void UiManager::updateBPhase(uint32_t dt_ms, uint32_t now_ms, uint32_t state_elapsed_ms) {
+  updateCopperBars(now_ms - intro_total_start_ms_);
+  updateStarfield(dt_ms);
+  updateWavySineScroller(dt_ms, now_ms);
+  updateBottomRollbackScroller(dt_ms);
+  animateLogoOvershoot();
+  updateFireworks(dt_ms);
+
+  if (state_elapsed_ms < intro_b1_crash_ms_) {
+    updateWireCube(dt_ms, true);
+    if (intro_3d_mode_ != Intro3DMode::kWireCube) {
+      updateRotoZoom(dt_ms);
+    }
+    updateGlitch(dt_ms);
+    return;
+  }
+
+  if (!intro_b1_done_) {
+    intro_b1_done_ = true;
+    if (intro_root_ != nullptr) {
+      lv_obj_set_style_translate_x(intro_root_, 0, LV_PART_MAIN);
+      lv_obj_set_style_translate_y(intro_root_, 0, LV_PART_MAIN);
+      lv_obj_set_style_opa(intro_root_, LV_OPA_COVER, LV_PART_MAIN);
+    }
+  }
+
+  if (intro_3d_mode_ == Intro3DMode::kWireCube) {
+    updateWireCube(dt_ms, false);
+  }
+  updateRotoZoom(dt_ms);
+
+  if (intro_firework_active_count_ == 0U && now_ms >= intro_next_b2_pulse_ms_) {
+    startFireworks();
+    intro_next_b2_pulse_ms_ = now_ms + 2000U + (nextIntroRandom() % 2000U);
+  }
+}
+
+void UiManager::animateLogoOvershoot() {
+  if (intro_logo_label_ == nullptr || intro_logo_shadow_label_ == nullptr) {
+    return;
+  }
+  const uint32_t now = lv_tick_get();
+  const uint32_t elapsed = now - intro_logo_anim_start_ms_;
+  const uint32_t drop_ms = 900U;
+  int16_t translate_y = 0;
+  if (elapsed < drop_ms) {
+    const float t = static_cast<float>(elapsed) / static_cast<float>(drop_ms);
+    const float eased = easeOutBack(t);
+    translate_y = static_cast<int16_t>((1.0f - eased) * -80.0f);
+  } else {
+    const uint32_t bounce_elapsed = elapsed - drop_ms;
+    if (bounce_elapsed < 420U) {
+      const float phase = (static_cast<float>(bounce_elapsed) / 420.0f) * 3.14159f;
+      translate_y = static_cast<int16_t>(std::sin(phase) * 3.0f);
+    } else {
+      translate_y = 0;
+    }
+  }
+  lv_obj_set_style_translate_y(intro_logo_label_, translate_y, LV_PART_MAIN);
+  lv_obj_set_style_translate_y(intro_logo_shadow_label_, translate_y, LV_PART_MAIN);
+}
+
+void UiManager::startGlitch(uint16_t duration_ms) {
+  intro_glitch_duration_ms_ = duration_ms;
+  intro_glitch_start_ms_ = lv_tick_get();
+  intro_glitch_next_jitter_ms_ = intro_glitch_start_ms_;
+}
+
+void UiManager::updateGlitch(uint32_t dt_ms) {
+  (void)dt_ms;
+  if (intro_root_ == nullptr || intro_glitch_duration_ms_ == 0U) {
+    return;
+  }
+  const uint32_t now = lv_tick_get();
+  const uint32_t elapsed = now - intro_glitch_start_ms_;
+  const uint16_t duration = intro_glitch_duration_ms_;
+  if (elapsed >= duration) {
+    lv_obj_set_style_translate_x(intro_root_, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(intro_root_, 0, LV_PART_MAIN);
+    lv_obj_set_style_opa(intro_root_, LV_OPA_COVER, LV_PART_MAIN);
+    return;
+  }
+
+  if (now >= intro_glitch_next_jitter_ms_) {
+    const int16_t jitter_x = static_cast<int16_t>(static_cast<int32_t>(nextIntroRandom() % 21U) - 10);
+    const int16_t jitter_y = static_cast<int16_t>(static_cast<int32_t>(nextIntroRandom() % 17U) - 8);
+    lv_obj_set_style_translate_x(intro_root_, jitter_x, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(intro_root_, jitter_y, LV_PART_MAIN);
+    intro_glitch_next_jitter_ms_ = now + 40U + (nextIntroRandom() % 41U);
+  }
+
+  const uint16_t half = duration / 2U;
+  int32_t fade = LV_OPA_COVER;
+  if (elapsed < half) {
+    fade = LV_OPA_COVER - static_cast<int32_t>((elapsed * 180U) / half);
+  } else {
+    fade = 75 + static_cast<int32_t>(((elapsed - half) * 180U) / (duration - half));
+  }
+  const bool blink = ((elapsed / 70U) % 2U) == 0U;
+  if (blink) {
+    fade = (fade * 3) / 4;
+  }
+  fade = clampValue<int32_t>(fade, 20, LV_OPA_COVER);
+  lv_obj_set_style_opa(intro_root_, static_cast<lv_opa_t>(fade), LV_PART_MAIN);
+}
+
+void UiManager::startFireworks() {
+  if (!intro_created_) {
+    return;
+  }
+  const int16_t width = activeDisplayWidth();
+  const int16_t height = activeDisplayHeight();
+  const int32_t area = static_cast<int32_t>(width) * height;
+  uint8_t bursts = (area > 140000) ? 3U : ((area > 90000) ? 2U : 1U);
+  uint8_t per_burst = static_cast<uint8_t>(clampValue<int32_t>(area / 3800, 24, 48));
+  while ((static_cast<uint16_t>(bursts) * per_burst) > 72U && bursts > 1U) {
+    --bursts;
+  }
+  while ((static_cast<uint16_t>(bursts) * per_burst) > 72U && per_burst > 24U) {
+    --per_burst;
+  }
+  const uint16_t total = static_cast<uint16_t>(bursts * per_burst);
+  intro_firework_active_count_ = total;
+  static constexpr uint32_t kParticlePalette[] = {
+      0x00FFFFUL, 0xFF00FFUL, 0xFFFF00UL, 0xFFFFFFUL, 0xFFAA55UL, 0x7FD7FFUL};
+
+  for (uint8_t i = 0U; i < 72U; ++i) {
+    IntroParticleState& state = intro_firework_states_[i];
+    state = {};
+    lv_obj_t* particle = intro_firework_particles_[i];
+    if (particle != nullptr) {
+      lv_obj_add_flag(particle, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_set_style_translate_x(particle, 0, LV_PART_MAIN);
+      lv_obj_set_style_translate_y(particle, 0, LV_PART_MAIN);
+      lv_obj_set_style_opa(particle, LV_OPA_COVER, LV_PART_MAIN);
+    }
+  }
+
+  uint16_t index = 0U;
+  for (uint8_t burst = 0U; burst < bursts; ++burst) {
+    const int16_t cx = static_cast<int16_t>(width / 2 + static_cast<int16_t>(nextIntroRandom() % 41U) - 20);
+    const int16_t cy = static_cast<int16_t>(height / 2 + static_cast<int16_t>(nextIntroRandom() % 33U) - 16);
+    for (uint8_t p = 0U; p < per_burst && index < 72U; ++p, ++index) {
+      IntroParticleState& state = intro_firework_states_[index];
+      lv_obj_t* particle = intro_firework_particles_[index];
+      if (particle == nullptr) {
+        continue;
+      }
+      const float angle = (6.28318530718f * static_cast<float>(p)) / static_cast<float>(per_burst);
+      const float jitter = static_cast<float>(static_cast<int16_t>(nextIntroRandom() % 21U) - 10) * 0.02f;
+      const float velocity = static_cast<float>(90 + (nextIntroRandom() % 90U));
+      state.x_q8 = static_cast<int32_t>(cx) << 8;
+      state.y_q8 = static_cast<int32_t>(cy) << 8;
+      state.vx_q8 = static_cast<int32_t>(std::cos(angle + jitter) * velocity * 256.0f);
+      state.vy_q8 = static_cast<int32_t>(std::sin(angle + jitter) * velocity * 256.0f) - (24 << 8);
+      state.delay_ms = static_cast<uint16_t>(burst * 120U + (nextIntroRandom() % 70U));
+      state.life_ms = static_cast<uint16_t>(560U + (nextIntroRandom() % 360U));
+      state.age_ms = 0U;
+      state.active = true;
+      const uint8_t size = static_cast<uint8_t>(2U + (nextIntroRandom() % 3U));
+      lv_obj_set_size(particle, size, size);
+      lv_obj_set_style_bg_color(particle, lv_color_hex(kParticlePalette[nextIntroRandom() % 6U]), LV_PART_MAIN);
+      lv_obj_set_style_bg_opa(particle, LV_OPA_COVER, LV_PART_MAIN);
+      lv_obj_set_pos(particle, cx, cy);
+      lv_obj_clear_flag(particle, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+}
+
+void UiManager::startCleanReveal() {
+  const int16_t width = activeDisplayWidth();
+  const int16_t height = activeDisplayHeight();
+  for (uint8_t i = 0U; i < 4U; ++i) {
+    if (intro_gradient_layers_[i] == nullptr) {
+      continue;
+    }
+    lv_obj_clear_flag(intro_gradient_layers_[i], LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_pos(intro_gradient_layers_[i], 0, static_cast<lv_coord_t>((height / 4) * i));
+    lv_obj_set_size(intro_gradient_layers_[i], width, static_cast<lv_coord_t>((height / 4) + 2));
+  }
+  lv_obj_set_style_bg_color(intro_gradient_layers_[0], lv_color_hex(0x081225UL), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(intro_gradient_layers_[1], lv_color_hex(0x0D1C33UL), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(intro_gradient_layers_[2], lv_color_hex(0x122642UL), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(intro_gradient_layers_[3], lv_color_hex(0x18324FUL), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(intro_gradient_layers_[0], LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(intro_gradient_layers_[1], LV_OPA_90, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(intro_gradient_layers_[2], LV_OPA_80, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(intro_gradient_layers_[3], LV_OPA_70, LV_PART_MAIN);
+
+  intro_clean_reveal_chars_ = 0U;
+  intro_clean_next_char_ms_ = lv_tick_get();
+
+  if (intro_clean_title_label_ != nullptr) {
+    lv_label_set_text(intro_clean_title_label_, "");
+    lv_obj_align(intro_clean_title_label_, LV_ALIGN_TOP_MID, 0, 20);
+    lv_obj_clear_flag(intro_clean_title_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (intro_clean_title_shadow_label_ != nullptr) {
+    lv_label_set_text(intro_clean_title_shadow_label_, "");
+    lv_obj_align(intro_clean_title_shadow_label_, LV_ALIGN_TOP_MID, 1, 21);
+    lv_obj_clear_flag(intro_clean_title_shadow_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (intro_clean_scroll_label_ != nullptr) {
+    lv_obj_add_flag(intro_clean_scroll_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+void UiManager::stopIntroAndCleanup() {
+  intro_active_ = false;
+  intro_skip_requested_ = false;
+  intro_state_ = IntroState::DONE;
+  intro_b1_done_ = false;
+  intro_glitch_duration_ms_ = 0U;
+  intro_next_b2_pulse_ms_ = 0U;
+  intro_firework_active_count_ = 0U;
+  intro_wave_half_height_mode_ = false;
+  intro_wave_band_top_ = 0;
+  intro_wave_band_bottom_ = 0;
+  intro_cube_morph_phase_ = 0.0f;
+
+  if (intro_timer_ != nullptr) {
+    lv_timer_pause(intro_timer_);
+  }
+  if (intro_root_ != nullptr) {
+    lv_obj_set_style_translate_x(intro_root_, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(intro_root_, 0, LV_PART_MAIN);
+    lv_obj_set_style_opa(intro_root_, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_add_flag(intro_root_, LV_OBJ_FLAG_HIDDEN);
+  }
+
+  for (lv_obj_t* bar : scene_cracktro_bars_) {
+    if (bar == nullptr) {
+      continue;
+    }
+    lv_obj_add_flag(bar, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_translate_x(bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(bar, 0, LV_PART_MAIN);
+  }
+  for (lv_obj_t* star : scene_starfield_) {
+    if (star == nullptr) {
+      continue;
+    }
+    lv_obj_add_flag(star, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_translate_x(star, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(star, 0, LV_PART_MAIN);
+  }
+
+  for (uint8_t i = 0U; i < 72U; ++i) {
+    if (intro_firework_particles_[i] != nullptr) {
+      lv_obj_add_flag(intro_firework_particles_[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    intro_firework_states_[i].active = false;
+  }
+
+  for (uint8_t i = 0U; i < kIntroWaveGlyphMax; ++i) {
+    if (intro_wave_slots_[i].glyph != nullptr) {
+      lv_obj_add_flag(intro_wave_slots_[i].glyph, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (intro_wave_slots_[i].shadow != nullptr) {
+      lv_obj_add_flag(intro_wave_slots_[i].shadow, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+  for (uint8_t i = 0U; i < kIntroWireEdgeCount; ++i) {
+    if (intro_wire_lines_[i] != nullptr) {
+      lv_obj_add_flag(intro_wire_lines_[i], LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+  for (uint8_t i = 0U; i < kIntroRotoStripeMax; ++i) {
+    if (intro_roto_stripes_[i] != nullptr) {
+      lv_obj_add_flag(intro_roto_stripes_[i], LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+
+  if (intro_logo_label_ != nullptr) {
+    lv_obj_add_flag(intro_logo_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (intro_logo_shadow_label_ != nullptr) {
+    lv_obj_add_flag(intro_logo_shadow_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (intro_bottom_scroll_label_ != nullptr) {
+    lv_obj_add_flag(intro_bottom_scroll_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (intro_clean_title_label_ != nullptr) {
+    lv_obj_add_flag(intro_clean_title_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (intro_clean_title_shadow_label_ != nullptr) {
+    lv_obj_add_flag(intro_clean_title_shadow_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (intro_debug_label_ != nullptr) {
+    lv_obj_add_flag(intro_debug_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+void UiManager::updateFireworks(uint32_t dt_ms) {
+  if (intro_firework_active_count_ == 0U || dt_ms == 0U) {
+    return;
+  }
+  uint16_t active_count = 0U;
+  const int16_t width = activeDisplayWidth();
+  const int16_t height = activeDisplayHeight();
+  constexpr int32_t kGravityQ8 = 180 << 8;
+  for (uint8_t i = 0U; i < 72U; ++i) {
+    IntroParticleState& state = intro_firework_states_[i];
+    lv_obj_t* particle = intro_firework_particles_[i];
+    if (!state.active || particle == nullptr) {
+      continue;
+    }
+    if (state.delay_ms > 0U) {
+      if (dt_ms >= state.delay_ms) {
+        state.delay_ms = 0U;
+      } else {
+        state.delay_ms = static_cast<uint16_t>(state.delay_ms - dt_ms);
+      }
+      lv_obj_add_flag(particle, LV_OBJ_FLAG_HIDDEN);
+      ++active_count;
+      continue;
+    }
+    state.age_ms = static_cast<uint16_t>(state.age_ms + dt_ms);
+    if (state.age_ms >= state.life_ms) {
+      state.active = false;
+      lv_obj_add_flag(particle, LV_OBJ_FLAG_HIDDEN);
+      continue;
+    }
+    state.vy_q8 += static_cast<int32_t>((kGravityQ8 * static_cast<int32_t>(dt_ms)) / 1000);
+    state.x_q8 += static_cast<int32_t>((state.vx_q8 * static_cast<int32_t>(dt_ms)) / 1000);
+    state.y_q8 += static_cast<int32_t>((state.vy_q8 * static_cast<int32_t>(dt_ms)) / 1000);
+
+    int16_t x = static_cast<int16_t>(state.x_q8 >> 8);
+    int16_t y = static_cast<int16_t>(state.y_q8 >> 8);
+    x = clampValue<int16_t>(x, -8, width + 8);
+    y = clampValue<int16_t>(y, -8, height + 8);
+    lv_obj_set_pos(particle, x, y);
+    lv_obj_clear_flag(particle, LV_OBJ_FLAG_HIDDEN);
+
+    const uint16_t remaining = static_cast<uint16_t>(state.life_ms - state.age_ms);
+    const lv_opa_t opa =
+        static_cast<lv_opa_t>(clampValue<uint16_t>((remaining * 255U) / state.life_ms, 16U, 255U));
+    lv_obj_set_style_opa(particle, opa, LV_PART_MAIN);
+    ++active_count;
+  }
+  intro_firework_active_count_ = active_count;
+}
+
+void UiManager::updateCleanReveal(uint32_t dt_ms) {
+  (void)dt_ms;
+  if (intro_clean_title_label_ == nullptr || intro_clean_title_shadow_label_ == nullptr) {
+    return;
+  }
+  const uint32_t now = lv_tick_get();
+  const size_t target_len = std::strlen(intro_clean_title_ascii_);
+  if (intro_clean_reveal_chars_ < target_len && now >= intro_clean_next_char_ms_) {
+    ++intro_clean_reveal_chars_;
+    if (intro_clean_reveal_chars_ > target_len) {
+      intro_clean_reveal_chars_ = static_cast<uint16_t>(target_len);
+    }
+    char title_buf[64] = {0};
+    const size_t copy_len =
+        clampValue<size_t>(intro_clean_reveal_chars_, 0U, sizeof(title_buf) - 1U);
+    if (copy_len > 0U) {
+      std::memcpy(title_buf, intro_clean_title_ascii_, copy_len);
+    }
+    lv_label_set_text(intro_clean_title_label_, title_buf);
+    lv_label_set_text(intro_clean_title_shadow_label_, title_buf);
+    intro_clean_next_char_ms_ = now + 55U;
+  }
+
+  // Fake near/far zoom for LVGL text: subtle vertical drift + opacity pulse.
+  const float pulse_phase = static_cast<float>(now) * 0.0024f;
+  const int16_t drift_y = static_cast<int16_t>(std::sin(pulse_phase) * 3.0f);
+  const lv_opa_t title_opa = static_cast<lv_opa_t>(200 + static_cast<int16_t>((std::sin(pulse_phase * 0.8f) + 1.0f) * 27.0f));
+  lv_obj_set_style_translate_y(intro_clean_title_label_, drift_y, LV_PART_MAIN);
+  lv_obj_set_style_translate_y(intro_clean_title_shadow_label_, static_cast<int16_t>(drift_y + 1), LV_PART_MAIN);
+  lv_obj_set_style_opa(intro_clean_title_label_, title_opa, LV_PART_MAIN);
+  lv_obj_set_style_opa(intro_clean_title_shadow_label_,
+                       static_cast<lv_opa_t>(clampValue<int16_t>(title_opa - 80, 40, LV_OPA_COVER)),
+                       LV_PART_MAIN);
+}
+
+void UiManager::updateSineScroller(uint32_t t_ms) {
+  const uint32_t now = t_ms;
+  uint32_t dt_ms = now - intro_wave_last_ms_;
+  if (dt_ms > 100U) {
+    dt_ms = 100U;
+  }
+  intro_wave_last_ms_ = now;
+  updateWavySineScroller(dt_ms, now);
+}
+
+void UiManager::updateIntroDebugOverlay(uint32_t dt_ms) {
+  (void)dt_ms;
+  if (intro_debug_label_ == nullptr) {
+    return;
+  }
+  if (!intro_debug_overlay_enabled_) {
+    lv_obj_add_flag(intro_debug_label_, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+
+  const uint32_t now = lv_tick_get();
+  if (now < intro_debug_next_ms_) {
+    return;
+  }
+  intro_debug_next_ms_ = now + 250U;
+
+  uint16_t active_roto = 0U;
+  for (uint8_t i = 0U; i < kIntroRotoStripeMax; ++i) {
+    if (intro_roto_stripes_[i] != nullptr && !lv_obj_has_flag(intro_roto_stripes_[i], LV_OBJ_FLAG_HIDDEN)) {
+      ++active_roto;
+    }
+  }
+  const uint16_t object_count = static_cast<uint16_t>(intro_copper_count_ + intro_star_count_ +
+                                                       (intro_wave_glyph_count_ * 2U) +
+                                                       intro_firework_active_count_ + active_roto +
+                                                       kIntroWireEdgeCount + 10U);
+  lv_label_set_text_fmt(intro_debug_label_,
+                        "phase=%u obj=%u stars=%u p=%u q=%u",
+                        static_cast<unsigned int>(intro_state_),
+                        static_cast<unsigned int>(object_count),
+                        static_cast<unsigned int>(intro_star_count_),
+                        static_cast<unsigned int>(intro_firework_active_count_),
+                        static_cast<unsigned int>(intro_3d_quality_resolved_));
+  lv_obj_clear_flag(intro_debug_label_, LV_OBJ_FLAG_HIDDEN);
+}
+
+void UiManager::tickIntro() {
+  if (!intro_active_ || intro_root_ == nullptr) {
+    return;
+  }
+  const uint32_t now = lv_tick_get();
+  uint32_t dt_ms = now - last_tick_ms_;
+  if (dt_ms > 100U) {
+    dt_ms = 100U;
+  }
+  last_tick_ms_ = now;
+  const uint32_t state_elapsed = now - t_state0_ms_;
+
+  if (intro_skip_requested_ &&
+      (intro_state_ == IntroState::PHASE_A_CRACKTRO || intro_state_ == IntroState::PHASE_B_TRANSITION)) {
+    intro_skip_requested_ = false;
+    transitionIntroState(IntroState::PHASE_C_CLEAN);
+  }
+
+  switch (intro_state_) {
+    case IntroState::PHASE_A_CRACKTRO:
+      updateCopperBars(now - intro_total_start_ms_);
+      updateStarfield(dt_ms);
+      updateWavySineScroller(dt_ms, now);
+      updateBottomRollbackScroller(dt_ms);
+      animateLogoOvershoot();
+      updateWireCube(dt_ms, false);
+      updateIntroDebugOverlay(dt_ms);
+      if (state_elapsed >= intro_config_.a_duration_ms) {
+        transitionIntroState(IntroState::PHASE_B_TRANSITION);
+      }
+      break;
+
+    case IntroState::PHASE_B_TRANSITION:
+      updateBPhase(dt_ms, now, state_elapsed);
+      updateIntroDebugOverlay(dt_ms);
+      if (state_elapsed >= intro_config_.b_duration_ms) {
+        transitionIntroState(IntroState::PHASE_C_CLEAN);
+      }
+      break;
+
+    case IntroState::PHASE_C_CLEAN:
+      updateStarfield(dt_ms);
+      if (intro_3d_mode_ == Intro3DMode::kWireCube) {
+        updateWireCube(dt_ms, false);
+      } else {
+        updateRotoZoom(dt_ms);
+      }
+      updateWavySineScroller(dt_ms, now);
+      updateCleanReveal(dt_ms);
+      updateFireworks(dt_ms);
+      updateIntroDebugOverlay(dt_ms);
+      if (state_elapsed >= intro_config_.c_duration_ms) {
+        transitionIntroState(IntroState::PHASE_C_LOOP);
+      }
+      break;
+
+    case IntroState::PHASE_C_LOOP:
+      updateStarfield(dt_ms);
+      if (intro_3d_mode_ == Intro3DMode::kWireCube) {
+        updateWireCube(dt_ms, false);
+      } else {
+        updateRotoZoom(dt_ms);
+      }
+      updateWavySineScroller(dt_ms, now);
+      updateCleanReveal(dt_ms);
+      updateFireworks(dt_ms);
+      updateIntroDebugOverlay(dt_ms);
+      if (state_elapsed >= intro_config_.c_duration_ms) {
+        transitionIntroState(IntroState::PHASE_C_LOOP);
+      }
+      break;
+
+    case IntroState::OUTRO: {
+      updateFireworks(dt_ms);
+      const uint32_t elapsed = state_elapsed;
+      if (elapsed >= kIntroOutroMs) {
+        stopIntroAndCleanup();
+      } else {
+        const int32_t opa =
+            LV_OPA_COVER - static_cast<int32_t>((elapsed * LV_OPA_COVER) / kIntroOutroMs);
+        lv_obj_set_style_opa(intro_root_,
+                             static_cast<lv_opa_t>(clampValue<int32_t>(opa, 0, LV_OPA_COVER)),
+                             LV_PART_MAIN);
+      }
+      break;
+    }
+
+    case IntroState::DONE:
+    default:
+      break;
+  }
+}
+
+void UiManager::introTimerCb(lv_timer_t* timer) {
+  if (timer == nullptr || timer->user_data == nullptr) {
+    return;
+  }
+  UiManager* self = static_cast<UiManager*>(timer->user_data);
+  self->tickIntro();
+}
+
 
 void UiManager::configureWaveformOverlay(const HardwareManager::Snapshot* snapshot,
                                          bool enabled,
@@ -1121,6 +3256,17 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   const char* scene_id = normalized_scene_id;
   const bool scene_changed = (std::strcmp(last_scene_id_, scene_id) != 0);
   const bool has_previous_scene = (last_scene_id_[0] != '\0');
+  const bool win_etape_intro_scene = (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0);
+
+  if (!win_etape_intro_scene && intro_active_) {
+    stopIntroAndCleanup();
+  }
+  if (!win_etape_intro_scene) {
+    intro_skip_latched_ = false;
+  }
+  if (win_etape_intro_scene && intro_active_ && !scene_changed) {
+    return;
+  }
 
   auto parseEffectToken = [](const char* token, SceneEffect fallback, const char* source) -> SceneEffect {
     if (token == nullptr || token[0] == '\0') {
@@ -1323,29 +3469,30 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     bg_rgb = 0x24090CUL;
     accent_rgb = 0xFF6A52UL;
     text_rgb = 0xFFF2EBUL;
-  } else if (std::strcmp(scene_id, "SCENE_WIN") == 0 || std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0 ||
-             std::strcmp(scene_id, "SCENE_REWARD") == 0) {
+  } else if (std::strcmp(scene_id, "SCENE_WIN") == 0 || std::strcmp(scene_id, "SCENE_REWARD") == 0) {
     title = "VICTOIRE";
     symbol = "WIN";
     effect = SceneEffect::kCelebrate;
     bg_rgb = 0x231038UL;
     accent_rgb = 0xF4CB4AUL;
     text_rgb = 0xFFF6C7UL;
-
-    if (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0 &&
-        std::strcmp(audio_pack_id_for_ui, "PACK_WIN") == 0 &&
-        std::strcmp(step_id_for_ui, "STEP_ETAPE2") == 0) {
-      title = "BRAVO!";
-      subtitle = audio_playing ? "Validation en cours..." : "BRAVO! vous avez eu juste";
-      win_etape_bravo_mode = true;
-      show_title = true;
-      demo_mode = "fireworks";
-      demo_particle_count = 4U;
-      demo_strobe_level = 92U;
-      win_etape_fireworks = true;
-    } else {
-      subtitle = "Etape validee";
-    }
+    subtitle = "Etape validee";
+  } else if (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0) {
+    title = "BRAVO!";
+    subtitle = audio_playing ? "Validation en cours..." : kWinEtapeWaitingSubtitle;
+    symbol = "WIN";
+    effect = SceneEffect::kNone;
+    transition = SceneTransition::kFade;
+    transition_ms = 220U;
+    bg_rgb = 0x000022UL;
+    accent_rgb = 0x00FFFFUL;
+    text_rgb = 0xFFFFFFUL;
+    show_title = true;
+    show_subtitle = true;
+    show_symbol = false;
+    win_etape_bravo_mode = true;
+    win_etape_fireworks = false;
+    subtitle_scroll_mode = SceneScrollMode::kNone;
   } else if (std::strcmp(scene_id, "SCENE_READY") == 0 || std::strcmp(scene_id, "SCENE_MEDIA_ARCHIVE") == 0) {
     title = "PRET";
     subtitle = "Scenario termine";
@@ -1660,9 +3807,17 @@ void UiManager::renderScene(const ScenarioDef* scenario,
                           waveform_sample_count,
                           waveform_amplitude_pct,
                           waveform_jitter);
+  if (win_etape_intro_scene) {
+    effect = SceneEffect::kNone;
+    transition = SceneTransition::kFade;
+    transition_ms = 220U;
+    subtitle_scroll_mode = SceneScrollMode::kNone;
+    win_etape_fireworks = false;
+    resetSceneTimeline();
+  }
   if (win_etape_bravo_mode) {
     title = "BRAVO!";
-    subtitle = audio_playing ? "Validation en cours..." : "BRAVO! vous avez eu juste";
+    subtitle = audio_playing ? "Validation en cours..." : kWinEtapeWaitingSubtitle;
   }
   if (win_etape_bravo_mode && timeline_keyframe_count_ > 1U) {
     timeline_keyframe_count_ = 1U;
@@ -1774,9 +3929,15 @@ void UiManager::renderScene(const ScenarioDef* scenario,
                 static_cast<unsigned int>(timeline_keyframe_count_),
                 static_cast<unsigned int>(transition),
                 static_cast<unsigned int>(transition_ms));
+  if (win_etape_intro_scene) {
+    startIntroIfNeeded(scene_changed);
+  }
 }
 
 void UiManager::handleButton(uint8_t key, bool long_press) {
+  if (intro_active_) {
+    requestIntroSkip();
+  }
   UiAction action;
   action.source = long_press ? UiActionSource::kKeyLong : UiActionSource::kKeyShort;
   action.key = key;
@@ -1790,6 +3951,9 @@ void UiManager::handleTouch(int16_t x, int16_t y, bool touched) {
   touch_x_ = x;
   touch_y_ = y;
   touch_pressed_ = touched;
+  if (touched && intro_active_) {
+    requestIntroSkip();
+  }
 }
 
 void UiManager::createWidgets() {
@@ -1802,6 +3966,26 @@ void UiManager::createWidgets() {
   lv_obj_set_style_bg_opa(scene_root_, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_bg_color(scene_root_, lv_color_hex(0x07132A), LV_PART_MAIN);
   lv_obj_clear_flag(scene_root_, LV_OBJ_FLAG_SCROLLABLE);
+
+  for (lv_obj_t*& bar : scene_cracktro_bars_) {
+    bar = lv_obj_create(scene_root_);
+    lv_obj_remove_style_all(bar);
+    lv_obj_set_size(bar, activeDisplayWidth(), 20);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(0x28143A), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_40, LV_PART_MAIN);
+    lv_obj_add_flag(bar, LV_OBJ_FLAG_HIDDEN);
+  }
+
+  for (uint8_t index = 0U; index < kStarfieldCount; ++index) {
+    lv_obj_t*& star = scene_starfield_[index];
+    star = lv_obj_create(scene_root_);
+    lv_obj_remove_style_all(star);
+    lv_obj_set_size(star, 3, 3);
+    lv_obj_set_style_radius(star, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(star, lv_color_hex(0xE9F6FF), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(star, LV_OPA_60, LV_PART_MAIN);
+    lv_obj_add_flag(star, LV_OBJ_FLAG_HIDDEN);
+  }
 
   scene_ring_outer_ = lv_obj_create(scene_root_);
   SceneElement::initCircle(scene_ring_outer_,
@@ -1974,6 +4158,13 @@ void UiManager::stopSceneAnimations() {
   if (scene_root_ == nullptr) {
     return;
   }
+  win_etape_showcase_phase_ = 0xFFU;
+  if (page_label_ != nullptr) {
+    lv_anim_del(page_label_, animWinEtapeShowcaseTickCb);
+  }
+  if (scene_core_ != nullptr) {
+    lv_anim_del(scene_core_, animWinEtapeShowcaseTickCb);
+  }
   const int16_t width = activeDisplayWidth();
   const int16_t height = activeDisplayHeight();
   int16_t min_dim = (width < height) ? width : height;
@@ -2042,6 +4233,8 @@ void UiManager::stopSceneAnimations() {
 
   if (scene_title_label_ != nullptr) {
     lv_anim_del(scene_title_label_, nullptr);
+    lv_obj_set_style_text_font(scene_title_label_, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_letter_space(scene_title_label_, 0, LV_PART_MAIN);
     lv_obj_set_style_opa(scene_title_label_, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_align(scene_title_label_, LV_ALIGN_TOP_MID, 0, 10);
     lv_obj_set_style_translate_x(scene_title_label_, 0, LV_PART_MAIN);
@@ -2056,6 +4249,8 @@ void UiManager::stopSceneAnimations() {
   }
   if (scene_subtitle_label_ != nullptr) {
     lv_anim_del(scene_subtitle_label_, nullptr);
+    lv_obj_set_style_text_font(scene_subtitle_label_, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_letter_space(scene_subtitle_label_, 0, LV_PART_MAIN);
     lv_obj_set_style_opa(scene_subtitle_label_, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_width(scene_subtitle_label_, width - 32);
     lv_label_set_long_mode(scene_subtitle_label_, LV_LABEL_LONG_DOT);
@@ -2075,6 +4270,28 @@ void UiManager::stopSceneAnimations() {
     lv_obj_add_flag(particle, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_translate_x(particle, 0, LV_PART_MAIN);
     lv_obj_set_style_translate_y(particle, 0, LV_PART_MAIN);
+  }
+
+  for (lv_obj_t* bar : scene_cracktro_bars_) {
+    if (bar == nullptr) {
+      continue;
+    }
+    lv_anim_del(bar, nullptr);
+    lv_obj_add_flag(bar, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_translate_x(bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_opa(bar, LV_OPA_COVER, LV_PART_MAIN);
+  }
+
+  for (lv_obj_t* star : scene_starfield_) {
+    if (star == nullptr) {
+      continue;
+    }
+    lv_anim_del(star, nullptr);
+    lv_obj_add_flag(star, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_translate_x(star, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(star, 0, LV_PART_MAIN);
+    lv_obj_set_style_opa(star, LV_OPA_COVER, LV_PART_MAIN);
   }
 
   if (scene_waveform_ != nullptr) {
@@ -2127,6 +4344,324 @@ uint16_t UiManager::resolveAnimMs(uint16_t fallback_ms) const {
     return fallback_ms;
   }
   return effect_speed_ms_;
+}
+
+void UiManager::startWinEtapeCracktroPhase() {
+  win_etape_showcase_phase_ = 0U;
+  const int16_t width = activeDisplayWidth();
+  const int16_t height = activeDisplayHeight();
+  applyThemeColors(0x130A22UL, 0xD78234UL, 0xFFE8BEUL);
+
+  if (scene_symbol_label_ != nullptr) {
+    lv_obj_add_flag(scene_symbol_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+
+  constexpr uint32_t kBarColors[kCracktroBarCount] = {
+      0x1A0B2CUL, 0x311446UL, 0x4E204DUL, 0x6A2B4AUL, 0x82403CUL, 0x9A5A31UL, 0xB8772CUL};
+  const int16_t bar_height = static_cast<int16_t>((height / static_cast<int16_t>(kCracktroBarCount)) + 2);
+  for (uint8_t index = 0U; index < kCracktroBarCount; ++index) {
+    lv_obj_t* bar = scene_cracktro_bars_[index];
+    if (bar == nullptr) {
+      continue;
+    }
+    lv_anim_del(bar, nullptr);
+    lv_obj_set_size(bar, static_cast<lv_coord_t>(width + 30), bar_height);
+    lv_obj_set_pos(bar, -15, static_cast<lv_coord_t>(index * (bar_height - 1)));
+    lv_obj_set_style_bg_color(bar, lv_color_hex(kBarColors[index]), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(bar, static_cast<lv_opa_t>(100 + index * 14U), LV_PART_MAIN);
+    lv_obj_set_style_translate_x(bar, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_HIDDEN);
+
+    lv_anim_t bar_shift;
+    lv_anim_init(&bar_shift);
+    lv_anim_set_var(&bar_shift, bar);
+    lv_anim_set_exec_cb(&bar_shift, animSetStyleTranslateX);
+    lv_anim_set_values(&bar_shift,
+                       static_cast<int32_t>(-18 + static_cast<int16_t>(index) * 3),
+                       static_cast<int32_t>(18 - static_cast<int16_t>(index) * 2));
+    lv_anim_set_time(&bar_shift, resolveAnimMs(static_cast<uint16_t>(260U + index * 90U)));
+    lv_anim_set_playback_time(&bar_shift, resolveAnimMs(static_cast<uint16_t>(260U + index * 90U)));
+    lv_anim_set_repeat_count(&bar_shift, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&bar_shift);
+  }
+
+  constexpr uint16_t kStarSpeedMs[3] = {2200U, 1450U, 980U};
+  constexpr uint8_t kStarSize[3] = {2U, 3U, 4U};
+  constexpr lv_opa_t kStarOpa[3] = {LV_OPA_40, LV_OPA_70, LV_OPA_COVER};
+  const int16_t star_track = (height > 76) ? static_cast<int16_t>(height - 76) : 40;
+  for (uint8_t index = 0U; index < kStarfieldCount; ++index) {
+    lv_obj_t* star = scene_starfield_[index];
+    if (star == nullptr) {
+      continue;
+    }
+    const uint8_t layer = index % 3U;
+    lv_anim_del(star, nullptr);
+    lv_obj_set_size(star, kStarSize[layer], kStarSize[layer]);
+    lv_obj_set_style_bg_opa(star, kStarOpa[layer], LV_PART_MAIN);
+    lv_obj_set_style_bg_color(star, lv_color_hex((layer == 2U) ? 0xFFFFFFUL : 0xBFE5FFUL), LV_PART_MAIN);
+    const int16_t start_x = static_cast<int16_t>((index * 53 + layer * 41) % (width + 28));
+    const int16_t y = static_cast<int16_t>(12 + ((index * 37 + layer * 19) % star_track));
+    lv_obj_set_pos(star, start_x, y);
+    lv_obj_clear_flag(star, LV_OBJ_FLAG_HIDDEN);
+
+    lv_anim_t star_scroll;
+    lv_anim_init(&star_scroll);
+    lv_anim_set_var(&star_scroll, star);
+    lv_anim_set_exec_cb(&star_scroll, animSetX);
+    lv_anim_set_values(&star_scroll, start_x, -14);
+    lv_anim_set_time(&star_scroll, resolveAnimMs(kStarSpeedMs[layer]));
+    lv_anim_set_repeat_count(&star_scroll, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_delay(&star_scroll, static_cast<uint16_t>(index * 70U));
+    lv_anim_start(&star_scroll);
+  }
+
+  if (scene_title_label_ != nullptr) {
+    lv_anim_del(scene_title_label_, nullptr);
+    lv_label_set_text(scene_title_label_, kWinEtapeCracktroTitle);
+    lv_obj_set_style_text_font(scene_title_label_, &lv_font_montserrat_18, LV_PART_MAIN);
+    lv_obj_set_style_text_letter_space(scene_title_label_, 2, LV_PART_MAIN);
+    lv_obj_align(scene_title_label_, LV_ALIGN_TOP_MID, 0, 24);
+    lv_obj_set_style_translate_y(scene_title_label_, -66, LV_PART_MAIN);
+    lv_obj_clear_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
+
+    lv_anim_t title_drop;
+    lv_anim_init(&title_drop);
+    lv_anim_set_var(&title_drop, scene_title_label_);
+    lv_anim_set_exec_cb(&title_drop, animSetStyleTranslateY);
+    lv_anim_set_values(&title_drop, -66, 0);
+    lv_anim_set_time(&title_drop, resolveAnimMs(920U));
+    lv_anim_set_delay(&title_drop, 120U);
+    lv_anim_set_path_cb(&title_drop, lv_anim_path_overshoot);
+    lv_anim_start(&title_drop);
+  }
+
+  if (scene_subtitle_label_ != nullptr) {
+    lv_anim_del(scene_subtitle_label_, nullptr);
+    lv_label_set_text(scene_subtitle_label_, kWinEtapeCracktroScroll);
+    lv_obj_set_style_text_font(scene_subtitle_label_, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_letter_space(scene_subtitle_label_, 1, LV_PART_MAIN);
+    lv_obj_align(scene_subtitle_label_, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_clear_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
+    applySubtitleScroll(SceneScrollMode::kMarquee, resolveAnimMs(3400U), 120U, true);
+  }
+}
+
+void UiManager::startWinEtapeCrashPhase() {
+  win_etape_showcase_phase_ = 1U;
+  applyThemeColors(0x1D0B20UL, 0xFF8A4DUL, 0xFFF3DDUL);
+
+  if (scene_root_ != nullptr) {
+    lv_anim_del(scene_root_, nullptr);
+    lv_anim_t root_flash;
+    lv_anim_init(&root_flash);
+    lv_anim_set_var(&root_flash, scene_root_);
+    lv_anim_set_exec_cb(&root_flash, animSetOpa);
+    lv_anim_set_values(&root_flash, LV_OPA_40, LV_OPA_COVER);
+    lv_anim_set_time(&root_flash, resolveAnimMs(110U));
+    lv_anim_set_playback_time(&root_flash, resolveAnimMs(110U));
+    lv_anim_set_repeat_count(&root_flash, 4U);
+    lv_anim_start(&root_flash);
+
+    lv_anim_t root_jitter_x;
+    lv_anim_init(&root_jitter_x);
+    lv_anim_set_var(&root_jitter_x, scene_root_);
+    lv_anim_set_exec_cb(&root_jitter_x, animSetRandomTranslateX);
+    lv_anim_set_values(&root_jitter_x, 0, 4095);
+    lv_anim_set_time(&root_jitter_x, resolveAnimMs(74U));
+    lv_anim_set_repeat_count(&root_jitter_x, 10U);
+    lv_anim_start(&root_jitter_x);
+
+    lv_anim_t root_jitter_y;
+    lv_anim_init(&root_jitter_y);
+    lv_anim_set_var(&root_jitter_y, scene_root_);
+    lv_anim_set_exec_cb(&root_jitter_y, animSetRandomTranslateY);
+    lv_anim_set_values(&root_jitter_y, 0, 4095);
+    lv_anim_set_time(&root_jitter_y, resolveAnimMs(66U));
+    lv_anim_set_repeat_count(&root_jitter_y, 10U);
+    lv_anim_start(&root_jitter_y);
+  }
+
+  for (uint8_t index = 0U; index < 4U; ++index) {
+    lv_obj_t* particle = scene_particles_[index];
+    if (particle == nullptr) {
+      continue;
+    }
+    lv_anim_del(particle, nullptr);
+    lv_obj_set_size(particle, 8 + static_cast<int16_t>(index * 2U), 8 + static_cast<int16_t>(index * 2U));
+    lv_obj_set_style_bg_color(particle, lv_color_hex((index % 2U) == 0U ? 0xFFD66EUL : 0xFF8D55UL), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(particle, LV_OPA_80, LV_PART_MAIN);
+    lv_obj_align(particle, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_clear_flag(particle, LV_OBJ_FLAG_HIDDEN);
+
+    lv_anim_t burst_opa;
+    lv_anim_init(&burst_opa);
+    lv_anim_set_var(&burst_opa, particle);
+    lv_anim_set_exec_cb(&burst_opa, animSetOpa);
+    lv_anim_set_values(&burst_opa, 20, LV_OPA_COVER);
+    lv_anim_set_time(&burst_opa, resolveAnimMs(200U));
+    lv_anim_set_playback_time(&burst_opa, resolveAnimMs(260U));
+    lv_anim_set_repeat_count(&burst_opa, 0U);
+    lv_anim_set_delay(&burst_opa, static_cast<uint16_t>(index * 36U));
+    lv_anim_start(&burst_opa);
+
+    lv_anim_t burst_x;
+    lv_anim_init(&burst_x);
+    lv_anim_set_var(&burst_x, particle);
+    lv_anim_set_exec_cb(&burst_x, animSetFireworkTranslateX);
+    lv_anim_set_values(&burst_x, 0, 4095);
+    lv_anim_set_time(&burst_x, resolveAnimMs(300U));
+    lv_anim_set_playback_time(&burst_x, resolveAnimMs(240U));
+    lv_anim_set_repeat_count(&burst_x, 0U);
+    lv_anim_set_delay(&burst_x, static_cast<uint16_t>(index * 28U));
+    lv_anim_start(&burst_x);
+
+    lv_anim_t burst_y;
+    lv_anim_init(&burst_y);
+    lv_anim_set_var(&burst_y, particle);
+    lv_anim_set_exec_cb(&burst_y, animSetFireworkTranslateY);
+    lv_anim_set_values(&burst_y, 0, 4095);
+    lv_anim_set_time(&burst_y, resolveAnimMs(320U));
+    lv_anim_set_playback_time(&burst_y, resolveAnimMs(260U));
+    lv_anim_set_repeat_count(&burst_y, 0U);
+    lv_anim_set_delay(&burst_y, static_cast<uint16_t>(index * 24U));
+    lv_anim_start(&burst_y);
+  }
+}
+
+void UiManager::startWinEtapeCleanPhase() {
+  win_etape_showcase_phase_ = 2U;
+  const int16_t width = activeDisplayWidth();
+  const int16_t height = activeDisplayHeight();
+  applyThemeColors(0x091830UL, 0x5E7FBBUL, 0xF2F6FFUL);
+
+  if (scene_root_ != nullptr) {
+    lv_anim_del(scene_root_, nullptr);
+    lv_obj_set_style_opa(scene_root_, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_translate_x(scene_root_, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(scene_root_, 0, LV_PART_MAIN);
+  }
+
+  constexpr uint32_t kCleanBars[kCracktroBarCount] = {
+      0x0A162EUL, 0x10203BUL, 0x182C49UL, 0x20385AUL, 0x294369UL, 0x304C73UL, 0x36547BUL};
+  const int16_t bar_height = static_cast<int16_t>((height / static_cast<int16_t>(kCracktroBarCount)) + 2);
+  for (uint8_t index = 0U; index < kCracktroBarCount; ++index) {
+    lv_obj_t* bar = scene_cracktro_bars_[index];
+    if (bar == nullptr) {
+      continue;
+    }
+    lv_anim_del(bar, nullptr);
+    lv_obj_set_size(bar, width, bar_height);
+    lv_obj_set_pos(bar, 0, static_cast<lv_coord_t>(index * (bar_height - 1)));
+    lv_obj_set_style_bg_color(bar, lv_color_hex(kCleanBars[index]), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(bar, static_cast<lv_opa_t>(48 + index * 10U), LV_PART_MAIN);
+    lv_obj_set_style_translate_x(bar, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_HIDDEN);
+  }
+
+  for (uint8_t index = 0U; index < kStarfieldCount; ++index) {
+    lv_obj_t* star = scene_starfield_[index];
+    if (star == nullptr) {
+      continue;
+    }
+    lv_anim_del(star, nullptr);
+    if (index >= 4U) {
+      lv_obj_add_flag(star, LV_OBJ_FLAG_HIDDEN);
+      continue;
+    }
+    lv_obj_set_size(star, 2, 2);
+    lv_obj_set_style_bg_opa(star, LV_OPA_40, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(star, lv_color_hex(0xA7C8F8UL), LV_PART_MAIN);
+    const int16_t start_x = static_cast<int16_t>((index * 97) % (width + 24));
+    const int16_t y = static_cast<int16_t>(18 + index * 16);
+    lv_obj_set_pos(star, start_x, y);
+    lv_obj_clear_flag(star, LV_OBJ_FLAG_HIDDEN);
+
+    lv_anim_t drift;
+    lv_anim_init(&drift);
+    lv_anim_set_var(&drift, star);
+    lv_anim_set_exec_cb(&drift, animSetX);
+    lv_anim_set_values(&drift, start_x, -10);
+    lv_anim_set_time(&drift, resolveAnimMs(static_cast<uint16_t>(4200U + index * 350U)));
+    lv_anim_set_repeat_count(&drift, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&drift);
+  }
+
+  for (lv_obj_t* particle : scene_particles_) {
+    if (particle == nullptr) {
+      continue;
+    }
+    lv_anim_del(particle, nullptr);
+    lv_obj_add_flag(particle, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (scene_symbol_label_ != nullptr) {
+    lv_obj_add_flag(scene_symbol_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+
+  if (scene_title_label_ != nullptr) {
+    lv_anim_del(scene_title_label_, nullptr);
+    lv_label_set_text(scene_title_label_, "");
+    lv_obj_set_style_text_font(scene_title_label_, &lv_font_montserrat_18, LV_PART_MAIN);
+    lv_obj_set_style_text_letter_space(scene_title_label_, 1, LV_PART_MAIN);
+    lv_obj_align(scene_title_label_, LV_ALIGN_TOP_MID, 0, 24);
+    lv_obj_set_style_translate_x(scene_title_label_, 0, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(scene_title_label_, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
+
+    lv_anim_t title_reveal;
+    lv_anim_init(&title_reveal);
+    lv_anim_set_var(&title_reveal, scene_title_label_);
+    lv_anim_set_exec_cb(&title_reveal, animSetWinTitleReveal);
+    lv_anim_set_values(&title_reveal, 0, static_cast<int32_t>(std::strlen(kWinEtapeDemoTitle)));
+    lv_anim_set_time(&title_reveal, resolveAnimMs(1700U));
+    lv_anim_set_delay(&title_reveal, 80U);
+    lv_anim_start(&title_reveal);
+  }
+
+  if (scene_subtitle_label_ != nullptr) {
+    lv_anim_del(scene_subtitle_label_, nullptr);
+    lv_label_set_text(scene_subtitle_label_, kWinEtapeDemoScroll);
+    lv_obj_set_style_text_font(scene_subtitle_label_, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_letter_space(scene_subtitle_label_, 0, LV_PART_MAIN);
+    lv_obj_align(scene_subtitle_label_, LV_ALIGN_BOTTOM_MID, 0, -14);
+    lv_obj_clear_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
+    applySubtitleScroll(SceneScrollMode::kMarquee, resolveAnimMs(7600U), 500U, true);
+
+    lv_anim_t subtitle_sine;
+    lv_anim_init(&subtitle_sine);
+    lv_anim_set_var(&subtitle_sine, scene_subtitle_label_);
+    lv_anim_set_exec_cb(&subtitle_sine, animSetSineTranslateY);
+    lv_anim_set_values(&subtitle_sine, 0, 4095);
+    lv_anim_set_time(&subtitle_sine, resolveAnimMs(2600U));
+    lv_anim_set_repeat_count(&subtitle_sine, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&subtitle_sine);
+  }
+}
+
+void UiManager::onWinEtapeShowcaseTick(uint16_t elapsed_ms) {
+  if (!win_etape_fireworks_mode_) {
+    return;
+  }
+  constexpr uint16_t kCracktroEndMs = 4700U;
+  constexpr uint16_t kCrashEndMs = 5600U;
+
+  if (elapsed_ms < 120U) {
+    if (win_etape_showcase_phase_ != 0U) {
+      startWinEtapeCracktroPhase();
+    }
+    return;
+  }
+  if (elapsed_ms < kCracktroEndMs) {
+    return;
+  }
+  if (elapsed_ms < kCrashEndMs) {
+    if (win_etape_showcase_phase_ != 1U) {
+      startWinEtapeCrashPhase();
+    }
+    return;
+  }
+  if (win_etape_showcase_phase_ != 2U) {
+    startWinEtapeCleanPhase();
+  }
 }
 
 void UiManager::applySceneEffect(SceneEffect effect) {
@@ -2561,6 +5096,29 @@ void UiManager::applySceneEffect(SceneEffect effect) {
 
   if (effect == SceneEffect::kCelebrate) {
     const bool fireworks_mode = win_etape_fireworks_mode_;
+    if (fireworks_mode) {
+      lv_obj_t* controller = page_label_;
+      if (controller == nullptr) {
+        controller = scene_core_;
+      }
+      if (controller != nullptr) {
+        lv_anim_del(controller, animWinEtapeShowcaseTickCb);
+      }
+      win_etape_showcase_phase_ = 0xFFU;
+      onWinEtapeShowcaseTick(0U);
+
+      if (controller != nullptr) {
+        lv_anim_t showcase_cycle;
+        lv_anim_init(&showcase_cycle);
+        lv_anim_set_var(&showcase_cycle, controller);
+        lv_anim_set_exec_cb(&showcase_cycle, animWinEtapeShowcaseTickCb);
+        lv_anim_set_values(&showcase_cycle, 0, 12000);
+        lv_anim_set_time(&showcase_cycle, 12000U);
+        lv_anim_set_repeat_count(&showcase_cycle, LV_ANIM_REPEAT_INFINITE);
+        lv_anim_start(&showcase_cycle);
+      }
+      return;
+    }
     const bool broken_mode = !fireworks_mode && (demo_strobe_level_ >= 85U);
     const uint16_t celebrate_ms = resolveAnimMs(fireworks_mode ? 640U : 560U);
     const uint16_t celebrate_alt_ms = resolveAnimMs(fireworks_mode ? 560U : 500U);
@@ -3386,6 +5944,46 @@ void UiManager::animTimelineTickCb(void* obj, int32_t value) {
     return;
   }
   g_instance->onTimelineTick(static_cast<uint16_t>(value));
+}
+
+void UiManager::animWinEtapeShowcaseTickCb(void* obj, int32_t value) {
+  (void)obj;
+  if (g_instance == nullptr || value < 0) {
+    return;
+  }
+  g_instance->onWinEtapeShowcaseTick(static_cast<uint16_t>(value));
+}
+
+void UiManager::animSetWinTitleReveal(void* obj, int32_t value) {
+  if (obj == nullptr) {
+    return;
+  }
+  constexpr const char* kTitle = kWinEtapeDemoTitle;
+  constexpr size_t kMaxChars = 48U;
+  char buffer[kMaxChars] = {0};
+  size_t count = (value < 0) ? 0U : static_cast<size_t>(value);
+  const size_t max_len = std::strlen(kTitle);
+  if (count > max_len) {
+    count = max_len;
+  }
+  if (count > (kMaxChars - 1U)) {
+    count = kMaxChars - 1U;
+  }
+  if (count > 0U) {
+    std::memcpy(buffer, kTitle, count);
+  }
+  lv_label_set_text(static_cast<lv_obj_t*>(obj), buffer);
+}
+
+void UiManager::animSetSineTranslateY(void* obj, int32_t value) {
+  if (obj == nullptr) {
+    return;
+  }
+  constexpr float kTau = 6.28318530718f;
+  const int32_t phase = (value < 0) ? 0 : (value % 4096);
+  const float radians = (static_cast<float>(phase) / 4095.0f) * kTau;
+  const int16_t offset = static_cast<int16_t>(std::sin(radians) * 6.0f);
+  lv_obj_set_style_translate_y(static_cast<lv_obj_t*>(obj), offset, LV_PART_MAIN);
 }
 
 void UiManager::displayFlushCb(lv_disp_drv_t* disp, const lv_area_t* area, lv_color_t* color_p) {

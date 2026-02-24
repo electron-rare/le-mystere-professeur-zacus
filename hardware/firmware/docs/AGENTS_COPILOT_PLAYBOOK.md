@@ -23,6 +23,12 @@
 3. **docs** – docs updates; stay focused, verify links, preserve indexes.
 4. **printables** – manifest hygiene; update sources before derived assets.
 5. **repo_hygiene** – checkpoints, artifact untracking, portable naming; follow `/tmp/zacus_checkpoint` snapshot flow.
+6. **demoscene-demomaking-generic** – reference-driven FX pipeline (ReferencePack -> StyleSheet/Timeline/TrackSet/FxGraph) for coherent cracktro/demoscene rendering.
+
+## Recommended order for demoscene UI work
+1. **`$demoscene-demomaking-generic`** for references, extracted numeric params, and deterministic timeline/tracks.
+2. **Adapter skill** for target implementation (`$firmware-graphics-stack` or `$firmware-scene-ui-editor`).
+3. **Hardware validation loop** on Freenove (`SCENE_GOTO <SCENE_ID>`, visual check, tune, repeat).
 
 ## Key observations to keep Copilot aligned
 - `docs/AGENTS_INDEX.md` is the canonical map of gates/quick commands for every agent.

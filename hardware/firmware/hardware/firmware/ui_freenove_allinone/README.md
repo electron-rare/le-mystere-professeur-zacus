@@ -93,3 +93,57 @@ pio run -e freenove_allinone -t upload --upload-port <PORT>
 ## Notes
 - Ce firmware est expérimental et fusionne les logiques audio + UI.
 - Pour la compatibilité UI Link, prévoir un mode optionnel.
+
+## Intro Amiga92 (`SCENE_WIN_ETAPE`)
+
+- Activation: l'intro A/B/C est lancee automatiquement quand `screen_scene_id == SCENE_WIN_ETAPE`.
+- Sequence:
+  - A (30000 ms): copper circular/wavy + starfield 3 couches + logo overshoot + scroller milieu rapide + rollback bas.
+  - B (15000 ms): `B1` crash court (700..1000 ms) + `B2` interlude (roto/tunnel + copper overlay + pulses fireworks).
+  - C (20000 ms): fond sobre + reveal `BRAVO Brigade Z` + scroller milieu ping-pong/wavy.
+  - ensuite: boucle de la phase C.
+- Skip: tout appui bouton ou touch pendant l'intro declenche un OUTRO court (400 ms).
+
+### Overrides runtime (TXT + JSON)
+
+- Priorite de lecture:
+  1) `/ui/scene_win_etape.txt`
+  2) `/ui/scene_win_etape.json`
+  3) `/SCENE_WIN_ETAPE.json`
+  4) `/ui/SCENE_WIN_ETAPE.json`
+- Cles supportees (TXT/JSON aliases):
+  - `logo_text`
+  - `mid_a_scroll`
+  - `bot_a_scroll`
+  - `clean_title`
+  - `clean_scroll`
+  - `a_ms`, `b_ms`, `c_ms`, `b1_ms`
+  - `speed_mid_a`, `speed_bot_a`, `speed_c`
+  - `stars`, `fx_3d`, `fx_3d_quality`
+
+Exemples:
+- JSON: `data/SCENE_WIN_ETAPE.json`
+- TXT: `data/ui/scene_win_etape.txt`
+
+### Perf notes
+
+- Tick fixe: `33 ms` (`~30 FPS` cible), `dt` clamp pour robustesse.
+- Zero allocation par frame dans la boucle intro (`tickIntro`).
+- Caps objets scene: `<=140` (petit ecran), `<=260` (grand ecran).
+- Pools fixes:
+  - stars: `48`
+  - fireworks: `72`
+  - wave glyph+shadow: `64 + 64`
+
+### References consulted
+
+- https://www.pouet.net/prodlist.php?type%5B0%5D=cracktro
+- https://www.youtube.com/results?search_query=amiga+cracktro
+- https://www.youtube.com/results?search_query=amiga+demoscene+1992
+- https://www.theflatnet.de/pub/cbm/amiga/AmigaDevDocs/hard_2.html
+- https://www.theflatnet.de/pub/cbm/amiga/AmigaDevDocs/
+- https://www.markwrobel.dk/project/amigamachinecode/
+- https://www.markwrobel.dk/post/amiga-machine-code-letter3-copper-revisited/
+- https://www.markwrobel.dk/post/amiga-machine-code-letter12-starfield-effect/
+- https://www.markwrobel.dk/post/amiga-machine-code-letter12-wave/
+- https://github.com/mrandreastoth/AmigaStyleDemo

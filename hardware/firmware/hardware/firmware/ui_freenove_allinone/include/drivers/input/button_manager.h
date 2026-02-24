@@ -17,6 +17,13 @@ struct ButtonEvent {
 
 class ButtonManager {
  public:
+  ButtonManager() = default;
+  ~ButtonManager() = default;
+  ButtonManager(const ButtonManager&) = delete;
+  ButtonManager& operator=(const ButtonManager&) = delete;
+  ButtonManager(ButtonManager&&) = delete;
+  ButtonManager& operator=(ButtonManager&&) = delete;
+
   bool begin();
   bool pollEvent(ButtonEvent* out_event);
 

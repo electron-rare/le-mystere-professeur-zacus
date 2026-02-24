@@ -11,7 +11,7 @@
 - `demoscene tunnel effect tutorial`
 - `wireframe cube perspective projection fixed point`
 - `LVGL canvas draw performance ESP32`
-- `demoscene 1998`
+- `demoscene amiga 1998`
 
 ### Visual references
 1. https://www.pouet.net/prodlist.php?type%5B0%5D=cracktro
@@ -47,7 +47,7 @@
 |---|---:|---:|---|
 | Timing | `kA_DurationMs` | 30000 | Long cracktro section requested for launch. |
 | Timing | `kB_DurationMs` | 15000 | Long transition block with explicit interlude. |
-| Timing | `kB1_CrashMs` | 900 | Crash punch at start of B, then B2 interlude. |
+| Timing | `kB1_CrashMs` | 4000 (clamp 3000..5000) | Crash punch at start of B, then B2 interlude. |
 | Timing | `kC_CycleMs` | 20000 | Clean loop cadence before C repeats. |
 | Palette | `kBg` | `#000022` | Dark retro background baseline. |
 | Palette | `kAccent1` | `#00FFFF` | Copper/scroller cyan. |
@@ -57,10 +57,12 @@
 | Scroll A | `kScrollMidA_PxPerSec` | 216 | Fast cracktro speed in requested range (160..280). |
 | Scroll A | `kScrollBotA_PxPerSec` | 108 | Bottom rollback speed in requested range (60..160). |
 | Scroll C | `kScrollC_PxPerSec` | 72 | Slow clean ping-pong in requested range (40..110). |
-| Sine | `kSineAmpA` | 18 px | Strong wave for cracktro text readability. |
-| Sine | `kSineAmpC` | 12 px | Softer clean wave within half-height band. |
+| Sine | `kSineAmpA` | dynamic `max(80, H/4 - font_h/2)` | Keep center scroller spanning >= 50% screen height. |
+| Sine | `kSineAmpC` | dynamic `max(80, H/4 - font_h/2)` | Same readability rule in clean loop. |
 | Sine | `kSinePeriodPx` | 104 px | Mid-wave spacing suited to 480x320 and similar panels. |
 | Sine | `kSinePhaseSpeed` | 1.9 rad/s | Stable oscillation without jitter. |
+| Center text | `band_top/bottom` | `[H/4, 3H/4]` | Vertical span lock for center scrollers. |
+| Center text | `padding_spaces` | `14` each side | Avoid visual clipping against screen edges. |
 | Stars | `stars_total` | `clamp((w*h)/1200, 60..220)` | Density target from cracktro references. |
 | Stars | `layers` | `3 (50/30/20)` | Standard depth split. |
 | Stars | `speed_l1/l2/l3` | `38 / 96 / 182 px/s` | Far-mid-near parallax. |
@@ -75,11 +77,12 @@
 | Glitch | `blink` | `8..14 Hz` | Classic short strobe feel. |
 
 ## Performance budget
-- Tick: `33 ms` (target `30 FPS`).
+- Tick: `42 ms` (target `24 FPS`).
 - No malloc/new in per-frame update loops.
 - Object caps for this scene:
   - small displays: `<= 140` LVGL objects
   - larger displays: `<= 260` LVGL objects
+- CPU budget target: intro tick update `<= 14 ms` average (headroom for DMA flush path).
 - 3D quality policy:
   - `low`: stripe count reduced, lower opacity
   - `med`: balanced defaults
@@ -104,5 +107,7 @@
 ## Final firmware behavior lock
 - Sequence: `A(30000) -> B(15000: B1 crash + B2 interlude) -> C(20000) -> C loop`.
 - Skip behavior: input in A/B jumps to C clean start.
-- C scroller: horizontal ping-pong + sine, bounded to center half-height band.
+- C scroller: horizontal ping-pong + sine, bounded to center half-height band (`>=50%` screen height).
 - Cleanup: intro timer paused on exit, all intro objects hidden/reset.
+- Autorun gate: `UI_DEMO_AUTORUN_WIN_ETAPE=1` forces scene playback at boot.
+- Runtime telemetry every 5s: `phase`, `t`, `obj`, `stars`, `particles`, `fx_fps`, `heap_internal`, `heap_psram`, `largest_dma`.

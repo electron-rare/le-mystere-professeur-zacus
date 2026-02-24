@@ -5,6 +5,13 @@
 
 class StorageManager {
  public:
+  StorageManager() = default;
+  ~StorageManager() = default;
+  StorageManager(const StorageManager&) = delete;
+  StorageManager& operator=(const StorageManager&) = delete;
+  StorageManager(StorageManager&&) = delete;
+  StorageManager& operator=(StorageManager&&) = delete;
+
   bool begin();
   bool ensurePath(const char* path);
   bool fileExists(const char* path) const;

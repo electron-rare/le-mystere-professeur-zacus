@@ -53,6 +53,12 @@ STAMP="$EVIDENCE_TIMESTAMP"
 ARTIFACT="$EVIDENCE_DIR/rtos_wifi_health.log"
 SERIAL_DEBUG_LOG="$EVIDENCE_DIR/wifi_serial_debug.log"
 ESP_URL="${ESP_URL:-http://192.168.1.100:8080}"
+CURL_AUTH_ARGS=()
+CURL_AUTH_NOTE=""
+if [[ -n "${ZACUS_WEB_TOKEN:-}" ]]; then
+  CURL_AUTH_ARGS=(-H "Authorization: Bearer ${ZACUS_WEB_TOKEN}")
+  CURL_AUTH_NOTE=" -H 'Authorization: Bearer ***'"
+fi
 
 mkdir -p "$EVIDENCE_DIR"
 EXIT_CODE=0
@@ -62,29 +68,29 @@ EXIT_CODE=0
   echo "[RTOS_WIFI_HEALTH] url=${ESP_URL}"
   echo ""
   echo "== GET /api/status =="
-  evidence_record_command "curl -sS -m 5 ${ESP_URL}/api/status"
-  if ! curl -sS -m 5 "${ESP_URL}/api/status"; then
+  evidence_record_command "curl -sS -m 5${CURL_AUTH_NOTE} ${ESP_URL}/api/status"
+  if ! curl -sS -m 5 "${CURL_AUTH_ARGS[@]}" "${ESP_URL}/api/status"; then
     echo "FAIL"
     EXIT_CODE=1
   fi
   echo ""
   echo "== GET /api/wifi =="
-  evidence_record_command "curl -sS -m 5 ${ESP_URL}/api/wifi"
-  if ! curl -sS -m 5 "${ESP_URL}/api/wifi"; then
+  evidence_record_command "curl -sS -m 5${CURL_AUTH_NOTE} ${ESP_URL}/api/wifi"
+  if ! curl -sS -m 5 "${CURL_AUTH_ARGS[@]}" "${ESP_URL}/api/wifi"; then
     echo "FAIL"
     EXIT_CODE=1
   fi
   echo ""
   echo "== GET /api/rtos =="
-  evidence_record_command "curl -sS -m 5 ${ESP_URL}/api/rtos"
-  if ! curl -sS -m 5 "${ESP_URL}/api/rtos"; then
+  evidence_record_command "curl -sS -m 5${CURL_AUTH_NOTE} ${ESP_URL}/api/rtos"
+  if ! curl -sS -m 5 "${CURL_AUTH_ARGS[@]}" "${ESP_URL}/api/rtos"; then
     echo "FAIL"
     EXIT_CODE=1
   fi
   echo ""
   echo "== GET /api/story/status =="
-  evidence_record_command "curl -sS -m 5 ${ESP_URL}/api/story/status"
-  if ! curl -sS -m 5 "${ESP_URL}/api/story/status"; then
+  evidence_record_command "curl -sS -m 5${CURL_AUTH_NOTE} ${ESP_URL}/api/story/status"
+  if ! curl -sS -m 5 "${CURL_AUTH_ARGS[@]}" "${ESP_URL}/api/story/status"; then
     echo "FAIL"
     EXIT_CODE=1
   fi

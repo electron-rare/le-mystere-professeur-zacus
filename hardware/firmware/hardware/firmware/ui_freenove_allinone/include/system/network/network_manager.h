@@ -3,9 +3,18 @@
 
 #include <Arduino.h>
 #include <esp_now.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/portmacro.h>
 
 class NetworkManager {
  public:
+  NetworkManager() = default;
+  ~NetworkManager() = default;
+  NetworkManager(const NetworkManager&) = delete;
+  NetworkManager& operator=(const NetworkManager&) = delete;
+  NetworkManager(NetworkManager&&) = delete;
+  NetworkManager& operator=(NetworkManager&&) = delete;
+
   struct Snapshot {
     bool ready = false;
     bool sta_connected = false;
@@ -94,14 +103,15 @@ class NetworkManager {
   bool ensureEspNowReady();
   bool addEspNowPeerInternal(const uint8_t mac[6]);
   bool removeEspNowPeerInternal(const uint8_t mac[6]);
-  void cachePeer(const uint8_t mac[6]);
+  void cachePeer(const uint8_t mac[6], bool from_isr = false);
   void forgetPeer(const uint8_t mac[6]);
   bool queueEspNowMessage(const char* payload,
                           const char* peer,
                           const char* msg_id,
                           uint32_t seq,
                           const char* type,
-                          bool ack_requested);
+                          bool ack_requested,
+                          bool from_isr = false);
   void refreshSnapshot();
   void handleEspNowRecv(const uint8_t* mac_addr, const uint8_t* data, int data_len);
   void handleEspNowSend(const uint8_t* mac_addr, esp_now_send_status_t status);
@@ -130,10 +140,10 @@ class NetworkManager {
   uint32_t espnow_tx_seq_ = 0U;
   uint32_t local_retry_ms_ = 15000U;
 
-  char local_target_ssid_[33] = "Les cils";
-  char local_target_password_[65] = "mascarade";
-  char fallback_ap_ssid_[33] = "Les cils";
-  char fallback_ap_password_[65] = "mascarade";
+  char local_target_ssid_[33] = {0};
+  char local_target_password_[65] = {0};
+  char fallback_ap_ssid_[33] = "Freenove-Setup";
+  char fallback_ap_password_[65] = {0};
 
   char peer_cache_[kMaxPeerCache][18] = {};
   uint8_t peer_cache_count_ = 0U;
@@ -150,6 +160,7 @@ class NetworkManager {
   uint8_t rx_queue_head_ = 0U;
   uint8_t rx_queue_tail_ = 0U;
   uint8_t rx_queue_count_ = 0U;
+  mutable portMUX_TYPE rx_queue_mux_ = portMUX_INITIALIZER_UNLOCKED;
 
   Snapshot snapshot_;
 };

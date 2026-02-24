@@ -34,6 +34,8 @@ smoke_*.log
 *_upload.log
 summary.json
 
+#prompt a suivre
+prompt_a_suivre
 # Generated artifacts/logs
 artifacts/
 logs/

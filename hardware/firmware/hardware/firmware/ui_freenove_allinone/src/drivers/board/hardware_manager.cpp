@@ -548,10 +548,14 @@ void HardwareManager::applyBrokenLedPattern(uint32_t now_ms,
 
   uint16_t secondary_led = primary_led;
   bool secondary_active = false;
+#if (FREENOVE_WS2812_COUNT > 1)
   if (led_count > 1U) {
-    secondary_led = static_cast<uint16_t>((primary_led + 1U + ((slot_noise >> 8) % (led_count - 1U))) % led_count);
+    const uint16_t secondary_span = static_cast<uint16_t>(led_count - 1U);
+    const uint16_t secondary_offset = static_cast<uint16_t>((slot_noise >> 8) % secondary_span);
+    secondary_led = static_cast<uint16_t>((primary_led + 1U + secondary_offset) % led_count);
     secondary_active = (((slot_noise >> 27) & 0x1U) == 1U) && (in_slot >= 24U) && (in_slot < 29U);
   }
+#endif
 
   for (uint16_t index = 0U; index < led_count; ++index) {
     const uint32_t led_noise = hash32(slot_noise ^ (static_cast<uint32_t>(index + 1U) * 0x27d4eb2dUL));

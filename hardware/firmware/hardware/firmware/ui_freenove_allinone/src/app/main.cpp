@@ -3,6 +3,7 @@
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <WebServer.h>
+#include <cerrno>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -20,24 +21,44 @@
 #include "media_manager.h"
 #include "ui_freenove_config.h"
 #include "network_manager.h"
+#include "runtime/app_coordinator.h"
 #include "runtime/la_trigger_service.h"
+#include "runtime/perf/perf_monitor.h"
+#include "runtime/provisioning/credential_store.h"
 #include "runtime/runtime_config_service.h"
+#include "runtime/runtime_services.h"
 #include "runtime/runtime_config_types.h"
 #include "scenario_manager.h"
 #include "scenarios/default_scenario_v2.h"
 #include "storage_manager.h"
+#include "system/boot_report.h"
+#include "system/rate_limited_log.h"
+#include "system/runtime_metrics.h"
 #include "touch_manager.h"
 #include "ui_manager.h"
+
+#ifndef ZACUS_FW_VERSION
+#define ZACUS_FW_VERSION "dev"
+#endif
+
+void runRuntimeIteration(uint32_t now_ms);
 
 namespace {
 
 constexpr const char* kDefaultScenarioFile = "/story/scenarios/DEFAULT.json";
+constexpr const char* kFirmwareName = "freenove_esp32s3";
 constexpr const char* kDiagAudioFile = "/music/boot_radio.mp3";
 constexpr size_t kSerialLineCapacity = 192U;
 constexpr bool kBootDiagnosticTone = true;
 constexpr const char* kEspNowBroadcastTarget = "broadcast";
 constexpr const char* kStepWinEtape = "STEP_ETAPE2";
 constexpr const char* kPackWin = "PACK_WIN";
+constexpr const char* kWebAuthHeaderName = "Authorization";
+constexpr const char* kWebAuthBearerPrefix = "Bearer ";
+constexpr const char* kProvisionStatusPath = "/api/provision/status";
+constexpr const char* kSetupWifiConnectPath = "/api/wifi/connect";
+constexpr const char* kSetupNetworkWifiConnectPath = "/api/network/wifi/connect";
+constexpr size_t kWebAuthTokenCapacity = 65U;
 
 AudioManager g_audio;
 ScenarioManager g_scenario;
@@ -49,6 +70,7 @@ NetworkManager g_network;
 HardwareManager g_hardware;
 CameraManager g_camera;
 MediaManager g_media;
+CredentialStore g_credential_store;
 RuntimeNetworkConfig g_network_cfg;
 RuntimeHardwareConfig g_hardware_cfg;
 CameraManager::Config g_camera_cfg;
@@ -68,9 +90,14 @@ LaTriggerRuntimeState g_la_trigger;
 bool g_la_dispatch_in_progress = false;
 bool g_has_ring_sent_for_win_etape = false;
 bool g_win_etape_ui_refresh_pending = false;
+bool g_setup_mode = true;
+bool g_web_auth_required = false;
+char g_web_auth_token[kWebAuthTokenCapacity] = {0};
 char g_last_action_step_key[72] = {0};
 char g_serial_line[kSerialLineCapacity] = {0};
 size_t g_serial_line_len = 0U;
+RuntimeServices g_runtime_services;
+AppCoordinator g_app_coordinator;
 
 bool dispatchScenarioEventByName(const char* event_name, uint32_t now_ms);
 
@@ -190,21 +217,42 @@ void copyText(char* out, size_t out_size, const char* text) {
 
 void logBootMemoryProfile() {
 #if defined(ARDUINO_ARCH_ESP32)
+  const BootHeapSnapshot heap = bootCaptureHeapSnapshot();
   Serial.printf("[MEM] free_heap=%u min_free_heap=%u total_heap=%u\n",
                 static_cast<unsigned int>(ESP.getFreeHeap()),
                 static_cast<unsigned int>(ESP.getMinFreeHeap()),
                 static_cast<unsigned int>(ESP.getHeapSize()));
-#if defined(FREENOVE_USE_PSRAM)
-  const size_t psram_total = ESP.getPsramSize();
-  const size_t free_psram = (psram_total != 0U) ? heap_caps_get_free_size(MALLOC_CAP_SPIRAM) : 0U;
-  Serial.printf("[MEM] psram_found=%u total_psram=%u free_psram=%u\n",
-                (psram_total != 0U) ? 1U : 0U,
-                static_cast<unsigned int>(psram_total),
-                static_cast<unsigned int>(free_psram));
-  if (psram_total == 0U) {
+  Serial.printf("[MEM] internal_free=%lu internal_largest=%lu\n",
+                static_cast<unsigned long>(heap.heap_internal_free),
+                static_cast<unsigned long>(heap.heap_internal_largest));
+  Serial.printf("[MEM] psram_found=%u total_psram=%lu free_psram=%lu largest_psram=%lu\n",
+                heap.psram_found ? 1U : 0U,
+                static_cast<unsigned long>(heap.psram_total),
+                static_cast<unsigned long>(heap.heap_psram_free),
+                static_cast<unsigned long>(heap.heap_psram_largest));
+  if (heap.psram_total == 0U) {
     Serial.println("[MEM] PSRAM expected by build flags but not detected");
   }
 #endif
+}
+
+void logBuildMemoryPolicy() {
+  Serial.printf("[CFG] UI_DRAW_BUF_IN_PSRAM=%d FREENOVE_PSRAM_UI_DRAW_BUFFER=%d UI_CAMERA_FB_IN_PSRAM=%d FREENOVE_PSRAM_CAMERA_FRAMEBUFFER=%d UI_AUDIO_RINGBUF_IN_PSRAM=%d UI_DMA_TX_IN_DRAM=%d\n",
+                UI_DRAW_BUF_IN_PSRAM,
+                FREENOVE_PSRAM_UI_DRAW_BUFFER,
+                UI_CAMERA_FB_IN_PSRAM,
+                FREENOVE_PSRAM_CAMERA_FRAMEBUFFER,
+                UI_AUDIO_RINGBUF_IN_PSRAM,
+                UI_DMA_TX_IN_DRAM);
+#if defined(FREENOVE_PSRAM_UI_DRAW_BUFFER)
+  if (UI_DRAW_BUF_IN_PSRAM != FREENOVE_PSRAM_UI_DRAW_BUFFER) {
+    Serial.println("[CFG] WARN draw-buffer PSRAM flags mismatch");
+  }
+#endif
+#if defined(FREENOVE_PSRAM_CAMERA_FRAMEBUFFER)
+  if (UI_CAMERA_FB_IN_PSRAM != FREENOVE_PSRAM_CAMERA_FRAMEBUFFER) {
+    Serial.println("[CFG] WARN camera framebuffer PSRAM flags mismatch");
+  }
 #endif
 }
 
@@ -629,6 +677,9 @@ bool normalizeEspNowPayloadToScenarioEvent(const char* payload_text, char* out_e
 
 bool dispatchScenarioEventByType(StoryEventType type, const char* event_name, uint32_t now_ms);
 bool dispatchScenarioEventByName(const char* event_name, uint32_t now_ms);
+void handleSerialCommand(const char* command_line, uint32_t now_ms);
+void runtimeTickBridge(uint32_t now_ms, RuntimeServices* services);
+void serialDispatchBridge(const char* command_line, uint32_t now_ms, RuntimeServices* services);
 void refreshSceneIfNeeded(bool force_render);
 void startPendingAudioIfAny();
 void executeStoryActionsForStep(const ScenarioSnapshot& snapshot, uint32_t now_ms);
@@ -642,9 +693,24 @@ void webSendHardwareStatus();
 void webSendCameraStatus();
 void webSendMediaFiles();
 void webSendMediaRecordStatus();
+void webSendAuthStatus();
+void webSendProvisionStatus();
 bool webReconnectLocalWifi();
 bool refreshStoryFromSd();
 bool dispatchControlAction(const String& action_raw, uint32_t now_ms, String* out_error = nullptr);
+void clearRuntimeStaCredentials();
+void applyRuntimeStaCredentials(const char* ssid, const char* password);
+void updateAuthPolicy();
+bool ensureWebToken(bool rotate_token, bool print_token, bool* out_generated = nullptr);
+void loadBootProvisioningState();
+bool provisionWifiCredentials(const char* ssid,
+                              const char* password,
+                              bool persist,
+                              bool* out_connect_started = nullptr,
+                              bool* out_persisted = nullptr,
+                              bool* out_token_generated = nullptr);
+bool forgetWifiCredentials();
+bool webAuthorizeApiRequest(const char* path);
 void printHardwareStatus();
 void printMicTunerStatus();
 void printHardwareStatusJson();
@@ -998,6 +1064,76 @@ bool splitSsidPass(const char* argument, String* out_ssid, String* out_pass) {
   return !out_ssid->isEmpty();
 }
 
+bool parseBoundedLongToken(const char* token, long min_value, long max_value, long* out_value) {
+  if (token == nullptr || out_value == nullptr) {
+    return false;
+  }
+  errno = 0;
+  char* end = nullptr;
+  const long parsed = std::strtol(token, &end, 10);
+  if (errno == ERANGE || end == token || (end != nullptr && *end != '\0') || parsed < min_value || parsed > max_value) {
+    return false;
+  }
+  *out_value = parsed;
+  return true;
+}
+
+bool parseHwLedSetArgs(const char* args,
+                       uint8_t* out_r,
+                       uint8_t* out_g,
+                       uint8_t* out_b,
+                       uint8_t* out_brightness,
+                       bool* out_pulse) {
+  if (args == nullptr || out_r == nullptr || out_g == nullptr || out_b == nullptr || out_brightness == nullptr ||
+      out_pulse == nullptr) {
+    return false;
+  }
+
+  char buffer[kSerialLineCapacity] = {0};
+  copyText(buffer, sizeof(buffer), args);
+  trimAsciiInPlace(buffer);
+  if (buffer[0] == '\0') {
+    return false;
+  }
+
+  char* tokens[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
+  size_t token_count = 0U;
+  char* cursor = buffer;
+  while (*cursor != '\0' && token_count < 5U) {
+    while (*cursor == ' ') {
+      ++cursor;
+    }
+    if (*cursor == '\0') {
+      break;
+    }
+    tokens[token_count++] = cursor;
+    while (*cursor != '\0' && *cursor != ' ') {
+      ++cursor;
+    }
+    if (*cursor == '\0') {
+      break;
+    }
+    *cursor++ = '\0';
+  }
+  if (token_count < 3U) {
+    return false;
+  }
+
+  long parsed_values[5] = {0L, 0L, 0L, static_cast<long>(FREENOVE_WS2812_BRIGHTNESS), 1L};
+  for (size_t index = 0U; index < token_count; ++index) {
+    const long max_value = (index == 4U) ? 1L : 255L;
+    if (!parseBoundedLongToken(tokens[index], 0L, max_value, &parsed_values[index])) {
+      return false;
+    }
+  }
+  *out_r = static_cast<uint8_t>(parsed_values[0]);
+  *out_g = static_cast<uint8_t>(parsed_values[1]);
+  *out_b = static_cast<uint8_t>(parsed_values[2]);
+  *out_brightness = static_cast<uint8_t>(parsed_values[3]);
+  *out_pulse = (parsed_values[4] != 0L);
+  return true;
+}
+
 bool parseEspNowSendPayload(const char* argument, String& payload, bool* used_target) {
   if (argument == nullptr) {
     return false;
@@ -1324,6 +1460,10 @@ constexpr const char* kWebUiIndex = R"HTML(
     <button onclick="wifiConn()">WIFI_CONNECT</button>
   </div>
   <div class="card">
+    <input id="token" placeholder="Bearer token" />
+    <button onclick="saveToken()">SET TOKEN</button>
+  </div>
+  <div class="card">
     <input id="payload" placeholder="Payload" />
     <button onclick="espnowSend()">ESPNOW_SEND</button>
     <button onclick="espnowOn()">ESPNOW_ON</button>
@@ -1338,23 +1478,41 @@ constexpr const char* kWebUiIndex = R"HTML(
     function showStatus(json) {
       document.getElementById("status").textContent = JSON.stringify(json, null, 2);
     }
+    const tokenStorageKey = "zacus_web_token";
+    let apiToken = localStorage.getItem(tokenStorageKey) || "";
+    function authHeaders() {
+      if (!apiToken) {
+        return {};
+      }
+      return { "Authorization": "Bearer " + apiToken };
+    }
+    function saveToken() {
+      apiToken = (document.getElementById("token").value || "").trim();
+      localStorage.setItem(tokenStorageKey, apiToken);
+      refreshStatus();
+      connectStream();
+    }
     async function post(path, params) {
       const body = new URLSearchParams(params || {});
-      await fetch(path, { method: "POST", body });
+      await fetch(path, { method: "POST", body, headers: authHeaders() });
       await refreshStatus();
     }
     async function refreshStatus() {
-      const res = await fetch("/api/status");
+      const res = await fetch("/api/status", { headers: authHeaders() });
+      if (!res.ok) {
+        document.getElementById("status").textContent = "HTTP " + res.status;
+        return;
+      }
       const json = await res.json();
       showStatus(json);
     }
     function connectStream() {
-      if (typeof EventSource === "undefined") {
-        setInterval(refreshStatus, 3000);
-        return;
-      }
       if (stream) {
         stream.close();
+        stream = null;
+      }
+      if (apiToken || typeof EventSource === "undefined") {
+        return;
       }
       stream = new EventSource("/api/stream");
       stream.addEventListener("status", (evt) => {
@@ -1385,7 +1543,8 @@ constexpr const char* kWebUiIndex = R"HTML(
     function wifiConn() {
       return post("/api/wifi/connect", {
         ssid: document.getElementById("ssid").value,
-        password: document.getElementById("pass").value
+        password: document.getElementById("pass").value,
+        persist: 1
       });
     }
     function espnowOn() { return post("/api/network/espnow/on"); }
@@ -1395,7 +1554,9 @@ constexpr const char* kWebUiIndex = R"HTML(
         payload: document.getElementById("payload").value
       });
     }
+    document.getElementById("token").value = apiToken;
     refreshStatus();
+    setInterval(refreshStatus, 3000);
     connectStream();
   </script>
 </body>
@@ -1429,6 +1590,191 @@ bool webParseJsonBody(StaticJsonDocument<N>* out_document) {
   return !error;
 }
 
+void clearRuntimeStaCredentials() {
+  g_network_cfg.local_ssid[0] = '\0';
+  g_network_cfg.local_password[0] = '\0';
+  g_network_cfg.wifi_test_ssid[0] = '\0';
+  g_network_cfg.wifi_test_password[0] = '\0';
+}
+
+void applyRuntimeStaCredentials(const char* ssid, const char* password) {
+  copyText(g_network_cfg.local_ssid, sizeof(g_network_cfg.local_ssid), (ssid != nullptr) ? ssid : "");
+  copyText(g_network_cfg.local_password, sizeof(g_network_cfg.local_password), (password != nullptr) ? password : "");
+  copyText(g_network_cfg.wifi_test_ssid, sizeof(g_network_cfg.wifi_test_ssid), g_network_cfg.local_ssid);
+  copyText(g_network_cfg.wifi_test_password, sizeof(g_network_cfg.wifi_test_password), g_network_cfg.local_password);
+}
+
+void updateAuthPolicy() {
+  g_web_auth_required = !g_setup_mode;
+}
+
+bool ensureWebToken(bool rotate_token, bool print_token, bool* out_generated) {
+  if (out_generated != nullptr) {
+    *out_generated = false;
+  }
+  if (!rotate_token && g_web_auth_token[0] != '\0') {
+    return true;
+  }
+  if (!rotate_token && g_credential_store.loadWebToken(g_web_auth_token, sizeof(g_web_auth_token))) {
+    return true;
+  }
+  if (!g_credential_store.generateWebToken(g_web_auth_token, sizeof(g_web_auth_token))) {
+    g_web_auth_token[0] = '\0';
+    return false;
+  }
+  if (!g_credential_store.saveWebToken(g_web_auth_token)) {
+    g_web_auth_token[0] = '\0';
+    return false;
+  }
+  if (out_generated != nullptr) {
+    *out_generated = true;
+  }
+  if (print_token) {
+    Serial.printf("[AUTH] web token=%s\n", g_web_auth_token);
+  }
+  return true;
+}
+
+void loadBootProvisioningState() {
+  clearRuntimeStaCredentials();
+  char stored_ssid[sizeof(g_network_cfg.local_ssid)] = {0};
+  char stored_password[sizeof(g_network_cfg.local_password)] = {0};
+  const bool has_credentials =
+      g_credential_store.loadStaCredentials(stored_ssid, sizeof(stored_ssid), stored_password, sizeof(stored_password));
+  if (has_credentials) {
+    applyRuntimeStaCredentials(stored_ssid, stored_password);
+  }
+  g_setup_mode = !has_credentials;
+  updateAuthPolicy();
+  if (!g_setup_mode) {
+    bool token_generated = false;
+    if (!ensureWebToken(false, true, &token_generated)) {
+      Serial.println("[AUTH] web token load/generation failed");
+    }
+  }
+}
+
+bool provisionWifiCredentials(const char* ssid,
+                              const char* password,
+                              bool persist,
+                              bool* out_connect_started,
+                              bool* out_persisted,
+                              bool* out_token_generated) {
+  if (out_connect_started != nullptr) {
+    *out_connect_started = false;
+  }
+  if (out_persisted != nullptr) {
+    *out_persisted = false;
+  }
+  if (out_token_generated != nullptr) {
+    *out_token_generated = false;
+  }
+  if (ssid == nullptr || ssid[0] == '\0') {
+    return false;
+  }
+
+  bool persisted = true;
+  if (persist) {
+    persisted = g_credential_store.saveStaCredentials(ssid, (password != nullptr) ? password : "");
+    if (persisted) {
+      applyRuntimeStaCredentials(ssid, (password != nullptr) ? password : "");
+      g_network.configureLocalPolicy(g_network_cfg.local_ssid,
+                                     g_network_cfg.local_password,
+                                     g_network_cfg.force_ap_if_not_local,
+                                     g_network_cfg.local_retry_ms,
+                                     g_network_cfg.pause_local_retry_when_ap_client);
+      g_setup_mode = false;
+      updateAuthPolicy();
+      bool token_generated = false;
+      if (!ensureWebToken(false, true, &token_generated)) {
+        persisted = false;
+      } else if (out_token_generated != nullptr) {
+        *out_token_generated = token_generated;
+      }
+      g_network.stopAp();
+    }
+  }
+
+  const bool connect_started = g_network.connectSta(ssid, (password != nullptr) ? password : "");
+  if (out_connect_started != nullptr) {
+    *out_connect_started = connect_started;
+  }
+  if (out_persisted != nullptr) {
+    *out_persisted = persisted;
+  }
+  return connect_started && persisted;
+}
+
+bool forgetWifiCredentials() {
+  const bool cleared = g_credential_store.clearStaCredentials();
+  clearRuntimeStaCredentials();
+  g_network.configureLocalPolicy(g_network_cfg.local_ssid,
+                                 g_network_cfg.local_password,
+                                 g_network_cfg.force_ap_if_not_local,
+                                 g_network_cfg.local_retry_ms,
+                                 g_network_cfg.pause_local_retry_when_ap_client);
+  g_network.disconnectSta();
+  g_setup_mode = true;
+  updateAuthPolicy();
+  if (g_network_cfg.ap_default_ssid[0] != '\0') {
+    g_network.startAp(g_network_cfg.ap_default_ssid, g_network_cfg.ap_default_password);
+  }
+  return cleared;
+}
+
+bool isSetupWhitelistApiPath(const char* path) {
+  if (path == nullptr) {
+    return false;
+  }
+  return std::strcmp(path, kProvisionStatusPath) == 0 || std::strcmp(path, kSetupWifiConnectPath) == 0 ||
+         std::strcmp(path, kSetupNetworkWifiConnectPath) == 0;
+}
+
+bool hasValidBearerToken() {
+  const String header = g_web_server.header(kWebAuthHeaderName);
+  if (!header.startsWith(kWebAuthBearerPrefix)) {
+    return false;
+  }
+  String token = header.substring(static_cast<unsigned int>(std::strlen(kWebAuthBearerPrefix)));
+  token.trim();
+  return g_web_auth_token[0] != '\0' && token == g_web_auth_token;
+}
+
+bool webAuthorizeApiRequest(const char* path) {
+  if (path == nullptr || std::strncmp(path, "/api/", 5U) != 0) {
+    return true;
+  }
+  if (g_setup_mode) {
+    if (isSetupWhitelistApiPath(path)) {
+      return true;
+    }
+    g_web_server.send(403, "application/json", "{\"ok\":false,\"error\":\"setup_mode_restricted\"}");
+    return false;
+  }
+  if (!g_web_auth_required) {
+    return true;
+  }
+  if (g_web_auth_token[0] == '\0') {
+    g_web_server.send(503, "application/json", "{\"ok\":false,\"error\":\"auth_token_missing\"}");
+    return false;
+  }
+  if (hasValidBearerToken()) {
+    return true;
+  }
+  g_web_server.send(401, "application/json", "{\"ok\":false,\"error\":\"unauthorized\"}");
+  return false;
+}
+
+template <typename Handler>
+void webOnApi(const char* path, HTTPMethod method, Handler&& handler) {
+  g_web_server.on(path, method, [path, handler]() {
+    if (!webAuthorizeApiRequest(path)) {
+      return;
+    }
+    handler();
+  });
+}
+
 void webFillEspNowStatus(JsonObject out, const NetworkManager::Snapshot& net) {
   out["ready"] = net.espnow_enabled;
   out["peer_count"] = net.espnow_peer_count;
@@ -1454,6 +1800,9 @@ void webFillEspNowStatus(JsonObject out, const NetworkManager::Snapshot& net) {
 void webFillWifiStatus(JsonObject out, const NetworkManager::Snapshot& net) {
   out["connected"] = net.sta_connected;
   out["has_credentials"] = (g_network_cfg.local_ssid[0] != '\0');
+  out["setup_mode"] = g_setup_mode;
+  out["auth_required"] = g_web_auth_required;
+  out["token_set"] = (g_web_auth_token[0] != '\0');
   out["ssid"] = String(net.sta_ssid);
   out["ip"] = net.sta_connected ? String(net.ip) : String("");
   out["rssi"] = net.rssi;
@@ -1608,6 +1957,33 @@ void webSendMediaFiles() {
 void webSendMediaRecordStatus() {
   StaticJsonDocument<768> document;
   webFillMediaStatus(document.to<JsonObject>(), millis());
+  webSendJsonDocument(document);
+}
+
+void webSendAuthStatus() {
+  StaticJsonDocument<256> document;
+  document["setup_mode"] = g_setup_mode;
+  document["auth_required"] = g_web_auth_required;
+  document["token_set"] = (g_web_auth_token[0] != '\0');
+  document["provisioned"] = g_credential_store.isProvisioned();
+  document["has_credentials"] = (g_network_cfg.local_ssid[0] != '\0');
+  webSendJsonDocument(document);
+}
+
+void webSendProvisionStatus() {
+  StaticJsonDocument<384> document;
+  const NetworkManager::Snapshot net = g_network.snapshot();
+  document["setup_mode"] = g_setup_mode;
+  document["auth_required"] = g_web_auth_required;
+  document["token_set"] = (g_web_auth_token[0] != '\0');
+  document["provisioned"] = g_credential_store.isProvisioned();
+  document["has_credentials"] = (g_network_cfg.local_ssid[0] != '\0');
+  document["sta_connected"] = net.sta_connected;
+  document["sta_connecting"] = net.sta_connecting;
+  document["ap_enabled"] = net.ap_enabled;
+  document["sta_ssid"] = net.sta_ssid;
+  document["ap_ssid"] = net.ap_ssid;
+  document["ip"] = net.ip;
   webSendJsonDocument(document);
 }
 
@@ -1876,6 +2252,13 @@ bool dispatchControlAction(const String& action_raw, uint32_t now_ms, String* ou
     webScheduleStaDisconnect();
     return true;
   }
+  if (action.equalsIgnoreCase("WIFI_FORGET")) {
+    const bool ok = forgetWifiCredentials();
+    if (!ok && out_error != nullptr) {
+      *out_error = "wifi_forget_failed";
+    }
+    return ok;
+  }
   if (action.equalsIgnoreCase("WIFI_RECONNECT")) {
     return webReconnectLocalWifi();
   }
@@ -1931,6 +2314,24 @@ bool dispatchControlAction(const String& action_raw, uint32_t now_ms, String* ou
       return false;
     }
     return g_network.connectSta(ssid.c_str(), password.c_str());
+  }
+
+  if (startsWithIgnoreCase(action.c_str(), "WIFI_PROVISION ")) {
+    String ssid;
+    String password;
+    if (!splitSsidPass(action.c_str() + std::strlen("WIFI_PROVISION "), &ssid, &password)) {
+      if (out_error != nullptr) {
+        *out_error = "wifi_provision_args";
+      }
+      return false;
+    }
+    bool connect_started = false;
+    bool persisted = false;
+    const bool ok = provisionWifiCredentials(ssid.c_str(), password.c_str(), true, &connect_started, &persisted, nullptr);
+    if (!ok && out_error != nullptr) {
+      *out_error = persisted ? "wifi_connect_failed" : "wifi_persist_failed";
+    }
+    return ok;
   }
 
   if (startsWithIgnoreCase(action.c_str(), "ESPNOW_SEND ")) {
@@ -2001,43 +2402,18 @@ bool dispatchControlAction(const String& action_raw, uint32_t now_ms, String* ou
   if (startsWithIgnoreCase(action.c_str(), "HW_LED_SET ")) {
     String args = action.substring(static_cast<unsigned int>(std::strlen("HW_LED_SET ")));
     args.trim();
-    int r = 0;
-    int g = 0;
-    int b = 0;
-    int brightness = FREENOVE_WS2812_BRIGHTNESS;
-    int pulse = 1;
-    const int count = std::sscanf(args.c_str(), "%d %d %d %d %d", &r, &g, &b, &brightness, &pulse);
-    if (count < 3) {
+    uint8_t red = 0U;
+    uint8_t green = 0U;
+    uint8_t blue = 0U;
+    uint8_t brightness = static_cast<uint8_t>(FREENOVE_WS2812_BRIGHTNESS);
+    bool pulse = true;
+    if (!parseHwLedSetArgs(args.c_str(), &red, &green, &blue, &brightness, &pulse)) {
       if (out_error != nullptr) {
         *out_error = "hw_led_set_args";
       }
       return false;
     }
-    if (brightness < 0) {
-      brightness = 0;
-    } else if (brightness > 255) {
-      brightness = 255;
-    }
-    if (r < 0) {
-      r = 0;
-    } else if (r > 255) {
-      r = 255;
-    }
-    if (g < 0) {
-      g = 0;
-    } else if (g > 255) {
-      g = 255;
-    }
-    if (b < 0) {
-      b = 0;
-    } else if (b > 255) {
-      b = 255;
-    }
-    return g_hardware.setManualLed(static_cast<uint8_t>(r),
-                                   static_cast<uint8_t>(g),
-                                   static_cast<uint8_t>(b),
-                                   static_cast<uint8_t>(brightness),
-                                   pulse != 0);
+    return g_hardware.setManualLed(red, green, blue, brightness, pulse);
   }
 
   if (startsWithIgnoreCase(action.c_str(), "HW_LED_AUTO ")) {
@@ -2196,8 +2572,17 @@ void webSendStatus() {
 void webSendStatusSse() {
   StaticJsonDocument<4096> document;
   webBuildStatusDocument(&document);
-  String payload;
-  serializeJson(document, payload);
+  char payload[4608] = {0};
+  const size_t measured_size = measureJson(document);
+  if (measured_size >= sizeof(payload)) {
+    g_web_server.send(500, "application/json", "{\"ok\":false,\"error\":\"status_payload_too_large\"}");
+    return;
+  }
+  const size_t payload_size = serializeJson(document, payload, sizeof(payload));
+  if (payload_size == 0U) {
+    g_web_server.send(500, "application/json", "{\"ok\":false,\"error\":\"status_serialize_failed\"}");
+    return;
+  }
 
   g_web_server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   g_web_server.sendHeader("Cache-Control", "no-cache");
@@ -2205,29 +2590,40 @@ void webSendStatusSse() {
   g_web_server.send(200, "text/event-stream", "");
   g_web_server.sendContent("event: status\n");
   g_web_server.sendContent("data: ");
-  g_web_server.sendContent(payload);
+  g_web_server.sendContent(payload, payload_size);
   g_web_server.sendContent("\n\n");
   g_web_server.sendContent("event: done\ndata: 1\n\n");
 }
 
 void setupWebUi() {
+  const char* auth_headers[] = {kWebAuthHeaderName};
+  g_web_server.collectHeaders(auth_headers, 1);
+
   g_web_server.on("/", HTTP_GET, []() {
     g_web_server.send(200, "text/html", kWebUiIndex);
   });
 
-  g_web_server.on("/api/status", HTTP_GET, []() {
+  webOnApi(kProvisionStatusPath, HTTP_GET, []() {
+    webSendProvisionStatus();
+  });
+
+  webOnApi("/api/auth/status", HTTP_GET, []() {
+    webSendAuthStatus();
+  });
+
+  webOnApi("/api/status", HTTP_GET, []() {
     webSendStatus();
   });
 
-  g_web_server.on("/api/stream", HTTP_GET, []() {
+  webOnApi("/api/stream", HTTP_GET, []() {
     webSendStatusSse();
   });
 
-  g_web_server.on("/api/hardware", HTTP_GET, []() {
+  webOnApi("/api/hardware", HTTP_GET, []() {
     webSendHardwareStatus();
   });
 
-  g_web_server.on("/api/hardware/led", HTTP_POST, []() {
+  webOnApi("/api/hardware/led", HTTP_POST, []() {
     int red = g_web_server.arg("r").toInt();
     int green = g_web_server.arg("g").toInt();
     int blue = g_web_server.arg("b").toInt();
@@ -2267,7 +2663,7 @@ void setupWebUi() {
     webSendResult("HW_LED_SET", ok);
   });
 
-  g_web_server.on("/api/hardware/led/auto", HTTP_POST, []() {
+  webOnApi("/api/hardware/led/auto", HTTP_POST, []() {
     bool enabled = false;
     bool parsed = false;
     if (g_web_server.hasArg("enabled")) {
@@ -2300,21 +2696,21 @@ void setupWebUi() {
     webSendResult("HW_LED_AUTO", true);
   });
 
-  g_web_server.on("/api/camera/status", HTTP_GET, []() {
+  webOnApi("/api/camera/status", HTTP_GET, []() {
     webSendCameraStatus();
   });
 
-  g_web_server.on("/api/camera/on", HTTP_POST, []() {
+  webOnApi("/api/camera/on", HTTP_POST, []() {
     const bool ok = g_camera.start();
     webSendResult("CAM_ON", ok);
   });
 
-  g_web_server.on("/api/camera/off", HTTP_POST, []() {
+  webOnApi("/api/camera/off", HTTP_POST, []() {
     g_camera.stop();
     webSendResult("CAM_OFF", true);
   });
 
-  g_web_server.on("/api/camera/snapshot.jpg", HTTP_GET, []() {
+  webOnApi("/api/camera/snapshot.jpg", HTTP_GET, []() {
     String out_path;
     if (!g_camera.snapshotToFile(nullptr, &out_path)) {
       g_web_server.send(500, "application/json", "{\"ok\":false,\"error\":\"camera_snapshot_failed\"}");
@@ -2330,11 +2726,11 @@ void setupWebUi() {
     dispatchScenarioEventByName("SERIAL:CAMERA_CAPTURED", millis());
   });
 
-  g_web_server.on("/api/media/files", HTTP_GET, []() {
+  webOnApi("/api/media/files", HTTP_GET, []() {
     webSendMediaFiles();
   });
 
-  g_web_server.on("/api/media/play", HTTP_POST, []() {
+  webOnApi("/api/media/play", HTTP_POST, []() {
     String path = g_web_server.arg("path");
     StaticJsonDocument<256> request_json;
     if (webParseJsonBody(&request_json) && path.isEmpty()) {
@@ -2344,12 +2740,12 @@ void setupWebUi() {
     webSendResult("MEDIA_PLAY", ok);
   });
 
-  g_web_server.on("/api/media/stop", HTTP_POST, []() {
+  webOnApi("/api/media/stop", HTTP_POST, []() {
     const bool ok = g_media.stop(&g_audio);
     webSendResult("MEDIA_STOP", ok);
   });
 
-  g_web_server.on("/api/media/record/start", HTTP_POST, []() {
+  webOnApi("/api/media/record/start", HTTP_POST, []() {
     uint16_t seconds = static_cast<uint16_t>(g_web_server.arg("seconds").toInt());
     String filename = g_web_server.arg("filename");
     StaticJsonDocument<256> request_json;
@@ -2365,49 +2761,61 @@ void setupWebUi() {
     webSendResult("REC_START", ok);
   });
 
-  g_web_server.on("/api/media/record/stop", HTTP_POST, []() {
+  webOnApi("/api/media/record/stop", HTTP_POST, []() {
     const bool ok = g_media.stopRecording();
     webSendResult("REC_STOP", ok);
   });
 
-  g_web_server.on("/api/media/record/status", HTTP_GET, []() {
+  webOnApi("/api/media/record/status", HTTP_GET, []() {
     webSendMediaRecordStatus();
   });
 
-  g_web_server.on("/api/network/wifi", HTTP_GET, []() {
+  webOnApi("/api/network/wifi", HTTP_GET, []() {
     webSendWifiStatus();
   });
 
-  g_web_server.on("/api/network/espnow", HTTP_GET, []() {
+  webOnApi("/api/network/espnow", HTTP_GET, []() {
     webSendEspNowStatus();
   });
 
-  g_web_server.on("/api/network/espnow/peer", HTTP_GET, []() {
+  webOnApi("/api/network/espnow/peer", HTTP_GET, []() {
     webSendEspNowPeerList();
   });
 
-  g_web_server.on("/api/wifi/disconnect", HTTP_POST, []() {
+  webOnApi("/api/wifi/disconnect", HTTP_POST, []() {
     webScheduleStaDisconnect();
     webSendResult("WIFI_DISCONNECT", true);
   });
 
-  g_web_server.on("/api/network/wifi/disconnect", HTTP_POST, []() {
+  webOnApi("/api/network/wifi/disconnect", HTTP_POST, []() {
     webScheduleStaDisconnect();
     webSendResult("WIFI_DISCONNECT", true);
   });
 
-  g_web_server.on("/api/network/wifi/reconnect", HTTP_POST, []() {
+  webOnApi("/api/network/wifi/reconnect", HTTP_POST, []() {
     const bool ok = webReconnectLocalWifi();
     webSendResult("WIFI_RECONNECT", ok);
   });
 
-  g_web_server.on("/api/wifi/connect", HTTP_POST, []() {
+  webOnApi("/api/wifi/connect", HTTP_POST, []() {
     String ssid = g_web_server.arg("ssid");
     String password = g_web_server.arg("password");
+    bool persist = false;
     if (password.isEmpty()) {
       password = g_web_server.arg("pass");
     }
     StaticJsonDocument<768> request_json;
+    if (g_web_server.hasArg("persist")) {
+      bool parsed_persist = false;
+      if (parseBoolToken(g_web_server.arg("persist").c_str(), &parsed_persist)) {
+        persist = parsed_persist;
+      } else {
+        long persist_flag = 0L;
+        if (parseBoundedLongToken(g_web_server.arg("persist").c_str(), 0L, 1L, &persist_flag)) {
+          persist = (persist_flag != 0L);
+        }
+      }
+    }
     if (webParseJsonBody(&request_json)) {
       if (ssid.isEmpty()) {
         ssid = request_json["ssid"] | "";
@@ -2415,22 +2823,60 @@ void setupWebUi() {
       if (password.isEmpty()) {
         password = request_json["pass"] | request_json["password"] | "";
       }
+      if (request_json["persist"].is<bool>()) {
+        persist = request_json["persist"].as<bool>();
+      } else if (request_json["persist"].is<int>()) {
+        persist = request_json["persist"].as<int>() != 0;
+      } else if (request_json["persist"].is<unsigned int>()) {
+        persist = request_json["persist"].as<unsigned int>() != 0U;
+      }
     }
     if (ssid.isEmpty()) {
       webSendResult("WIFI_CONNECT", false);
       return;
     }
-    const bool ok = g_network.connectSta(ssid.c_str(), password.c_str());
-    webSendResult("WIFI_CONNECT", ok);
+    bool connect_started = false;
+    bool persisted = false;
+    bool token_generated = false;
+    const bool ok = provisionWifiCredentials(ssid.c_str(),
+                                             password.c_str(),
+                                             persist,
+                                             &connect_started,
+                                             &persisted,
+                                             &token_generated);
+    StaticJsonDocument<320> response;
+    response["ok"] = ok;
+    response["action"] = "WIFI_CONNECT";
+    response["persist"] = persist;
+    response["connect_started"] = connect_started;
+    if (persist) {
+      response["persisted"] = persisted;
+      if (token_generated && g_web_auth_token[0] != '\0') {
+        response["token"] = g_web_auth_token;
+      }
+    }
+    webSendJsonDocument(response, ok ? 200 : 400);
   });
 
-  g_web_server.on("/api/network/wifi/connect", HTTP_POST, []() {
+  webOnApi("/api/network/wifi/connect", HTTP_POST, []() {
     String ssid = g_web_server.arg("ssid");
     String password = g_web_server.arg("password");
+    bool persist = false;
     if (password.isEmpty()) {
       password = g_web_server.arg("pass");
     }
     StaticJsonDocument<768> request_json;
+    if (g_web_server.hasArg("persist")) {
+      bool parsed_persist = false;
+      if (parseBoolToken(g_web_server.arg("persist").c_str(), &parsed_persist)) {
+        persist = parsed_persist;
+      } else {
+        long persist_flag = 0L;
+        if (parseBoundedLongToken(g_web_server.arg("persist").c_str(), 0L, 1L, &persist_flag)) {
+          persist = (persist_flag != 0L);
+        }
+      }
+    }
     if (webParseJsonBody(&request_json)) {
       if (ssid.isEmpty()) {
         ssid = request_json["ssid"] | "";
@@ -2438,16 +2884,42 @@ void setupWebUi() {
       if (password.isEmpty()) {
         password = request_json["pass"] | request_json["password"] | "";
       }
+      if (request_json["persist"].is<bool>()) {
+        persist = request_json["persist"].as<bool>();
+      } else if (request_json["persist"].is<int>()) {
+        persist = request_json["persist"].as<int>() != 0;
+      } else if (request_json["persist"].is<unsigned int>()) {
+        persist = request_json["persist"].as<unsigned int>() != 0U;
+      }
     }
     if (ssid.isEmpty()) {
       webSendResult("WIFI_CONNECT", false);
       return;
     }
-    const bool ok = g_network.connectSta(ssid.c_str(), password.c_str());
-    webSendResult("WIFI_CONNECT", ok);
+    bool connect_started = false;
+    bool persisted = false;
+    bool token_generated = false;
+    const bool ok = provisionWifiCredentials(ssid.c_str(),
+                                             password.c_str(),
+                                             persist,
+                                             &connect_started,
+                                             &persisted,
+                                             &token_generated);
+    StaticJsonDocument<320> response;
+    response["ok"] = ok;
+    response["action"] = "WIFI_CONNECT";
+    response["persist"] = persist;
+    response["connect_started"] = connect_started;
+    if (persist) {
+      response["persisted"] = persisted;
+      if (token_generated && g_web_auth_token[0] != '\0') {
+        response["token"] = g_web_auth_token;
+      }
+    }
+    webSendJsonDocument(response, ok ? 200 : 400);
   });
 
-  g_web_server.on("/api/espnow/send", HTTP_POST, []() {
+  webOnApi("/api/espnow/send", HTTP_POST, []() {
     String payload = g_web_server.arg("payload");
     StaticJsonDocument<768> request_json;
     if (webParseJsonBody(&request_json)) {
@@ -2467,7 +2939,7 @@ void setupWebUi() {
     webSendResult("ESPNOW_SEND", ok);
   });
 
-  g_web_server.on("/api/network/espnow/send", HTTP_POST, []() {
+  webOnApi("/api/network/espnow/send", HTTP_POST, []() {
     String payload = g_web_server.arg("payload");
     StaticJsonDocument<768> request_json;
     if (webParseJsonBody(&request_json)) {
@@ -2487,17 +2959,17 @@ void setupWebUi() {
     webSendResult("ESPNOW_SEND", ok);
   });
 
-  g_web_server.on("/api/network/espnow/on", HTTP_POST, []() {
+  webOnApi("/api/network/espnow/on", HTTP_POST, []() {
     const bool ok = g_network.enableEspNow();
     webSendResult("ESPNOW_ON", ok);
   });
 
-  g_web_server.on("/api/network/espnow/off", HTTP_POST, []() {
+  webOnApi("/api/network/espnow/off", HTTP_POST, []() {
     g_network.disableEspNow();
     webSendResult("ESPNOW_OFF", true);
   });
 
-  g_web_server.on("/api/network/espnow/peer", HTTP_POST, []() {
+  webOnApi("/api/network/espnow/peer", HTTP_POST, []() {
     String mac = g_web_server.arg("mac");
     StaticJsonDocument<256> request_json;
     if (webParseJsonBody(&request_json) && mac.isEmpty()) {
@@ -2507,7 +2979,7 @@ void setupWebUi() {
     webSendResult("ESPNOW_PEER_ADD", ok);
   });
 
-  g_web_server.on("/api/network/espnow/peer", HTTP_DELETE, []() {
+  webOnApi("/api/network/espnow/peer", HTTP_DELETE, []() {
     String mac = g_web_server.arg("mac");
     StaticJsonDocument<256> request_json;
     if (webParseJsonBody(&request_json) && mac.isEmpty()) {
@@ -2517,17 +2989,17 @@ void setupWebUi() {
     webSendResult("ESPNOW_PEER_DEL", ok);
   });
 
-  g_web_server.on("/api/story/refresh-sd", HTTP_POST, []() {
+  webOnApi("/api/story/refresh-sd", HTTP_POST, []() {
     const bool ok = refreshStoryFromSd();
     webSendResult("STORY_REFRESH_SD", ok);
   });
 
-  g_web_server.on("/api/scenario/unlock", HTTP_POST, []() {
+  webOnApi("/api/scenario/unlock", HTTP_POST, []() {
     const bool ok = dispatchScenarioEventByName("UNLOCK", millis());
     webSendResult("UNLOCK", ok);
   });
 
-  g_web_server.on("/api/scenario/next", HTTP_POST, []() {
+  webOnApi("/api/scenario/next", HTTP_POST, []() {
     bool ok = dispatchScenarioEventByName("SERIAL:BTN_NEXT", millis());
     if (!ok) {
       ok = notifyScenarioButtonGuarded(5U, false, millis(), "api_scenario_next");
@@ -2535,7 +3007,7 @@ void setupWebUi() {
     webSendResult("NEXT", ok);
   });
 
-  g_web_server.on("/api/control", HTTP_POST, []() {
+  webOnApi("/api/control", HTTP_POST, []() {
     String action = g_web_server.arg("action");
     StaticJsonDocument<768> request_json;
     if (webParseJsonBody(&request_json) && action.isEmpty()) {
@@ -2767,6 +3239,16 @@ void runScenarioRevalidateAll(uint32_t now_ms) {
   Serial.println("SC_REVALIDATE_ALL_END");
 }
 
+void runtimeTickBridge(uint32_t now_ms, RuntimeServices* services) {
+  (void)services;
+  ::runRuntimeIteration(now_ms);
+}
+
+void serialDispatchBridge(const char* command_line, uint32_t now_ms, RuntimeServices* services) {
+  (void)services;
+  handleSerialCommand(command_line, now_ms);
+}
+
 void refreshSceneIfNeeded(bool force_render) {
   const bool changed = g_scenario.consumeSceneChanged();
   if (!force_render && !changed) {
@@ -2787,12 +3269,14 @@ void refreshSceneIfNeeded(bool force_render) {
                 snapshot.screen_scene_id != nullptr ? snapshot.screen_scene_id : "n/a",
                 snapshot.audio_pack_id != nullptr ? snapshot.audio_pack_id : "n/a",
                 g_audio.isPlaying() ? 1U : 0U);
-  g_ui.renderScene(snapshot.scenario,
-                   snapshot.screen_scene_id,
-                   step_id,
-                   snapshot.audio_pack_id,
-                   g_audio.isPlaying(),
-                   screen_payload.isEmpty() ? nullptr : screen_payload.c_str());
+  UiSceneFrame frame = {};
+  frame.scenario = snapshot.scenario;
+  frame.screen_scene_id = snapshot.screen_scene_id;
+  frame.step_id = step_id;
+  frame.audio_pack_id = snapshot.audio_pack_id;
+  frame.audio_playing = g_audio.isPlaying();
+  frame.screen_payload_json = screen_payload.isEmpty() ? nullptr : screen_payload.c_str();
+  g_ui.submitSceneFrame(frame);
 }
 
 void startPendingAudioIfAny() {
@@ -2886,11 +3370,13 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
         "SC_LIST SC_LOAD <id> SCENE_GOTO <scene_id> SC_COVERAGE SC_REVALIDATE SC_REVALIDATE_ALL SC_EVENT <type> [name] "
         "SC_EVENT_RAW <name> "
         "STORY_REFRESH_SD STORY_SD_STATUS "
+        "UI_GFX_STATUS UI_MEM_STATUS PERF_STATUS PERF_RESET "
         "HW_STATUS HW_STATUS_JSON HW_LED_SET <r> <g> <b> [brightness] [pulse] HW_LED_AUTO <ON|OFF> HW_MIC_STATUS HW_BAT_STATUS "
         "MIC_TUNER_STATUS [ON|OFF|<period_ms>] "
         "CAM_STATUS CAM_ON CAM_OFF CAM_SNAPSHOT [filename] "
         "MEDIA_LIST <picture|music|recorder> MEDIA_PLAY <path> MEDIA_STOP REC_START [seconds] [filename] REC_STOP REC_STATUS "
-        "NET_STATUS WIFI_STATUS WIFI_TEST WIFI_STA <ssid> <pass> WIFI_CONNECT <ssid> <pass> WIFI_DISCONNECT "
+        "NET_STATUS WIFI_STATUS WIFI_TEST WIFI_STA <ssid> <pass> WIFI_CONNECT <ssid> <pass> WIFI_PROVISION <ssid> <pass> WIFI_FORGET WIFI_DISCONNECT "
+        "AUTH_STATUS AUTH_TOKEN_ROTATE [token] "
         "WIFI_AP_ON [ssid] [pass] WIFI_AP_OFF "
         "ESPNOW_ON ESPNOW_OFF ESPNOW_STATUS ESPNOW_STATUS_JSON ESPNOW_PEER_ADD <mac> ESPNOW_PEER_DEL <mac> ESPNOW_PEER_LIST "
         "ESPNOW_SEND <text|json> "
@@ -2899,6 +3385,23 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
   }
   if (std::strcmp(command, "STATUS") == 0) {
     printRuntimeStatus();
+    return;
+  }
+  if (std::strcmp(command, "UI_GFX_STATUS") == 0) {
+    g_ui.dumpStatus(UiStatusTopic::kGraphics);
+    return;
+  }
+  if (std::strcmp(command, "UI_MEM_STATUS") == 0) {
+    g_ui.dumpStatus(UiStatusTopic::kMemory);
+    return;
+  }
+  if (std::strcmp(command, "PERF_STATUS") == 0) {
+    perfMonitor().dumpStatus();
+    return;
+  }
+  if (std::strcmp(command, "PERF_RESET") == 0) {
+    perfMonitor().reset();
+    Serial.println("ACK PERF_RESET");
     return;
   }
   if (std::strcmp(command, "BTN_READ") == 0) {
@@ -3124,13 +3627,72 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
     printNetworkStatus();
     return;
   }
+  if (std::strcmp(command, "AUTH_STATUS") == 0) {
+    Serial.printf("AUTH_STATUS setup_mode=%u auth_required=%u token_set=%u provisioned=%u\n",
+                  g_setup_mode ? 1U : 0U,
+                  g_web_auth_required ? 1U : 0U,
+                  g_web_auth_token[0] != '\0' ? 1U : 0U,
+                  g_credential_store.isProvisioned() ? 1U : 0U);
+    return;
+  }
+  if (std::strcmp(command, "AUTH_TOKEN_ROTATE") == 0) {
+    bool ok = false;
+    if (argument != nullptr && argument[0] != '\0') {
+      char token[kWebAuthTokenCapacity] = {0};
+      copyText(token, sizeof(token), argument);
+      trimAsciiInPlace(token);
+      ok = token[0] != '\0' && g_credential_store.saveWebToken(token);
+      if (ok) {
+        copyText(g_web_auth_token, sizeof(g_web_auth_token), token);
+      }
+    } else {
+      ok = ensureWebToken(true, false, nullptr);
+    }
+    Serial.printf("ACK AUTH_TOKEN_ROTATE ok=%u%s%s\n",
+                  ok ? 1U : 0U,
+                  ok ? " token=" : "",
+                  ok ? g_web_auth_token : "");
+    return;
+  }
   if (std::strcmp(command, "ESPNOW_STATUS_JSON") == 0) {
     printEspNowStatusJson();
     return;
   }
   if (std::strcmp(command, "WIFI_TEST") == 0) {
+    if (g_network_cfg.wifi_test_ssid[0] == '\0') {
+      Serial.println("ERR WIFI_TEST_NO_CREDENTIALS");
+      return;
+    }
     const bool ok = g_network.connectSta(g_network_cfg.wifi_test_ssid, g_network_cfg.wifi_test_password);
     Serial.printf("ACK WIFI_TEST ssid=%s ok=%u\n", g_network_cfg.wifi_test_ssid, ok ? 1U : 0U);
+    return;
+  }
+  if (std::strcmp(command, "WIFI_PROVISION") == 0) {
+    if (argument == nullptr) {
+      Serial.println("ERR WIFI_PROVISION_ARG");
+      return;
+    }
+    String ssid;
+    String pass;
+    if (!splitSsidPass(argument, &ssid, &pass) || ssid.isEmpty()) {
+      Serial.println("ERR WIFI_PROVISION_ARG");
+      return;
+    }
+    bool connect_started = false;
+    bool persisted = false;
+    bool token_generated = false;
+    const bool ok = provisionWifiCredentials(
+        ssid.c_str(), pass.c_str(), true, &connect_started, &persisted, &token_generated);
+    Serial.printf("ACK WIFI_PROVISION ssid=%s ok=%u persisted=%u connect_started=%u setup_mode=%u token_set=%u\n",
+                  ssid.c_str(),
+                  ok ? 1U : 0U,
+                  persisted ? 1U : 0U,
+                  connect_started ? 1U : 0U,
+                  g_setup_mode ? 1U : 0U,
+                  g_web_auth_token[0] != '\0' ? 1U : 0U);
+    if (token_generated && g_web_auth_token[0] != '\0') {
+      Serial.printf("AUTH_TOKEN %s\n", g_web_auth_token);
+    }
     return;
   }
   if (std::strcmp(command, "WIFI_STA") == 0 || std::strcmp(command, "WIFI_CONNECT") == 0) {
@@ -3146,6 +3708,11 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
     }
     const bool ok = g_network.connectSta(ssid.c_str(), pass.c_str());
     Serial.printf("ACK WIFI_STA ssid=%s ok=%u\n", ssid.c_str(), ok ? 1U : 0U);
+    return;
+  }
+  if (std::strcmp(command, "WIFI_FORGET") == 0) {
+    const bool ok = forgetWifiCredentials();
+    Serial.printf("ACK WIFI_FORGET ok=%u setup_mode=%u\n", ok ? 1U : 0U, g_setup_mode ? 1U : 0U);
     return;
   }
   if (std::strcmp(command, "WIFI_DISCONNECT") == 0) {
@@ -3340,7 +3907,7 @@ void pollSerialCommands(uint32_t now_ms) {
         continue;
       }
       g_serial_line[g_serial_line_len] = '\0';
-      handleSerialCommand(g_serial_line, now_ms);
+      g_app_coordinator.onSerialLine(g_serial_line, now_ms);
       g_serial_line_len = 0U;
       continue;
     }
@@ -3358,7 +3925,10 @@ void pollSerialCommands(uint32_t now_ms) {
 void setup() {
   Serial.begin(115200);
   delay(100);
+  RuntimeMetrics::instance().reset(bootResetReasonCode());
   Serial.println("[MAIN] Freenove all-in-one boot");
+  bootPrintReport(kFirmwareName, ZACUS_FW_VERSION);
+  logBuildMemoryPolicy();
   logBootMemoryProfile();
 
   if (!g_storage.begin()) {
@@ -3387,9 +3957,14 @@ void setup() {
     g_storage.syncStoryFileFromSd(kDefaultScenarioFile);
   }
   RuntimeConfigService::load(g_storage, &g_network_cfg, &g_hardware_cfg, &g_camera_cfg, &g_media_cfg);
+  loadBootProvisioningState();
   Serial.printf("[MAIN] default scenario checksum=%lu\n",
                 static_cast<unsigned long>(g_storage.checksum(kDefaultScenarioFile)));
   Serial.printf("[MAIN] story storage sd=%u\n", g_storage.hasSdCard() ? 1U : 0U);
+  Serial.printf("[AUTH] setup_mode=%u auth_required=%u token_set=%u\n",
+                g_setup_mode ? 1U : 0U,
+                g_web_auth_required ? 1U : 0U,
+                g_web_auth_token[0] != '\0' ? 1U : 0U);
 
   g_media.begin(g_media_cfg);
   g_camera.begin(g_camera_cfg);
@@ -3417,6 +3992,9 @@ void setup() {
                                  g_network_cfg.force_ap_if_not_local,
                                  g_network_cfg.local_retry_ms,
                                  g_network_cfg.pause_local_retry_when_ap_client);
+  if (g_setup_mode && g_network_cfg.ap_default_ssid[0] != '\0') {
+    g_network.startAp(g_network_cfg.ap_default_ssid, g_network_cfg.ap_default_password);
+  }
   if (g_network_cfg.local_ssid[0] != '\0') {
     const bool connect_started = g_network.connectSta(g_network_cfg.local_ssid, g_network_cfg.local_password);
     Serial.printf("[NET] boot wifi target=%s started=%u\n",
@@ -3454,24 +4032,51 @@ void setup() {
   g_last_action_step_key[0] = '\0';
 
   g_ui.begin();
-  g_ui.setLaDetectionState(false, 0U, 0U, g_hardware_cfg.mic_la_stable_ms, 0U, g_hardware_cfg.mic_la_timeout_ms);
+  UiLaMetrics boot_la_metrics = {};
+  boot_la_metrics.locked = false;
+  boot_la_metrics.stability_pct = 0U;
+  boot_la_metrics.stable_ms = 0U;
+  boot_la_metrics.stable_target_ms = g_hardware_cfg.mic_la_stable_ms;
+  boot_la_metrics.gate_elapsed_ms = 0U;
+  boot_la_metrics.gate_timeout_ms = g_hardware_cfg.mic_la_timeout_ms;
+  g_ui.setLaMetrics(boot_la_metrics);
   g_ui.setHardwareSnapshotRef(&g_hardware.snapshotRef());
   refreshSceneIfNeeded(true);
   startPendingAudioIfAny();
+
+  g_runtime_services.audio = &g_audio;
+  g_runtime_services.scenario = &g_scenario;
+  g_runtime_services.ui = &g_ui;
+  g_runtime_services.storage = &g_storage;
+  g_runtime_services.buttons = &g_buttons;
+  g_runtime_services.touch = &g_touch;
+  g_runtime_services.network = &g_network;
+  g_runtime_services.hardware = &g_hardware;
+  g_runtime_services.camera = &g_camera;
+  g_runtime_services.media = &g_media;
+  g_runtime_services.network_cfg = &g_network_cfg;
+  g_runtime_services.hardware_cfg = &g_hardware_cfg;
+  g_runtime_services.camera_cfg = &g_camera_cfg;
+  g_runtime_services.media_cfg = &g_media_cfg;
+  g_runtime_services.tick_runtime = runtimeTickBridge;
+  g_runtime_services.dispatch_serial = serialDispatchBridge;
+  g_app_coordinator.begin(&g_runtime_services);
 }
 
-void loop() {
-  const uint32_t now_ms = millis();
-  pollSerialCommands(now_ms);
-
+void runRuntimeIteration(uint32_t now_ms) {
   ButtonEvent event;
   while (g_buttons.pollEvent(&event)) {
     const uint32_t event_ms = (event.ms != 0U) ? event.ms : now_ms;
-    Serial.printf("[MAIN] button key=%u long=%u ms=%lu\n",
-                  event.key,
-                  event.long_press ? 1U : 0U,
-                  static_cast<unsigned long>(event_ms));
-    g_ui.handleButton(event.key, event.long_press);
+    ZACUS_RL_LOG_MS(250U,
+                    "[MAIN] button key=%u long=%u ms=%lu\n",
+                    event.key,
+                    event.long_press ? 1U : 0U,
+                    static_cast<unsigned long>(event_ms));
+    UiInputEvent ui_event = {};
+    ui_event.type = UiInputEventType::kButton;
+    ui_event.key = event.key;
+    ui_event.long_press = event.long_press;
+    g_ui.submitInputEvent(ui_event);
     notifyScenarioButtonGuarded(event.key, event.long_press, event_ms, "physical_button");
     if (g_hardware_started) {
       g_hardware.noteButton(event.key, event.long_press, event_ms);
@@ -3480,12 +4085,24 @@ void loop() {
 
   TouchPoint touch;
   if (g_touch.poll(&touch)) {
-    g_ui.handleTouch(touch.x, touch.y, touch.touched);
+    UiInputEvent ui_event = {};
+    ui_event.type = UiInputEventType::kTouch;
+    ui_event.touch_x = touch.x;
+    ui_event.touch_y = touch.y;
+    ui_event.touch_pressed = touch.touched;
+    g_ui.submitInputEvent(ui_event);
   } else {
-    g_ui.handleTouch(0, 0, false);
+    UiInputEvent ui_event = {};
+    ui_event.type = UiInputEventType::kTouch;
+    ui_event.touch_x = 0;
+    ui_event.touch_y = 0;
+    ui_event.touch_pressed = false;
+    g_ui.submitInputEvent(ui_event);
   }
 
+  const uint32_t network_started_us = perfMonitor().beginSample();
   g_network.update(now_ms);
+  perfMonitor().endSample(PerfSection::kNetworkUpdate, network_started_us);
   if (g_hardware_started) {
     g_hardware.update(now_ms);
     maybeEmitHardwareEvents(now_ms);
@@ -3559,9 +4176,13 @@ void loop() {
                   stepIdFromSnapshot(after));
   }
 
+  const uint32_t audio_started_us = perfMonitor().beginSample();
   g_audio.update();
+  perfMonitor().endSample(PerfSection::kAudioUpdate, audio_started_us);
   g_media.update(now_ms, &g_audio);
+  const uint32_t scenario_started_us = perfMonitor().beginSample();
   g_scenario.tick(now_ms);
+  perfMonitor().endSample(PerfSection::kScenarioTick, scenario_started_us);
   startPendingAudioIfAny();
   if (g_win_etape_ui_refresh_pending) {
     g_win_etape_ui_refresh_pending = false;
@@ -3571,14 +4192,20 @@ void loop() {
   if (g_la_trigger.gate_active && g_la_trigger.gate_entered_ms > 0U) {
     la_gate_elapsed_ms = now_ms - g_la_trigger.gate_entered_ms;
   }
-  g_ui.setLaDetectionState(g_la_trigger.locked,
-                           laStablePercent(),
-                           g_la_trigger.stable_ms,
-                           g_hardware_cfg.mic_la_stable_ms,
-                           la_gate_elapsed_ms,
-                           g_hardware_cfg.mic_la_timeout_ms);
+  UiLaMetrics la_metrics = {};
+  la_metrics.locked = g_la_trigger.locked;
+  la_metrics.stability_pct = laStablePercent();
+  la_metrics.stable_ms = g_la_trigger.stable_ms;
+  la_metrics.stable_target_ms = g_hardware_cfg.mic_la_stable_ms;
+  la_metrics.gate_elapsed_ms = la_gate_elapsed_ms;
+  la_metrics.gate_timeout_ms = g_hardware_cfg.mic_la_timeout_ms;
+  g_ui.setLaMetrics(la_metrics);
   refreshSceneIfNeeded(false);
-  g_ui.update();
+  const uint32_t ui_started_us = perfMonitor().beginSample();
+  g_ui.tick(now_ms);
+  RuntimeMetrics::instance().noteUiFrame(now_ms);
+  perfMonitor().endSample(PerfSection::kUiTick, ui_started_us);
+  RuntimeMetrics::instance().logPeriodic(now_ms);
   if (g_web_started) {
     g_web_server.handleClient();
     if (g_web_disconnect_sta_pending &&
@@ -3588,4 +4215,10 @@ void loop() {
     }
   }
   yield();
+}
+
+void loop() {
+  const uint32_t now_ms = millis();
+  pollSerialCommands(now_ms);
+  g_app_coordinator.tick(now_ms);
 }

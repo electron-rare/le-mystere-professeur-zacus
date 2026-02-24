@@ -7,6 +7,13 @@ class AudioManager;
 
 class MediaManager {
  public:
+  MediaManager() = default;
+  ~MediaManager() = default;
+  MediaManager(const MediaManager&) = delete;
+  MediaManager& operator=(const MediaManager&) = delete;
+  MediaManager(MediaManager&&) = delete;
+  MediaManager& operator=(MediaManager&&) = delete;
+
   struct Config {
     char music_dir[32] = "/music";
     char picture_dir[32] = "/picture";

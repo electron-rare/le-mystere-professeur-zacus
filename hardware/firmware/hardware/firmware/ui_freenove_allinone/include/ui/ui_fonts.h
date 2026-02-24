@@ -7,6 +7,10 @@ namespace UiFonts {
 
 void init();
 
+// Compatibility aliases for callers expecting a compact API surface.
+const lv_font_t* fontBody();
+const lv_font_t* fontBodyBoldOrTitle();
+
 const lv_font_t* fontBodyS();
 const lv_font_t* fontBodyM();
 const lv_font_t* fontBodyL();
@@ -22,4 +26,3 @@ const lv_style_t* styleMono();
 const lv_style_t* stylePixel();
 
 }  // namespace UiFonts
-

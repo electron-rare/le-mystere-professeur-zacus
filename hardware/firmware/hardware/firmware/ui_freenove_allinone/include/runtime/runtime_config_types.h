@@ -8,12 +8,12 @@ struct RuntimeNetworkConfig {
   static constexpr uint8_t kMaxEspNowBootPeers = 10U;
 
   char hostname[33] = "zacus-freenove";
-  char wifi_test_ssid[33] = "Les cils";
-  char wifi_test_password[65] = "mascarade";
-  char local_ssid[33] = "Les cils";
-  char local_password[65] = "mascarade";
+  char wifi_test_ssid[33] = {0};
+  char wifi_test_password[65] = {0};
+  char local_ssid[33] = {0};
+  char local_password[65] = {0};
   char ap_default_ssid[33] = "Freenove-Setup";
-  char ap_default_password[65] = "mascarade";
+  char ap_default_password[65] = {0};
   bool force_ap_if_not_local = false;
   bool pause_local_retry_when_ap_client = false;
   uint32_t local_retry_ms = kDefaultLocalRetryMs;

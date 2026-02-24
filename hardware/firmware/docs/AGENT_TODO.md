@@ -1,3 +1,80 @@
+## [2026-02-24] Programme Freenove 3 vagues - fondations architecture/memoire/perf
+
+- Checkpoint securite execute:
+  - `/tmp/zacus_checkpoint/1771909054_wip.patch`
+  - `/tmp/zacus_checkpoint/1771909054_status.txt`
+- Baseline runtime ajustee pour mesure realiste (Phase 0):
+  - `platformio.ini` Freenove: `UI_FULL_FRAME_BENCH=0`, `UI_DEMO_AUTORUN_WIN_ETAPE=0`.
+- Vague A (architecture) - extraction de l'orchestration:
+  - nouveaux modules: `runtime/runtime_services.h`, `runtime/app_coordinator.*`, `runtime/serial_command_router.*`.
+  - `main.cpp` delegue desormais la boucle runtime via `AppCoordinator::tick(...)` et le dispatch serie via `AppCoordinator::onSerialLine(...)`.
+- Vague B (securite memoire) - garde-fous d'allocation:
+  - nouveaux modules: `runtime/memory/caps_allocator.*`, `runtime/memory/safe_size.h`.
+  - `ui_manager.cpp` migre les alloc/free critiques vers wrappers capability-aware + verification overflow sur tailles de buffers.
+  - nouveau snapshot memoire public UI: `UiMemorySnapshot` + `UiManager::memorySnapshot()`.
+- Vague C (performance) - instrumentation:
+  - nouveau service: `runtime/perf/perf_monitor.*` + sections (`loop`, `ui_tick`, `ui_flush`, `scenario_tick`, `network_update`, `audio_update`).
+  - nouvelles commandes serie: `PERF_STATUS`, `PERF_RESET`.
+  - instrumentation ajoutee sur `AppCoordinator::tick`, `UiManager::displayFlushCb/completePendingFlush`, `g_network.update`, `g_audio.update`, `g_scenario.tick`, `g_ui.tick`.
+- Validation/gates:
+  - `pio run -e freenove_esp32s3` ✅
+  - `ZACUS_ENV=freenove_esp32s3 ./tools/dev/run_matrix_and_smoke.sh` ✅ (verdict global `SKIP` faute de mapping port strict; evidence `artifacts/rc_live/freenove_esp32s3_20260224-050717/summary.md`).
+
+## [2026-02-24] Fonts registry completion (aliases + docs + UI cleanup)
+
+- Scope complete for requested multi-family LVGL font pack:
+  - API aliases added in `ui_fonts.h/.cpp`: `fontBody()`, `fontBodyBoldOrTitle()`.
+  - optional 1px style shadow support added (`UI_FONT_STYLE_SHADOW`, default `1`) on title/pixel styles.
+  - remaining hardcoded Montserrat usages in `ui_manager.cpp` replaced by `UiFonts::*` getters.
+  - new doc added: `docs/ui/fonts.md` (families, sizes, FR subset, bpp, regen flow, flash/RAM notes).
+  - `docs/ui/fonts_fr.md` updated to reflect lowercase API names.
+- Validation:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 6 --wait-port 10 --no-evidence` ✅ (`RESULT=PASS`)
+
+## [2026-02-24] SCENE_WIN_ETAPE refonte alignement final + mode test lock
+
+- Checkpoint securite execute:
+  - `/tmp/zacus_checkpoint/20260224_045912_wip.patch`
+  - `/tmp/zacus_checkpoint/20260224_045912_status.txt`
+- Alignement livrables scene:
+  - `docs/ui/SCENE_WIN_ETAPE_demoscene_calibration.md` corrige (`B1=4000`, bande centre >=50%, padding centre explicite).
+  - `hardware/firmware/ui_freenove_allinone/README.md` corrige (B1 3..5s, ordre overrides JSON-first, `FONT_MODE`).
+  - `data/ui/scene_win_etape.txt` corrige (`B1_MS=4000`, `FONT_MODE=orbitron`, note padding auto scroller centre).
+- Demande test hardware verrouillee:
+  - `platformio.ini` force pour l'env freenove:
+    - `UI_FULL_FRAME_BENCH=1`
+    - `UI_DEMO_AUTORUN_WIN_ETAPE=1`
+- Skill sync:
+  - `~/.codex/skills/demoscene-demomaking-generic/SKILL.md` enrichi (profil LVGL 320x480, split B1/B2, regle centre >=50%, padding).
+  - MAJ references:
+    - `references/parameter-calibration-guide.md`
+    - `references/engine-adapter-matrix.md`
+- Validation:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 6 --wait-port 10 --no-evidence` ✅ (`RESULT=PASS`)
+  - `SCENE_GOTO SCENE_WIN_ETAPE` serie -> `ACK SCENE_GOTO ok=1` ✅
+  - Runtime serie (`UI_GFX_STATUS`) ✅:
+    - `full_frame=1`, `source=PSRAM`, `mode=RGB332`, autorun scene actif (`[UI][WIN_ETAPE] phase=...` sans `SCENE_GOTO`).
+
+## [2026-02-24] Freenove kit lock FNK0102H + test relance
+
+- Verrouillage confirme pour le kit utilisateur **FNK0102H**:
+  - `platformio.ini`: `FREENOVE_LCD_VARIANT_FNK0102A=0`, `...B=0`, `...H=1`.
+  - `hardware/firmware/ui_freenove_allinone/include/ui_freenove_config.h`: default `FREENOVE_LCD_VARIANT_FNK0102H=1`.
+- Checkpoint securite execute:
+  - `/tmp/zacus_checkpoint/20260224_045143_wip.patch`
+  - `/tmp/zacus_checkpoint/20260224_045143_status.txt`
+- Correctif compile rapide applique:
+  - `LV_OPA_65` -> `LV_OPA_60` dans `ui_manager.cpp` (compat LVGL 8.4).
+- Verification build/flash/runtime:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 6 --wait-port 10 --no-evidence` ✅ (`RESULT=PASS`)
+  - Runtime check serie: `UI_GFX_STATUS` + `SCENE_GOTO SCENE_WIN_ETAPE` + phase logs intro OK.
+
 ## [2026-02-24] SCENE_WIN_ETAPE demoscene runtime hardening (B1/B2 + morph + TXT/JSON)
 
 - Skills chain appliquee pour la scene:
@@ -1159,3 +1236,164 @@
 [20260223-210304] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/esp32dev_esp32_release_esp8266_oled_ui_rp2040_ili9488_ui_rp2040_ili9486_20260223-210304, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/esp32dev_esp32_release_esp8266_oled_ui_rp2040_ili9488_ui_rp2040_ili9486_20260223-210304/summary.md
 [20260223-210353] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/esp32dev_esp32_release_esp8266_oled_ui_rp2040_ili9488_ui_rp2040_ili9486_20260223-210353, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/esp32dev_esp32_release_esp8266_oled_ui_rp2040_ili9488_ui_rp2040_ili9486_20260223-210353/summary.md
 [20260223-210410] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/esp32dev_esp32_release_esp8266_oled_ui_rp2040_ili9488_ui_rp2040_ili9486_20260223-210410, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/esp32dev_esp32_release_esp8266_oled_ui_rp2040_ili9488_ui_rp2040_ili9486_20260223-210410/summary.md
+
+## Refactor LVGL graphics stack - 2026-02-24
+- Checkpoint evidence:
+  - `/tmp/zacus_checkpoint/20260224_032248_wip.patch`
+  - `/tmp/zacus_checkpoint/20260224_032248_status.txt`
+- Scope en cours:
+  - `ui_manager.{h,cpp}`: pipeline buffers/dma/8bpp + stats/diagnostics.
+  - `lv_conf.h` + `platformio.ini`: flags build pour mode 256, DMA async, budget mem.
+  - `main.cpp`: commandes série `UI_GFX_STATUS` et `UI_MEM_STATUS`.
+  - docs ajoutées: `docs/ui/graphics_stack.md`, `docs/ui/lvgl_memory_budget.md`, `docs/ui/fonts_fr.md`.
+- Validation:
+  - `pio run -e freenove_esp32s3` ✅
+  - tentative multi-env (`esp32dev`, `esp32_release`, `esp8266_oled`, `ui_rp2040_ili9488`, `ui_rp2040_ili9486`) interrompue pour limiter le temps de cycle après confirmation Freenove.
+
+## Refactor LVGL graphics stack - suite run 2026-02-24
+- Checkpoint evidence:
+  - `/tmp/zacus_checkpoint/20260224_035128_wip.patch`
+  - `/tmp/zacus_checkpoint/20260224_035128_status.txt`
+- Validation build matrix terminee:
+  - `pio run -e esp32dev -e esp32_release -e esp8266_oled -e ui_rp2040_ili9488 -e ui_rp2040_ili9486` ✅
+  - `pio run -e freenove_esp32s3` ✅
+- Flash hardware Freenove:
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- Verification scene:
+  - `SCENE_GOTO SCENE_WIN_ETAPE` envoye via pyserial (ACK recu, logs scene/audio coherents).
+  - test boucle host 95s avec relance scene a `t=90s` (ACK recu a chaque injection).
+- Observation runtime a investiguer:
+  - `UI_GFX_STATUS` retourne `depth=8` mais `lines=0`, `double=0`, `dma_req=0`, `dma_async=0` (pipeline graphique semble retomber en mode non configure).
+
+## Refactor LVGL graphics stack - affichage Freenove (2026-02-24)
+- Checkpoint evidence:
+  - `/tmp/zacus_checkpoint/20260224_040114_wip.patch`
+  - `/tmp/zacus_checkpoint/20260224_040114_status.txt`
+- Probleme reproduit et corrige:
+  - boot montrait `draw buffer allocation failed` (heap DMA interne trop faible pour le mode initial).
+  - allocation draw buffers rendue robuste: fallback auto SRAM_DMA -> PSRAM, candidats lignes et mono fallback.
+  - trans buffer DMA rendu adaptatif (fallback par lignes), conversion RGB332->RGB565 sync ligne-par-ligne corrigee.
+  - guard de stabilite ajoute: async DMA desactive en mode RGB332 (panic `dma_end_callback` observe sur SCENE_GOTO).
+- Option hardware ajoutee:
+  - `FREENOVE_LCD_USE_HSPI` dans `ui_freenove_config.h` (switch HSPI/FSPI via flag).
+  - support macro ajoute pour `FREENOVE_LCD_VARIANT_FNK0102H`.
+- Validation:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - test runtime 95s avec `SCENE_GOTO SCENE_WIN_ETAPE` + relance a t=90s: pas de panic, scene boucle.
+  - retour utilisateur: affichage OK.
+
+## External font pack generation (2026-02-24)
+- Checkpoint evidence:
+  - `/tmp/zacus_checkpoint/20260224_042527_wip.patch`
+  - `/tmp/zacus_checkpoint/20260224_042527_status.txt`
+- Generated and committed LVGL external font sources for Freenove UI stack:
+  - Inter: 14/18/24/32
+  - Orbitron: 28/40
+  - IBM Plex Mono: 14/18
+  - Press Start 2P: 16/24
+- Added portable generation toolchain:
+  - `tools/fonts/scripts/font_manifest.json`
+  - `tools/fonts/scripts/generate_lvgl_fonts.sh`
+  - `tools/fonts/ttf/README.md`
+- Build validation:
+  - `pio run -e freenove_esp32s3` ✅
+- Commit:
+  - `1328897 feat(ui-fonts): generate and enable external LVGL font pack`
+
+## LCD variant lock FNK0102H (2026-02-24)
+- Demande utilisateur: verrouiller la cible kit sur FNK0102H.
+- Changements appliques:
+  - `hardware/firmware/ui_freenove_allinone/include/ui_freenove_config.h`:
+    - defaults: `FREENOVE_LCD_VARIANT_FNK0102B=0`, `FREENOVE_LCD_VARIANT_FNK0102H=1`
+    - commentaire profil maj en FNK0102H.
+  - `platformio.ini` (`env:freenove_esp32s3_full_with_ui`):
+    - `-DFREENOVE_LCD_VARIANT_FNK0102B=0`
+    - `-DFREENOVE_LCD_VARIANT_FNK0102H=1`
+- Validation:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - verification runtime serie: `UI_GFX_STATUS` recu apres flash (`depth=8`, `lines=40`, `double=1`, `source=PSRAM`).
+[20260224-050717] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260224-050717, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260224-050717/summary.md
+[20260224-052021] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260224-052021, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260224-052021/summary.md
+
+## Plan Freenove - partition + runtime safety + flash (2026-02-24)
+
+- Checkpoint:
+  - `/tmp/zacus_checkpoint/20260224_064903_wip.patch`
+  - `/tmp/zacus_checkpoint/20260224_064903_status.txt`
+- Baseline (avant lot):
+  - `pio run -e freenove_esp32s3 -t size` -> `text=1253534 data=426752 bss=1448701 dec=3128987`
+  - `./build_all.sh freenove_esp32s3` -> `Flash=1664021 / 2097152`
+  - map symbols:
+    - `__ssvfscanf_r` present
+    - `__ssvfiscanf_r` present
+    - `_Z19runRuntimeIterationj` present
+    - `_ZN12_GLOBAL__N_119handleSerialCommandEPKcj` present
+    - `_ZN9UiManager11renderSceneEPK11ScenarioDefPKcS4_S4_bS4_` present
+- Implemented:
+  - partition custom Freenove (`partitions/freenove_esp32s3_app6mb_fs6mb.csv`) + `platformio.ini` alignement max app 6MB.
+  - hardening concurrence ESP-NOW:
+    - queue RX lockee (`portMUX_TYPE`), enqueue/dequeue atomiques,
+    - suppression recursion ACK-skip dans `consumeEspNowMessage`,
+    - callback RX/TX lock sections courtes + parse JSON hors lock.
+  - provisioning/auth:
+    - nouveau module NVS `runtime/provisioning/credential_store.{h,cpp}` (`sta_ssid`, `sta_pass`, `web_token`, `provisioned`),
+    - zero secrets hardcodes par defaut (`RuntimeNetworkConfig`, `APP_WIFI`, fallback embedded),
+    - endpoint `GET /api/provision/status`,
+    - `persist=1` sur `/api/wifi/connect` et `/api/network/wifi/connect`,
+    - auth policy:
+      - setup mode: whitelist provisioning sans auth,
+      - mode normal: Bearer token requis sur `/api/*`,
+    - commandes serie:
+      - `WIFI_PROVISION <ssid> <pass>`
+      - `WIFI_FORGET`
+      - `AUTH_STATUS`
+      - `AUTH_TOKEN_ROTATE [token]`
+  - parsing borne:
+    - `HW_LED_SET` migre de `sscanf` vers parse tokenise + `strtol` borne.
+  - flash/memory:
+    - `UI_LV_MEM_SIZE_KB=128`,
+    - reduction String hot path:
+      - `network_manager.cpp` (`sendEspNowTarget`, envelope handling),
+      - `main.cpp` (`webSendStatusSse` sans `String payload`),
+    - externalisation bundle story:
+      - fallback embedded minimal seulement (`APP_WIFI` + `DEFAULT` minimal),
+      - message explicite `buildfs/uploadfs` requis pour bundle complet.
+  - scripts dev:
+    - `tools/dev/healthcheck_wifi.sh` support `ZACUS_WEB_TOKEN`,
+    - `tools/dev/rtos_wifi_health.sh` support `ZACUS_WEB_TOKEN` (header auth + evidence redacted).
+- Validation apres lot:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t size` ✅ -> `text=1254606 data=413388 bss=1416005 dec=3083999`
+  - `pio run -e freenove_esp32s3 -t buildfs` ✅
+  - `./build_all.sh freenove_esp32s3` ✅ -> `Flash=1651729 / 6291456`, `RAM=209300 / 327680`
+  - `ZACUS_ENV=freenove_esp32s3 ./tools/dev/run_matrix_and_smoke.sh` ✅ (smoke SKIPPED: port policy LOCATION mismatch)
+  - content validators:
+    - `python3 ../../tools/scenario/validate_scenario.py ../../game/scenarios/zacus_v1.yaml` ✅
+    - `python3 ../../tools/scenario/export_md.py ../../game/scenarios/zacus_v1.yaml` ✅
+    - `python3 ../../tools/audio/validate_manifest.py ../../audio/manifests/zacus_v1_audio.yaml` ✅
+    - `python3 ../../tools/printables/validate_manifest.py ../../printables/manifests/zacus_v1_printables.yaml` ✅
+- Notes:
+  - `__ssvfscanf_r`/`__ssvfiscanf_r` restent dans la map, mais provenance framework (`FrameworkArduino/IPv6Address.cpp.o`), pas du code Freenove local.
+  - artefacts smoke:
+    - `artifacts/rc_live/freenove_esp32s3_20260224-060831/`
+    - `artifacts/rc_live/freenove_esp32s3_20260224-060831_agent/`
+
+## Audit flash + hardening Freenove ESP32-S3 (2026-02-24)
+- Checkpoint evidence:
+  - `/tmp/zacus_checkpoint/1771909826_wip.patch`
+  - `/tmp/zacus_checkpoint/1771909826_status.txt`
+- Scope applique (firmware Freenove):
+  - `platformio.ini`: `CORE_DEBUG_LEVEL=0` sur env `freenove_esp32s3_full_with_ui`, `UI_FONT_PIXEL_ENABLE=0`, `UI_FONT_TITLE_XL_ENABLE=0`.
+  - `ui_freenove_allinone/include/lv_conf.h`: widget set LVGL reduit au strict necessaire (`label`/`line`), theme default desactive, fontes Montserrat 18+ desactivees.
+  - `ui_freenove_allinone/src/ui_fonts.cpp`: fallback compile-time pour `fontTitleXL()` sans Orbitron 40 quand `UI_FONT_TITLE_XL_ENABLE=0`.
+  - `ui_freenove_allinone/src/hardware_manager.cpp`: suppression warning/risque modulo-zero compile-time sur pattern LED secondaire.
+- Mesures build (`pio run -e freenove_esp32s3`):
+  - Baseline: Flash `1808605` (86.2%), RAM `242340`.
+  - Apres optimisation: Flash `1664021` (79.3%), RAM `241996`.
+  - Gain flash: `-144584` octets (~`-7.99%` du binaire initial).
+- Gates executees:
+  - `pio run -e freenove_esp32s3` ✅
+  - `ZACUS_ENV=freenove_esp32s3 ./tools/dev/run_matrix_and_smoke.sh` ✅ (smoke SKIP attendu: mapping port USB non conforme policy LOCATION)
+[20260224-060831] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260224-060831, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260224-060831/summary.md

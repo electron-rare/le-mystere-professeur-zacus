@@ -13,6 +13,10 @@ class AudioManager {
 
   AudioManager();
   ~AudioManager();
+  AudioManager(const AudioManager&) = delete;
+  AudioManager& operator=(const AudioManager&) = delete;
+  AudioManager(AudioManager&&) = delete;
+  AudioManager& operator=(AudioManager&&) = delete;
 
   bool begin();
   bool play(const char* filename);
@@ -34,6 +38,7 @@ class AudioManager {
   const char* fxProfileLabel(uint8_t fx_profile_index) const;
   const char* activeCodec() const;
   uint16_t activeBitrateKbps() const;
+  uint32_t underrunCount() const;
 
   void setAudioDoneCallback(AudioDoneCallback cb, void* ctx);
 
@@ -101,6 +106,9 @@ class AudioManager {
   bool pending_use_sd_ = false;
   bool pending_diagnostic_tone_ = false;
   uint32_t reopen_earliest_ms_ = 0U;
+  uint32_t underrun_count_ = 0U;
+  uint32_t underrun_last_note_ms_ = 0U;
+  uint32_t underrun_last_log_ms_ = 0U;
   mutable char current_track_snapshot_[96] = {0};
   AudioDoneCallback done_cb_ = nullptr;
   void* done_ctx_ = nullptr;

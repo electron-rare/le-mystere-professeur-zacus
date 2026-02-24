@@ -3,15 +3,17 @@
 ## Registry
 `ui_fonts.h/.cpp` exposes a single registry used by UI scenes:
 
-- `FontBodyS()`
-- `FontBodyM()`
-- `FontBodyL()`
-- `FontTitle()`
-- `FontTitleXL()`
-- `FontMono()`
-- `FontPixel()`
+- `fontBody()` / `fontBodyBoldOrTitle()` (compat aliases)
+- `fontBodyS()`
+- `fontBodyM()`
+- `fontBodyL()`
+- `fontTitle()`
+- `fontTitleXL()`
+- `fontMono()`
+- `fontPixel()`
 
 Styles are also exposed (`styleBody`, `styleTitle`, `styleTitleXL`, `styleMono`, `stylePixel`).
+Optional 1px shadow is enabled on title/pixel styles (`UI_FONT_STYLE_SHADOW=1`, disable with `-DUI_FONT_STYLE_SHADOW=0`).
 
 ## Families and sizes
 Target families:

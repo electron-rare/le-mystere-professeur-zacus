@@ -34,6 +34,11 @@ class CameraManager {
   };
 
   CameraManager();
+  ~CameraManager() = default;
+  CameraManager(const CameraManager&) = delete;
+  CameraManager& operator=(const CameraManager&) = delete;
+  CameraManager(CameraManager&&) = delete;
+  CameraManager& operator=(CameraManager&&) = delete;
 
   bool begin(const Config& config);
   bool start();

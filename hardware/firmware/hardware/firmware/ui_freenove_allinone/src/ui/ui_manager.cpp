@@ -2,7 +2,6 @@
 #include "ui_manager.h"
 
 #include <ArduinoJson.h>
-#include <TFT_eSPI.h>
 #include <FS.h>
 #include <LittleFS.h>
 #include <cctype>
@@ -17,24 +16,75 @@
 #endif
 
 #include "ui_freenove_config.h"
+#include "drivers/display/display_hal.h"
 #include "resources/screen_scene_registry.h"
+#include "runtime/memory/caps_allocator.h"
+#include "runtime/memory/safe_size.h"
+#include "runtime/perf/perf_monitor.h"
 #include "ui/scene_element.h"
 #include "ui/scene_state.h"
+#include "ui/fx/fx_engine.h"
+#include "ui_fonts.h"
 
 namespace {
 
-constexpr uint16_t kDrawBufferLines = 24;
-constexpr uint16_t kPsramDrawBufferLines = 48;
-constexpr uint16_t kPsramDrawBufferLinesFallback = 32;
-constexpr size_t kPsramDrawBufferReserveBytes = 96U * 1024U;
+#ifndef UI_COLOR_256
+#define UI_COLOR_256 1
+#endif
 
-TFT_eSPI g_tft = TFT_eSPI(FREENOVE_LCD_WIDTH, FREENOVE_LCD_HEIGHT);
-lv_disp_draw_buf_t g_draw_buf;
-lv_color_t g_draw_pixels_local[FREENOVE_LCD_WIDTH * kDrawBufferLines];
-lv_color_t* g_draw_pixels = g_draw_pixels_local;
-size_t g_draw_pixels_count = FREENOVE_LCD_WIDTH * static_cast<size_t>(kDrawBufferLines);
-bool g_draw_buffer_in_psram = false;
+#ifndef UI_COLOR_565
+#define UI_COLOR_565 0
+#endif
+
+#ifndef UI_FORCE_THEME_256
+#define UI_FORCE_THEME_256 1
+#endif
+
+#ifndef UI_DRAW_BUF_LINES
+#define UI_DRAW_BUF_LINES 40
+#endif
+
+#ifndef UI_DRAW_BUF_IN_PSRAM
+#if defined(FREENOVE_PSRAM_UI_DRAW_BUFFER)
+#define UI_DRAW_BUF_IN_PSRAM FREENOVE_PSRAM_UI_DRAW_BUFFER
+#else
+#define UI_DRAW_BUF_IN_PSRAM 1
+#endif
+#endif
+
+#ifndef UI_DMA_TX_IN_DRAM
+#define UI_DMA_TX_IN_DRAM 1
+#endif
+
+#ifndef UI_DMA_FLUSH_ASYNC
+#define UI_DMA_FLUSH_ASYNC 1
+#endif
+
+#ifndef UI_DMA_TRANS_BUF_LINES
+#define UI_DMA_TRANS_BUF_LINES UI_DRAW_BUF_LINES
+#endif
+
+#ifndef UI_FULL_FRAME_BENCH
+#define UI_FULL_FRAME_BENCH 0
+#endif
+
+#ifndef UI_DEMO_AUTORUN_WIN_ETAPE
+#define UI_DEMO_AUTORUN_WIN_ETAPE 0
+#endif
+
 UiManager* g_instance = nullptr;
+
+constexpr uint16_t kDrawLineFallbacks[] = {48U, 40U, 32U, 24U};
+constexpr uint16_t kDrawBufLinesRequested = static_cast<uint16_t>(UI_DRAW_BUF_LINES);
+constexpr uint16_t kDmaTransBufLinesRequested = static_cast<uint16_t>(UI_DMA_TRANS_BUF_LINES);
+constexpr bool kUseColor256Runtime = (UI_COLOR_565 == 0) && (UI_COLOR_256 != 0);
+constexpr bool kUseThemeQuantizeRuntime = (UI_FORCE_THEME_256 != 0);
+constexpr bool kUseAsyncDmaRuntime = (UI_DMA_FLUSH_ASYNC != 0);
+constexpr bool kUsePsramLineBuffersRuntime = (UI_DRAW_BUF_IN_PSRAM != 0);
+constexpr bool kUseDmaTxInDramRuntime = (UI_DMA_TX_IN_DRAM != 0);
+constexpr bool kUseFullFrameBenchRuntime = (UI_FULL_FRAME_BENCH != 0);
+constexpr bool kUseDemoAutorunWinEtapeRuntime = (UI_DEMO_AUTORUN_WIN_ETAPE != 0);
+constexpr uint32_t kFullFrameBenchMinFreePsram = 256U * 1024U;
 
 int16_t activeDisplayWidth() {
   lv_disp_t* display = lv_disp_get_default();
@@ -112,63 +162,6 @@ uint32_t toLvKey(uint8_t key, bool long_press) {
     default:
       return LV_KEY_ENTER;
   }
-}
-
-bool tryAllocatePsramDrawBuffer(uint16_t draw_lines) {
-#if defined(ARDUINO_ARCH_ESP32) && defined(FREENOVE_PSRAM_UI_DRAW_BUFFER)
-  const size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-  if (free_psram == 0U) {
-    return false;
-  }
-  const size_t pixels = static_cast<size_t>(draw_lines) * FREENOVE_LCD_WIDTH;
-  const size_t bytes = pixels * sizeof(lv_color_t);
-  if (free_psram <= (bytes + kPsramDrawBufferReserveBytes)) {
-    return false;
-  }
-  lv_color_t* const buffer = static_cast<lv_color_t*>(
-      heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-  if (buffer == nullptr) {
-    return false;
-  }
-  g_draw_pixels = buffer;
-  g_draw_pixels_count = pixels;
-  g_draw_buffer_in_psram = true;
-  Serial.printf("[UI] draw buffer in PSRAM: lines=%u bytes=%u free_psram=%u\n",
-                static_cast<unsigned int>(draw_lines),
-                static_cast<unsigned int>(bytes),
-                static_cast<unsigned int>(free_psram));
-  return true;
-#else
-  (void)draw_lines;
-  return false;
-#endif
-}
-
-void initDrawBufferFromPsram() {
-  g_draw_pixels = g_draw_pixels_local;
-  g_draw_pixels_count = FREENOVE_LCD_WIDTH * static_cast<size_t>(kDrawBufferLines);
-  g_draw_buffer_in_psram = false;
-
-#if defined(ARDUINO_ARCH_ESP32) && defined(FREENOVE_PSRAM_UI_DRAW_BUFFER)
-  if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) == 0U) {
-    Serial.printf("[UI] PSRAM unavailable for draw buffer, using internal RAM (%u lines)\n",
-                  static_cast<unsigned int>(kDrawBufferLines));
-  } else if (tryAllocatePsramDrawBuffer(kPsramDrawBufferLines) ||
-             tryAllocatePsramDrawBuffer(kPsramDrawBufferLinesFallback)) {
-  } else {
-    Serial.printf("[UI] PSRAM insufficient, fallback draw buffer lines=%u in internal RAM\n",
-                  static_cast<unsigned int>(kDrawBufferLines));
-  }
-#else
-  Serial.printf("[UI] PSRAM draw buffer disabled, using internal RAM lines=%u\n",
-                static_cast<unsigned int>(kDrawBufferLines));
-#endif
-  const uint16_t effective_lines =
-      static_cast<uint16_t>(g_draw_pixels_count / static_cast<size_t>(FREENOVE_LCD_WIDTH));
-  Serial.printf("[UI] LVGL draw buffer ready: source=%s lines=%u bytes=%u\n",
-                g_draw_buffer_in_psram ? "PSRAM" : "DRAM",
-                static_cast<unsigned int>(effective_lines),
-                static_cast<unsigned int>(g_draw_pixels_count * sizeof(lv_color_t)));
 }
 
 bool parseHexRgb(const char* text, uint32_t* out_rgb) {
@@ -401,7 +394,7 @@ int16_t signedNoise(uint32_t value, uintptr_t salt, int16_t amplitude) {
 
 constexpr const char* kWinEtapeCracktroTitle = "PROFESSEUR ZACUS";
 constexpr const char* kWinEtapeCracktroScroll =
-    "PROUDLY PRESENTS • LE MYSTERE DU PROFESSEUR ZACUS • NO CLOUD • PURE SIGNAL •";
+    "PROUDLY PRESENTS ... ... NO CLOUD • PURE SIGNAL ...";
 constexpr const char* kWinEtapeCracktroBottomScroll =
     "... Le Professeur SAILLANT Franck HOTAMP vous salue bien ...";
 constexpr const char* kWinEtapeDemoTitle = "BRAVO Brigade Z";
@@ -409,11 +402,11 @@ constexpr const char* kWinEtapeDemoScroll =
     "Vous n’avez plus qu’a valider sur le téléphone qui sonne";
 constexpr const char* kWinEtapeWaitingSubtitle = "Validation par reponse au telephone";
 
-constexpr uint16_t kIntroTickMs = 33U;
+constexpr uint16_t kIntroTickMs = 42U;
 constexpr uint32_t kIntroCracktroMsDefault = 30000U;
 constexpr uint32_t kIntroTransitionMsDefault = 15000U;
 constexpr uint32_t kIntroCleanMsDefault = 20000U;
-constexpr uint16_t kIntroB1CrashMsDefault = 900U;
+constexpr uint16_t kIntroB1CrashMsDefault = 4000U;
 constexpr uint16_t kIntroOutroMs = 400U;
 constexpr uint32_t kIntroCracktroMsMin = 1000U;
 constexpr uint32_t kIntroCracktroMsMax = 120000U;
@@ -421,8 +414,8 @@ constexpr uint32_t kIntroTransitionMsMin = 300U;
 constexpr uint32_t kIntroTransitionMsMax = 60000U;
 constexpr uint32_t kIntroCleanMsMin = 1000U;
 constexpr uint32_t kIntroCleanMsMax = 120000U;
-constexpr uint16_t kIntroB1CrashMsMin = 700U;
-constexpr uint16_t kIntroB1CrashMsMax = 1000U;
+constexpr uint16_t kIntroB1CrashMsMin = 3000U;
+constexpr uint16_t kIntroB1CrashMsMax = 5000U;
 constexpr uint16_t kIntroScrollApxPerSecDefault = 216U;
 constexpr uint16_t kIntroScrollBotApxPerSecDefault = 108U;
 constexpr uint16_t kIntroScrollCpxPerSecDefault = 72U;
@@ -430,10 +423,10 @@ constexpr uint16_t kIntroScrollSpeedMin = 10U;
 constexpr uint16_t kIntroScrollSpeedMax = 400U;
 constexpr uint16_t kIntroScrollBotSpeedMin = 60U;
 constexpr uint16_t kIntroScrollBotSpeedMax = 160U;
-constexpr uint8_t kIntroSineAmpApxDefault = 18U;
-constexpr uint8_t kIntroSineAmpCpxDefault = 12U;
-constexpr uint8_t kIntroSineAmpMin = 1U;
-constexpr uint8_t kIntroSineAmpMax = 32U;
+constexpr uint8_t kIntroSineAmpApxDefault = 96U;
+constexpr uint8_t kIntroSineAmpCpxDefault = 96U;
+constexpr uint8_t kIntroSineAmpMin = 8U;
+constexpr uint8_t kIntroSineAmpMax = 180U;
 constexpr uint16_t kIntroSinePeriodPxDefault = 104U;
 constexpr uint16_t kIntroSinePeriodMin = 40U;
 constexpr uint16_t kIntroSinePeriodMax = 220U;
@@ -444,6 +437,34 @@ constexpr uint16_t kIntroCubeFov = 156U;
 constexpr uint16_t kIntroCubeZOffset = 320U;
 constexpr uint16_t kIntroCubeScale = 88U;
 constexpr int16_t kIntroBottomScrollMarginPx = 8;
+constexpr uint8_t kIntroCenterScrollPadSpaces = 14U;
+
+// Retro key color set (RGB332-friendly) used by SCENE_WIN_ETAPE only.
+constexpr uint32_t kIntroPaletteRgb[] = {
+    0x000022UL,  // 0 bg0
+    0x001144UL,  // 1 bg1
+    0x002E6AUL,  // 2 bg2
+    0x00FFFFUL,  // 3 accent cyan
+    0xFF00FFUL,  // 4 accent magenta
+    0xFFFF00UL,  // 5 accent yellow
+    0x0044AAUL,  // 6 accent blue
+    0xFFFFFFUL,  // 7 text white
+    0x000000UL,  // 8 shadow black
+    0x7FD7FFUL,  // 9 text light blue
+    0xFFAA55UL,  // 10 warm particle
+    0x1A3355UL,  // 11 dither stripe dark
+    0x23466FUL,  // 12 dither stripe mid
+    0x10233FUL,  // 13 tunnel stripe dark
+    0x18365DUL,  // 14 tunnel stripe light
+    0xD4F2FFUL,  // 15 star near white-blue
+};
+
+constexpr uint8_t kIntroPaletteCount =
+    static_cast<uint8_t>(sizeof(kIntroPaletteRgb) / sizeof(kIntroPaletteRgb[0]));
+
+lv_color_t introPaletteColor(uint8_t index) {
+  return lv_color_hex(kIntroPaletteRgb[index % kIntroPaletteCount]);
+}
 
 template <typename T>
 T clampValue(T value, T min_value, T max_value) {
@@ -541,12 +562,20 @@ bool UiManager::begin() {
   g_instance = this;
   lv_init();
 
-  g_tft.begin();
-  g_tft.setRotation(FREENOVE_LCD_ROTATION);
-  g_tft.fillScreen(TFT_BLACK);
-  initDrawBufferFromPsram();
-
-  lv_disp_draw_buf_init(&g_draw_buf, g_draw_pixels, nullptr, g_draw_pixels_count);
+  drivers::display::DisplayHalConfig display_cfg = {};
+  display_cfg.width = FREENOVE_LCD_WIDTH;
+  display_cfg.height = FREENOVE_LCD_HEIGHT;
+  display_cfg.rotation = FREENOVE_LCD_ROTATION;
+  if (!drivers::display::displayHal().begin(display_cfg)) {
+    Serial.println("[UI] display init failed");
+    return false;
+  }
+  drivers::display::displayHal().fillScreen(0x0000U);
+  initGraphicsPipeline();
+  if (draw_buf1_ == nullptr) {
+    Serial.println("[UI] graphics pipeline init failed");
+    return false;
+  }
 
   static lv_disp_drv_t disp_drv;
   lv_disp_drv_init(&disp_drv);
@@ -558,7 +587,7 @@ bool UiManager::begin() {
     disp_drv.ver_res = FREENOVE_LCD_HEIGHT;
   }
   disp_drv.flush_cb = displayFlushCb;
-  disp_drv.draw_buf = &g_draw_buf;
+  disp_drv.draw_buf = &draw_buf_;
   lv_disp_drv_register(&disp_drv);
 
   static lv_indev_drv_t keypad_drv;
@@ -576,11 +605,72 @@ bool UiManager::begin() {
 #endif
 
   player_ui_.reset();
+  UiFonts::init();
   createWidgets();
+  ui::fx::FxEngineConfig fx_cfg = {};
+  fx_cfg.sprite_width = 160U;
+  fx_cfg.sprite_height = 120U;
+  fx_cfg.target_fps = 18U;
+#ifdef UI_FX_SPRITE_W
+  fx_cfg.sprite_width = static_cast<uint16_t>(UI_FX_SPRITE_W);
+#endif
+#ifdef UI_FX_SPRITE_H
+  fx_cfg.sprite_height = static_cast<uint16_t>(UI_FX_SPRITE_H);
+#endif
+#ifdef UI_FX_TARGET_FPS
+  fx_cfg.target_fps = static_cast<uint8_t>(UI_FX_TARGET_FPS);
+#endif
+  fx_cfg.lgfx_backend = drivers::display::displayHalUsesLovyanGfx();
+  fx_engine_.begin(fx_cfg);
   last_lvgl_tick_ms_ = millis();
+  graphics_stats_last_report_ms_ = last_lvgl_tick_ms_;
   ready_ = true;
-  Serial.println("[UI] LVGL + TFT ready");
+  Serial.printf("[UI] LVGL + display ready backend=%s\n",
+                drivers::display::displayHalUsesLovyanGfx() ? "lgfx" : "tftespi");
+  if (kUseDemoAutorunWinEtapeRuntime) {
+    Serial.println("[UI] autorun SCENE_WIN_ETAPE enabled");
+  }
+  dumpGraphicsStatus();
   return true;
+}
+
+void UiManager::tick(uint32_t now_ms) {
+  (void)now_ms;
+  update();
+}
+
+void UiManager::setLaMetrics(const UiLaMetrics& metrics) {
+  setLaDetectionState(metrics.locked,
+                      metrics.stability_pct,
+                      metrics.stable_ms,
+                      metrics.stable_target_ms,
+                      metrics.gate_elapsed_ms,
+                      metrics.gate_timeout_ms);
+}
+
+void UiManager::submitSceneFrame(const UiSceneFrame& frame) {
+  renderScene(frame.scenario,
+              frame.screen_scene_id,
+              frame.step_id,
+              frame.audio_pack_id,
+              frame.audio_playing,
+              frame.screen_payload_json);
+}
+
+void UiManager::submitInputEvent(const UiInputEvent& event) {
+  if (event.type == UiInputEventType::kTouch) {
+    handleTouch(event.touch_x, event.touch_y, event.touch_pressed);
+    return;
+  }
+  handleButton(event.key, event.long_press);
+}
+
+void UiManager::dumpStatus(UiStatusTopic topic) const {
+  if (topic == UiStatusTopic::kMemory) {
+    dumpMemoryStatus();
+    return;
+  }
+  dumpGraphicsStatus();
 }
 
 void UiManager::update() {
@@ -597,7 +687,541 @@ void UiManager::update() {
     updatePageLine();
   }
   renderMicrophoneWaveform();
+  pollAsyncFlush();
   lv_timer_handler();
+  pollAsyncFlush();
+}
+
+void UiManager::initGraphicsPipeline() {
+  flush_ctx_ = {};
+  buffer_cfg_ = {};
+  graphics_stats_ = {};
+
+  if (draw_buf1_owned_ && draw_buf1_ != nullptr) {
+    runtime::memory::CapsAllocator::release(draw_buf1_);
+  }
+  if (draw_buf2_owned_ && draw_buf2_ != nullptr) {
+    runtime::memory::CapsAllocator::release(draw_buf2_);
+  }
+  if (dma_trans_buf_owned_ && dma_trans_buf_ != nullptr) {
+    runtime::memory::CapsAllocator::release(dma_trans_buf_);
+  }
+  if (full_frame_buf_owned_ && full_frame_buf_ != nullptr) {
+    runtime::memory::CapsAllocator::release(full_frame_buf_);
+  }
+
+  draw_buf1_ = nullptr;
+  draw_buf2_ = nullptr;
+  draw_buf1_owned_ = false;
+  draw_buf2_owned_ = false;
+  dma_trans_buf_ = nullptr;
+  dma_trans_buf_pixels_ = 0U;
+  dma_trans_buf_owned_ = false;
+  full_frame_buf_ = nullptr;
+  full_frame_buf_owned_ = false;
+  color_lut_ready_ = false;
+  dma_requested_ = false;
+  dma_available_ = false;
+  async_flush_enabled_ = false;
+
+  if (kUseColor256Runtime) {
+    for (uint16_t value = 0; value < 256U; ++value) {
+      const uint8_t r3 = static_cast<uint8_t>((value >> 5U) & 0x07U);
+      const uint8_t g3 = static_cast<uint8_t>((value >> 2U) & 0x07U);
+      const uint8_t b2 = static_cast<uint8_t>(value & 0x03U);
+      const uint8_t r5 = static_cast<uint8_t>((r3 * 31U + 3U) / 7U);
+      const uint8_t g6 = static_cast<uint8_t>((g3 * 63U + 3U) / 7U);
+      const uint8_t b5 = static_cast<uint8_t>((b2 * 31U + 1U) / 3U);
+      rgb332_to_565_lut_[value] =
+          static_cast<uint16_t>((static_cast<uint16_t>(r5) << 11U) |
+                                (static_cast<uint16_t>(g6) << 5U) |
+                                static_cast<uint16_t>(b5));
+    }
+    color_lut_ready_ = true;
+  }
+
+  if (!allocateDrawBuffers()) {
+    Serial.println("[UI] draw buffer allocation failed");
+    return;
+  }
+  initDmaEngine();
+
+  const uint16_t width = static_cast<uint16_t>(activeDisplayWidth());
+  uint32_t draw_pixels = static_cast<uint32_t>(width) * static_cast<uint32_t>(buffer_cfg_.lines);
+  if (buffer_cfg_.full_frame) {
+    const uint16_t height = static_cast<uint16_t>(activeDisplayHeight());
+    draw_pixels = static_cast<uint32_t>(width) * static_cast<uint32_t>(height);
+  }
+  lv_disp_draw_buf_init(&draw_buf_, draw_buf1_, draw_buf2_, draw_pixels);
+}
+
+bool UiManager::allocateDrawBuffers() {
+  const uint16_t width = static_cast<uint16_t>(activeDisplayWidth());
+  const uint16_t height = static_cast<uint16_t>(activeDisplayHeight());
+  if (width == 0U || height == 0U) {
+    return false;
+  }
+
+  const uint8_t bpp = static_cast<uint8_t>(sizeof(lv_color_t) * 8U);
+  buffer_cfg_.bpp = bpp;
+  buffer_cfg_.draw_in_psram = false;
+  buffer_cfg_.full_frame = false;
+  buffer_cfg_.double_buffer = false;
+
+  if (kUseFullFrameBenchRuntime) {
+    size_t full_pixels = 0U;
+    size_t full_bytes = 0U;
+    if (!runtime::memory::safeMulSize(static_cast<size_t>(width), static_cast<size_t>(height), &full_pixels) ||
+        !runtime::memory::safeMulSize(full_pixels, sizeof(lv_color_t), &full_bytes)) {
+      Serial.println("[UI] full-frame size overflow, fallback to line buffers");
+      full_pixels = 0U;
+      full_bytes = 0U;
+    }
+    lv_color_t* full = nullptr;
+#if defined(ARDUINO_ARCH_ESP32)
+    if (full_bytes > 0U) {
+      const size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+      if (free_psram > (full_bytes + kFullFrameBenchMinFreePsram)) {
+        full = static_cast<lv_color_t*>(
+            runtime::memory::CapsAllocator::allocPsram(full_bytes, "ui.full_frame_bench"));
+      }
+    }
+#else
+    if (full_bytes > 0U) {
+      full = static_cast<lv_color_t*>(
+          runtime::memory::CapsAllocator::allocDefault(full_bytes, "ui.full_frame_bench"));
+    }
+#endif
+    if (full != nullptr) {
+      full_frame_buf_ = full;
+      full_frame_buf_owned_ = true;
+      draw_buf1_ = full_frame_buf_;
+      draw_buf1_owned_ = false;
+      draw_buf2_ = nullptr;
+      draw_buf2_owned_ = false;
+      buffer_cfg_.lines = height;
+      buffer_cfg_.full_frame = true;
+      buffer_cfg_.double_buffer = false;
+      buffer_cfg_.draw_in_psram = true;
+      Serial.printf("[UI] draw buffer full-frame bench enabled bytes=%u\n",
+                    static_cast<unsigned int>(full_bytes));
+      return true;
+    }
+    Serial.println("[UI] full-frame bench requested but unavailable, fallback to line buffers");
+  }
+
+  uint16_t line_candidates[12] = {0};
+  uint8_t candidate_count = 0U;
+  auto add_line_candidate = [&](uint16_t lines) {
+    if (lines == 0U) {
+      return;
+    }
+    if (lines > height) {
+      lines = height;
+    }
+    for (uint8_t index = 0U; index < candidate_count; ++index) {
+      if (line_candidates[index] == lines) {
+        return;
+      }
+    }
+    if (candidate_count < static_cast<uint8_t>(sizeof(line_candidates) / sizeof(line_candidates[0]))) {
+      line_candidates[candidate_count++] = lines;
+    }
+  };
+  add_line_candidate(kDrawBufLinesRequested != 0U ? kDrawBufLinesRequested : 40U);
+  for (uint8_t index = 0U; index < (sizeof(kDrawLineFallbacks) / sizeof(kDrawLineFallbacks[0])); ++index) {
+    add_line_candidate(kDrawLineFallbacks[index]);
+  }
+  add_line_candidate(20U);
+  add_line_candidate(16U);
+  add_line_candidate(12U);
+  add_line_candidate(8U);
+  add_line_candidate(6U);
+  add_line_candidate(4U);
+  add_line_candidate(2U);
+  add_line_candidate(1U);
+
+  auto allocate_buffer = [&](size_t bytes, bool psram, const char* tag) -> lv_color_t* {
+    if (bytes == 0U) {
+      return nullptr;
+    }
+    if (psram) {
+      return static_cast<lv_color_t*>(
+          runtime::memory::CapsAllocator::allocPsram(bytes, tag));
+    }
+    return static_cast<lv_color_t*>(
+        runtime::memory::CapsAllocator::allocInternalDma(bytes, tag));
+  };
+
+  auto try_allocate_draw = [&](bool draw_in_psram) -> bool {
+    for (uint8_t index = 0U; index < candidate_count; ++index) {
+      const uint16_t lines = line_candidates[index];
+      if (lines == 0U) {
+        continue;
+      }
+      size_t pixels = 0U;
+      size_t bytes = 0U;
+      if (!runtime::memory::safeMulSize(static_cast<size_t>(width), static_cast<size_t>(lines), &pixels) ||
+          !runtime::memory::safeMulSize(pixels, sizeof(lv_color_t), &bytes)) {
+        Serial.printf("[UI] draw buffer size overflow lines=%u\n", static_cast<unsigned int>(lines));
+        continue;
+      }
+      lv_color_t* first = allocate_buffer(bytes, draw_in_psram, "ui.draw.first");
+      if (first == nullptr) {
+        continue;
+      }
+      lv_color_t* second = allocate_buffer(bytes, draw_in_psram, "ui.draw.second");
+      if (second != nullptr) {
+        draw_buf1_ = first;
+        draw_buf2_ = second;
+        draw_buf1_owned_ = true;
+        draw_buf2_owned_ = true;
+        buffer_cfg_.lines = lines;
+        buffer_cfg_.double_buffer = true;
+        buffer_cfg_.draw_in_psram = draw_in_psram;
+        Serial.printf("[UI] draw buffers ready lines=%u bytes=%u source=%s double=1\n",
+                      static_cast<unsigned int>(lines),
+                      static_cast<unsigned int>(bytes),
+                      draw_in_psram ? "PSRAM" : "SRAM_DMA");
+        return true;
+      }
+
+      draw_buf1_ = first;
+      draw_buf2_ = nullptr;
+      draw_buf1_owned_ = true;
+      draw_buf2_owned_ = false;
+      buffer_cfg_.lines = lines;
+      buffer_cfg_.double_buffer = false;
+      buffer_cfg_.draw_in_psram = draw_in_psram;
+      Serial.printf("[UI] draw buffer fallback mono lines=%u bytes=%u source=%s\n",
+                    static_cast<unsigned int>(lines),
+                    static_cast<unsigned int>(bytes),
+                    draw_in_psram ? "PSRAM" : "SRAM_DMA");
+      return true;
+    }
+    return false;
+  };
+
+  const bool prefer_psram_for_trans = kUseColor256Runtime || kUsePsramLineBuffersRuntime;
+  const bool preferred_psram = prefer_psram_for_trans;
+  bool allocated = try_allocate_draw(preferred_psram);
+  if (!allocated) {
+    allocated = try_allocate_draw(!preferred_psram);
+    if (allocated) {
+      Serial.printf("[UI] draw buffer source fallback=%s\n",
+                    (!preferred_psram) ? "PSRAM" : "SRAM_DMA");
+    }
+  }
+  if (!allocated) {
+    return false;
+  }
+
+  const bool needs_trans_buffer = kUseColor256Runtime || buffer_cfg_.draw_in_psram;
+  if (needs_trans_buffer) {
+    uint16_t trans_line_candidates[12] = {0};
+    uint8_t trans_candidate_count = 0U;
+    auto add_trans_candidate = [&](uint16_t lines) {
+      if (lines == 0U) {
+        return;
+      }
+      if (lines > height) {
+        lines = height;
+      }
+      for (uint8_t i = 0U; i < trans_candidate_count; ++i) {
+        if (trans_line_candidates[i] == lines) {
+          return;
+        }
+      }
+      if (trans_candidate_count <
+          static_cast<uint8_t>(sizeof(trans_line_candidates) / sizeof(trans_line_candidates[0]))) {
+        trans_line_candidates[trans_candidate_count++] = lines;
+      }
+    };
+    const uint16_t requested_trans_lines = (kDmaTransBufLinesRequested != 0U)
+                                               ? kDmaTransBufLinesRequested
+                                               : buffer_cfg_.lines;
+    add_trans_candidate(requested_trans_lines);
+    add_trans_candidate(buffer_cfg_.lines);
+    add_trans_candidate(24U);
+    add_trans_candidate(16U);
+    add_trans_candidate(12U);
+    add_trans_candidate(8U);
+    add_trans_candidate(6U);
+    add_trans_candidate(4U);
+    add_trans_candidate(2U);
+    add_trans_candidate(1U);
+
+    uint16_t selected_trans_lines = 0U;
+#if defined(ARDUINO_ARCH_ESP32)
+    for (uint8_t index = 0U; index < trans_candidate_count; ++index) {
+      const uint16_t trans_lines = trans_line_candidates[index];
+      size_t trans_pixels = 0U;
+      size_t trans_bytes = 0U;
+      if (!runtime::memory::safeMulSize(static_cast<size_t>(width), static_cast<size_t>(trans_lines), &trans_pixels) ||
+          !runtime::memory::safeMulSize(trans_pixels, sizeof(uint16_t), &trans_bytes)) {
+        Serial.printf("[UI] trans buffer size overflow lines=%u\n",
+                      static_cast<unsigned int>(trans_lines));
+        continue;
+      }
+      dma_trans_buf_ = static_cast<uint16_t*>(
+          kUseDmaTxInDramRuntime
+              ? runtime::memory::CapsAllocator::allocInternalDma(trans_bytes, "ui.trans")
+              : runtime::memory::CapsAllocator::allocDefault(trans_bytes, "ui.trans"));
+      if (dma_trans_buf_ != nullptr) {
+        dma_trans_buf_owned_ = true;
+        dma_trans_buf_pixels_ = trans_pixels;
+        selected_trans_lines = trans_lines;
+        break;
+      }
+    }
+#else
+    if (trans_candidate_count > 0U) {
+      const uint16_t trans_lines = trans_line_candidates[0];
+      size_t trans_pixels = 0U;
+      size_t trans_bytes = 0U;
+      if (!runtime::memory::safeMulSize(static_cast<size_t>(width), static_cast<size_t>(trans_lines), &trans_pixels) ||
+          !runtime::memory::safeMulSize(trans_pixels, sizeof(uint16_t), &trans_bytes)) {
+        Serial.printf("[UI] trans buffer size overflow lines=%u\n",
+                      static_cast<unsigned int>(trans_lines));
+      } else {
+        dma_trans_buf_ = static_cast<uint16_t*>(
+            runtime::memory::CapsAllocator::allocDefault(trans_bytes, "ui.trans"));
+      }
+      if (dma_trans_buf_ != nullptr) {
+        dma_trans_buf_owned_ = true;
+        dma_trans_buf_pixels_ = trans_pixels;
+        selected_trans_lines = trans_lines;
+      }
+    }
+#endif
+    if (dma_trans_buf_ != nullptr && selected_trans_lines > 0U) {
+      Serial.printf("[UI] trans buffer ready lines=%u pixels=%u source=%s\n",
+                    static_cast<unsigned int>(selected_trans_lines),
+                    static_cast<unsigned int>(dma_trans_buf_pixels_),
+                    kUseDmaTxInDramRuntime ? "INTERNAL_DMA" : "DEFAULT");
+      if (kUseAsyncDmaRuntime && !kUseColor256Runtime && selected_trans_lines < buffer_cfg_.lines) {
+        Serial.printf("[UI] draw lines reduced for trans buffer: %u -> %u\n",
+                      static_cast<unsigned int>(buffer_cfg_.lines),
+                      static_cast<unsigned int>(selected_trans_lines));
+        buffer_cfg_.lines = selected_trans_lines;
+      }
+    } else {
+      dma_trans_buf_owned_ = false;
+      dma_trans_buf_pixels_ = 0U;
+      Serial.println("[UI] trans buffer unavailable; async DMA may be disabled");
+    }
+  }
+
+  return draw_buf1_ != nullptr;
+}
+
+bool UiManager::initDmaEngine() {
+  dma_requested_ = kUseAsyncDmaRuntime;
+  dma_available_ = false;
+  async_flush_enabled_ = false;
+  if (!dma_requested_) {
+    buffer_cfg_.dma_enabled = false;
+    return false;
+  }
+
+  dma_available_ = drivers::display::displayHal().initDma(false);
+  if (!dma_available_) {
+    Serial.println("[UI] DMA engine unavailable, keeping sync flush");
+    buffer_cfg_.dma_enabled = false;
+    return false;
+  }
+
+  if (kUseColor256Runtime) {
+    Serial.println("[UI] DMA async disabled in RGB332 mode (stability guard)");
+    buffer_cfg_.dma_enabled = false;
+    return false;
+  }
+
+  const bool needs_trans_buffer = kUseColor256Runtime || buffer_cfg_.draw_in_psram;
+  if (needs_trans_buffer && dma_trans_buf_ == nullptr) {
+    Serial.println("[UI] DMA enabled but trans buffer missing, keeping sync flush");
+    buffer_cfg_.dma_enabled = false;
+    return false;
+  }
+
+  if (buffer_cfg_.full_frame) {
+    Serial.println("[UI] full-frame bench forces sync flush");
+    buffer_cfg_.dma_enabled = false;
+    return false;
+  }
+
+  async_flush_enabled_ = true;
+  buffer_cfg_.dma_enabled = true;
+  Serial.println("[UI] DMA async flush enabled");
+  return true;
+}
+
+void UiManager::pollAsyncFlush() {
+  if (!flush_ctx_.pending) {
+    return;
+  }
+  if (flush_ctx_.using_dma && dma_available_ && drivers::display::displayHal().dmaBusy()) {
+    graphics_stats_.flush_busy_poll_count += 1U;
+    return;
+  }
+  completePendingFlush();
+}
+
+void UiManager::completePendingFlush() {
+  if (!flush_ctx_.pending) {
+    return;
+  }
+  if (flush_ctx_.using_dma) {
+    drivers::display::displayHal().endWrite();
+  }
+  if (flush_ctx_.disp != nullptr) {
+    lv_disp_flush_ready(flush_ctx_.disp);
+  }
+
+  const uint32_t elapsed_us = micros() - flush_ctx_.started_ms;
+  graphics_stats_.flush_count += 1U;
+  if (flush_ctx_.using_dma) {
+    graphics_stats_.dma_flush_count += 1U;
+  } else {
+    graphics_stats_.sync_flush_count += 1U;
+  }
+  graphics_stats_.flush_time_total_us += elapsed_us;
+  if (elapsed_us > graphics_stats_.flush_time_max_us) {
+    graphics_stats_.flush_time_max_us = elapsed_us;
+  }
+  perfMonitor().noteUiFlush(flush_ctx_.using_dma, elapsed_us);
+  flush_ctx_ = {};
+}
+
+uint16_t UiManager::convertLineRgb332ToRgb565(const lv_color_t* src,
+                                              uint16_t* dst,
+                                              uint32_t px_count) const {
+  if (src == nullptr || dst == nullptr || px_count == 0U || !color_lut_ready_) {
+    return 0U;
+  }
+  for (uint32_t index = 0U; index < px_count; ++index) {
+#if LV_COLOR_DEPTH == 8
+    const uint8_t rgb332 = src[index].full;
+    dst[index] = rgb332_to_565_lut_[rgb332];
+#else
+    dst[index] = src[index].full;
+#endif
+  }
+  return static_cast<uint16_t>((px_count > 0xFFFFU) ? 0xFFFFU : px_count);
+}
+
+lv_color_t UiManager::quantize565ToTheme256(lv_color_t color) const {
+  if (!kUseThemeQuantizeRuntime) {
+    return color;
+  }
+#if LV_COLOR_DEPTH == 16
+  lv_color32_t c32 = {};
+  c32.full = lv_color_to32(color);
+  const uint8_t r3 = static_cast<uint8_t>((static_cast<uint16_t>(c32.ch.red) * 7U + 127U) / 255U);
+  const uint8_t g3 = static_cast<uint8_t>((static_cast<uint16_t>(c32.ch.green) * 7U + 127U) / 255U);
+  const uint8_t b2 = static_cast<uint8_t>((static_cast<uint16_t>(c32.ch.blue) * 3U + 127U) / 255U);
+  const uint8_t rq = static_cast<uint8_t>((static_cast<uint16_t>(r3) * 255U) / 7U);
+  const uint8_t gq = static_cast<uint8_t>((static_cast<uint16_t>(g3) * 255U) / 7U);
+  const uint8_t bq = static_cast<uint8_t>((static_cast<uint16_t>(b2) * 255U) / 3U);
+  return lv_color_make(rq, gq, bq);
+#else
+  return color;
+#endif
+}
+
+void UiManager::dumpGraphicsStatus() const {
+  const uint32_t avg_us = (graphics_stats_.flush_count == 0U)
+                              ? 0U
+                              : (graphics_stats_.flush_time_total_us / graphics_stats_.flush_count);
+  Serial.printf(
+      "[UI] GFX_STATUS depth=%u mode=%s theme256=%u lines=%u double=%u source=%s full_frame=%u dma_req=%u dma_async=%u trans_px=%u pending=%u flush=%lu dma=%lu sync=%lu avg_us=%lu max_us=%lu\n",
+      static_cast<unsigned int>(LV_COLOR_DEPTH),
+      kUseColor256Runtime ? "RGB332" : "RGB565",
+      kUseThemeQuantizeRuntime ? 1U : 0U,
+      static_cast<unsigned int>(buffer_cfg_.lines),
+      buffer_cfg_.double_buffer ? 1U : 0U,
+      buffer_cfg_.draw_in_psram ? "PSRAM" : "SRAM_DMA",
+      buffer_cfg_.full_frame ? 1U : 0U,
+      dma_requested_ ? 1U : 0U,
+      async_flush_enabled_ ? 1U : 0U,
+      static_cast<unsigned int>(dma_trans_buf_pixels_),
+      flush_ctx_.pending ? 1U : 0U,
+      static_cast<unsigned long>(graphics_stats_.flush_count),
+      static_cast<unsigned long>(graphics_stats_.dma_flush_count),
+      static_cast<unsigned long>(graphics_stats_.sync_flush_count),
+      static_cast<unsigned long>(avg_us),
+      static_cast<unsigned long>(graphics_stats_.flush_time_max_us));
+}
+
+UiMemorySnapshot UiManager::memorySnapshot() const {
+  UiMemorySnapshot snapshot = {};
+
+#if LV_USE_MEM_MONITOR
+  lv_mem_monitor_t monitor = {};
+  lv_mem_monitor(&monitor);
+  snapshot.lv_mem_used = monitor.total_size - monitor.free_size;
+  snapshot.lv_mem_free = monitor.free_size;
+  snapshot.lv_mem_frag_pct = monitor.frag_pct;
+  snapshot.lv_mem_max_used = monitor.max_used;
+#endif
+
+#if defined(ARDUINO_ARCH_ESP32)
+  snapshot.heap_internal_free = static_cast<uint32_t>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+  snapshot.heap_dma_free = static_cast<uint32_t>(heap_caps_get_free_size(MALLOC_CAP_DMA));
+  snapshot.heap_psram_free = static_cast<uint32_t>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+  snapshot.heap_largest_dma_block = static_cast<uint32_t>(heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+#endif
+
+  snapshot.alloc_failures = runtime::memory::CapsAllocator::failureCount();
+  snapshot.draw_lines = buffer_cfg_.lines;
+  snapshot.draw_in_psram = buffer_cfg_.draw_in_psram;
+  snapshot.full_frame = buffer_cfg_.full_frame;
+  snapshot.dma_async_enabled = async_flush_enabled_;
+
+  const size_t width = static_cast<size_t>(activeDisplayWidth());
+  const size_t height = static_cast<size_t>(activeDisplayHeight());
+  size_t draw_pixels = 0U;
+  if (buffer_cfg_.full_frame) {
+    runtime::memory::safeMulSize(width, height, &draw_pixels);
+  } else {
+    runtime::memory::safeMulSize(width, static_cast<size_t>(buffer_cfg_.lines), &draw_pixels);
+  }
+  size_t draw_bytes = 0U;
+  runtime::memory::safeMulSize(draw_pixels, sizeof(lv_color_t), &draw_bytes);
+  snapshot.draw_buffer_bytes = static_cast<uint32_t>((draw_bytes > 0xFFFFFFFFULL) ? 0xFFFFFFFFULL : draw_bytes);
+
+  size_t trans_bytes = 0U;
+  runtime::memory::safeMulSize(dma_trans_buf_pixels_, sizeof(uint16_t), &trans_bytes);
+  snapshot.trans_buffer_bytes = static_cast<uint32_t>((trans_bytes > 0xFFFFFFFFULL) ? 0xFFFFFFFFULL : trans_bytes);
+  return snapshot;
+}
+
+void UiManager::dumpMemoryStatus() const {
+  const UiMemorySnapshot snapshot = memorySnapshot();
+#if LV_USE_MEM_MONITOR
+  Serial.printf("[UI] LV_MEM used=%u free=%u frag=%u%% max_used=%u\n",
+                static_cast<unsigned int>(snapshot.lv_mem_used),
+                static_cast<unsigned int>(snapshot.lv_mem_free),
+                static_cast<unsigned int>(snapshot.lv_mem_frag_pct),
+                static_cast<unsigned int>(snapshot.lv_mem_max_used));
+#else
+  Serial.println("[UI] LV_MEM monitor disabled at compile-time");
+#endif
+#if defined(ARDUINO_ARCH_ESP32)
+  Serial.printf("[UI] HEAP internal=%u dma=%u psram=%u largest_dma=%u\n",
+                static_cast<unsigned int>(snapshot.heap_internal_free),
+                static_cast<unsigned int>(snapshot.heap_dma_free),
+                static_cast<unsigned int>(snapshot.heap_psram_free),
+                static_cast<unsigned int>(snapshot.heap_largest_dma_block));
+#endif
+  Serial.printf("[UI] MEM_SNAPSHOT draw_lines=%u draw_psram=%u full_frame=%u dma_async=%u draw_bytes=%u trans_bytes=%u alloc_fail=%lu\n",
+                static_cast<unsigned int>(snapshot.draw_lines),
+                snapshot.draw_in_psram ? 1U : 0U,
+                snapshot.full_frame ? 1U : 0U,
+                snapshot.dma_async_enabled ? 1U : 0U,
+                static_cast<unsigned int>(snapshot.draw_buffer_bytes),
+                static_cast<unsigned int>(snapshot.trans_buffer_bytes),
+                static_cast<unsigned long>(snapshot.alloc_failures));
 }
 
 void UiManager::setHardwareSnapshot(const HardwareManager::Snapshot& snapshot) {
@@ -655,6 +1279,7 @@ void UiManager::resetIntroConfigDefaults() {
   intro_config_.stars_override = -1;
   copyStringBounded(intro_config_.fx_3d, sizeof(intro_config_.fx_3d), "rotozoom");
   copyStringBounded(intro_config_.fx_3d_quality, sizeof(intro_config_.fx_3d_quality), "auto");
+  copyStringBounded(intro_config_.font_mode, sizeof(intro_config_.font_mode), "orbitron");
 }
 
 void UiManager::parseSceneWinEtapeTxtOverrides(const char* payload) {
@@ -783,6 +1408,10 @@ void UiManager::parseSceneWinEtapeTxtOverrides(const char* payload) {
       copyStringBounded(intro_config_.fx_3d_quality,
                         sizeof(intro_config_.fx_3d_quality),
                         value.c_str());
+      continue;
+    }
+    if (key == "FONT_MODE") {
+      copyStringBounded(intro_config_.font_mode, sizeof(intro_config_.font_mode), value.c_str());
       continue;
     }
   }
@@ -920,6 +1549,10 @@ void UiManager::parseSceneWinEtapeJsonOverrides(const char* payload, const char*
                       sizeof(intro_config_.fx_3d_quality),
                       fx_3d_quality);
   }
+  const char* font_mode = doc["FONT_MODE"] | doc["font_mode"] | doc["fontMode"] | "";
+  if (font_mode[0] != '\0') {
+    copyStringBounded(intro_config_.font_mode, sizeof(intro_config_.font_mode), font_mode);
+  }
 
   Serial.printf("[UI] intro overrides loaded from %s\n",
                 (path_for_log != nullptr) ? path_for_log : "json");
@@ -928,10 +1561,10 @@ void UiManager::parseSceneWinEtapeJsonOverrides(const char* payload, const char*
 void UiManager::loadSceneWinEtapeOverrides() {
   resetIntroConfigDefaults();
   const char* const candidates[] = {
-      "/ui/scene_win_etape.txt",
       "/ui/scene_win_etape.json",
       "/SCENE_WIN_ETAPE.json",
       "/ui/SCENE_WIN_ETAPE.json",
+      "/ui/scene_win_etape.txt",
   };
 
   String payload;
@@ -1005,6 +1638,9 @@ void UiManager::loadSceneWinEtapeOverrides() {
   if (intro_config_.fx_3d_quality[0] == '\0') {
     copyStringBounded(intro_config_.fx_3d_quality, sizeof(intro_config_.fx_3d_quality), "auto");
   }
+  if (intro_config_.font_mode[0] == '\0') {
+    copyStringBounded(intro_config_.font_mode, sizeof(intro_config_.font_mode), "orbitron");
+  }
 
   intro_b1_crash_ms_ = intro_config_.b1_crash_ms;
   intro_scroll_mid_a_px_per_sec_ = intro_config_.scroll_a_px_per_sec;
@@ -1019,7 +1655,7 @@ void UiManager::ensureIntroCreated() {
   intro_root_ = lv_obj_create(scene_root_);
   lv_obj_remove_style_all(intro_root_);
   lv_obj_set_size(intro_root_, LV_PCT(100), LV_PCT(100));
-  lv_obj_set_style_bg_color(intro_root_, lv_color_hex(0x000022UL), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(intro_root_, introPaletteColor(0), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(intro_root_, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_clear_flag(intro_root_, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_add_flag(intro_root_, LV_OBJ_FLAG_HIDDEN);
@@ -1058,50 +1694,50 @@ void UiManager::ensureIntroCreated() {
   intro_debug_label_ = lv_label_create(intro_root_);
 
   if (intro_logo_shadow_label_ != nullptr) {
-    lv_obj_set_style_text_font(intro_logo_shadow_label_, &lv_font_montserrat_18, LV_PART_MAIN);
-    lv_obj_set_style_text_color(intro_logo_shadow_label_, lv_color_hex(0x000000UL), LV_PART_MAIN);
+    lv_obj_set_style_text_font(intro_logo_shadow_label_, UiFonts::fontTitleXL(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(intro_logo_shadow_label_, introPaletteColor(8), LV_PART_MAIN);
     lv_obj_set_style_text_opa(intro_logo_shadow_label_, LV_OPA_70, LV_PART_MAIN);
     lv_obj_set_style_text_letter_space(intro_logo_shadow_label_, 2, LV_PART_MAIN);
     lv_obj_add_flag(intro_logo_shadow_label_, LV_OBJ_FLAG_HIDDEN);
   }
   if (intro_logo_label_ != nullptr) {
-    lv_obj_set_style_text_font(intro_logo_label_, &lv_font_montserrat_18, LV_PART_MAIN);
-    lv_obj_set_style_text_color(intro_logo_label_, lv_color_hex(0xFFFFFFUL), LV_PART_MAIN);
+    lv_obj_set_style_text_font(intro_logo_label_, UiFonts::fontTitleXL(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(intro_logo_label_, introPaletteColor(7), LV_PART_MAIN);
     lv_obj_set_style_text_letter_space(intro_logo_label_, 2, LV_PART_MAIN);
     lv_obj_add_flag(intro_logo_label_, LV_OBJ_FLAG_HIDDEN);
   }
   if (intro_crack_scroll_label_ != nullptr) {
-    lv_obj_set_style_text_font(intro_crack_scroll_label_, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(intro_crack_scroll_label_, lv_color_hex(0xFFFFFFUL), LV_PART_MAIN);
+    lv_obj_set_style_text_font(intro_crack_scroll_label_, UiFonts::fontTitleXL(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(intro_crack_scroll_label_, introPaletteColor(7), LV_PART_MAIN);
     lv_obj_add_flag(intro_crack_scroll_label_, LV_OBJ_FLAG_HIDDEN);
   }
   if (intro_bottom_scroll_label_ != nullptr) {
-    lv_obj_set_style_text_font(intro_bottom_scroll_label_, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(intro_bottom_scroll_label_, lv_color_hex(0xFFF3A7UL), LV_PART_MAIN);
+    lv_obj_set_style_text_font(intro_bottom_scroll_label_, UiFonts::fontMono(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(intro_bottom_scroll_label_, introPaletteColor(5), LV_PART_MAIN);
     lv_obj_set_style_text_opa(intro_bottom_scroll_label_, LV_OPA_90, LV_PART_MAIN);
     lv_obj_add_flag(intro_bottom_scroll_label_, LV_OBJ_FLAG_HIDDEN);
   }
   if (intro_clean_title_shadow_label_ != nullptr) {
-    lv_obj_set_style_text_font(intro_clean_title_shadow_label_, &lv_font_montserrat_18, LV_PART_MAIN);
-    lv_obj_set_style_text_color(intro_clean_title_shadow_label_, lv_color_hex(0x000000UL), LV_PART_MAIN);
+    lv_obj_set_style_text_font(intro_clean_title_shadow_label_, UiFonts::fontTitleXL(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(intro_clean_title_shadow_label_, introPaletteColor(8), LV_PART_MAIN);
     lv_obj_set_style_text_opa(intro_clean_title_shadow_label_, LV_OPA_70, LV_PART_MAIN);
     lv_obj_set_style_text_letter_space(intro_clean_title_shadow_label_, 1, LV_PART_MAIN);
     lv_obj_add_flag(intro_clean_title_shadow_label_, LV_OBJ_FLAG_HIDDEN);
   }
   if (intro_clean_title_label_ != nullptr) {
-    lv_obj_set_style_text_font(intro_clean_title_label_, &lv_font_montserrat_18, LV_PART_MAIN);
-    lv_obj_set_style_text_color(intro_clean_title_label_, lv_color_hex(0xFFFFFFUL), LV_PART_MAIN);
+    lv_obj_set_style_text_font(intro_clean_title_label_, UiFonts::fontTitleXL(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(intro_clean_title_label_, introPaletteColor(7), LV_PART_MAIN);
     lv_obj_set_style_text_letter_space(intro_clean_title_label_, 1, LV_PART_MAIN);
     lv_obj_add_flag(intro_clean_title_label_, LV_OBJ_FLAG_HIDDEN);
   }
   if (intro_clean_scroll_label_ != nullptr) {
-    lv_obj_set_style_text_font(intro_clean_scroll_label_, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(intro_clean_scroll_label_, lv_color_hex(0xFFFFFFUL), LV_PART_MAIN);
+    lv_obj_set_style_text_font(intro_clean_scroll_label_, UiFonts::fontTitleXL(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(intro_clean_scroll_label_, introPaletteColor(7), LV_PART_MAIN);
     lv_obj_add_flag(intro_clean_scroll_label_, LV_OBJ_FLAG_HIDDEN);
   }
   if (intro_debug_label_ != nullptr) {
-    lv_obj_set_style_text_font(intro_debug_label_, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(intro_debug_label_, lv_color_hex(0x7FD7FFUL), LV_PART_MAIN);
+    lv_obj_set_style_text_font(intro_debug_label_, UiFonts::fontBodyS(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(intro_debug_label_, introPaletteColor(9), LV_PART_MAIN);
     lv_obj_set_style_text_opa(intro_debug_label_, LV_OPA_80, LV_PART_MAIN);
     lv_obj_align(intro_debug_label_, LV_ALIGN_TOP_LEFT, 6, 6);
     lv_obj_add_flag(intro_debug_label_, LV_OBJ_FLAG_HIDDEN);
@@ -1112,15 +1748,15 @@ void UiManager::ensureIntroCreated() {
     slot.shadow = lv_label_create(intro_root_);
     slot.glyph = lv_label_create(intro_root_);
     if (slot.shadow != nullptr) {
-      lv_obj_set_style_text_font(slot.shadow, &lv_font_montserrat_14, LV_PART_MAIN);
-      lv_obj_set_style_text_color(slot.shadow, lv_color_hex(0x000000UL), LV_PART_MAIN);
+      lv_obj_set_style_text_font(slot.shadow, UiFonts::fontTitleXL(), LV_PART_MAIN);
+      lv_obj_set_style_text_color(slot.shadow, introPaletteColor(8), LV_PART_MAIN);
       lv_obj_set_style_text_opa(slot.shadow, LV_OPA_50, LV_PART_MAIN);
       lv_label_set_text(slot.shadow, " ");
       lv_obj_add_flag(slot.shadow, LV_OBJ_FLAG_HIDDEN);
     }
     if (slot.glyph != nullptr) {
-      lv_obj_set_style_text_font(slot.glyph, &lv_font_montserrat_14, LV_PART_MAIN);
-      lv_obj_set_style_text_color(slot.glyph, lv_color_hex(0xFFFFFFUL), LV_PART_MAIN);
+      lv_obj_set_style_text_font(slot.glyph, UiFonts::fontTitleXL(), LV_PART_MAIN);
+      lv_obj_set_style_text_color(slot.glyph, introPaletteColor(7), LV_PART_MAIN);
       lv_label_set_text(slot.glyph, " ");
       lv_obj_add_flag(slot.glyph, LV_OBJ_FLAG_HIDDEN);
     }
@@ -1132,7 +1768,7 @@ void UiManager::ensureIntroCreated() {
     intro_wire_lines_[i] = lv_line_create(intro_root_);
     lv_line_set_points(intro_wire_lines_[i], intro_wire_points_[i], 2);
     lv_obj_set_style_line_width(intro_wire_lines_[i], 1, LV_PART_MAIN);
-    lv_obj_set_style_line_color(intro_wire_lines_[i], lv_color_hex(0x00FFFFUL), LV_PART_MAIN);
+    lv_obj_set_style_line_color(intro_wire_lines_[i], introPaletteColor(3), LV_PART_MAIN);
     lv_obj_set_style_line_rounded(intro_wire_lines_[i], true, LV_PART_MAIN);
     lv_obj_set_style_opa(intro_wire_lines_[i], LV_OPA_70, LV_PART_MAIN);
     lv_obj_set_size(intro_wire_lines_[i], LV_PCT(100), LV_PCT(100));
@@ -1143,7 +1779,7 @@ void UiManager::ensureIntroCreated() {
     intro_roto_stripes_[i] = lv_obj_create(intro_root_);
     lv_obj_remove_style_all(intro_roto_stripes_[i]);
     lv_obj_set_size(intro_roto_stripes_[i], 20, 3);
-    lv_obj_set_style_bg_color(intro_roto_stripes_[i], lv_color_hex(0x1C3558UL), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(intro_roto_stripes_[i], introPaletteColor(11), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(intro_roto_stripes_[i], LV_OPA_30, LV_PART_MAIN);
     lv_obj_add_flag(intro_roto_stripes_[i], LV_OBJ_FLAG_HIDDEN);
   }
@@ -1154,7 +1790,7 @@ void UiManager::ensureIntroCreated() {
     lv_obj_set_size(intro_firework_particles_[i], 3, 3);
     lv_obj_set_style_bg_opa(intro_firework_particles_[i], LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(intro_firework_particles_[i], LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(intro_firework_particles_[i], lv_color_hex(0xFFFFFFUL), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(intro_firework_particles_[i], introPaletteColor(7), LV_PART_MAIN);
     lv_obj_add_flag(intro_firework_particles_[i], LV_OBJ_FLAG_HIDDEN);
     intro_firework_states_[i] = {};
   }
@@ -1212,7 +1848,7 @@ void UiManager::createCopperWavyRings(uint8_t count) {
     lv_obj_set_style_bg_opa(bar, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(bar, 2, LV_PART_MAIN);
     lv_obj_set_style_border_opa(bar, LV_OPA_70, LV_PART_MAIN);
-    lv_obj_set_style_border_color(bar, lv_color_hex(0x00FFFFUL), LV_PART_MAIN);
+    lv_obj_set_style_border_color(bar, introPaletteColor(3), LV_PART_MAIN);
     lv_obj_set_style_translate_x(bar, 0, LV_PART_MAIN);
     lv_obj_set_style_translate_y(bar, 0, LV_PART_MAIN);
   }
@@ -1222,7 +1858,7 @@ void UiManager::updateCopperWavyRings(uint32_t t_ms) {
   if (intro_copper_count_ == 0U) {
     return;
   }
-  static constexpr uint32_t kPalette[] = {0x00FFFFUL, 0xFF00FFUL, 0xFFFF00UL, 0xFFFFFFUL};
+  static constexpr uint8_t kPaletteIdx[] = {3U, 4U, 5U, 7U};
   const int16_t width = activeDisplayWidth();
   const int16_t height = activeDisplayHeight();
   const int16_t min_dim = static_cast<int16_t>((width < height) ? width : height);
@@ -1252,12 +1888,14 @@ void UiManager::updateCopperWavyRings(uint32_t t_ms) {
         static_cast<uint8_t>((i + static_cast<uint8_t>((t_ms / 220U) % 4U)) % 4U);
     const float pulse = (std::sin(phase * 2.2f) + 1.0f) * 0.5f;
     lv_opa_t opa = static_cast<lv_opa_t>(80 + static_cast<uint8_t>(pulse * 130.0f));
+    const uint8_t border_width = static_cast<uint8_t>(2U + static_cast<uint8_t>(pulse * 3.0f));
     if (intro_state_ == IntroState::PHASE_B_TRANSITION && intro_b1_done_) {
       opa = static_cast<lv_opa_t>(40 + static_cast<uint8_t>(pulse * 90.0f));
     }
     lv_obj_set_pos(bar, x, y);
     lv_obj_set_size(bar, diameter, diameter);
-    lv_obj_set_style_border_color(bar, lv_color_hex(kPalette[palette_index]), LV_PART_MAIN);
+    lv_obj_set_style_border_width(bar, border_width, LV_PART_MAIN);
+    lv_obj_set_style_border_color(bar, introPaletteColor(kPaletteIdx[palette_index]), LV_PART_MAIN);
     lv_obj_set_style_border_opa(bar, opa, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(bar, LV_OPA_TRANSP, LV_PART_MAIN);
   }
@@ -1272,8 +1910,8 @@ void UiManager::createStarfield(uint8_t count, uint8_t layers) {
   const int16_t width = activeDisplayWidth();
   const int16_t height = activeDisplayHeight();
   const bool clean_mode = (intro_state_ == IntroState::PHASE_C_CLEAN || intro_state_ == IntroState::PHASE_C_LOOP);
-  const int16_t speeds_fast[3] = {38, 96, 182};
-  const int16_t speeds_clean[3] = {20, 58, 118};
+  const int16_t speeds_fast[3] = {54, 116, 198};
+  const int16_t speeds_clean[3] = {26, 74, 154};
 
   const uint16_t layer0_end = static_cast<uint16_t>((count * 50U) / 100U);
   const uint16_t layer1_end = static_cast<uint16_t>((count * 80U) / 100U);
@@ -1312,7 +1950,7 @@ void UiManager::createStarfield(uint8_t count, uint8_t layers) {
 
     lv_obj_set_size(star, state.size_px, state.size_px);
     lv_obj_set_style_radius(star, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(star, lv_color_hex(layer == 2U ? 0xFFFFFFUL : 0xBEEBFFUL), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(star, introPaletteColor(layer == 2U ? 7U : 15U), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(star,
                             (layer == 0U) ? LV_OPA_30 : ((layer == 1U) ? LV_OPA_60 : LV_OPA_COVER),
                             LV_PART_MAIN);
@@ -1378,12 +2016,15 @@ void UiManager::configureWavySineScroller(const char* text,
                                           bool limit_to_half_width) {
   String padded = asciiFallbackForUiText(text);
   // Keep some visual breathing room so the scroller does not look clipped on screen edges.
-  padded = String("        ") + padded + String("        ");
+  String pad;
+  for (uint8_t i = 0U; i < kIntroCenterScrollPadSpaces; ++i) {
+    pad += " ";
+  }
+  padded = pad + padded + pad;
   copyStringBounded(intro_wave_text_ascii_, sizeof(intro_wave_text_ascii_), padded.c_str());
   intro_wave_text_len_ = static_cast<uint16_t>(std::strlen(intro_wave_text_ascii_));
   intro_wave_pingpong_mode_ = ping_pong;
   intro_wave_speed_px_per_sec_ = speed_px_per_sec;
-  intro_wave_amp_px_ = amp_px;
   intro_wave_period_px_ = period_px;
   intro_wave_phase_speed_ = intro_config_.sine_phase_speed;
   intro_wave_base_y_ = base_y;
@@ -1393,10 +2034,37 @@ void UiManager::configureWavySineScroller(const char* text,
   intro_wave_half_height_mode_ = false;
   intro_wave_band_top_ = 0;
   intro_wave_band_bottom_ = activeDisplayHeight();
+  intro_wave_use_pixel_font_ = false;
 
   const int16_t width = activeDisplayWidth();
-  const lv_font_t* wave_font = large_text ? &lv_font_montserrat_18 : &lv_font_montserrat_14;
-  intro_wave_char_width_ = large_text ? ((width >= 460) ? 13 : 12) : ((width >= 460) ? 10 : 9);
+  const int16_t height = activeDisplayHeight();
+  String font_mode = intro_config_.font_mode;
+  font_mode.toLowerCase();
+  const bool force_pixel = (font_mode == "pixel");
+  const lv_font_t* wave_font = UiFonts::fontBodyM();
+  if (large_text) {
+    if (force_pixel) {
+      wave_font = UiFonts::fontPixel();
+      intro_wave_use_pixel_font_ = true;
+    } else {
+      wave_font = UiFonts::fontTitleXL();
+      intro_wave_use_pixel_font_ = false;
+    }
+  }
+  intro_wave_font_line_height_ = lv_font_get_line_height(wave_font);
+  const float width_ratio = large_text ? 0.62f : 0.56f;
+  intro_wave_char_width_ =
+      static_cast<int16_t>(clampValue<int32_t>(static_cast<int32_t>(intro_wave_font_line_height_ * width_ratio),
+                                               8,
+                                               30));
+  if (!large_text && intro_wave_char_width_ < 9) {
+    intro_wave_char_width_ = 9;
+  }
+  intro_wave_amp_px_ = amp_px;
+  if (large_text) {
+    intro_wave_amp_px_ = resolveCenterWaveAmplitudePx(wave_font);
+    intro_wave_base_y_ = static_cast<int16_t>(height / 2);
+  }
 
   if (intro_wave_text_len_ == 0U) {
     intro_wave_glyph_count_ = 0U;
@@ -1448,6 +2116,9 @@ void UiManager::configureWavySineScroller(const char* text,
     }
     lv_obj_set_style_text_font(slot.glyph, wave_font, LV_PART_MAIN);
     lv_obj_set_style_text_font(slot.shadow, wave_font, LV_PART_MAIN);
+    lv_obj_set_style_text_color(slot.glyph, introPaletteColor(7), LV_PART_MAIN);
+    lv_obj_set_style_text_color(slot.shadow, introPaletteColor(8), LV_PART_MAIN);
+    lv_obj_set_style_text_opa(slot.shadow, LV_OPA_60, LV_PART_MAIN);
     if (i < intro_wave_glyph_count_) {
       lv_obj_clear_flag(slot.glyph, LV_OBJ_FLAG_HIDDEN);
       lv_obj_clear_flag(slot.shadow, LV_OBJ_FLAG_HIDDEN);
@@ -1458,14 +2129,39 @@ void UiManager::configureWavySineScroller(const char* text,
   }
 }
 
+uint8_t UiManager::resolveCenterWaveAmplitudePx(const lv_font_t* wave_font) const {
+  const int16_t height = activeDisplayHeight();
+  const uint8_t fallback = clampValue<uint8_t>(intro_wave_amp_px_, 8U, kIntroSineAmpMax);
+  if (wave_font == nullptr || height <= 0) {
+    return fallback;
+  }
+  const int16_t font_h = static_cast<int16_t>(lv_font_get_line_height(wave_font));
+  int16_t target = static_cast<int16_t>((height / 4) - (font_h / 2));
+  if (target < 80) {
+    target = 80;
+  }
+  if (target > static_cast<int16_t>(kIntroSineAmpMax)) {
+    target = static_cast<int16_t>(kIntroSineAmpMax);
+  }
+  const uint8_t cfg_amp = clampValue<uint8_t>(intro_wave_amp_px_, 8U, kIntroSineAmpMax);
+  if (cfg_amp > static_cast<uint8_t>(target)) {
+    return cfg_amp;
+  }
+  return static_cast<uint8_t>(target);
+}
+
 void UiManager::clampWaveYToBand(int16_t* y) const {
   if (y == nullptr || !intro_wave_half_height_mode_) {
     return;
   }
+  int16_t y_max = static_cast<int16_t>(intro_wave_band_bottom_ - intro_wave_font_line_height_);
+  if (y_max < intro_wave_band_top_) {
+    y_max = intro_wave_band_top_;
+  }
   if (*y < intro_wave_band_top_) {
     *y = intro_wave_band_top_;
-  } else if (*y > intro_wave_band_bottom_) {
-    *y = intro_wave_band_bottom_;
+  } else if (*y > y_max) {
+    *y = y_max;
   }
 }
 
@@ -1721,7 +2417,7 @@ void UiManager::updateWireCube(uint32_t dt_ms, bool crash_boost) {
     intro_wire_points_[e][1].y = projected[b][1];
     lv_line_set_points(line, intro_wire_points_[e], 2);
     lv_obj_set_style_line_color(line,
-                                lv_color_hex((e % 2U) == 0U ? 0x00FFFFUL : 0xFF00FFUL),
+                                introPaletteColor((e % 2U) == 0U ? 3U : 4U),
                                 LV_PART_MAIN);
     lv_obj_set_style_opa(line, base_opa, LV_PART_MAIN);
     lv_obj_clear_flag(line, LV_OBJ_FLAG_HIDDEN);
@@ -1798,7 +2494,7 @@ void UiManager::updateRotoZoom(uint32_t dt_ms) {
     lv_obj_set_size(stripe, stripe_w, stripe_h);
     const bool checker = ((i + static_cast<uint8_t>(intro_roto_phase_ * 3.0f)) & 1U) == 0U;
     lv_obj_set_style_bg_color(stripe,
-                              lv_color_hex(checker ? 0x17335AUL : 0x0F2746UL),
+                              introPaletteColor(checker ? 12U : 13U),
                               LV_PART_MAIN);
     const lv_opa_t opa = static_cast<lv_opa_t>(20 + static_cast<uint8_t>(depth * 90.0f));
     lv_obj_set_style_bg_opa(stripe, opa, LV_PART_MAIN);
@@ -1809,7 +2505,8 @@ void UiManager::updateRotoZoom(uint32_t dt_ms) {
 void UiManager::resolveIntro3DModeAndQuality() {
   String mode = intro_config_.fx_3d;
   mode.toLowerCase();
-  if (mode == "wirecube") {
+  if (mode == "wirecube" || mode.indexOf("cube") >= 0 || mode.indexOf("boing") >= 0 ||
+      mode.indexOf("ball") >= 0) {
     intro_3d_mode_ = Intro3DMode::kWireCube;
   } else if (mode == "tunnel") {
     intro_3d_mode_ = Intro3DMode::kTunnel;
@@ -1895,6 +2592,7 @@ void UiManager::startIntro() {
   last_tick_ms_ = intro_total_start_ms_;
   intro_wave_last_ms_ = intro_total_start_ms_;
   intro_debug_next_ms_ = intro_total_start_ms_;
+  intro_phase_log_next_ms_ = intro_total_start_ms_ + 5000U;
   intro_debug_overlay_enabled_ = false;
   intro_b1_done_ = false;
   intro_next_b2_pulse_ms_ = 0U;
@@ -1903,7 +2601,9 @@ void UiManager::startIntro() {
   intro_wave_band_bottom_ = activeDisplayHeight();
   intro_cube_morph_enabled_ = true;
   intro_cube_morph_phase_ = 0.0f;
-  intro_cube_morph_speed_ = 1.2f;
+  intro_cube_morph_speed_ = 0.9f;
+  intro_c_fx_stage_ = 0U;
+  intro_c_fx_stage_start_ms_ = intro_total_start_ms_;
   intro_b1_crash_ms_ = intro_config_.b1_crash_ms;
   intro_scroll_mid_a_px_per_sec_ = intro_config_.scroll_a_px_per_sec;
   intro_scroll_bot_a_px_per_sec_ = intro_config_.scroll_bot_a_px_per_sec;
@@ -1986,8 +2686,11 @@ void UiManager::transitionIntroState(IntroState next_state) {
                               intro_config_.sine_amp_a_px,
                               intro_config_.sine_period_px,
                               false,
-                              static_cast<int16_t>((h / 2) - 14),
+                              static_cast<int16_t>(h / 2),
                               true);
+    intro_wave_half_height_mode_ = true;
+    intro_wave_band_top_ = static_cast<int16_t>(h / 4);
+    intro_wave_band_bottom_ = static_cast<int16_t>((h * 3) / 4);
     configureBottomRollbackScroller(intro_crack_bottom_scroll_ascii_);
 
     if (intro_clean_title_label_ != nullptr) {
@@ -2030,8 +2733,10 @@ void UiManager::transitionIntroState(IntroState next_state) {
     return;
   }
 
-  if (next_state == IntroState::PHASE_C_CLEAN || next_state == IntroState::PHASE_C_LOOP) {
+    if (next_state == IntroState::PHASE_C_CLEAN || next_state == IntroState::PHASE_C_LOOP) {
     startCleanReveal();
+    intro_c_fx_stage_ = 0U;
+    intro_c_fx_stage_start_ms_ = t_state0_ms_;
     int16_t stars = static_cast<int16_t>(clampValue<int32_t>(area / 1500, 60, 140));
     if (stars > static_cast<int16_t>(kStarfieldCount)) {
       stars = static_cast<int16_t>(kStarfieldCount);
@@ -2229,8 +2934,7 @@ void UiManager::startFireworks() {
   }
   const uint16_t total = static_cast<uint16_t>(bursts * per_burst);
   intro_firework_active_count_ = total;
-  static constexpr uint32_t kParticlePalette[] = {
-      0x00FFFFUL, 0xFF00FFUL, 0xFFFF00UL, 0xFFFFFFUL, 0xFFAA55UL, 0x7FD7FFUL};
+  static constexpr uint8_t kParticlePalette[] = {3U, 4U, 5U, 7U, 10U, 9U};
 
   for (uint8_t i = 0U; i < 72U; ++i) {
     IntroParticleState& state = intro_firework_states_[i];
@@ -2267,7 +2971,9 @@ void UiManager::startFireworks() {
       state.active = true;
       const uint8_t size = static_cast<uint8_t>(2U + (nextIntroRandom() % 3U));
       lv_obj_set_size(particle, size, size);
-      lv_obj_set_style_bg_color(particle, lv_color_hex(kParticlePalette[nextIntroRandom() % 6U]), LV_PART_MAIN);
+      lv_obj_set_style_bg_color(particle,
+                                introPaletteColor(kParticlePalette[nextIntroRandom() % 6U]),
+                                LV_PART_MAIN);
       lv_obj_set_style_bg_opa(particle, LV_OPA_COVER, LV_PART_MAIN);
       lv_obj_set_pos(particle, cx, cy);
       lv_obj_clear_flag(particle, LV_OBJ_FLAG_HIDDEN);
@@ -2286,10 +2992,10 @@ void UiManager::startCleanReveal() {
     lv_obj_set_pos(intro_gradient_layers_[i], 0, static_cast<lv_coord_t>((height / 4) * i));
     lv_obj_set_size(intro_gradient_layers_[i], width, static_cast<lv_coord_t>((height / 4) + 2));
   }
-  lv_obj_set_style_bg_color(intro_gradient_layers_[0], lv_color_hex(0x081225UL), LV_PART_MAIN);
-  lv_obj_set_style_bg_color(intro_gradient_layers_[1], lv_color_hex(0x0D1C33UL), LV_PART_MAIN);
-  lv_obj_set_style_bg_color(intro_gradient_layers_[2], lv_color_hex(0x122642UL), LV_PART_MAIN);
-  lv_obj_set_style_bg_color(intro_gradient_layers_[3], lv_color_hex(0x18324FUL), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(intro_gradient_layers_[0], introPaletteColor(0), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(intro_gradient_layers_[1], introPaletteColor(1), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(intro_gradient_layers_[2], introPaletteColor(2), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(intro_gradient_layers_[3], introPaletteColor(14), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(intro_gradient_layers_[0], LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_bg_opa(intro_gradient_layers_[1], LV_OPA_90, LV_PART_MAIN);
   lv_obj_set_style_bg_opa(intro_gradient_layers_[2], LV_OPA_80, LV_PART_MAIN);
@@ -2324,7 +3030,11 @@ void UiManager::stopIntroAndCleanup() {
   intro_wave_half_height_mode_ = false;
   intro_wave_band_top_ = 0;
   intro_wave_band_bottom_ = 0;
+  intro_wave_use_pixel_font_ = false;
+  intro_wave_font_line_height_ = 0;
   intro_cube_morph_phase_ = 0.0f;
+  intro_c_fx_stage_ = 0U;
+  intro_c_fx_stage_start_ms_ = 0U;
 
   if (intro_timer_ != nullptr) {
     lv_timer_pause(intro_timer_);
@@ -2494,6 +3204,62 @@ void UiManager::updateSineScroller(uint32_t t_ms) {
   updateWavySineScroller(dt_ms, now);
 }
 
+uint8_t UiManager::estimateIntroObjectCount() const {
+  uint16_t active_roto = 0U;
+  for (uint8_t i = 0U; i < kIntroRotoStripeMax; ++i) {
+    if (intro_roto_stripes_[i] != nullptr && !lv_obj_has_flag(intro_roto_stripes_[i], LV_OBJ_FLAG_HIDDEN)) {
+      ++active_roto;
+    }
+  }
+  const uint16_t object_count = static_cast<uint16_t>(intro_copper_count_ + intro_star_count_ +
+                                                       (intro_wave_glyph_count_ * 2U) +
+                                                       intro_firework_active_count_ + active_roto +
+                                                       kIntroWireEdgeCount + 10U);
+  return static_cast<uint8_t>(clampValue<uint16_t>(object_count, 0U, 255U));
+}
+
+void UiManager::updateC3DStage(uint32_t now_ms) {
+  if (intro_state_ != IntroState::PHASE_C_CLEAN && intro_state_ != IntroState::PHASE_C_LOOP) {
+    return;
+  }
+  const uint32_t elapsed = now_ms - t_state0_ms_;
+  uint8_t next_stage = 7U;
+  if (elapsed < 2500U) {
+    next_stage = 0U;  // cube roto
+  } else if (elapsed < 5000U) {
+    next_stage = 1U;  // cube rotozoom
+  } else if (elapsed < 7500U) {
+    next_stage = 2U;  // ball zoom
+  } else if (elapsed < 10000U) {
+    next_stage = 3U;  // boing
+  } else if (elapsed < 12500U) {
+    next_stage = 4U;  // rnd zoom
+  } else if (elapsed < 15000U) {
+    next_stage = 5U;  // rnd roto
+  } else if (elapsed < 17500U) {
+    next_stage = 6U;  // boing
+  } else {
+    next_stage = 7U;  // final boing hold
+  }
+  if (next_stage != intro_c_fx_stage_) {
+    intro_c_fx_stage_ = next_stage;
+    intro_c_fx_stage_start_ms_ = now_ms;
+  }
+
+  if (intro_c_fx_stage_ <= 2U) {
+    intro_3d_mode_ = Intro3DMode::kWireCube;
+    intro_cube_morph_enabled_ = true;
+    intro_cube_morph_speed_ = (intro_c_fx_stage_ == 1U) ? 1.8f : 1.1f;
+  } else if (intro_c_fx_stage_ <= 6U) {
+    intro_3d_mode_ = Intro3DMode::kRotoZoom;
+  } else {
+    intro_3d_mode_ = Intro3DMode::kWireCube;
+    intro_cube_morph_enabled_ = true;
+    intro_cube_morph_phase_ = 3.14159f;
+    intro_cube_morph_speed_ = 0.18f;
+  }
+}
+
 void UiManager::updateIntroDebugOverlay(uint32_t dt_ms) {
   (void)dt_ms;
   if (intro_debug_label_ == nullptr) {
@@ -2510,20 +3276,10 @@ void UiManager::updateIntroDebugOverlay(uint32_t dt_ms) {
   }
   intro_debug_next_ms_ = now + 250U;
 
-  uint16_t active_roto = 0U;
-  for (uint8_t i = 0U; i < kIntroRotoStripeMax; ++i) {
-    if (intro_roto_stripes_[i] != nullptr && !lv_obj_has_flag(intro_roto_stripes_[i], LV_OBJ_FLAG_HIDDEN)) {
-      ++active_roto;
-    }
-  }
-  const uint16_t object_count = static_cast<uint16_t>(intro_copper_count_ + intro_star_count_ +
-                                                       (intro_wave_glyph_count_ * 2U) +
-                                                       intro_firework_active_count_ + active_roto +
-                                                       kIntroWireEdgeCount + 10U);
   lv_label_set_text_fmt(intro_debug_label_,
                         "phase=%u obj=%u stars=%u p=%u q=%u",
                         static_cast<unsigned int>(intro_state_),
-                        static_cast<unsigned int>(object_count),
+                        static_cast<unsigned int>(estimateIntroObjectCount()),
                         static_cast<unsigned int>(intro_star_count_),
                         static_cast<unsigned int>(intro_firework_active_count_),
                         static_cast<unsigned int>(intro_3d_quality_resolved_));
@@ -2535,6 +3291,7 @@ void UiManager::tickIntro() {
     return;
   }
   const uint32_t now = lv_tick_get();
+  fx_engine_.noteFrame(now);
   uint32_t dt_ms = now - last_tick_ms_;
   if (dt_ms > 100U) {
     dt_ms = 100U;
@@ -2548,8 +3305,41 @@ void UiManager::tickIntro() {
     transitionIntroState(IntroState::PHASE_C_CLEAN);
   }
 
+  fx_engine_.setSceneCounts(estimateIntroObjectCount(), intro_star_count_, intro_firework_active_count_);
+
+  if (now >= intro_phase_log_next_ms_) {
+    intro_phase_log_next_ms_ = now + 5000U;
+    const UiMemorySnapshot mem = memorySnapshot();
+    const ui::fx::FxEngineStats fx_stats = fx_engine_.stats();
+    Serial.printf("[UI][WIN_ETAPE] phase=%u t=%lu obj=%u stars=%u particles=%u fx_fps=%u q=%u heap_int=%u heap_psram=%u largest_dma=%u\n",
+                  static_cast<unsigned int>(intro_state_),
+                  static_cast<unsigned long>(state_elapsed),
+                  static_cast<unsigned int>(estimateIntroObjectCount()),
+                  static_cast<unsigned int>(intro_star_count_),
+                  static_cast<unsigned int>(intro_firework_active_count_),
+                  static_cast<unsigned int>(fx_stats.fps),
+                  static_cast<unsigned int>(intro_3d_quality_resolved_),
+                  static_cast<unsigned int>(mem.heap_internal_free),
+                  static_cast<unsigned int>(mem.heap_psram_free),
+                  static_cast<unsigned int>(mem.heap_largest_dma_block));
+  }
+
   switch (intro_state_) {
     case IntroState::PHASE_A_CRACKTRO:
+      if (state_elapsed < 5000U) {
+        intro_cube_morph_enabled_ = false;
+        intro_cube_morph_phase_ = 0.0f;
+      } else if (state_elapsed < 15000U) {
+        intro_cube_morph_enabled_ = true;
+        intro_cube_morph_speed_ = 0.314f;
+      } else if (state_elapsed >= 25000U) {
+        intro_cube_morph_enabled_ = true;
+        intro_cube_morph_phase_ = 3.14159f;
+        intro_cube_morph_speed_ = 0.22f;
+      } else {
+        intro_cube_morph_enabled_ = true;
+        intro_cube_morph_speed_ = 0.90f;
+      }
       updateCopperBars(now - intro_total_start_ms_);
       updateStarfield(dt_ms);
       updateWavySineScroller(dt_ms, now);
@@ -2571,6 +3361,7 @@ void UiManager::tickIntro() {
       break;
 
     case IntroState::PHASE_C_CLEAN:
+      updateC3DStage(now);
       updateStarfield(dt_ms);
       if (intro_3d_mode_ == Intro3DMode::kWireCube) {
         updateWireCube(dt_ms, false);
@@ -2587,6 +3378,7 @@ void UiManager::tickIntro() {
       break;
 
     case IntroState::PHASE_C_LOOP:
+      updateC3DStage(now);
       updateStarfield(dt_ms);
       if (intro_3d_mode_ == Intro3DMode::kWireCube) {
         updateWireCube(dt_ms, false);
@@ -3241,7 +4033,11 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   }
 
   const char* scenario_id = (scenario != nullptr && scenario->id != nullptr) ? scenario->id : "N/A";
-  const char* raw_scene_id = (screen_scene_id != nullptr && screen_scene_id[0] != '\0') ? screen_scene_id : "SCENE_READY";
+  const char* raw_scene_id =
+      (screen_scene_id != nullptr && screen_scene_id[0] != '\0') ? screen_scene_id : "SCENE_READY";
+  if (kUseDemoAutorunWinEtapeRuntime) {
+    raw_scene_id = "SCENE_WIN_ETAPE";
+  }
   const char* normalized_scene_id = storyNormalizeScreenSceneId(raw_scene_id);
   const char* step_id_for_log = (step_id != nullptr && step_id[0] != '\0') ? step_id : "N/A";
   const char* step_id_for_ui = (step_id != nullptr && step_id[0] != '\0') ? step_id : "";
@@ -3936,7 +4732,12 @@ void UiManager::renderScene(const ScenarioDef* scenario,
 
 void UiManager::handleButton(uint8_t key, bool long_press) {
   if (intro_active_) {
-    requestIntroSkip();
+    if (intro_state_ == IntroState::PHASE_A_CRACKTRO || intro_state_ == IntroState::PHASE_B_TRANSITION) {
+      requestIntroSkip();
+    } else if (long_press || key == 5U) {
+      intro_debug_overlay_enabled_ = !intro_debug_overlay_enabled_;
+      Serial.printf("[UI][WIN_ETAPE] debug_overlay=%u\n", intro_debug_overlay_enabled_ ? 1U : 0U);
+    }
   }
   UiAction action;
   action.source = long_press ? UiActionSource::kKeyLong : UiActionSource::kKeyShort;
@@ -3948,11 +4749,17 @@ void UiManager::handleButton(uint8_t key, bool long_press) {
 }
 
 void UiManager::handleTouch(int16_t x, int16_t y, bool touched) {
+  const bool was_touched = touch_pressed_;
   touch_x_ = x;
   touch_y_ = y;
   touch_pressed_ = touched;
   if (touched && intro_active_) {
-    requestIntroSkip();
+    if (intro_state_ == IntroState::PHASE_A_CRACKTRO || intro_state_ == IntroState::PHASE_B_TRANSITION) {
+      requestIntroSkip();
+    } else if (!was_touched) {
+      intro_debug_overlay_enabled_ = !intro_debug_overlay_enabled_;
+      Serial.printf("[UI][WIN_ETAPE] debug_overlay=%u\n", intro_debug_overlay_enabled_ ? 1U : 0U);
+    }
   }
 }
 
@@ -4096,13 +4903,13 @@ void UiManager::createWidgets() {
   lv_obj_set_style_text_color(scene_la_pitch_label_, lv_color_hex(0xE8F1FF), LV_PART_MAIN);
   lv_obj_set_style_text_color(scene_la_timer_label_, lv_color_hex(0x9AD6FF), LV_PART_MAIN);
   lv_obj_set_style_text_color(scene_la_timeout_label_, lv_color_hex(0x84CFFF), LV_PART_MAIN);
-  lv_obj_set_style_text_font(scene_title_label_, &lv_font_montserrat_14, LV_PART_MAIN);
-  lv_obj_set_style_text_font(scene_subtitle_label_, &lv_font_montserrat_14, LV_PART_MAIN);
-  lv_obj_set_style_text_font(scene_symbol_label_, &lv_font_montserrat_18, LV_PART_MAIN);
-  lv_obj_set_style_text_font(scene_la_status_label_, &lv_font_montserrat_14, LV_PART_MAIN);
-  lv_obj_set_style_text_font(scene_la_pitch_label_, &lv_font_montserrat_14, LV_PART_MAIN);
-  lv_obj_set_style_text_font(scene_la_timer_label_, &lv_font_montserrat_14, LV_PART_MAIN);
-  lv_obj_set_style_text_font(scene_la_timeout_label_, &lv_font_montserrat_14, LV_PART_MAIN);
+  lv_obj_set_style_text_font(scene_title_label_, UiFonts::fontBodyM(), LV_PART_MAIN);
+  lv_obj_set_style_text_font(scene_subtitle_label_, UiFonts::fontBodyM(), LV_PART_MAIN);
+  lv_obj_set_style_text_font(scene_symbol_label_, UiFonts::fontTitle(), LV_PART_MAIN);
+  lv_obj_set_style_text_font(scene_la_status_label_, UiFonts::fontMono(), LV_PART_MAIN);
+  lv_obj_set_style_text_font(scene_la_pitch_label_, UiFonts::fontBodyM(), LV_PART_MAIN);
+  lv_obj_set_style_text_font(scene_la_timer_label_, UiFonts::fontMono(), LV_PART_MAIN);
+  lv_obj_set_style_text_font(scene_la_timeout_label_, UiFonts::fontMono(), LV_PART_MAIN);
   lv_obj_set_style_text_opa(scene_title_label_, LV_OPA_80, LV_PART_MAIN);
   lv_obj_set_style_text_opa(scene_subtitle_label_, LV_OPA_80, LV_PART_MAIN);
   lv_obj_set_style_text_opa(scene_symbol_label_, LV_OPA_90, LV_PART_MAIN);
@@ -4233,7 +5040,7 @@ void UiManager::stopSceneAnimations() {
 
   if (scene_title_label_ != nullptr) {
     lv_anim_del(scene_title_label_, nullptr);
-    lv_obj_set_style_text_font(scene_title_label_, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(scene_title_label_, UiFonts::fontBodyS(), LV_PART_MAIN);
     lv_obj_set_style_text_letter_space(scene_title_label_, 0, LV_PART_MAIN);
     lv_obj_set_style_opa(scene_title_label_, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_align(scene_title_label_, LV_ALIGN_TOP_MID, 0, 10);
@@ -4249,7 +5056,7 @@ void UiManager::stopSceneAnimations() {
   }
   if (scene_subtitle_label_ != nullptr) {
     lv_anim_del(scene_subtitle_label_, nullptr);
-    lv_obj_set_style_text_font(scene_subtitle_label_, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(scene_subtitle_label_, UiFonts::fontBodyS(), LV_PART_MAIN);
     lv_obj_set_style_text_letter_space(scene_subtitle_label_, 0, LV_PART_MAIN);
     lv_obj_set_style_opa(scene_subtitle_label_, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_width(scene_subtitle_label_, width - 32);
@@ -4418,7 +5225,7 @@ void UiManager::startWinEtapeCracktroPhase() {
   if (scene_title_label_ != nullptr) {
     lv_anim_del(scene_title_label_, nullptr);
     lv_label_set_text(scene_title_label_, kWinEtapeCracktroTitle);
-    lv_obj_set_style_text_font(scene_title_label_, &lv_font_montserrat_18, LV_PART_MAIN);
+    lv_obj_set_style_text_font(scene_title_label_, UiFonts::fontBodyM(), LV_PART_MAIN);
     lv_obj_set_style_text_letter_space(scene_title_label_, 2, LV_PART_MAIN);
     lv_obj_align(scene_title_label_, LV_ALIGN_TOP_MID, 0, 24);
     lv_obj_set_style_translate_y(scene_title_label_, -66, LV_PART_MAIN);
@@ -4438,7 +5245,7 @@ void UiManager::startWinEtapeCracktroPhase() {
   if (scene_subtitle_label_ != nullptr) {
     lv_anim_del(scene_subtitle_label_, nullptr);
     lv_label_set_text(scene_subtitle_label_, kWinEtapeCracktroScroll);
-    lv_obj_set_style_text_font(scene_subtitle_label_, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(scene_subtitle_label_, UiFonts::fontBodyS(), LV_PART_MAIN);
     lv_obj_set_style_text_letter_space(scene_subtitle_label_, 1, LV_PART_MAIN);
     lv_obj_align(scene_subtitle_label_, LV_ALIGN_BOTTOM_MID, 0, -10);
     lv_obj_clear_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
@@ -4600,7 +5407,7 @@ void UiManager::startWinEtapeCleanPhase() {
   if (scene_title_label_ != nullptr) {
     lv_anim_del(scene_title_label_, nullptr);
     lv_label_set_text(scene_title_label_, "");
-    lv_obj_set_style_text_font(scene_title_label_, &lv_font_montserrat_18, LV_PART_MAIN);
+    lv_obj_set_style_text_font(scene_title_label_, UiFonts::fontBodyM(), LV_PART_MAIN);
     lv_obj_set_style_text_letter_space(scene_title_label_, 1, LV_PART_MAIN);
     lv_obj_align(scene_title_label_, LV_ALIGN_TOP_MID, 0, 24);
     lv_obj_set_style_translate_x(scene_title_label_, 0, LV_PART_MAIN);
@@ -4620,7 +5427,7 @@ void UiManager::startWinEtapeCleanPhase() {
   if (scene_subtitle_label_ != nullptr) {
     lv_anim_del(scene_subtitle_label_, nullptr);
     lv_label_set_text(scene_subtitle_label_, kWinEtapeDemoScroll);
-    lv_obj_set_style_text_font(scene_subtitle_label_, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_font(scene_subtitle_label_, UiFonts::fontBodyS(), LV_PART_MAIN);
     lv_obj_set_style_text_letter_space(scene_subtitle_label_, 0, LV_PART_MAIN);
     lv_obj_align(scene_subtitle_label_, LV_ALIGN_BOTTOM_MID, 0, -14);
     lv_obj_clear_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
@@ -5637,9 +6444,9 @@ void UiManager::applySubtitleScroll(SceneScrollMode mode, uint16_t speed_ms, uin
 }
 
 void UiManager::applyThemeColors(uint32_t bg_rgb, uint32_t accent_rgb, uint32_t text_rgb) {
-  const lv_color_t bg = lv_color_hex(bg_rgb);
-  const lv_color_t accent = lv_color_hex(accent_rgb);
-  const lv_color_t text = lv_color_hex(text_rgb);
+  const lv_color_t bg = quantize565ToTheme256(lv_color_hex(bg_rgb));
+  const lv_color_t accent = quantize565ToTheme256(lv_color_hex(accent_rgb));
+  const lv_color_t text = quantize565ToTheme256(lv_color_hex(text_rgb));
 
   lv_obj_set_style_bg_color(scene_root_, bg, LV_PART_MAIN);
   lv_obj_set_style_bg_color(scene_core_, accent, LV_PART_MAIN);
@@ -5987,13 +6794,104 @@ void UiManager::animSetSineTranslateY(void* obj, int32_t value) {
 }
 
 void UiManager::displayFlushCb(lv_disp_drv_t* disp, const lv_area_t* area, lv_color_t* color_p) {
-  (void)disp;
+  if (disp == nullptr || area == nullptr || color_p == nullptr) {
+    if (disp != nullptr) {
+      lv_disp_flush_ready(disp);
+    }
+    return;
+  }
+  if (g_instance == nullptr) {
+    lv_disp_flush_ready(disp);
+    return;
+  }
+
+  UiManager* self = g_instance;
+  drivers::display::DisplayHal& display = drivers::display::displayHal();
   const uint32_t width = static_cast<uint32_t>(area->x2 - area->x1 + 1);
   const uint32_t height = static_cast<uint32_t>(area->y2 - area->y1 + 1);
-  g_tft.startWrite();
-  g_tft.setAddrWindow(area->x1, area->y1, width, height);
-  g_tft.pushColors(reinterpret_cast<uint16_t*>(&color_p->full), width * height, true);
-  g_tft.endWrite();
+  const uint32_t pixel_count = width * height;
+  const uint32_t started_us = micros();
+  const bool needs_convert = kUseColor256Runtime;
+  const bool needs_copy_to_trans = self->buffer_cfg_.draw_in_psram || self->buffer_cfg_.full_frame;
+  bool async_dma = self->async_flush_enabled_ && self->dma_available_ && !self->flush_ctx_.pending;
+  bool tx_pixels_prepared = false;
+
+  uint16_t* tx_pixels = reinterpret_cast<uint16_t*>(&color_p->full);
+  if (needs_convert || needs_copy_to_trans) {
+    if (self->dma_trans_buf_ != nullptr && pixel_count <= self->dma_trans_buf_pixels_) {
+      tx_pixels = self->dma_trans_buf_;
+      if (needs_convert) {
+        self->convertLineRgb332ToRgb565(color_p, tx_pixels, pixel_count);
+      } else {
+        std::memcpy(tx_pixels, reinterpret_cast<uint16_t*>(&color_p->full), pixel_count * sizeof(uint16_t));
+      }
+      tx_pixels_prepared = true;
+    } else {
+      async_dma = false;
+    }
+  }
+
+  if (async_dma) {
+    display.startWrite();
+    display.pushImageDma(area->x1,
+                         area->y1,
+                         static_cast<int16_t>(width),
+                         static_cast<int16_t>(height),
+                         tx_pixels);
+    self->flush_ctx_.pending = true;
+    self->flush_ctx_.using_dma = true;
+    self->flush_ctx_.converted = (needs_convert || needs_copy_to_trans);
+    self->flush_ctx_.disp = disp;
+    self->flush_ctx_.area = *area;
+    self->flush_ctx_.row_count = height;
+    self->flush_ctx_.started_ms = started_us;
+    return;
+  }
+
+  display.startWrite();
+  display.setAddrWindow(area->x1, area->y1, static_cast<int16_t>(width), static_cast<int16_t>(height));
+
+  if (needs_convert && !tx_pixels_prepared) {
+    static uint16_t row_buffer[(FREENOVE_LCD_WIDTH > FREENOVE_LCD_HEIGHT) ? FREENOVE_LCD_WIDTH
+                                                                           : FREENOVE_LCD_HEIGHT];
+    const uint32_t max_row = sizeof(row_buffer) / sizeof(row_buffer[0]);
+    if (self->dma_trans_buf_ != nullptr && self->dma_trans_buf_pixels_ >= width) {
+      for (uint32_t row = 0U; row < height; ++row) {
+        const lv_color_t* src_row = color_p + (row * width);
+        self->convertLineRgb332ToRgb565(src_row, self->dma_trans_buf_, width);
+        display.pushColors(self->dma_trans_buf_, width, true);
+      }
+    } else if (width <= max_row) {
+      for (uint32_t row = 0U; row < height; ++row) {
+        const lv_color_t* src_row = color_p + (row * width);
+        self->convertLineRgb332ToRgb565(src_row, row_buffer, width);
+        display.pushColors(row_buffer, width, true);
+      }
+    } else {
+      for (uint32_t pixel = 0U; pixel < pixel_count; ++pixel) {
+#if LV_COLOR_DEPTH == 8
+        const uint16_t c565 = self->rgb332_to_565_lut_[color_p[pixel].full];
+        display.pushColor(c565);
+#else
+        display.pushColor(static_cast<uint16_t>(color_p[pixel].full));
+#endif
+      }
+    }
+  } else if (needs_copy_to_trans && tx_pixels_prepared) {
+    display.pushColors(tx_pixels, pixel_count, true);
+  } else {
+    display.pushColors(tx_pixels, pixel_count, true);
+  }
+  display.endWrite();
+
+  const uint32_t elapsed_us = micros() - started_us;
+  self->graphics_stats_.flush_count += 1U;
+  self->graphics_stats_.sync_flush_count += 1U;
+  self->graphics_stats_.flush_time_total_us += elapsed_us;
+  if (elapsed_us > self->graphics_stats_.flush_time_max_us) {
+    self->graphics_stats_.flush_time_max_us = elapsed_us;
+  }
+  perfMonitor().noteUiFlush(false, elapsed_us);
   lv_disp_flush_ready(disp);
 }
 

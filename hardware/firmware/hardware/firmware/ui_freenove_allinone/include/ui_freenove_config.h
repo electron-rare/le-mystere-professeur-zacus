@@ -1,7 +1,7 @@
 #pragma once
 
 // Freenove Media Kit reference profile (Sketch_19):
-// - FNK0102B ST7796 320x480 by default, rotation 1
+// - FNK0102H ST7796 320x480 by default, rotation 1
 // - Buttons via analog ladder on GPIO19
 // - I2S output BCLK=42, WS=41, DOUT=1
 
@@ -10,15 +10,55 @@
 #endif
 
 #ifndef FREENOVE_LCD_VARIANT_FNK0102B
-#define FREENOVE_LCD_VARIANT_FNK0102B 1
+#define FREENOVE_LCD_VARIANT_FNK0102B 0
 #endif
 
-#if FREENOVE_LCD_VARIANT_FNK0102A && FREENOVE_LCD_VARIANT_FNK0102B
-#error "Select one LCD variant only (FNK0102A xor FNK0102B)."
+#ifndef FREENOVE_LCD_VARIANT_FNK0102H
+#define FREENOVE_LCD_VARIANT_FNK0102H 1
 #endif
 
-#if !FREENOVE_LCD_VARIANT_FNK0102A && !FREENOVE_LCD_VARIANT_FNK0102B
+#if (FREENOVE_LCD_VARIANT_FNK0102A + FREENOVE_LCD_VARIANT_FNK0102B + FREENOVE_LCD_VARIANT_FNK0102H) > 1
+#error "Select one LCD variant only (FNK0102A/FNK0102B/FNK0102H)."
+#endif
+
+#if !FREENOVE_LCD_VARIANT_FNK0102A && !FREENOVE_LCD_VARIANT_FNK0102B && !FREENOVE_LCD_VARIANT_FNK0102H
 #error "At least one LCD variant must be enabled."
+#endif
+
+// Master switch for LVGL draw buffers in PSRAM.
+// Keep legacy macro for backward compatibility with existing build flags.
+#if defined(FREENOVE_PSRAM_UI_DRAW_BUFFER) && !defined(UI_DRAW_BUF_IN_PSRAM)
+#define UI_DRAW_BUF_IN_PSRAM FREENOVE_PSRAM_UI_DRAW_BUFFER
+#endif
+
+#ifndef UI_DRAW_BUF_IN_PSRAM
+#define UI_DRAW_BUF_IN_PSRAM 1
+#endif
+
+#ifndef FREENOVE_PSRAM_UI_DRAW_BUFFER
+#define FREENOVE_PSRAM_UI_DRAW_BUFFER UI_DRAW_BUF_IN_PSRAM
+#endif
+
+// Optional policy toggles for other large buffers.
+#ifndef UI_AUDIO_RINGBUF_IN_PSRAM
+#define UI_AUDIO_RINGBUF_IN_PSRAM 1
+#endif
+
+#if defined(FREENOVE_PSRAM_CAMERA_FRAMEBUFFER) && !defined(UI_CAMERA_FB_IN_PSRAM)
+#define UI_CAMERA_FB_IN_PSRAM FREENOVE_PSRAM_CAMERA_FRAMEBUFFER
+#endif
+
+#ifndef UI_CAMERA_FB_IN_PSRAM
+#define UI_CAMERA_FB_IN_PSRAM 1
+#endif
+
+#ifndef FREENOVE_PSRAM_CAMERA_FRAMEBUFFER
+#define FREENOVE_PSRAM_CAMERA_FRAMEBUFFER UI_CAMERA_FB_IN_PSRAM
+#endif
+
+// SPI TX DMA staging buffers should stay in internal DRAM.
+#ifndef UI_DMA_TX_IN_DRAM
+#define UI_DMA_TX_IN_DRAM 1
 #endif
 
 #define UI_LCD_SPI_HOST 1
@@ -34,6 +74,12 @@
 #define TFT_HEIGHT 240
 #define TFT_SDA_READ
 #define TFT_RGB_ORDER TFT_BGR
+#define TFT_INVERSION_ON
+#elif FREENOVE_LCD_VARIANT_FNK0102H
+#define FREENOVE_LCD_LABEL "FNK0102H_ST7796_320x480"
+#define FREENOVE_LCD_WIDTH 320
+#define FREENOVE_LCD_HEIGHT 480
+#define ST7796_DRIVER
 #define TFT_INVERSION_ON
 #else
 #define FREENOVE_LCD_LABEL "FNK0102B_ST7796_320x480"
@@ -69,7 +115,14 @@
 #ifndef SUPPORT_TRANSACTIONS
 #define SUPPORT_TRANSACTIONS
 #endif
+#ifndef FREENOVE_LCD_USE_HSPI
+#define FREENOVE_LCD_USE_HSPI 0
+#endif
+#if FREENOVE_LCD_USE_HSPI
+#define USE_HSPI_PORT
+#else
 #define USE_FSPI_PORT
+#endif
 
 // Buttons: analog ladder by default (5 keys).
 #define FREENOVE_BTN_ANALOG_PIN 19

@@ -9,8 +9,8 @@
 namespace {
 
 constexpr const char* kDefaultWifiHostname = "zacus-freenove";
-constexpr const char* kDefaultWifiSsid = "Les cils";
-constexpr const char* kDefaultWifiPassword = "mascarade";
+constexpr const char* kDefaultWifiSsid = "";
+constexpr const char* kDefaultWifiPassword = "";
 constexpr uint16_t kMaxLaToleranceHz = 10U;
 
 void copyText(char* out, size_t out_size, const char* text) {

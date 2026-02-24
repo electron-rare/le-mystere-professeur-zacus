@@ -11,6 +11,13 @@ struct TouchPoint {
 
 class TouchManager {
  public:
+  TouchManager() = default;
+  ~TouchManager() = default;
+  TouchManager(const TouchManager&) = delete;
+  TouchManager& operator=(const TouchManager&) = delete;
+  TouchManager(TouchManager&&) = delete;
+  TouchManager& operator=(TouchManager&&) = delete;
+
   bool begin();
   bool poll(TouchPoint* out_point);
 };

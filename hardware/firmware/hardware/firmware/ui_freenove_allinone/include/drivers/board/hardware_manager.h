@@ -50,6 +50,11 @@ class HardwareManager {
   };
 
   HardwareManager();
+  ~HardwareManager() = default;
+  HardwareManager(const HardwareManager&) = delete;
+  HardwareManager& operator=(const HardwareManager&) = delete;
+  HardwareManager(HardwareManager&&) = delete;
+  HardwareManager& operator=(HardwareManager&&) = delete;
 
   bool begin();
   void update(uint32_t now_ms);

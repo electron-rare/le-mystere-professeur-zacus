@@ -39,12 +39,14 @@
 
 ## Structure modulaire
 
-- audio_manager.{h,cpp} : gestion audio
-- scenario_manager.{h,cpp} : gestion scénario
-- ui_manager.{h,cpp} : gestion UI dynamique (LVGL)
-- button_manager.{h,cpp} : gestion boutons
-- touch_manager.{h,cpp} : gestion tactile
-- storage_manager.{h,cpp} : gestion LittleFS, fallback
+- `src/app/*` : orchestration runtime (`main`, `scenario_manager`, coordinator serie)
+- `src/ui/*` : LVGL scenes, fonts, FX helpers (`ui_manager`, `ui_fonts`, `ui/fx`)
+- `src/audio/*` : gestion audio runtime (`audio_manager`)
+- `src/storage/*` : LittleFS/SD et resolution assets (`storage_manager`)
+- `src/camera/*` : camera runtime (`camera_manager`)
+- `src/drivers/*` : board I/O (input, board, display HAL + SPI bus manager)
+- `src/system/*` : metrics, boot report, reseau/media wrappers, task topology
+- headers legacy (`include/*_manager.h`) conserves en facades vers les headers modulaires
 
 Ce firmware combine :
 - Les fonctions audio/scénario (type ESP32 Audio)
@@ -86,6 +88,59 @@ pio run -e freenove_allinone
 pio run -e freenove_allinone -t upload --upload-port <PORT>
 ```
 
+## Build Freenove ESP32-S3 (partition 6MB app / 6MB FS)
+
+```sh
+pio run -e freenove_esp32s3
+pio run -e freenove_esp32s3 -t buildfs
+pio run -e freenove_esp32s3 -t uploadfs --upload-port <PORT>
+pio run -e freenove_esp32s3 -t upload --upload-port <PORT>
+```
+
+- Partition custom active: `partitions/freenove_esp32s3_app6mb_fs6mb.csv`.
+- Le bundle story complet n'est plus embarque dans le firmware: `buildfs/uploadfs` est requis pour charger le contenu complet (screens/audio/actions/apps).
+- Fallback embarque minimal conserve: `APP_WIFI` + scenario `DEFAULT` minimal.
+
+## Norme embarquee (audit + refacto)
+
+- Standard projet: `docs/skills/EMBEDDED_CPP_OO_ESP32S3_PIO_ARDUINO.md`.
+- Toute revue technique Freenove doit citer cette norme pour les risques temps reel, memoire, concurrence et style OO.
+
+## Provisioning Wi-Fi + Auth WebUI
+
+- Au boot sans credentials NVS:
+  - mode setup AP actif;
+  - endpoints setup ouverts: `GET /api/provision/status`, `POST /api/wifi/connect`, `POST /api/network/wifi/connect`.
+- Hors setup:
+  - auth Bearer requise sur `/api/*`:
+    - `Authorization: Bearer <token>`.
+- Provisioning persistant:
+  - API: `POST /api/wifi/connect` (ou `/api/network/wifi/connect`) avec `persist=1`.
+  - Serie: `WIFI_PROVISION <ssid> <pass>`.
+- Rotation token:
+  - Serie: `AUTH_TOKEN_ROTATE [token]`.
+- Outils shell:
+  - `tools/dev/healthcheck_wifi.sh` et `tools/dev/rtos_wifi_health.sh` supportent `ZACUS_WEB_TOKEN`.
+
+## LVGL graphics stack (ESP32-S3)
+
+- Le runtime Freenove (`env:freenove_esp32s3*`) supporte:
+  - `LV_COLOR_DEPTH=8` (RGB332) avec conversion RGB565 au flush.
+  - draw buffers lignes en double-buffer.
+  - flush DMA asynchrone (overlap draw/transfert) avec fallback sync.
+- Flags principaux (`platformio.ini`):
+  - `UI_COLOR_256`, `UI_COLOR_565`, `UI_FORCE_THEME_256`
+  - `UI_DRAW_BUF_LINES`, `UI_DRAW_BUF_IN_PSRAM`
+  - `UI_DMA_FLUSH_ASYNC`, `UI_DMA_TRANS_BUF_LINES`
+  - `UI_FULL_FRAME_BENCH`, `UI_LV_MEM_SIZE_KB`
+- Commandes debug serie:
+  - `UI_GFX_STATUS`
+  - `UI_MEM_STATUS`
+- Documentation associee:
+  - `docs/ui/graphics_stack.md`
+  - `docs/ui/lvgl_memory_budget.md`
+  - `docs/ui/fonts_fr.md`
+
 ## Mapping hardware
 - Voir `include/ui_freenove_config.h` pour l’adaptation des pins
 - Schéma de branchement : se référer à la doc Freenove
@@ -99,27 +154,28 @@ pio run -e freenove_allinone -t upload --upload-port <PORT>
 - Activation: l'intro A/B/C est lancee automatiquement quand `screen_scene_id == SCENE_WIN_ETAPE`.
 - Sequence:
   - A (30000 ms): copper circular/wavy + starfield 3 couches + logo overshoot + scroller milieu rapide + rollback bas.
-  - B (15000 ms): `B1` crash court (700..1000 ms) + `B2` interlude (roto/tunnel + copper overlay + pulses fireworks).
+  - B (15000 ms): `B1` crash intense (3000..5000 ms, defaut 4000) + `B2` interlude (roto/tunnel + copper overlay + pulses fireworks).
   - C (20000 ms): fond sobre + reveal `BRAVO Brigade Z` + scroller milieu ping-pong/wavy.
   - ensuite: boucle de la phase C.
-- Skip: tout appui bouton ou touch pendant l'intro declenche un OUTRO court (400 ms).
+- Skip: tout appui bouton ou touch pendant A/B saute directement vers C (puis C loop).
 
 ### Overrides runtime (TXT + JSON)
 
 - Priorite de lecture:
-  1) `/ui/scene_win_etape.txt`
-  2) `/ui/scene_win_etape.json`
-  3) `/SCENE_WIN_ETAPE.json`
-  4) `/ui/SCENE_WIN_ETAPE.json`
+  1) `/ui/scene_win_etape.json`
+  2) `/SCENE_WIN_ETAPE.json`
+  3) `/ui/SCENE_WIN_ETAPE.json`
+  4) `/ui/scene_win_etape.txt`
 - Cles supportees (TXT/JSON aliases):
-  - `logo_text`
-  - `mid_a_scroll`
-  - `bot_a_scroll`
-  - `clean_title`
-  - `clean_scroll`
+  - `logo_text` / `LOGO_TEXT`
+  - `mid_a_scroll` / `MID_A_SCROLL`
+  - `bot_a_scroll` / `BOT_A_SCROLL`
+  - `clean_title` / `C_TITLE`
+  - `clean_scroll` / `C_SCROLL`
   - `a_ms`, `b_ms`, `c_ms`, `b1_ms`
   - `speed_mid_a`, `speed_bot_a`, `speed_c`
   - `stars`, `fx_3d`, `fx_3d_quality`
+  - `font_mode` (`orbitron|pixel|auto`)
 
 Exemples:
 - JSON: `data/SCENE_WIN_ETAPE.json`
@@ -127,13 +183,23 @@ Exemples:
 
 ### Perf notes
 
-- Tick fixe: `33 ms` (`~30 FPS` cible), `dt` clamp pour robustesse.
+- Tick fixe: `42 ms` (`~24 FPS` cible), `dt` clamp pour robustesse.
 - Zero allocation par frame dans la boucle intro (`tickIntro`).
 - Caps objets scene: `<=140` (petit ecran), `<=260` (grand ecran).
 - Pools fixes:
   - stars: `48`
   - fireworks: `72`
   - wave glyph+shadow: `64 + 64`
+
+### Visual verification mode
+
+- Build flags (env `freenove_esp32s3`) pour tests scene:
+  - `UI_FULL_FRAME_BENCH=1`
+  - `UI_DEMO_AUTORUN_WIN_ETAPE=1`
+- Quand ces flags sont actifs:
+  - la scene `SCENE_WIN_ETAPE` demarre automatiquement au boot;
+  - la phase C continue en boucle tant que la scene reste active;
+  - `UI_GFX_STATUS` permet de verifier le mode runtime (depth/full_frame/source).
 
 ### References consulted
 

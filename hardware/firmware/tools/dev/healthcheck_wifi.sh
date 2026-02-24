@@ -10,6 +10,10 @@ LOGFILE="$LOGDIR/healthcheck_$(date +%Y%m%d-%H%M%S).log"
 
 SSID_PATTERN="ZACUS"
 ESP_IP="192.168.4.1"
+CURL_AUTH_HEADER=()
+if [[ -n "${ZACUS_WEB_TOKEN:-}" ]]; then
+  CURL_AUTH_HEADER=(-H "Authorization: Bearer ${ZACUS_WEB_TOKEN}")
+fi
 
 {
   echo "[HEALTHCHECK] $(date)"
@@ -32,7 +36,7 @@ ESP_IP="192.168.4.1"
   fi
   echo "---"
   echo "[3] Test HTTP /api/status..."
-  if curl -s --max-time 3 "http://$ESP_IP/api/status" | grep -q '"wifi"'; then
+  if curl -s --max-time 3 "${CURL_AUTH_HEADER[@]}" "http://$ESP_IP/api/status" | grep -q '"wifi"'; then
     echo "[OK] /api/status répond."
   else
     echo "[FAIL] /api/status ne répond pas."

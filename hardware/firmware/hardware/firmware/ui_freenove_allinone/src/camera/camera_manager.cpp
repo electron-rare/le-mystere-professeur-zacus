@@ -227,7 +227,7 @@ bool CameraManager::start() {
 #if defined(CAMERA_GRAB_LATEST)
   cfg.grab_mode = CAMERA_GRAB_LATEST;
 #endif
-#if defined(FREENOVE_PSRAM_CAMERA_FRAMEBUFFER) && defined(CAMERA_FB_IN_PSRAM)
+#if defined(CAMERA_FB_IN_PSRAM) && (UI_CAMERA_FB_IN_PSRAM != 0)
   cfg.fb_location = CAMERA_FB_IN_PSRAM;
   Serial.println("[CAM] framebuffer pinned to PSRAM");
 #endif

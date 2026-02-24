@@ -14,6 +14,10 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 - Documentation état des lieux firmware (métriques, tests, structure)
 - Documentation recommandations sprint (roadmap actions)
 - Index navigation documentation (docs/INDEX.md)
+- Skill local embarqué: `docs/skills/EMBEDDED_CPP_OO_ESP32S3_PIO_ARDUINO.md`
+- Observabilité Freenove: boot report + runtime metrics (`audio_underrun`, `sd_errors`, `ui_fps_approx`, reset reason)
+- Nouveau socle display: `DisplayHal` + `SpiBusManager` + hooks backend LGFX/TFT_eSPI
+- Interfaces phase-2 préparatoires: `audio_pipeline`, `storage_prefetch`, `camera_pipeline`, `task_topology`, `ui/fx/fx_engine`
 
 #### Changed
 - Structure nettoyée : suppression symlink `esp32 → esp32_audio`
@@ -21,6 +25,9 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 - Paths corrigés dans AGENTS.md, READMEs, tools/qa docs
 - Port mapping ESP8266 OLED : marker ready timeout étendu
 - Port mapping ESP32/ESP8266 : swap 20-6.4.1/20-6.4.2
+- Migration modulaire Freenove: `src/{app,ui,audio,storage,camera,drivers,system}` avec headers façade legacy
+- UI stack: draw buffers PSRAM unifiés via `UI_DRAW_BUF_IN_PSRAM` + mapping legacy `FREENOVE_PSRAM_UI_DRAW_BUFFER`
+- SCENE_WIN_ETAPE: logs périodiques enrichis (`fx_fps`, heap internal/psram, largest dma)
 
 #### Fixed
 - Documentation cohérente (esp32/ vs esp32_audio/ résolu)

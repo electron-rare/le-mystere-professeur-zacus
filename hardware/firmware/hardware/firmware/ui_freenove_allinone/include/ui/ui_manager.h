@@ -6,21 +6,91 @@
 
 #include "core/scenario_def.h"
 #include "hardware_manager.h"
+#include "ui/fx/fx_engine.h"
 #include "ui/player_ui_model.h"
+
+struct UiSceneFrame {
+  const ScenarioDef* scenario = nullptr;
+  const char* screen_scene_id = nullptr;
+  const char* step_id = nullptr;
+  const char* audio_pack_id = nullptr;
+  bool audio_playing = false;
+  const char* screen_payload_json = nullptr;
+};
+
+enum class UiInputEventType : uint8_t {
+  kButton = 0,
+  kTouch,
+};
+
+struct UiInputEvent {
+  UiInputEventType type = UiInputEventType::kButton;
+  uint8_t key = 0U;
+  bool long_press = false;
+  int16_t touch_x = 0;
+  int16_t touch_y = 0;
+  bool touch_pressed = false;
+};
+
+struct UiLaMetrics {
+  bool locked = false;
+  uint8_t stability_pct = 0U;
+  uint32_t stable_ms = 0U;
+  uint32_t stable_target_ms = 0U;
+  uint32_t gate_elapsed_ms = 0U;
+  uint32_t gate_timeout_ms = 0U;
+};
+
+struct UiMemorySnapshot {
+  uint32_t heap_internal_free = 0U;
+  uint32_t heap_dma_free = 0U;
+  uint32_t heap_psram_free = 0U;
+  uint32_t heap_largest_dma_block = 0U;
+  uint32_t lv_mem_used = 0U;
+  uint32_t lv_mem_free = 0U;
+  uint32_t lv_mem_max_used = 0U;
+  uint8_t lv_mem_frag_pct = 0U;
+  uint32_t alloc_failures = 0U;
+  uint16_t draw_lines = 0U;
+  bool draw_in_psram = false;
+  bool full_frame = false;
+  bool dma_async_enabled = false;
+  uint32_t draw_buffer_bytes = 0U;
+  uint32_t trans_buffer_bytes = 0U;
+};
+
+enum class UiStatusTopic : uint8_t {
+  kGraphics = 0,
+  kMemory,
+};
 
 class UiManager {
  public:
+  UiManager() = default;
+  ~UiManager() = default;
+  UiManager(const UiManager&) = delete;
+  UiManager& operator=(const UiManager&) = delete;
+  UiManager(UiManager&&) = delete;
+  UiManager& operator=(UiManager&&) = delete;
+
   bool begin();
-  void update();
+  void tick(uint32_t now_ms);
   void setHardwareSnapshot(const HardwareManager::Snapshot& snapshot);
   void setHardwareSnapshotRef(const HardwareManager::Snapshot* snapshot);
+  void setLaMetrics(const UiLaMetrics& metrics);
+  void submitSceneFrame(const UiSceneFrame& frame);
+  void submitInputEvent(const UiInputEvent& event);
+  void dumpStatus(UiStatusTopic topic) const;
+  UiMemorySnapshot memorySnapshot() const;
+
+ private:
+  void update();
   void setLaDetectionState(bool locked,
                            uint8_t stability_pct,
                            uint32_t stable_ms,
                            uint32_t stable_target_ms,
                            uint32_t gate_elapsed_ms,
                            uint32_t gate_timeout_ms);
-
   void renderScene(const ScenarioDef* scenario,
                    const char* screen_scene_id,
                    const char* step_id,
@@ -29,8 +99,9 @@ class UiManager {
                    const char* screen_payload_json);
   void handleButton(uint8_t key, bool long_press);
   void handleTouch(int16_t x, int16_t y, bool touched);
+  void dumpGraphicsStatus() const;
+  void dumpMemoryStatus() const;
 
- private:
   enum class SceneEffect : uint8_t {
     kNone = 0,
     kPulse,
@@ -124,22 +195,51 @@ class UiManager {
     uint32_t a_duration_ms = 30000U;
     uint32_t b_duration_ms = 15000U;
     uint32_t c_duration_ms = 20000U;
-    uint16_t b1_crash_ms = 900U;
+    uint16_t b1_crash_ms = 4000U;
     uint16_t scroll_a_px_per_sec = 216U;
     uint16_t scroll_bot_a_px_per_sec = 108U;
     uint16_t scroll_c_px_per_sec = 72U;
-    uint8_t sine_amp_a_px = 18U;
-    uint8_t sine_amp_c_px = 12U;
+    uint8_t sine_amp_a_px = 96U;
+    uint8_t sine_amp_c_px = 96U;
     uint16_t sine_period_px = 104U;
     float sine_phase_speed = 1.9f;
     int16_t stars_override = -1;
     char fx_3d[20] = {0};
     char fx_3d_quality[16] = {0};
+    char font_mode[16] = {0};
   };
 
   struct IntroGlyphSlot {
     lv_obj_t* glyph = nullptr;
     lv_obj_t* shadow = nullptr;
+  };
+
+  struct FlushContext {
+    bool pending = false;
+    bool using_dma = false;
+    bool converted = false;
+    lv_disp_drv_t* disp = nullptr;
+    lv_area_t area = {0, 0, 0, 0};
+    uint32_t started_ms = 0U;
+    uint32_t row_count = 0U;
+  };
+
+  struct BufferConfig {
+    uint16_t lines = 0U;
+    uint8_t bpp = 16U;
+    bool draw_in_psram = false;
+    bool full_frame = false;
+    bool double_buffer = false;
+    bool dma_enabled = false;
+  };
+
+  struct GraphicsStats {
+    uint32_t flush_count = 0U;
+    uint32_t dma_flush_count = 0U;
+    uint32_t sync_flush_count = 0U;
+    uint32_t flush_time_total_us = 0U;
+    uint32_t flush_time_max_us = 0U;
+    uint32_t flush_busy_poll_count = 0U;
   };
 
   void createWidgets();
@@ -156,6 +256,8 @@ class UiManager {
   void tickIntro();
   void configureBPhaseStart();
   void updateBPhase(uint32_t dt_ms, uint32_t now_ms, uint32_t state_elapsed_ms);
+  void updateC3DStage(uint32_t now_ms);
+  uint8_t estimateIntroObjectCount() const;
   void createCopperBars(uint8_t count);
   void updateCopperBars(uint32_t t_ms);
   void createCopperWavyRings(uint8_t count);
@@ -176,6 +278,7 @@ class UiManager {
   void updateBottomRollbackScroller(uint32_t dt_ms);
   void configureBottomRollbackScroller(const char* text);
   void clampWaveYToBand(int16_t* y) const;
+  uint8_t resolveCenterWaveAmplitudePx(const lv_font_t* wave_font) const;
   void createWireCube();
   void updateWireCube(uint32_t dt_ms, bool crash_boost);
   void createRotoZoom();
@@ -190,6 +293,13 @@ class UiManager {
   void updateCleanReveal(uint32_t dt_ms);
   void updateSineScroller(uint32_t t_ms);
   uint32_t nextIntroRandom();
+  void initGraphicsPipeline();
+  bool allocateDrawBuffers();
+  bool initDmaEngine();
+  void pollAsyncFlush();
+  void completePendingFlush();
+  uint16_t convertLineRgb332ToRgb565(const lv_color_t* src, uint16_t* dst, uint32_t px_count) const;
+  lv_color_t quantize565ToTheme256(lv_color_t color) const;
   void updatePageLine();
   void stopSceneAnimations();
   void applySceneEffect(SceneEffect effect);
@@ -238,6 +348,25 @@ class UiManager {
 
   bool ready_ = false;
   PlayerUiModel player_ui_;
+  lv_disp_draw_buf_t draw_buf_;
+  lv_color_t* draw_buf1_ = nullptr;
+  lv_color_t* draw_buf2_ = nullptr;
+  bool draw_buf1_owned_ = false;
+  bool draw_buf2_owned_ = false;
+  uint16_t* dma_trans_buf_ = nullptr;
+  size_t dma_trans_buf_pixels_ = 0U;
+  bool dma_trans_buf_owned_ = false;
+  lv_color_t* full_frame_buf_ = nullptr;
+  bool full_frame_buf_owned_ = false;
+  FlushContext flush_ctx_;
+  BufferConfig buffer_cfg_;
+  GraphicsStats graphics_stats_;
+  uint16_t rgb332_to_565_lut_[256] = {};
+  bool color_lut_ready_ = false;
+  bool dma_requested_ = false;
+  bool dma_available_ = false;
+  bool async_flush_enabled_ = false;
+  uint32_t graphics_stats_last_report_ms_ = 0U;
 
   lv_obj_t* scene_root_ = nullptr;
   lv_obj_t* scene_core_ = nullptr;
@@ -328,7 +457,7 @@ class UiManager {
   uint32_t intro_wave_last_ms_ = 0U;
   uint32_t intro_debug_next_ms_ = 0U;
   uint16_t intro_glitch_duration_ms_ = 0U;
-  uint16_t intro_b1_crash_ms_ = 900U;
+  uint16_t intro_b1_crash_ms_ = 4000U;
   uint16_t intro_scroll_mid_a_px_per_sec_ = 216U;
   uint16_t intro_scroll_bot_a_px_per_sec_ = 108U;
   uint16_t intro_copper_count_ = 0U;
@@ -347,6 +476,7 @@ class UiManager {
   uint16_t intro_wave_text_len_ = 0U;
   uint16_t intro_wave_head_index_ = 0U;
   int16_t intro_wave_char_width_ = 9;
+  int16_t intro_wave_font_line_height_ = 40;
   int16_t intro_wave_base_y_ = 128;
   int32_t intro_wave_pingpong_x_q8_ = 0;
   int32_t intro_wave_pingpong_min_x_q8_ = 0;
@@ -357,10 +487,11 @@ class UiManager {
   int16_t intro_wave_band_bottom_ = 0;
   bool intro_wave_pingpong_mode_ = false;
   uint16_t intro_wave_speed_px_per_sec_ = 120U;
-  uint8_t intro_wave_amp_px_ = 12U;
+  uint8_t intro_wave_amp_px_ = 96U;
   uint16_t intro_wave_period_px_ = 104U;
   float intro_wave_phase_ = 0.0f;
   float intro_wave_phase_speed_ = 1.9f;
+  bool intro_wave_use_pixel_font_ = false;
   bool intro_b1_done_ = false;
   bool intro_cube_morph_enabled_ = true;
   float intro_cube_morph_phase_ = 0.0f;
@@ -370,6 +501,9 @@ class UiManager {
   uint16_t intro_cube_roll_ = 0U;
   float intro_roto_phase_ = 0.0f;
   bool intro_debug_overlay_enabled_ = false;
+  uint32_t intro_phase_log_next_ms_ = 0U;
+  uint8_t intro_c_fx_stage_ = 0U;
+  uint32_t intro_c_fx_stage_start_ms_ = 0U;
   uint32_t intro_rng_state_ = 0x1234ABCDUL;
   lv_timer_t* intro_timer_ = nullptr;
 
@@ -394,4 +528,5 @@ class UiManager {
   int16_t touch_x_ = 0;
   int16_t touch_y_ = 0;
   bool touch_pressed_ = false;
+  ui::fx::FxEngine fx_engine_;
 };

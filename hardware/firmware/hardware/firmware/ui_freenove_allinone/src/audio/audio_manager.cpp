@@ -7,6 +7,9 @@
 #include <cctype>
 #include <cstring>
 
+#include "system/rate_limited_log.h"
+#include "system/runtime_metrics.h"
+
 #if defined(ARDUINO_ARCH_ESP32) && __has_include(<SD_MMC.h>)
 #include <SD_MMC.h>
 #define ZACUS_HAS_SD_AUDIO 1
@@ -34,6 +37,8 @@ constexpr uint8_t kAudioPumpTaskCore = 1U;
 constexpr uint16_t kAudioPumpActiveDelayMs = 1U;
 constexpr uint16_t kAudioPumpIdleDelayMs = 4U;
 constexpr uint16_t kAudioStateLockTimeoutMs = 20U;
+constexpr uint32_t kAudioUnderrunThresholdBytes = 768U;
+constexpr uint32_t kAudioUnderrunCooldownMs = 250U;
 
 struct AudioPinProfile {
   int bck;
@@ -202,9 +207,7 @@ struct AudioManager::AudioRtosState {
   bool running = false;
 };
 
-AudioManager::AudioManager() {
-  createRtosState();
-}
+AudioManager::AudioManager() = default;
 
 AudioManager::~AudioManager() {
   stopAudioPump();
@@ -347,7 +350,22 @@ void AudioManager::audioPumpLoop() {
     if (takeStateLock(0U)) {
       if (player_ != nullptr && playing_) {
         active = true;
+        const uint32_t now_ms = millis();
         player_->loop();
+        const uint32_t in_buffer_bytes = player_->inBufferFilled();
+        if (player_->isRunning() && in_buffer_bytes < kAudioUnderrunThresholdBytes &&
+            (underrun_last_note_ms_ == 0U || (now_ms - underrun_last_note_ms_) >= kAudioUnderrunCooldownMs)) {
+          ++underrun_count_;
+          underrun_last_note_ms_ = now_ms;
+          RuntimeMetrics::instance().noteAudioUnderrun();
+          if (underrun_last_log_ms_ == 0U || (now_ms - underrun_last_log_ms_) >= 1000U) {
+            underrun_last_log_ms_ = now_ms;
+            ZACUS_RL_LOG_MS(1000U,
+                            "[AUDIO] underrun count=%lu in_buffer=%lu\n",
+                            static_cast<unsigned long>(underrun_count_),
+                            static_cast<unsigned long>(in_buffer_bytes));
+          }
+        }
         if (!player_->isRunning()) {
           std::strncpy(finished_track, current_track_.c_str(), sizeof(finished_track) - 1U);
           finished_track[sizeof(finished_track) - 1U] = '\0';
@@ -386,11 +404,15 @@ bool AudioManager::ensurePlayer() {
 }
 
 bool AudioManager::begin() {
+  createRtosState();
   if (!takeStateLock(kAudioStateLockTimeoutMs)) {
     Serial.println("[AUDIO] begin lock timeout");
     return false;
   }
   const bool ready = ensurePlayer();
+  underrun_count_ = 0U;
+  underrun_last_note_ms_ = 0U;
+  underrun_last_log_ms_ = 0U;
   releaseStateLock();
   if (!ready) {
     return false;
@@ -675,6 +697,8 @@ void AudioManager::clearTrackState() {
   active_codec_ = AudioCodec::kUnknown;
   active_bitrate_kbps_ = 0U;
   active_use_sd_ = false;
+  underrun_last_note_ms_ = 0U;
+  underrun_last_log_ms_ = 0U;
 }
 
 void AudioManager::stop() {
@@ -754,7 +778,22 @@ void AudioManager::update() {
     if (player_ != nullptr) {
       tryStartPendingTrack(millis());
       if (!pump_task_enabled_ && playing_) {
+        const uint32_t now_ms = millis();
         player_->loop();
+        const uint32_t in_buffer_bytes = player_->inBufferFilled();
+        if (player_->isRunning() && in_buffer_bytes < kAudioUnderrunThresholdBytes &&
+            (underrun_last_note_ms_ == 0U || (now_ms - underrun_last_note_ms_) >= kAudioUnderrunCooldownMs)) {
+          ++underrun_count_;
+          underrun_last_note_ms_ = now_ms;
+          RuntimeMetrics::instance().noteAudioUnderrun();
+          if (underrun_last_log_ms_ == 0U || (now_ms - underrun_last_log_ms_) >= 1000U) {
+            underrun_last_log_ms_ = now_ms;
+            ZACUS_RL_LOG_MS(1000U,
+                            "[AUDIO] underrun count=%lu in_buffer=%lu\n",
+                            static_cast<unsigned long>(underrun_count_),
+                            static_cast<unsigned long>(in_buffer_bytes));
+          }
+        }
         if (!player_->isRunning()) {
           std::strncpy(finished_track, current_track_.c_str(), sizeof(finished_track) - 1U);
           finished_track[sizeof(finished_track) - 1U] = '\0';
@@ -905,6 +944,15 @@ uint16_t AudioManager::activeBitrateKbps() const {
   const uint16_t bitrate = active_bitrate_kbps_;
   releaseStateLock();
   return bitrate;
+}
+
+uint32_t AudioManager::underrunCount() const {
+  if (!takeStateLock(kAudioStateLockTimeoutMs)) {
+    return underrun_count_;
+  }
+  const uint32_t count = underrun_count_;
+  releaseStateLock();
+  return count;
 }
 
 void AudioManager::setAudioDoneCallback(AudioDoneCallback cb, void* ctx) {

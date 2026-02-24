@@ -3,14 +3,9 @@
   "app": "WIFI_STACK",
   "config": {
     "hostname": "zacus-freenove",
-    "local_ssid": "Les cils",
-    "local_password": "mascarade",
     "ap_policy": "if_no_known_wifi",
     "pause_local_retry_when_ap_client": true,
     "local_retry_ms": 15000,
-    "test_ssid": "Les cils",
-    "test_password": "mascarade",
-    "ap_default_ssid": "Freenove-Setup",
-    "ap_default_password": "mascarade"
+    "ap_default_ssid": "Freenove-Setup"
   }
 }

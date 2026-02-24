@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "bpp": 4,
+  "ranges": [
+    "0x20-0x7E",
+    "0xA0-0x00FF",
+    "0x0100-0x017F",
+    "0x2010-0x2030"
+  ],
+  "symbols": "’”“«»…•–—°œŒàâäçéèêëîïôöùûüÿÀÂÄÇÉÈÊËÎÏÔÖÙÛÜŸ",
+  "fonts": [
+    {
+      "family": "Inter",
+      "file": "tools/fonts/ttf/Inter-Regular.ttf",
+      "sizes": [14, 18, 24, 32],
+      "prefix": "lv_font_inter"
+    },
+    {
+      "family": "Orbitron",
+      "file": "tools/fonts/ttf/Orbitron-Bold.ttf",
+      "sizes": [28, 40],
+      "prefix": "lv_font_orbitron"
+    },
+    {
+      "family": "IBM Plex Mono",
+      "file": "tools/fonts/ttf/IBMPlexMono-Regular.ttf",
+      "sizes": [14, 18],
+      "prefix": "lv_font_ibmplexmono"
+    },
+    {
+      "family": "Press Start 2P",
+      "file": "tools/fonts/ttf/PressStart2P-Regular.ttf",
+      "sizes": [16, 24],
+      "prefix": "lv_font_pressstart2p",
+      "optional_define": "UI_FONT_PIXEL_ENABLE"
+    }
+  ]
+}

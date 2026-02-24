@@ -48,6 +48,9 @@ printables/export/png/**
 # Example: "file 2.ext" or "Makefile 2"
 **/* 2
 **/* 2.*
- 
+
 # Ignorer tous les fichiers du dossier 'prompt a suivre/'
 prompt a suivre/*
+
+# Ignore macOS app bundle Voicebox (généré localement)
+hardware/firmware/tools/Voicebox.app/

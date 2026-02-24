@@ -23,6 +23,8 @@ Key environment variables:
   ZACUS_TIMEOUT=<seconds>   serial_smoke per-command timeout
   ZACUS_UI_LINK_WAIT=<sec>  Delay before UI_LINK_STATUS poll
   ZACUS_SKIP_SCREEN_CHECK=1 Skip story screen smoke check
+  ZACUS_SKIP_CONTRACT_CHECK=1 Skip ESP-NOW cross-repo contract check
+  RTC_BL_PHONE_REPO=<path>   Local RTC_BL_PHONE repository path for contract check
   ZACUS_NO_COUNTDOWN=1      Skip USB countdown prompts
   ZACUS_WAIT_MAX_SECS=<n>   Max USB wait in strict hardware mode (0 = no max)
 
@@ -290,6 +292,59 @@ run_build_env() {
     fi
   fi
   return 1
+}
+
+run_cross_repo_contract_check() {
+  local log_file="$ARTIFACT_DIR/contract_check.log"
+  local repo="${RTC_BL_PHONE_REPO:-${RTC_REPO:-}}"
+  local checker="$ROOT/tools/dev/check_cross_repo_espnow_contract.py"
+  local cmd=()
+  local rc=0
+
+  if [[ "${ZACUS_SKIP_CONTRACT_CHECK:-0}" == "1" ]]; then
+    append_step "cross_repo_contract_check" "SKIP" "0" "$log_file" "ZACUS_SKIP_CONTRACT_CHECK=1"
+    log_info "cross-repo contract check skipped"
+    return 0
+  fi
+
+  if [[ -z "$repo" ]]; then
+    append_step "cross_repo_contract_check" "SKIP" "0" "$log_file" "set RTC_BL_PHONE_REPO (or RTC_REPO) to run drift check"
+    log_info "cross-repo contract check skipped (no local RTC path configured)"
+    return 0
+  fi
+
+  if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+    append_step "cross_repo_contract_check" "SKIP" "0" "$log_file" "python not found: $PYTHON_BIN"
+    log_info "cross-repo contract check skipped (python unavailable)"
+    return 0
+  fi
+
+  if [[ ! -f "$checker" ]]; then
+    append_step "cross_repo_contract_check" "FAIL" "1" "$log_file" "missing checker: $checker"
+    set_failure 25
+    return 1
+  fi
+
+  if [[ ! -d "$repo" ]]; then
+    append_step "cross_repo_contract_check" "FAIL" "1" "$log_file" "missing RTC repo path: $repo"
+    set_failure 25
+    return 1
+  fi
+
+  cmd=("$PYTHON_BIN" "$checker" --rtc-repo "$repo" --json)
+  record_command "${cmd[*]}"
+  printf '[step] %s\n' "${cmd[*]}" | tee -a "$RUN_LOG" "$log_file"
+  set +e
+  "${cmd[@]}" >>"$log_file" 2>&1
+  rc=$?
+  set -e
+  if [[ "$rc" == "0" ]]; then
+    append_step "cross_repo_contract_check" "PASS" "0" "$log_file" "repo=$repo"
+    return 0
+  fi
+  append_step "cross_repo_contract_check" "FAIL" "$rc" "$log_file" "repo=$repo"
+  set_failure 25
+  return "$rc"
 }
 
 list_ports_verbose() {
@@ -973,6 +1028,8 @@ if [[ "${ZACUS_SKIP_SMOKE:-0}" != "1" ]]; then
     SERIAL_MODULE_AVAILABLE="0"
   fi
 fi
+
+run_cross_repo_contract_check
 
 if [[ "${ZACUS_SKIP_PIO:-0}" == "1" ]]; then
   BUILD_STATUS="SKIPPED"

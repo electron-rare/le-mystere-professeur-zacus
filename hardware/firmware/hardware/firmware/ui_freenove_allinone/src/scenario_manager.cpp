@@ -266,6 +266,28 @@ bool ScenarioManager::notifyActionEvent(const char* event_name, uint32_t now_ms)
   return dispatchEvent(StoryEventType::kAction, name, now_ms, "action_event");
 }
 
+bool ScenarioManager::gotoScene(const char* scene_id, uint32_t now_ms, const char* source) {
+  if (scenario_ == nullptr || scene_id == nullptr || scene_id[0] == '\0') {
+    return false;
+  }
+  for (uint8_t index = 0U; index < scenario_->stepCount; ++index) {
+    const StepDef& step = scenario_->steps[index];
+    const char* screen_scene_id = step.resources.screenSceneId;
+    const char* audio_pack_id = step.resources.audioPackId;
+    applyStepResourceOverride(&step, &screen_scene_id, &audio_pack_id);
+    (void)audio_pack_id;
+    if (screen_scene_id == nullptr || std::strcmp(screen_scene_id, scene_id) != 0) {
+      continue;
+    }
+    const char* enter_source =
+        (source != nullptr && source[0] != '\0') ? source : "scene_goto";
+    enterStep(static_cast<int8_t>(index), now_ms, enter_source);
+    runImmediateTransitions(now_ms, enter_source);
+    return true;
+  }
+  return false;
+}
+
 ScenarioSnapshot ScenarioManager::snapshot() const {
   ScenarioSnapshot out;
   out.scenario = scenario_;

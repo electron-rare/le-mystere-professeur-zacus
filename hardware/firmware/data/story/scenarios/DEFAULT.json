@@ -64,7 +64,7 @@
     },
     {
       "id": "STEP_ETAPE2",
-      "screen_scene_id": "SCENE_SIGNAL_SPIKE",
+      "screen_scene_id": "SCENE_WIN_ETAPE",
       "audio_pack_id": "PACK_WIN",
       "action_ids": [
         "ACTION_TRACE_STEP",

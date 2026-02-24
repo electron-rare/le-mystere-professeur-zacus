@@ -35,6 +35,9 @@ constexpr const char* kDefaultScenarioFile = "/story/scenarios/DEFAULT.json";
 constexpr const char* kDiagAudioFile = "/music/boot_radio.mp3";
 constexpr size_t kSerialLineCapacity = 192U;
 constexpr bool kBootDiagnosticTone = true;
+constexpr const char* kEspNowBroadcastTarget = "broadcast";
+constexpr const char* kStepWinEtape = "STEP_ETAPE2";
+constexpr const char* kPackWin = "PACK_WIN";
 
 AudioManager g_audio;
 ScenarioManager g_scenario;
@@ -63,6 +66,8 @@ bool g_mic_event_armed = true;
 bool g_battery_low_latched = false;
 LaTriggerRuntimeState g_la_trigger;
 bool g_la_dispatch_in_progress = false;
+bool g_has_ring_sent_for_win_etape = false;
+bool g_win_etape_ui_refresh_pending = false;
 char g_last_action_step_key[72] = {0};
 char g_serial_line[kSerialLineCapacity] = {0};
 size_t g_serial_line_len = 0U;
@@ -768,7 +773,14 @@ bool executeEspNowCommandPayload(const char* payload_text, uint32_t now_ms, EspN
     return true;
   }
   if (command == "NEXT") {
-    out_result->ok = notifyScenarioButtonGuarded(5U, false, now_ms, "espnow_command");
+    bool ok = dispatchScenarioEventByName("SERIAL:BTN_NEXT", now_ms);
+    if (!ok) {
+      ok = notifyScenarioButtonGuarded(5U, false, now_ms, "espnow_command");
+    }
+    out_result->ok = ok;
+    if (!out_result->ok) {
+      out_result->error = "invalid_next_event";
+    }
     return true;
   }
   if (command == "WIFI_DISCONNECT") {
@@ -828,6 +840,63 @@ bool executeEspNowCommandPayload(const char* payload_text, uint32_t now_ms, EspN
     if (!dispatched) {
       out_result->error = "invalid_sc_event";
     }
+    return true;
+  }
+  if (command == "RING") {
+    out_result->ok = dispatchScenarioEventByName("RING", now_ms);
+    if (!out_result->ok) {
+      out_result->error = "invalid_ring_event";
+    }
+    return true;
+  }
+  if (command == "SCENE") {
+    String scene_id = trailing_arg;
+    scene_id.trim();
+    if (scene_id.isEmpty() && !args.isNull()) {
+      if (args.is<const char*>()) {
+        scene_id = args.as<const char*>();
+      } else if (args.is<JsonObjectConst>()) {
+        JsonObjectConst scene_args = args.as<JsonObjectConst>();
+        const char* id = scene_args["id"] | scene_args["scenario"] | scene_args["scenario_id"] | scene_args["scene_id"] | "";
+        if (id != nullptr && id[0] != '\0') {
+          scene_id = id;
+        } else if (scene_args["name"].is<const char*>()) {
+          scene_id = scene_args["name"].as<const char*>();
+        }
+      } else if (args.is<int>()) {
+        scene_id = String(args.as<int>());
+      } else if (args.is<unsigned int>()) {
+        scene_id = String(args.as<unsigned int>());
+      } else if (args.is<long>()) {
+        scene_id = String(args.as<long>());
+      } else if (args.is<unsigned long>()) {
+        scene_id = String(args.as<unsigned long>());
+      }
+    }
+
+    scene_id.trim();
+    if (scene_id.isEmpty()) {
+      out_result->ok = false;
+      out_result->error = "missing_scene_id";
+      return true;
+    }
+    scene_id.toUpperCase();
+
+    String load_source;
+    String load_path;
+    out_result->ok = loadScenarioByIdPreferStoryFile(scene_id.c_str(), &load_source, &load_path);
+    if (!out_result->ok) {
+      out_result->error = "scene_not_found";
+      return true;
+    }
+    if (!load_path.isEmpty()) {
+      Serial.printf("[SCENARIO] SCENE source=%s path=%s\n", load_source.c_str(), load_path.c_str());
+    } else {
+      Serial.printf("[SCENARIO] SCENE source=%s id=%s\n", load_source.c_str(), scene_id.c_str());
+    }
+    g_last_action_step_key[0] = '\0';
+    refreshSceneIfNeeded(true);
+    startPendingAudioIfAny();
     return true;
   }
 
@@ -929,6 +998,58 @@ bool splitSsidPass(const char* argument, String* out_ssid, String* out_pass) {
   return !out_ssid->isEmpty();
 }
 
+bool parseEspNowSendPayload(const char* argument, String& payload, bool* used_target) {
+  if (argument == nullptr) {
+    return false;
+  }
+
+  String args = argument;
+  args.trim();
+  if (args.isEmpty()) {
+    return false;
+  }
+  if (used_target != nullptr) {
+    *used_target = false;
+  }
+
+  const int separator = args.indexOf(' ');
+  if (separator < 0) {
+    payload = args;
+    return true;
+  }
+
+  String maybe_target = args.substring(0U, static_cast<unsigned int>(separator));
+  maybe_target.trim();
+  String parsed_payload = args.substring(static_cast<unsigned int>(separator + 1U));
+  parsed_payload.trim();
+  if (parsed_payload.isEmpty()) {
+    return false;
+  }
+
+  bool looks_like_target = false;
+  String target_lower = maybe_target;
+  target_lower.toLowerCase();
+  if (target_lower == kEspNowBroadcastTarget) {
+    looks_like_target = true;
+  } else {
+    uint8_t parsed_mac[6] = {0};
+    if (g_network.parseMac(maybe_target.c_str(), parsed_mac)) {
+      looks_like_target = true;
+    }
+  }
+
+  if (!looks_like_target) {
+    payload = args;
+    return true;
+  }
+
+  if (used_target != nullptr) {
+    *used_target = true;
+  }
+  payload = parsed_payload;
+  return true;
+}
+
 void printNetworkStatus() {
   const NetworkManager::Snapshot net = g_network.snapshot();
   Serial.printf("NET_STATUS state=%s mode=%s sta=%u connecting=%u ap=%u fallback_ap=%u espnow=%u ip=%s sta_ssid=%s "
@@ -998,9 +1119,32 @@ void printEspNowStatusJson() {
   Serial.println();
 }
 
+bool sendRingCommandToRtc() {
+  StaticJsonDocument<96> payload;
+  payload["cmd"] = "RING";
+  String payload_text;
+  serializeJson(payload, payload_text);
+  const bool ok = g_network.sendEspNowTarget(kEspNowBroadcastTarget, payload_text.c_str());
+  Serial.printf("[MAIN] RING send to rtc ok=%u payload=%s\n", ok ? 1U : 0U, payload_text.c_str());
+  return ok;
+}
+
 void onAudioFinished(const char* track, void* ctx) {
   (void)ctx;
   Serial.printf("[MAIN] audio done: %s\n", track != nullptr ? track : "unknown");
+  const ScenarioSnapshot snapshot = g_scenario.snapshot();
+  if (snapshot.step != nullptr &&
+      snapshot.step->id != nullptr &&
+      std::strcmp(snapshot.step->id, kStepWinEtape) == 0 &&
+      snapshot.audio_pack_id != nullptr &&
+      std::strcmp(snapshot.audio_pack_id, kPackWin) == 0 &&
+      !g_has_ring_sent_for_win_etape) {
+    g_has_ring_sent_for_win_etape = sendRingCommandToRtc();
+  }
+  if (snapshot.step != nullptr && snapshot.step->id != nullptr && std::strcmp(snapshot.step->id, kStepWinEtape) == 0 &&
+      snapshot.audio_pack_id != nullptr && std::strcmp(snapshot.audio_pack_id, kPackWin) == 0) {
+    g_win_etape_ui_refresh_pending = true;
+  }
   g_scenario.notifyAudioDone(millis());
 }
 
@@ -1180,7 +1324,6 @@ constexpr const char* kWebUiIndex = R"HTML(
     <button onclick="wifiConn()">WIFI_CONNECT</button>
   </div>
   <div class="card">
-    <input id="target" placeholder="ESP-NOW target (mac|broadcast)" />
     <input id="payload" placeholder="Payload" />
     <button onclick="espnowSend()">ESPNOW_SEND</button>
     <button onclick="espnowOn()">ESPNOW_ON</button>
@@ -1249,7 +1392,6 @@ constexpr const char* kWebUiIndex = R"HTML(
     function espnowOff() { return post("/api/network/espnow/off"); }
     function espnowSend() {
       return post("/api/espnow/send", {
-        target: document.getElementById("target").value,
         payload: document.getElementById("payload").value
       });
     }
@@ -1673,9 +1815,8 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
 
 void executeStoryActionsForStep(const ScenarioSnapshot& snapshot, uint32_t now_ms) {
   if (snapshot.step == nullptr) {
-    return;
-  }
-  if (snapshot.action_ids == nullptr || snapshot.action_count == 0U) {
+    g_has_ring_sent_for_win_etape = false;
+    g_win_etape_ui_refresh_pending = false;
     return;
   }
 
@@ -1686,9 +1827,17 @@ void executeStoryActionsForStep(const ScenarioSnapshot& snapshot, uint32_t now_m
            scenarioIdFromSnapshot(snapshot),
            stepIdFromSnapshot(snapshot));
   if (std::strcmp(step_key, g_last_action_step_key) == 0) {
-    return;
+    if (snapshot.action_ids == nullptr || snapshot.action_count == 0U) {
+      return;
+    }
+  } else {
+    copyText(g_last_action_step_key, sizeof(g_last_action_step_key), step_key);
+    g_has_ring_sent_for_win_etape = std::strcmp(stepIdFromSnapshot(snapshot), kStepWinEtape) != 0;
+    g_win_etape_ui_refresh_pending = false;
+    if (snapshot.action_ids == nullptr || snapshot.action_count == 0U) {
+      return;
+    }
   }
-  copyText(g_last_action_step_key, sizeof(g_last_action_step_key), step_key);
 
   g_media.noteStepChange();
   for (uint8_t index = 0U; index < snapshot.action_count; ++index) {
@@ -1786,19 +1935,11 @@ bool dispatchControlAction(const String& action_raw, uint32_t now_ms, String* ou
 
   if (startsWithIgnoreCase(action.c_str(), "ESPNOW_SEND ")) {
     String args = action.substring(static_cast<unsigned int>(std::strlen("ESPNOW_SEND ")));
-    args.trim();
-    const int sep = args.indexOf(' ');
-    if (sep <= 0) {
+    String payload;
+    if (!parseEspNowSendPayload(args.c_str(), payload, nullptr)) {
       return false;
     }
-    String target = args.substring(0, static_cast<unsigned int>(sep));
-    String payload = args.substring(static_cast<unsigned int>(sep + 1));
-    target.trim();
-    payload.trim();
-    if (target.isEmpty() || payload.isEmpty()) {
-      return false;
-    }
-    return g_network.sendEspNowTarget(target.c_str(), payload.c_str());
+    return g_network.sendEspNowTarget(kEspNowBroadcastTarget, payload.c_str());
   }
 
   if (startsWithIgnoreCase(action.c_str(), "SC_EVENT_RAW ")) {
@@ -1826,6 +1967,35 @@ bool dispatchControlAction(const String& action_raw, uint32_t now_ms, String* ou
       return false;
     }
     return dispatchScenarioEventByType(event_type, event_name.isEmpty() ? nullptr : event_name.c_str(), now_ms);
+  }
+
+  if (startsWithIgnoreCase(action.c_str(), "SCENE_GOTO ")) {
+    String scene_id = action.substring(static_cast<unsigned int>(std::strlen("SCENE_GOTO ")));
+    scene_id.trim();
+    scene_id.toUpperCase();
+    if (scene_id.isEmpty()) {
+      if (out_error != nullptr) {
+        *out_error = "scene_goto_arg";
+      }
+      return false;
+    }
+    const bool ok = g_scenario.gotoScene(scene_id.c_str(), now_ms, "scene_goto_control");
+    if (!ok) {
+      if (out_error != nullptr) {
+        *out_error = "scene_not_found";
+      }
+      return false;
+    }
+    g_last_action_step_key[0] = '\0';
+    refreshSceneIfNeeded(true);
+    startPendingAudioIfAny();
+    return true;
+  }
+  if (action.equalsIgnoreCase("SCENE_GOTO")) {
+    if (out_error != nullptr) {
+      *out_error = "scene_goto_arg";
+    }
+    return false;
   }
 
   if (startsWithIgnoreCase(action.c_str(), "HW_LED_SET ")) {
@@ -2278,16 +2448,9 @@ void setupWebUi() {
   });
 
   g_web_server.on("/api/espnow/send", HTTP_POST, []() {
-    String target = g_web_server.arg("target");
     String payload = g_web_server.arg("payload");
-    if (target.isEmpty()) {
-      target = g_web_server.arg("mac");
-    }
     StaticJsonDocument<768> request_json;
     if (webParseJsonBody(&request_json)) {
-      if (target.isEmpty()) {
-        target = request_json["target"] | request_json["mac"] | "broadcast";
-      }
       if (payload.isEmpty()) {
         if (request_json["payload"].is<JsonVariantConst>()) {
           serializeJson(request_json["payload"], payload);
@@ -2296,28 +2459,18 @@ void setupWebUi() {
         }
       }
     }
-    if (target.isEmpty()) {
-      target = "broadcast";
-    }
     if (payload.isEmpty()) {
       webSendResult("ESPNOW_SEND", false);
       return;
     }
-    const bool ok = g_network.sendEspNowTarget(target.c_str(), payload.c_str());
+    const bool ok = g_network.sendEspNowTarget(kEspNowBroadcastTarget, payload.c_str());
     webSendResult("ESPNOW_SEND", ok);
   });
 
   g_web_server.on("/api/network/espnow/send", HTTP_POST, []() {
-    String target = g_web_server.arg("target");
     String payload = g_web_server.arg("payload");
-    if (target.isEmpty()) {
-      target = g_web_server.arg("mac");
-    }
     StaticJsonDocument<768> request_json;
     if (webParseJsonBody(&request_json)) {
-      if (target.isEmpty()) {
-        target = request_json["target"] | request_json["mac"] | "broadcast";
-      }
       if (payload.isEmpty()) {
         if (request_json["payload"].is<JsonVariantConst>()) {
           serializeJson(request_json["payload"], payload);
@@ -2326,14 +2479,11 @@ void setupWebUi() {
         }
       }
     }
-    if (target.isEmpty()) {
-      target = "broadcast";
-    }
     if (payload.isEmpty()) {
       webSendResult("ESPNOW_SEND", false);
       return;
     }
-    const bool ok = g_network.sendEspNowTarget(target.c_str(), payload.c_str());
+    const bool ok = g_network.sendEspNowTarget(kEspNowBroadcastTarget, payload.c_str());
     webSendResult("ESPNOW_SEND", ok);
   });
 
@@ -2378,7 +2528,10 @@ void setupWebUi() {
   });
 
   g_web_server.on("/api/scenario/next", HTTP_POST, []() {
-    const bool ok = notifyScenarioButtonGuarded(5U, false, millis(), "api_scenario_next");
+    bool ok = dispatchScenarioEventByName("SERIAL:BTN_NEXT", millis());
+    if (!ok) {
+      ok = notifyScenarioButtonGuarded(5U, false, millis(), "api_scenario_next");
+    }
     webSendResult("NEXT", ok);
   });
 
@@ -2648,6 +2801,11 @@ void startPendingAudioIfAny() {
     return;
   }
 
+  const ScenarioSnapshot snapshot = g_scenario.snapshot();
+  const bool is_win_etape_audio = (audio_pack == kPackWin &&
+                                   snapshot.step != nullptr && snapshot.step->id != nullptr &&
+                                   std::strcmp(snapshot.step->id, kStepWinEtape) == 0);
+
   const String configured_path = g_storage.resolveAudioPathByPackId(audio_pack.c_str());
   const char* mapped_path = audioPackToFile(audio_pack.c_str());
   if (configured_path.isEmpty() && mapped_path == nullptr) {
@@ -2664,18 +2822,30 @@ void startPendingAudioIfAny() {
     Serial.printf("[MAIN] audio pack=%s path=%s source=story_audio_json\n",
                   audio_pack.c_str(),
                   configured_path.c_str());
+    if (is_win_etape_audio) {
+      g_win_etape_ui_refresh_pending = true;
+    }
     return;
   }
   if (mapped_path != nullptr && g_audio.play(mapped_path)) {
     Serial.printf("[MAIN] audio pack=%s path=%s source=pack_map\n", audio_pack.c_str(), mapped_path);
+    if (is_win_etape_audio) {
+      g_win_etape_ui_refresh_pending = true;
+    }
     return;
   }
   if (g_audio.play(kDiagAudioFile)) {
     Serial.printf("[MAIN] audio fallback for pack=%s fallback=%s\n", audio_pack.c_str(), kDiagAudioFile);
+    if (is_win_etape_audio) {
+      g_win_etape_ui_refresh_pending = true;
+    }
     return;
   }
   if (g_audio.playDiagnosticTone()) {
     Serial.printf("[MAIN] audio fallback for pack=%s fallback=builtin_tone\n", audio_pack.c_str());
+    if (is_win_etape_audio) {
+      g_win_etape_ui_refresh_pending = true;
+    }
     return;
   }
 
@@ -2713,7 +2883,8 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
   if (std::strcmp(command, "HELP") == 0) {
     Serial.println(
         "CMDS PING STATUS BTN_READ NEXT UNLOCK RESET "
-        "SC_LIST SC_LOAD <id> SC_COVERAGE SC_REVALIDATE SC_REVALIDATE_ALL SC_EVENT <type> [name] SC_EVENT_RAW <name> "
+        "SC_LIST SC_LOAD <id> SCENE_GOTO <scene_id> SC_COVERAGE SC_REVALIDATE SC_REVALIDATE_ALL SC_EVENT <type> [name] "
+        "SC_EVENT_RAW <name> "
         "STORY_REFRESH_SD STORY_SD_STATUS "
         "HW_STATUS HW_STATUS_JSON HW_LED_SET <r> <g> <b> [brightness] [pulse] HW_LED_AUTO <ON|OFF> HW_MIC_STATUS HW_BAT_STATUS "
         "MIC_TUNER_STATUS [ON|OFF|<period_ms>] "
@@ -2722,7 +2893,7 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
         "NET_STATUS WIFI_STATUS WIFI_TEST WIFI_STA <ssid> <pass> WIFI_CONNECT <ssid> <pass> WIFI_DISCONNECT "
         "WIFI_AP_ON [ssid] [pass] WIFI_AP_OFF "
         "ESPNOW_ON ESPNOW_OFF ESPNOW_STATUS ESPNOW_STATUS_JSON ESPNOW_PEER_ADD <mac> ESPNOW_PEER_DEL <mac> ESPNOW_PEER_LIST "
-        "ESPNOW_SEND <mac|broadcast> <text|json> "
+        "ESPNOW_SEND <text|json> "
         "AUDIO_TEST AUDIO_TEST_FS AUDIO_PROFILE <idx> AUDIO_FX <idx> AUDIO_STATUS VOL <0..21> AUDIO_STOP STOP");
     return;
   }
@@ -2864,7 +3035,8 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
       std::strcmp(command, "CAM_ON") == 0 || std::strcmp(command, "CAM_OFF") == 0 ||
       std::strcmp(command, "CAM_SNAPSHOT") == 0 || std::strcmp(command, "MEDIA_LIST") == 0 ||
       std::strcmp(command, "MEDIA_PLAY") == 0 || std::strcmp(command, "MEDIA_STOP") == 0 ||
-      std::strcmp(command, "REC_START") == 0 || std::strcmp(command, "REC_STOP") == 0) {
+      std::strcmp(command, "REC_START") == 0 || std::strcmp(command, "REC_STOP") == 0 ||
+      std::strcmp(command, "SCENE_GOTO") == 0) {
     String action = command;
     if (argument != nullptr && argument[0] != '\0') {
       action += " ";
@@ -3050,26 +3222,13 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
       Serial.println("ERR ESPNOW_SEND_ARG");
       return;
     }
-    char args[kSerialLineCapacity] = {0};
-    std::strncpy(args, argument, sizeof(args) - 1U);
-    char* target = args;
-    char* payload = nullptr;
-    for (size_t index = 0U; index < sizeof(args) && args[index] != '\0'; ++index) {
-      if (args[index] == ' ') {
-        args[index] = '\0';
-        payload = &args[index + 1U];
-        break;
-      }
-    }
-    while (payload != nullptr && *payload == ' ') {
-      ++payload;
-    }
-    if (target[0] == '\0' || payload == nullptr || payload[0] == '\0') {
+    String payload;
+    if (!parseEspNowSendPayload(argument, payload, nullptr)) {
       Serial.println("ERR ESPNOW_SEND_ARG");
       return;
     }
-    const bool ok = g_network.sendEspNowTarget(target, payload);
-    Serial.printf("ACK ESPNOW_SEND target=%s ok=%u\n", target, ok ? 1U : 0U);
+    const bool ok = g_network.sendEspNowTarget(kEspNowBroadcastTarget, payload.c_str());
+    Serial.printf("ACK ESPNOW_SEND target=%s ok=%u\n", kEspNowBroadcastTarget, ok ? 1U : 0U);
     return;
   }
   if (std::strcmp(command, "AUDIO_TEST") == 0) {
@@ -3404,6 +3563,10 @@ void loop() {
   g_media.update(now_ms, &g_audio);
   g_scenario.tick(now_ms);
   startPendingAudioIfAny();
+  if (g_win_etape_ui_refresh_pending) {
+    g_win_etape_ui_refresh_pending = false;
+    refreshSceneIfNeeded(true);
+  }
   uint32_t la_gate_elapsed_ms = 0U;
   if (g_la_trigger.gate_active && g_la_trigger.gate_entered_ms > 0U) {
     la_gate_elapsed_ms = now_ms - g_la_trigger.gate_entered_ms;

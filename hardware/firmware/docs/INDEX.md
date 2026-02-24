@@ -44,6 +44,8 @@ Règle active: les contributions valides passent uniquement par `main`.
   - Story Engine V2 (format scénarios YAML)
   - UI Link v2 (UART frames)
   - Audio pipeline
+- **[ESP-NOW Freenove → RTC_BL_PHONE](ESP_NOW_API_COORDINATION_AGENT.md)** - Contrat de coordination API (broadcast obligatoire)
+- **[Cross-Repo Intelligence](CROSS_REPO_INTELLIGENCE.md)** - Référentiel opérationnel Zacus ↔ RTC_BL_PHONE (`esp32_RTC_ZACUS`)
 
 
 ### 🔧 Hardware & Testing

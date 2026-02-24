@@ -11,6 +11,8 @@
 namespace {
 
 NetworkManager* g_network_instance = nullptr;
+constexpr uint8_t kBroadcastMac[6] = {0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU};
+constexpr char kBroadcastTarget[] = "broadcast";
 
 bool timeReached(uint32_t now_ms, uint32_t target_ms) {
   return static_cast<int32_t>(now_ms - target_ms) >= 0;
@@ -508,9 +510,6 @@ bool NetworkManager::ensureEspNowReady() {
 }
 
 bool NetworkManager::sendEspNowTarget(const char* target, const char* text) {
-  if (target == nullptr || target[0] == '\0') {
-    return false;
-  }
   if (text == nullptr || text[0] == '\0') {
     return false;
   }
@@ -546,15 +545,10 @@ bool NetworkManager::sendEspNowTarget(const char* target, const char* text) {
     serializeJson(envelope, frame);
   }
 
-  if (equalsIgnoreCase(target, "broadcast")) {
-    const uint8_t broadcast_mac[6] = {0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU};
-    return sendEspNowText(broadcast_mac, frame.c_str());
+  if (target != nullptr && target[0] != '\0' && !equalsIgnoreCase(target, kBroadcastTarget)) {
+    Serial.printf("[NET] ESP-NOW target ignored; using broadcast target=%s\n", target);
   }
-  uint8_t mac[6] = {0};
-  if (!parseMac(target, mac)) {
-    return false;
-  }
-  return sendEspNowText(mac, frame.c_str());
+  return sendEspNowText(kBroadcastMac, frame.c_str());
 }
 
 NetworkManager::Snapshot NetworkManager::snapshot() const {

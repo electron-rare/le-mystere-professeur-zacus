@@ -21,6 +21,7 @@ constexpr ScreenSceneDef kScenes[] = {
     {"SCENE_MEDIA_ARCHIVE", 2U, 2U},
     {"SCENE_READY", 2U, 2U},
     {"SCENE_WIN", 1U, 2U},
+    {"SCENE_WIN_ETAPE", 1U, 2U},
 };
 
 // Controlled legacy aliases used during the migration window.

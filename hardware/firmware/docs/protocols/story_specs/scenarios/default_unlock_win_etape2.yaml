@@ -20,6 +20,7 @@ steps:
     audio_pack_id: ""
     actions:
       - ACTION_TRACE_STEP
+      - ACTION_HW_LED_READY
     apps:
       - APP_SCREEN
       - APP_GATE
@@ -46,9 +47,11 @@ steps:
     audio_pack_id: PACK_BOOT_RADIO
     actions:
       - ACTION_TRACE_STEP
+      - ACTION_HW_LED_ALERT
     apps:
       - APP_AUDIO
       - APP_SCREEN
+      - APP_GATE
       - APP_WIFI
       - APP_ESPNOW
     mp3_gate_open: false
@@ -77,8 +80,11 @@ steps:
     audio_pack_id: ""
     actions:
       - ACTION_TRACE_STEP
-      - ACTION_FORCE_ETAPE2
+      - ACTION_QUEUE_SONAR
+      - ACTION_CAMERA_SNAPSHOT
+      - ACTION_REC_START
     apps:
+      - APP_AUDIO
       - APP_SCREEN
       - APP_GATE
       - APP_WIFI
@@ -117,23 +123,19 @@ steps:
         priority: 120
 
   - step_id: STEP_ETAPE2
-    screen_scene_id: SCENE_WIN
+    screen_scene_id: SCENE_WIN_ETAPE
     audio_pack_id: PACK_WIN
     actions:
       - ACTION_TRACE_STEP
+      - ACTION_HW_LED_ALERT
     apps:
       - APP_AUDIO
       - APP_SCREEN
+      - APP_GATE
       - APP_WIFI
       - APP_ESPNOW
     mp3_gate_open: false
     transitions:
-      - trigger: on_event
-        event_type: audio_done
-        event_name: AUDIO_DONE
-        target_step_id: STEP_DONE
-        after_ms: 0
-        priority: 100
       - trigger: on_event
         event_type: serial
         event_name: BTN_NEXT
@@ -148,10 +150,12 @@ steps:
         priority: 120
 
   - step_id: STEP_DONE
-    screen_scene_id: SCENE_READY
+    screen_scene_id: SCENE_MEDIA_ARCHIVE
     audio_pack_id: ""
     actions:
       - ACTION_TRACE_STEP
+      - ACTION_REC_STOP
+      - ACTION_HW_LED_READY
       - ACTION_REFRESH_SD
     apps:
       - APP_SCREEN

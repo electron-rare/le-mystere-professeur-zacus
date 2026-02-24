@@ -1,3 +1,59 @@
+## [2026-02-23] Audit coherence global (source de verite: firmware Freenove)
+
+- Validation story spec OK: `./tools/dev/story-gen validate`.
+- Regeneration C++ story/apps OK: `./tools/dev/story-gen generate-cpp` (spec hash `a4e034ba637f`).
+- Build firmware cible Freenove OK: `pio run -e freenove_esp32s3`.
+- Contrat ESP-NOW corrige:
+  - `SCENE` documente comme `SCENE <scenario_id>` (chargement scenario),
+  - `SCENE_GOTO <scene_id>` documente comme extension one-shot Freenove.
+- Drift checker cross-repo aligne:
+  - `SCENE_GOTO` parsee explicitement,
+  - marquee comme extension `OPTIONAL Zacus-only` pour eviter les faux positifs de drift.
+- Coordination cross-repo rendue portable:
+  - docs mises a jour pour utiliser `RTC_BL_PHONE_REPO` (ou `RTC_REPO`) au lieu d'un chemin machine hardcode.
+
+## [2026-02-23] Coherence lock Freenove (Codex)
+
+- Canonical hardware target: `freenove_esp32s3` on **ESP32-S3-WROOM-1-N16R8**.
+- Canonical upload port for this setup: `/dev/cu.usbmodem5AB90753301` (usbmodem flow).
+- Canonical one-shot scene jump command: `SCENE_GOTO <SCENE_ID>` (serial + API control action).
+- API parity for one-shot jump: `POST /api/control` with `action=SCENE_GOTO SCENE_WIN_ETAPE`.
+- UI text safety lock: UTF-8 to ASCII fallback is applied before label rendering in `ui_manager.cpp` to avoid missing-glyph artifacts on the Freenove display.
+- Skill sync lock: `firmware-scene-ui-editor` uses `SCENE_GOTO` as primary visual validation path.
+
+## [2026-02-23] Contrat ESP-NOW compact (1-pager)
+
+- Ajout d'une fiche de synthèse pour intégration externe: `hardware/firmware/docs/ESP_NOW_API_CONTRACT_FREENOVE_V1_QUICK.md` (format recommandé v1, réponses ACK, endpoints, erreurs).
+- Ajout d'une version ultra-légère `hardware/firmware/docs/ESP_NOW_API_CONTRACT_FREENOVE_V1_MINI_SCHEMA.md` pour le second repo.
+- Coordination API confirmée: la carte pair ESP-NOW Freenove est verrouillée sur `RTC_BL_PHONE` branche `esp32_RTC_ZACUS` (Freenove en broadcast-only).
+- Ajout d'un document d'orchestration API: `docs/ESP_NOW_API_COORDINATION_AGENT.md`.
+- Ajout d'une fiche interne de coordination cross-repo: `docs/CROSS_REPO_INTELLIGENCE.md` (contrôle bi-directionnel sans écriture RTC tant qu'autorisé).
+- Ajout d'un script de contrôle drift: `tools/dev/check_cross_repo_espnow_contract.py`.
+- Intégration du contrôle contractuel cross-repo dans `tools/dev/run_matrix_and_smoke.sh` via l'étape `cross_repo_contract_check` (env: `RTC_BL_PHONE_REPO`, `ZACUS_SKIP_CONTRACT_CHECK`).
+
+
+## [2026-02-23] ESP-NOW Freenove (commandes runtime)
+
+- Ajouté support ESP-NOW de `RING` (dispatch event story) et `SCENE <scenario_id>` (charge scénario par id) dans `executeEspNowCommandPayload` du firmware Freenove.
+- Mise à jour du contrat ESP-NOW Freenove (`ESP_NOW_API_CONTRACT_FREENOVE_V1*`) pour documenter ces commandes côté pair intégré.
+- Envoi ESP-NOW simplifié: `ESPNOW_SEND` force désormais l’envoi en broadcast (argument de target ignoré pour la compatibilité existante, WebUI simplifiée).
+
+
+## [2026-02-23] Contrat ESP-NOW Freenove (v1)
+
+- Ajout doc contrat API ESP-NOW Freenove: `hardware/firmware/docs/ESP_NOW_API_CONTRACT_FREENOVE_V1.md` (commandes, endpoints, exemples, erreurs/compatibilité).
+
+
+## [2026-02-23] Enchainement scène LA → etape gagnée (Freenove)
+
+- `STEP_ETAPE2` utilise désormais `SCENE_WIN_ETAPE` dans `data/story/scenarios/DEFAULT.json` (côté runtime actuel); `SCENE_SIGNAL_SPIKE` reste conservée en flux legacy/compat.
+- Déploiement provisoire embarqué aligné: mise à jour de `hardware/firmware/ui_freenove_allinone/src/storage_manager.cpp` (asset scenario par défaut + ajout `SCENE_WIN_ETAPE.json` intégré).
+- Registre runtime mis à jour: `hardware/libs/story/src/resources/screen_scene_registry.cpp` et fallback C++ de scénario compilé `hardware/libs/story/src/generated/scenarios_gen.cpp`.
+- Fichier scène ajouté: `data/story/screens/SCENE_WIN_ETAPE.json` (clone visuel de `SCENE_WIN` avec nouvel ID).
+- Convergence des sources de vérité: `docs/protocols/story_specs/scenarios/default_unlock_win_etape2.yaml` aligné sur `SCENE_WIN_ETAPE` + `SCENE_MEDIA_ARCHIVE`.
+- Générateur story: ajout de `SCENE_WIN_ETAPE` dans `lib/zacus_story_gen_ai/src/zacus_story_gen_ai/generator.py` pour conserver le mapping canonical et régression C++ alignée.
+- UI `SCENE_WIN_ETAPE`: texte dynamique (`Validation en cours...` / `BRAVO! vous avez eu juste`) selon l'état audio pour piloter l'attente de validation côté UI.
+
 ### Procédure smoke test Freenove
 
 1. Vérifier la configuration du port série (résolution dynamique via cockpit.sh ports).
@@ -464,7 +520,7 @@
 - Runtime modifié:
   - boot auto-connect vers `Les cils`/`mascarade`
   - AP fallback auto uniquement en absence de connexion STA (et stop auto quand STA connecté)
-  - commandes série enrichies: `WIFI_CONNECT`, `WIFI_DISCONNECT`, `ESPNOW_PEER_ADD/DEL/LIST`, `ESPNOW_SEND <mac|broadcast>`
+- commandes série enrichies: `WIFI_CONNECT`, `WIFI_DISCONNECT`, `ESPNOW_PEER_ADD/DEL/LIST`, `ESPNOW_SEND <text|json>` (broadcast)
   - bridge ESP-NOW -> events scénario durci (texte + JSON `cmd/raw/event/event_type/event_name`)
 - Story/UI:
   - intégration `APP_WIFI` + `APP_ESPNOW` dans les scénarios/story specs YAML
@@ -809,7 +865,7 @@
 - [x] Audio crossfade consolidé:
   - correction callback fin de piste (track réel reporté),
   - lecture des packs audio depuis LittleFS **ou SD** (`/sd/...`).
-- [x] ESP-NOW aligné avec `docs/espnow_api_v1.md`:
+- [x] ESP-NOW aligné avec `docs/ESP_NOW_API_CONTRACT_FREENOVE_V1.md`:
   - enveloppe v1 supportée (`msg_id`, `seq`, `type`, `payload`, `ack`),
   - extraction metadata + statut exposé,
   - trames `type=command` exécutées côté runtime et réponse corrélée `type=ack` renvoyée si `ack=true`.
@@ -1013,3 +1069,6 @@
   - Chargement payload: normalisation stricte `screen_scene_id` avant lookup dans `StorageManager`.
   - UI: règles d'effets/transitions explicites, logs sur token inconnu.
 - Tests: cas d'IDs inconnues + alias legacy dans validation de scénario + lookup.
+[20260223-210304] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/esp32dev_esp32_release_esp8266_oled_ui_rp2040_ili9488_ui_rp2040_ili9486_20260223-210304, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/esp32dev_esp32_release_esp8266_oled_ui_rp2040_ili9488_ui_rp2040_ili9486_20260223-210304/summary.md
+[20260223-210353] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/esp32dev_esp32_release_esp8266_oled_ui_rp2040_ili9488_ui_rp2040_ili9486_20260223-210353, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/esp32dev_esp32_release_esp8266_oled_ui_rp2040_ili9488_ui_rp2040_ili9486_20260223-210353/summary.md
+[20260223-210410] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/esp32dev_esp32_release_esp8266_oled_ui_rp2040_ili9488_ui_rp2040_ili9486_20260223-210410, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/esp32dev_esp32_release_esp8266_oled_ui_rp2040_ili9488_ui_rp2040_ili9486_20260223-210410/summary.md

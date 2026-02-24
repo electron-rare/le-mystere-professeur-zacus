@@ -33,6 +33,7 @@ class ScenarioManager {
   bool notifySerialEvent(const char* event_name, uint32_t now_ms);
   bool notifyTimerEvent(const char* event_name, uint32_t now_ms);
   bool notifyActionEvent(const char* event_name, uint32_t now_ms);
+  bool gotoScene(const char* scene_id, uint32_t now_ms, const char* source);
 
   ScenarioSnapshot snapshot() const;
   bool consumeSceneChanged();

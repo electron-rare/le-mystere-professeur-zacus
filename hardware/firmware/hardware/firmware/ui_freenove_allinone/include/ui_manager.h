@@ -99,8 +99,13 @@ class UiManager {
   static void touchReadCb(lv_indev_drv_t* drv, lv_indev_data_t* data);
   static void animSetY(void* obj, int32_t value);
   static void animSetX(void* obj, int32_t value);
+  static void animSetStyleTranslateX(void* obj, int32_t value);
+  static void animSetStyleTranslateY(void* obj, int32_t value);
+  static void animSetFireworkTranslateX(void* obj, int32_t value);
+  static void animSetFireworkTranslateY(void* obj, int32_t value);
   static void animSetOpa(void* obj, int32_t value);
   static void animSetSize(void* obj, int32_t value);
+  static void animSetParticleSize(void* obj, int32_t value);
   static void animSetWidth(void* obj, int32_t value);
   static void animSetRandomTranslateX(void* obj, int32_t value);
   static void animSetRandomTranslateY(void* obj, int32_t value);
@@ -142,9 +147,11 @@ class UiManager {
   uint16_t timeline_duration_ms_ = 0U;
   bool timeline_loop_ = true;
   int8_t timeline_effect_index_ = -1;
+  uint8_t particleIndexForObj(const lv_obj_t* target) const;
   char last_scene_id_[40] = {0};
   uint8_t demo_particle_count_ = 4U;
   uint8_t demo_strobe_level_ = 65U;
+  bool win_etape_fireworks_mode_ = false;
   uint32_t last_lvgl_tick_ms_ = 0U;
 
   uint32_t pending_key_code_ = LV_KEY_ENTER;

@@ -286,6 +286,29 @@ SCENE_PROFILES: dict[str, dict[str, Any]] = {
             },
         ],
     },
+    "SCENE_WIN_ETAPE": {
+        "title": "VICTOIRE",
+        "subtitle": "Etape validee",
+        "symbol": "WIN",
+        "effect": "celebrate",
+        "effect_speed_ms": 420,
+        "theme": {"bg": "#231038", "accent": "#F4CB4A", "text": "#FFF8E2"},
+        "transition": {"effect": "zoom", "duration_ms": 280},
+        "timeline": [
+            {
+                "at_ms": 0,
+                "effect": "celebrate",
+                "speed_ms": 420,
+                "theme": {"bg": "#231038", "accent": "#F4CB4A", "text": "#FFF8E2"},
+            },
+            {
+                "at_ms": 1000,
+                "effect": "blink",
+                "speed_ms": 240,
+                "theme": {"bg": "#341A4D", "accent": "#FFE083", "text": "#FFFDF3"},
+            },
+        ],
+    },
     "SCENE_REWARD": {
         "title": "RECOMPENSE",
         "subtitle": "Indice debloque",

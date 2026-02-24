@@ -1,7 +1,7 @@
 {
   "id": "SCENE_WIN_ETAPE",
   "title": "VICTOIRE",
-  "subtitle": "Etape validee",
+  "subtitle": "",
   "symbol": "WIN",
   "effect": "celebrate",
   "visual": {

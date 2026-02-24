@@ -204,6 +204,8 @@ class UiManager {
     uint16_t sine_period_px = 104U;
     float sine_phase_speed = 1.9f;
     int16_t stars_override = -1;
+    char fx_backend[16] = {0};
+    char fx_quality[16] = {0};
     char fx_3d[20] = {0};
     char fx_3d_quality[16] = {0};
     char font_mode[16] = {0};

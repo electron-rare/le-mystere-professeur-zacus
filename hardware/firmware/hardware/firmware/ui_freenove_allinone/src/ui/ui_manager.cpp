@@ -688,6 +688,34 @@ void UiManager::update() {
   }
   renderMicrophoneWaveform();
   pollAsyncFlush();
+  if (intro_active_) {
+    ui::fx::FxScenePhase fx_phase = ui::fx::FxScenePhase::kIdle;
+    switch (intro_state_) {
+      case IntroState::PHASE_A_CRACKTRO:
+        fx_phase = ui::fx::FxScenePhase::kPhaseA;
+        break;
+      case IntroState::PHASE_B_TRANSITION:
+        fx_phase = ui::fx::FxScenePhase::kPhaseB;
+        break;
+      case IntroState::PHASE_C_CLEAN:
+      case IntroState::PHASE_C_LOOP:
+        fx_phase = ui::fx::FxScenePhase::kPhaseC;
+        break;
+      default:
+        fx_phase = ui::fx::FxScenePhase::kIdle;
+        break;
+    }
+    if (fx_engine_.renderFrame(now_ms,
+                               drivers::display::displayHal(),
+                               static_cast<uint16_t>(activeDisplayWidth()),
+                               static_cast<uint16_t>(activeDisplayHeight()),
+                               fx_phase)) {
+      lv_obj_t* overlay_root = (intro_root_ != nullptr) ? intro_root_ : scene_root_;
+      if (overlay_root != nullptr) {
+        lv_obj_invalidate(overlay_root);
+      }
+    }
+  }
   lv_timer_handler();
   pollAsyncFlush();
 }
@@ -1277,6 +1305,8 @@ void UiManager::resetIntroConfigDefaults() {
   intro_config_.sine_period_px = kIntroSinePeriodPxDefault;
   intro_config_.sine_phase_speed = kIntroSinePhaseSpeedDefault;
   intro_config_.stars_override = -1;
+  copyStringBounded(intro_config_.fx_backend, sizeof(intro_config_.fx_backend), "auto");
+  copyStringBounded(intro_config_.fx_quality, sizeof(intro_config_.fx_quality), "auto");
   copyStringBounded(intro_config_.fx_3d, sizeof(intro_config_.fx_3d), "rotozoom");
   copyStringBounded(intro_config_.fx_3d_quality, sizeof(intro_config_.fx_3d_quality), "auto");
   copyStringBounded(intro_config_.font_mode, sizeof(intro_config_.font_mode), "orbitron");
@@ -1400,6 +1430,14 @@ void UiManager::parseSceneWinEtapeTxtOverrides(const char* payload) {
       continue;
     }
 
+    if (key == "FX_BACKEND") {
+      copyStringBounded(intro_config_.fx_backend, sizeof(intro_config_.fx_backend), value.c_str());
+      continue;
+    }
+    if (key == "FX_QUALITY") {
+      copyStringBounded(intro_config_.fx_quality, sizeof(intro_config_.fx_quality), value.c_str());
+      continue;
+    }
     if (key == "FX_3D") {
       copyStringBounded(intro_config_.fx_3d, sizeof(intro_config_.fx_3d), value.c_str());
       continue;
@@ -1539,6 +1577,14 @@ void UiManager::parseSceneWinEtapeJsonOverrides(const char* payload, const char*
     intro_config_.stars_override = static_cast<int16_t>(doc["stars"].as<int>());
   }
 
+  const char* fx_backend = doc["FX_BACKEND"] | doc["fx_backend"] | "";
+  if (fx_backend[0] != '\0') {
+    copyStringBounded(intro_config_.fx_backend, sizeof(intro_config_.fx_backend), fx_backend);
+  }
+  const char* fx_quality = doc["FX_QUALITY"] | doc["fx_quality"] | "";
+  if (fx_quality[0] != '\0') {
+    copyStringBounded(intro_config_.fx_quality, sizeof(intro_config_.fx_quality), fx_quality);
+  }
   const char* fx_3d = doc["FX_3D"] | doc["fx_3d"] | "";
   if (fx_3d[0] != '\0') {
     copyStringBounded(intro_config_.fx_3d, sizeof(intro_config_.fx_3d), fx_3d);
@@ -1631,6 +1677,12 @@ void UiManager::loadSceneWinEtapeOverrides() {
   } else {
     intro_config_.stars_override =
         clampValue<int16_t>(intro_config_.stars_override, static_cast<int16_t>(60), static_cast<int16_t>(220));
+  }
+  if (intro_config_.fx_backend[0] == '\0') {
+    copyStringBounded(intro_config_.fx_backend, sizeof(intro_config_.fx_backend), "auto");
+  }
+  if (intro_config_.fx_quality[0] == '\0') {
+    copyStringBounded(intro_config_.fx_quality, sizeof(intro_config_.fx_quality), "auto");
   }
   if (intro_config_.fx_3d[0] == '\0') {
     copyStringBounded(intro_config_.fx_3d, sizeof(intro_config_.fx_3d), "rotozoom");
@@ -2582,6 +2634,30 @@ void UiManager::startIntro() {
                     asciiFallbackForUiText(intro_config_.clean_scroll).c_str());
 
   resolveIntro3DModeAndQuality();
+  String fx_backend_mode = intro_config_.fx_backend;
+  fx_backend_mode.toLowerCase();
+  const bool fx_lgfx_available = fx_engine_.config().lgfx_backend;
+  bool fx_enabled = fx_lgfx_available;
+  if (fx_backend_mode == "lvgl_canvas" || fx_backend_mode == "lvgl") {
+    fx_enabled = false;
+  } else if (fx_backend_mode == "lgfx") {
+    fx_enabled = fx_lgfx_available;
+  } else {
+    fx_enabled = fx_lgfx_available;
+  }
+  fx_engine_.setEnabled(fx_enabled);
+
+  String fx_quality_mode = intro_config_.fx_quality;
+  fx_quality_mode.toLowerCase();
+  uint8_t fx_quality_level = 0U;
+  if (fx_quality_mode == "low") {
+    fx_quality_level = 1U;
+  } else if (fx_quality_mode == "med" || fx_quality_mode == "medium") {
+    fx_quality_level = 2U;
+  } else if (fx_quality_mode == "high") {
+    fx_quality_level = 3U;
+  }
+  fx_engine_.setQualityLevel(fx_quality_level);
 
   intro_skip_latched_ = false;
   intro_skip_requested_ = false;
@@ -2631,6 +2707,13 @@ void UiManager::startIntro() {
                 static_cast<unsigned int>(intro_config_.scroll_c_px_per_sec),
                 static_cast<unsigned int>(intro_3d_quality_resolved_),
                 static_cast<unsigned int>(intro_3d_mode_));
+  Serial.printf("[UI][WIN_ETAPE] fx backend=%s enabled=%u quality=%s target_fps=%u sprite=%ux%u\n",
+                fx_backend_mode.c_str(),
+                fx_enabled ? 1U : 0U,
+                fx_quality_mode.c_str(),
+                static_cast<unsigned int>(fx_engine_.config().target_fps),
+                static_cast<unsigned int>(fx_engine_.config().sprite_width),
+                static_cast<unsigned int>(fx_engine_.config().sprite_height));
 }
 
 void UiManager::requestIntroSkip() {
@@ -3291,7 +3374,6 @@ void UiManager::tickIntro() {
     return;
   }
   const uint32_t now = lv_tick_get();
-  fx_engine_.noteFrame(now);
   uint32_t dt_ms = now - last_tick_ms_;
   if (dt_ms > 100U) {
     dt_ms = 100U;

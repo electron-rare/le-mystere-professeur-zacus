@@ -1,3 +1,22 @@
+## [2026-02-25] Scope ESP-NOW + fix action boot media (LittleFS)
+
+- Objectif:
+  - inclure ESP-NOW dans le passage vers `STEP_MEDIA_MANAGER`,
+  - corriger l'action de boot media qui provoquait un warning buildfs.
+- Actions:
+  - action renommee `ACTION_SET_BOOT_MEDIA` (`data/story/actions/ACTION_SET_BOOT_MEDIA.json`) pour rester compatible LittleFS.
+  - references scenario mises a jour:
+    - `docs/protocols/story_specs/scenarios/default_unlock_win_etape2.yaml`
+    - `data/story/scenarios/DEFAULT.json`
+  - transition ESP-NOW ajoutee:
+    - `on_event espnow QR_OK -> STEP_MEDIA_MANAGER`.
+  - compat runtime conservee dans `main.cpp`:
+    - accepte `ACTION_SET_BOOT_MEDIA` + alias legacy `ACTION_SET_BOOT_MEDIA_MANAGER`.
+- Gates:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅
+  - warning `unable to open '/story/actions/ACTION_SET_BOOT_MEDIA_MANAGER.json.` disparu.
+
 ## [2026-02-25] Passes completes ChatGPT examples -> firmware (QR + media + gates)
 
 - Skills utilises:

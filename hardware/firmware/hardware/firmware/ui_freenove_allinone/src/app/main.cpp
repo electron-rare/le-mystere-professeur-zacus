@@ -555,6 +555,11 @@ bool parseEventType(const char* text, StoryEventType* out_type) {
     *out_type = StoryEventType::kSerial;
     return true;
   }
+  if (std::strcmp(normalized, "espnow") == 0 || std::strcmp(normalized, "esp_now") == 0) {
+    // ESP-NOW events are bridged to story SERIAL:* tokens.
+    *out_type = StoryEventType::kSerial;
+    return true;
+  }
   if (std::strcmp(normalized, "action") == 0) {
     *out_type = StoryEventType::kAction;
     return true;
@@ -667,6 +672,13 @@ bool normalizeEventTokenFromText(const char* raw_text, char* out_event, size_t o
   }
 
   if (startsWithIgnoreCase(event, "SERIAL ")) {
+    char* name = event + 7;
+    trimAsciiInPlace(name);
+    toUpperAsciiInPlace(name);
+    snprintf(out_event, out_capacity, "SERIAL:%s", name[0] != '\0' ? name : "BTN_NEXT");
+    return true;
+  }
+  if (startsWithIgnoreCase(event, "ESPNOW ")) {
     char* name = event + 7;
     trimAsciiInPlace(name);
     toUpperAsciiInPlace(name);
@@ -2631,7 +2643,8 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
     return g_media.stopRecording();
   }
 
-  if (std::strcmp(action_id, "ACTION_SET_BOOT_MEDIA_MANAGER") == 0) {
+  if (std::strcmp(action_id, "ACTION_SET_BOOT_MEDIA") == 0 ||
+      std::strcmp(action_id, "ACTION_SET_BOOT_MEDIA_MANAGER") == 0) {
     const bool mode_ok = g_boot_mode_store.saveMode(BootModeStore::StartupMode::kMediaManager);
     const bool flag_ok = g_boot_mode_store.setMediaValidated(true);
     applyStartupMode(BootModeStore::StartupMode::kMediaManager);
@@ -3852,8 +3865,24 @@ bool dispatchScenarioEventByType(StoryEventType type, const char* event_name, ui
       return true;
     case StoryEventType::kTimer:
       return g_scenario.notifyTimerEvent(event_name, now_ms);
-    case StoryEventType::kSerial:
-      return g_scenario.notifySerialEvent(event_name, now_ms);
+    case StoryEventType::kSerial: {
+      const bool dispatched = g_scenario.notifySerialEvent(event_name, now_ms);
+      if (dispatched) {
+        return true;
+      }
+      if (event_name != nullptr && std::strcmp(event_name, "QR_OK") == 0) {
+        const ScenarioSnapshot snapshot = g_scenario.snapshot();
+        const bool boot_mode_ok = executeStoryAction("ACTION_SET_BOOT_MEDIA", snapshot, now_ms);
+        const bool goto_ok = g_scenario.gotoScene("SCENE_MEDIA_MANAGER", now_ms, "event_qr_ok_fallback");
+        if (boot_mode_ok || goto_ok) {
+          Serial.printf("[SC_EVENT] qr fallback mode_ok=%u goto_ok=%u\n",
+                        boot_mode_ok ? 1U : 0U,
+                        goto_ok ? 1U : 0U);
+        }
+        return boot_mode_ok || goto_ok;
+      }
+      return false;
+    }
     case StoryEventType::kAction:
       return g_scenario.notifyActionEvent(event_name, now_ms);
     default:
@@ -5292,7 +5321,7 @@ void runRuntimeIteration(uint32_t now_ms) {
     }
     if (!dispatched && std::strcmp(runtime_event, "QR_OK") == 0) {
       const ScenarioSnapshot snapshot = g_scenario.snapshot();
-      const bool boot_mode_ok = executeStoryAction("ACTION_SET_BOOT_MEDIA_MANAGER", snapshot, now_ms);
+      const bool boot_mode_ok = executeStoryAction("ACTION_SET_BOOT_MEDIA", snapshot, now_ms);
       const bool goto_ok = g_scenario.gotoScene("SCENE_MEDIA_MANAGER", now_ms, "ui_qr_fallback");
       dispatched = goto_ok;
       if (boot_mode_ok || goto_ok) {

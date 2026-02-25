@@ -33,7 +33,7 @@
     "ACTION_QUEUE_SONAR",
     "ACTION_REC_START",
     "ACTION_REC_STOP",
-    "ACTION_SET_BOOT_MEDIA_MANAGER"
+    "ACTION_SET_BOOT_MEDIA"
   ],
   "steps": [
     {
@@ -83,13 +83,22 @@
       ],
       "transitions": [
         {
-          "id": "TR_STEP_DONE_MEDIA",
+          "id": "TR_STEP_DONE_MEDIA_SERIAL",
           "trigger": "on_event",
           "event_type": "serial",
           "event_name": "QR_OK",
           "target_step_id": "STEP_MEDIA_MANAGER",
           "after_ms": 0,
           "priority": 140
+        },
+        {
+          "id": "TR_STEP_DONE_MEDIA_ESPNOW",
+          "trigger": "on_event",
+          "event_type": "espnow",
+          "event_name": "QR_OK",
+          "target_step_id": "STEP_MEDIA_MANAGER",
+          "after_ms": 0,
+          "priority": 130
         }
       ]
     },
@@ -98,7 +107,7 @@
       "screen_scene_id": "SCENE_MEDIA_MANAGER",
       "action_ids": [
         "ACTION_TRACE_STEP",
-        "ACTION_SET_BOOT_MEDIA_MANAGER",
+        "ACTION_SET_BOOT_MEDIA",
         "ACTION_HW_LED_READY"
       ],
       "mp3_gate_open": true

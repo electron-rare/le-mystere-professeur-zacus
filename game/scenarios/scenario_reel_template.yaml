@@ -61,6 +61,7 @@ prompt_input:
     - "SCENE_GOTO SCENE_LOCKED"
     - "SCENE_GOTO SCENE_CAMERA_SCAN"
     - "QR_SIM A_COMPLETER"
+    - "SC_EVENT espnow QR_OK"
     - "BOOT_MODE_STATUS"
     - "RESET"
 
@@ -148,13 +149,14 @@ current_firmware_snapshot:
         - "ACTION_REFRESH_SD"
       transitions:
         - "serial:QR_OK->STEP_MEDIA_MANAGER"
+        - "espnow:QR_OK->STEP_MEDIA_MANAGER"
 
     - step_id: "STEP_MEDIA_MANAGER"
       screen_scene_id: "SCENE_MEDIA_MANAGER"
       audio_pack_id: ""
       actions:
         - "ACTION_TRACE_STEP"
-        - "ACTION_SET_BOOT_MEDIA_MANAGER"
+        - "ACTION_SET_BOOT_MEDIA"
         - "ACTION_HW_LED_READY"
       mp3_gate_open: true
       transitions: []

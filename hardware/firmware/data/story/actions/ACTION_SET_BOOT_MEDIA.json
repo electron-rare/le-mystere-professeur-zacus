@@ -1,5 +1,5 @@
 {
-  "id": "ACTION_SET_BOOT_MEDIA_MANAGER",
+  "id": "ACTION_SET_BOOT_MEDIA",
   "type": "set_boot_mode",
   "config": {
     "mode": "media_manager",

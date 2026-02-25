@@ -4,8 +4,10 @@
 #include <ArduinoJson.h>
 #include <FS.h>
 #include <LittleFS.h>
+#include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <vector>
 
 #include "audio_manager.h"
 
@@ -42,6 +44,54 @@ bool equalsIgnoreCase(const char* lhs, const char* rhs) {
       return false;
     }
   }
+}
+
+bool isAsciiDigit(char ch) {
+  return ch >= '0' && ch <= '9';
+}
+
+int compareNaturalPath(const String& lhs, const String& rhs) {
+  const char* a = lhs.c_str();
+  const char* b = rhs.c_str();
+  size_t ia = 0U;
+  size_t ib = 0U;
+  while (a[ia] != '\0' && b[ib] != '\0') {
+    const char ca = a[ia];
+    const char cb = b[ib];
+    if (isAsciiDigit(ca) && isAsciiDigit(cb)) {
+      unsigned long va = 0UL;
+      unsigned long vb = 0UL;
+      while (isAsciiDigit(a[ia])) {
+        va = (va * 10UL) + static_cast<unsigned long>(a[ia] - '0');
+        ++ia;
+      }
+      while (isAsciiDigit(b[ib])) {
+        vb = (vb * 10UL) + static_cast<unsigned long>(b[ib] - '0');
+        ++ib;
+      }
+      if (va < vb) {
+        return -1;
+      }
+      if (va > vb) {
+        return 1;
+      }
+      continue;
+    }
+    const char la = toLowerAscii(ca);
+    const char lb = toLowerAscii(cb);
+    if (la < lb) {
+      return -1;
+    }
+    if (la > lb) {
+      return 1;
+    }
+    ++ia;
+    ++ib;
+  }
+  if (a[ia] == '\0' && b[ib] == '\0') {
+    return 0;
+  }
+  return (a[ia] == '\0') ? -1 : 1;
 }
 
 }  // namespace
@@ -110,8 +160,8 @@ bool MediaManager::listFiles(const char* kind, String* out_json) const {
     return false;
   }
 
-  DynamicJsonDocument document(2048);
-  JsonArray files = document.to<JsonArray>();
+  std::vector<String> listed_paths;
+  listed_paths.reserve(32U);
   File entry = folder.openNextFile();
   while (entry) {
     if (!entry.isDirectory()) {
@@ -119,13 +169,24 @@ bool MediaManager::listFiles(const char* kind, String* out_json) const {
       if (!path.startsWith("/")) {
         path = "/" + path;
       }
-      files.add(path);
+      listed_paths.push_back(path);
     }
     entry.close();
     entry = folder.openNextFile();
   }
-  serializeJson(files, *out_json);
   folder.close();
+
+  // Keep media list stable and human-friendly for MP3/photo browsing.
+  std::sort(listed_paths.begin(), listed_paths.end(), [](const String& lhs, const String& rhs) {
+    return compareNaturalPath(lhs, rhs) < 0;
+  });
+
+  DynamicJsonDocument document(4096);
+  JsonArray files = document.to<JsonArray>();
+  for (const String& path : listed_paths) {
+    files.add(path);
+  }
+  serializeJson(files, *out_json);
   return true;
 }
 

@@ -1,31 +1,23 @@
 {
   "date": "2026-02-25",
-  "agent": "qa-test",
+  "agent": "pm-spec",
   "changes": [
-    "game/scenarios/zacus_v1.yaml",
-    "tools/scenario/diff_gameplay_scenarios.py",
-    ".github/workflows/validate.yml",
-    "docs/WORKFLOWS.md",
+    "docs/repo-deep-analysis-2026-02-25.md",
     "specs/CONVERSATION_BUNDLE_INTAKE.md",
-    "architecture/CONVERSATION_BUNDLE_ARCHITECTURE.md",
-    "tools/scenario/validate_runtime_bundle.py",
-    "tools/requirements/validators.txt",
-    "tools/setup/install_validators.sh"
+    "architecture/CONVERSATION_BUNDLE_ARCHITECTURE.md"
   ],
   "artifacts": [
-    "artifacts/pm-spec/2026-02-25/conversation-bundle-intake.md",
+    "artifacts/pm-spec/2026-02-25/repo-deep-analysis.md",
     "artifacts/pm-spec/2026-02-25/gameplay-promotion-note.md",
-    "artifacts/qa-test/2026-02-25/validator-bootstrap.md",
-    "artifacts/qa-test/2026-02-25/runtime-bundle-validator.md",
     "artifacts/qa-test/2026-02-25/gameplay-functional-diff.md"
   ],
   "gates": {
     "G0": "satisfied",
     "G1": "satisfied",
-    "G2": "implemented_gameplay_and_tooling",
-    "G3": "validated_and_ci_wired",
+    "G2": "implemented",
+    "G3": "validated",
     "G4": "pending",
-    "G5": "partial"
+    "G5": "pending_plan"
   },
-  "note": "Promotion gameplay effectuée + diff fonctionnel généré + validate_runtime_bundle branché en CI."
+  "note": "Analyse approfondie repo publiée avec plan PR-A/PR-B/PR-C pour aller au-delà du lot courant."
 }

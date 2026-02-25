@@ -21,3 +21,6 @@
 
 ## Statut Gates
 - G1 Arch Freeze : **satisfait** pour ce lot d'import documentaire/data.
+
+## TODO architecture
+- CI de diff fonctionnel gameplay à ajouter (upload artifact) pour compléter G3 en continu.

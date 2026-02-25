@@ -27,3 +27,6 @@ Le bundle conversationnel est maintenu dans :
 
 ## Statut Gates
 - G0 Spec Freeze : **satisfait** pour l'import brut du bundle.
+
+## TODO transverse (issue restante)
+- Analyse transverse du repo ajoutée dans `docs/repo-deep-analysis-2026-02-25.md` pour planifier PR-A/PR-B/PR-C.

@@ -1,0 +1,52 @@
+{
+  "id": "SCENE_WINNER",
+  "title": "WINNER",
+  "subtitle": "Mode Winner actif",
+  "symbol": "WIN",
+  "effect": "celebrate",
+  "visual": {
+    "show_title": true,
+    "show_symbol": true,
+    "effect_speed_ms": 320
+  },
+  "demo": {
+    "mode": "arcade",
+    "particle_count": 3,
+    "strobe_level": 75
+  },
+  "theme": {
+    "bg": "#1D0E33",
+    "accent": "#FFD36C",
+    "text": "#FFF7DE"
+  },
+  "timeline": {
+    "loop": true,
+    "duration_ms": 1200,
+    "keyframes": [
+      {
+        "at_ms": 0,
+        "effect": "celebrate",
+        "speed_ms": 320,
+        "theme": {
+          "bg": "#1D0E33",
+          "accent": "#FFD36C",
+          "text": "#FFF7DE"
+        }
+      },
+      {
+        "at_ms": 1200,
+        "effect": "pulse",
+        "speed_ms": 260,
+        "theme": {
+          "bg": "#2B1450",
+          "accent": "#FFE39A",
+          "text": "#FFFEF6"
+        }
+      }
+    ]
+  },
+  "transition": {
+    "effect": "zoom",
+    "duration_ms": 220
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "meta": {
+    "title": "Winner Preset",
+    "fps": 50,
+    "bpm": 125,
+    "seed": 4242,
+    "internal": {
+      "w": 160,
+      "h": 120,
+      "fmt": "I8"
+    }
+  },
+  "clips": [
+    {
+      "id": "bg_bars",
+      "t0": 0.0,
+      "t1": 18.0,
+      "track": "BG",
+      "fx": "rasterbars",
+      "params": {
+        "bars": 7,
+        "thickness": 16,
+        "amp": 36,
+        "speed": 0.06
+      }
+    },
+    {
+      "id": "cube",
+      "t0": 0.0,
+      "t1": 18.0,
+      "track": "MID",
+      "fx": "wirecube",
+      "params": {
+        "rotX": 0.19,
+        "rotY": 0.25,
+        "rotZ": 0.13,
+        "intensity": 235
+      }
+    },
+    {
+      "id": "flash",
+      "t0": 0.0,
+      "t1": 1.0,
+      "track": "UI",
+      "fx": "transition_flash",
+      "params": {
+        "flashFrames": 2,
+        "fadeOut": 0.8
+      }
+    }
+  ],
+  "mods": [
+    {
+      "clip": "cube",
+      "param": "rotY",
+      "type": "sine",
+      "args": {
+        "base": 0.25,
+        "amp": 0.05,
+        "freqHz": 0.4,
+        "phase": 0.0
+      }
+    }
+  ],
+  "events": []
+}

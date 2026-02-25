@@ -1,3 +1,165 @@
+## [2026-02-24] Plan v4 integration (FX3D modes + SCENE_CAMERA_SCAN recorder Win311)
+
+- Skills chain executee (ordre): `freenove-firmware-orchestrator` -> `firmware-graphics-stack` -> `firmware-camera-stack` -> `firmware-fx-overlay-lovyangfx` -> `firmware-build-stack`.
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260224_214537_wip.patch`
+  - `/tmp/zacus_checkpoint/20260224_214537_status.txt`
+- Implementations principales:
+  - `FxEngine`: ajout `FxMode` (`classic|starfield3d|dotsphere3d|voxel|raycorridor`) + `setMode()/mode()`, renderers 3D integres sans casser le runtime v9.
+  - `UiManager`: parse/apply `FX_MODE_A/B/C` sur `SCENE_WIN_ETAPE` (defaults `A=starfield3d`, `B=dotsphere3d`, `C=raycorridor`), reset mode sur scenes direct FX.
+  - `CameraManager`: session recorder RGB565/QVGA, freeze/save/list/delete/select, restauration mode legacy en sortie.
+  - `Win311 camera UI` + `CameraCaptureService`: integration overlay LVGL branchee sur `CameraManager`.
+  - `main.cpp`: ownership scene `SCENE_CAMERA_SCAN`, mapping boutons physiques (BTN1..BTN5), commandes serie `CAM_UI_*` + `CAM_REC_*`, blocage forwarding scenario quand scene camera active.
+  - `SCENE_CAMERA_SCAN` payload reduit (fond neutre, symbole/effects minimaux) pour limiter le bruit visuel sous overlay.
+- Contrats data/doc:
+  - `data/SCENE_WIN_ETAPE.json` + `data/ui/scene_win_etape.txt`: ajout `FX_MODE_A/B/C`.
+  - `README.md` et `docs/ui/SCENE_WIN_ETAPE_demoscene_calibration.md`: doc modes 3D + scene camera recorder + commandes.
+  - `lv_conf.h`: `LV_USE_BTN=1`, `LV_USE_IMG=1`, `LV_USE_LIST=1`.
+- Build/flash Freenove:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅ (1er passage)
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ⚠️ echec final pySerial `Device not configured` apres ecriture 100%.
+- Verification serie rapide:
+  - `SCENE_GOTO SCENE_WIN_ETAPE` -> ACK + rendu actif.
+  - `SCENE_GOTO SCENE_CAMERA_SCAN` -> overlay actif, ownership camera engage.
+  - `CAM_REC_STATUS` visible; sur ce hardware: `camera_init_failed` (preview indisponible, pas de crash).
+  - `SCENE_GOTO SCENE_LOCKED` -> sortie propre scene camera (`[CAM_UI] scene owner=legacy`).
+- Gates contrat multi-env:
+  - matrice `pio run -e esp32dev -e esp32_release -e esp8266_oled -e ui_rp2040_ili9488 -e ui_rp2040_ili9486` lancee puis interrompue (duree excesive en session interactive); `esp32dev` compile complet observe ✅ avant interruption.
+
+## [2026-02-24] Plan v3 integration hardening (FX v9 + MP3 scene + crash fixes)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260224_204345_wip.patch`
+  - `/tmp/zacus_checkpoint/20260224_204345_status.txt`
+- Correctifs runtime appliques:
+  - `amiga_audio_player.cpp`: remplacement par overlay LVGL minimal compatible config projet.
+  - `audio_player_service.cpp`: backend `Audio` simplifie (API project-safe) + stats/playlist.
+  - `fx/v9/engine/engine.cpp`: retrait RTTI (`dynamic_cast`) -> binding par `clip.fx` + `static_cast`.
+  - `fx_engine.cpp/.h`: injection LUT v9 (`services.luts`) pour supprimer panic `StarfieldFx::render`.
+  - `main.cpp`: init AMP en lazy mode sur `SCENE_MP3_PLAYER` pour eviter contention I2S avec audio scenario.
+  - `main.cpp`: scene MP3 active suspend `g_audio.update`, sortie scene restaure pipeline story.
+- Build/flash Freenove:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- Verification serie (pyserial):
+  - `SCENE_GOTO SCENE_WIN_ETAPE` -> `UI_GFX_STATUS` avec `fx_fps>0` (`3..4`) ✅
+  - `SCENE_GOTO SCENE_WINNER` / `SCENE_GOTO SCENE_FIREWORKS` -> `ACK ... ok=1`, `fx_fps>0`, plus de panic ✅
+  - `SCENE_GOTO SCENE_MP3_PLAYER` + `AMP_SCAN` -> `tracks=5 base=/music` ✅
+  - `AMP_PLAY 0` / `AMP_STOP` -> ACK + status playback ✅
+  - cycle cleanup scenes (`LOCKED -> WIN_ETAPE -> MP3 -> LOCKED`) -> logs `cleanup scene assets transition ...` sur chaque transition ✅
+- Documentation:
+  - `README.md`: runtime `FX_ONLY_V9` + section scene MP3 + commandes `AMP_*`.
+  - `SCENE_WIN_ETAPE_demoscene_calibration.md`: lock runtime v9 + mapping timelines.
+
+## [2026-02-24] Upload USB modem + validation scenes WINNER/FIREWORKS
+
+- Port detecte: `/dev/cu.usbmodem5AB90753301`.
+- Flash execute:
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- Correctif runtime pour `SCENE_GOTO` hors steps scenario:
+  - `ScenarioManager::gotoScene` accepte desormais un fallback override scene canonique (sans modifier `game/scenarios/*.yaml`).
+  - override clear automatiquement lors d'un vrai `enterStep`.
+- Validation serie (pyserial):
+  - `SCENE_GOTO SCENE_WINNER` -> `ACK ... ok=1` ✅
+  - `SCENE_GOTO SCENE_FIREWORKS` -> `ACK ... ok=1` ✅
+  - retour `SCENE_GOTO SCENE_WIN_ETAPE` -> `ACK ... ok=1`, logs phase A preset `demo`, `UI_GFX_STATUS` avec `fx_fps>0` ✅
+
+## [2026-02-24] Port v2 FX/boing + scenes WINNER/FIREWORKS (iteration)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260224_183508_wip.patch`
+  - `/tmp/zacus_checkpoint/20260224_183508_status.txt`
+- Integration technique:
+  - import v9/boing stabilise (includes normalises, compat C++11).
+  - `fx_engine.cpp`: shadow boing via `boing_shadow_darken_span_half_rgb565` (ASM S3 par defaut, fallback C), fast blit 2x (`fx_blit_fast`) sur ratio exact.
+  - `platformio.ini`: ajout `UI_BOING_SHADOW_ASM=1` (env Freenove).
+  - `timeline_load.cpp`: parser ArduinoJson complet (`meta/clips/mods/events`, params/args typed->string).
+  - `assets_fs.cpp`: lecture LittleFS reelle + fallback texte/palette.
+  - scenes exposees: `SCENE_WINNER`, `SCENE_FIREWORKS` (registry + JSON + defaults UiManager).
+- Validation:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ❌ (port absent)
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ❌ (port absent)
+
+## [2026-02-24] Hotfix texte phase A SCENE_WIN_ETAPE (FX v8)
+
+- Symptome utilisateur: texte non visible sur la premiere scene apres integration FX v8.
+- Correctifs appliques:
+  - `ui_manager.cpp`: en mode `FX_ONLY_V8`, ne plus masquer `scene_title_label_`, `scene_subtitle_label_`, `scene_symbol_label_`.
+  - `fx_engine.cpp`: fallback glyph 6x8 robuste (`a..z` force en `A..Z`, caracteres hors plage -> espace).
+- Validation:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - check serie: `SCENE_GOTO SCENE_WIN_ETAPE` -> logs `[WIN_ETAPE] phase=A preset=demo bpm=125 font=italic`, `fx_fps>0`, aucun panic/reboot detecte.
+
+## [2026-02-24] Skill sync: firmware-lvgl-lgfx-overlay-stack v1.1
+
+- Scope: Standardisation métier documentaire de la stack graphique overlay LVGL/LovyanGFX.
+- Actions:
+  - Mis à jour `~/.codex/skills/firmware-lvgl-lgfx-overlay-stack/SKILL.md` en v1.1 (single SPI master, FX→overlay→`lv_timer_handler`, PSRAM/DRAM, RGB332+LUT, hard guardrails).
+  - Ajout/reprise miroir exact dans `hardware/firmware/docs/skills/firmware-lvgl-lgfx-overlay-stack.md`.
+  - Vérification: présence des flags requis, ordre de rendu, invariant no-frame-allocation, checklist d’acceptance.
+- Validation (read-only):
+  - `rg -n \"UI_FX_LGFX|UI_FX_BACKEND_LGFX|UI_COLOR_256|UI_DRAW_BUF_IN_PSRAM|UI_DMA_TX_IN_DRAM|UI_DEMO_AUTORUN_WIN_ETAPE|FX -> invalidate overlay|pushRotateZoom|0 alloc par frame|Acceptance\"` sur les deux fichiers.
+  - `diff -u` entre fichiers source et miroir (doit être vide).
+
+## [2026-02-24] Resource coordinator + mic profile commandes (SCENE-driven + manual/auto)
+
+- Scope: finaliser le contrôle scène/micro dans `main.cpp`.
+- Changement effectué:
+  - Ajout de `RESOURCE_PROFILE_AUTO <on|off>` sur la chaîne contrôle API/serial.
+  - `RESOURCE_PROFILE ...` force désormais le mode manuel (`profile_auto=0`) pour éviter les auto-overrides non attendus.
+  - Réactivation auto explicite: `RESOURCE_PROFILE_AUTO ON` applique immédiatement la politique scène courante.
+  - Politique scène élargie: `SCENE_WIN_ETAPE` force `gfx_focus` aussi via `screen_scene_id` (et pas uniquement `STEP_ETAPE2/PACK_WIN`).
+- Prochaine vérification:
+  - `RESOURCE_STATUS` + `SCENE_GOTO SCENE_WIN_ETAPE` puis `UI_GFX_STATUS` / `PERF_STATUS`.
+- Checkpoint local: `/tmp/zacus_checkpoint/1771936163_wip.patch`, `/tmp/zacus_checkpoint/1771936163_status.txt`.
+
+## [2026-02-24] SCENE_WIN_ETAPE back-pressure + trans buffer guard (flush/lvgl)
+
+- Scope: Freenove UI SCENE_WIN_ETAPE. Durcissement de la boucle `update()` : aucune frame FX/LVGL relancée si flush ou DMA occupés, mise en attente `pending_lvgl_flush_request_` et relance dès que le bus est libre. `displayFlushCb` protège les surcharges (overflow count) sans écraser `flush_ctx_`.
+- Mémoire/alloc: si trans buffer plus petit que draw lines (RGB332/PSRAM ou DMA actif), réduction automatique du nombre de lignes draw pour rester aligné sur le buffer trans; reset complet des stats/pending à l’init pipeline.
+- Validation: `pio run -e freenove_esp32s3` ✅, `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅.
+- Checkpoint: `/tmp/zacus_checkpoint/1771928050_wip.patch`, `/tmp/zacus_checkpoint/1771928050_status.txt`.
+
+## [2026-02-24] LVGL pipeline perf (double buffer + DMA RGB332)
+
+- Scope: Freenove UI/LVGL. DMA async désormais autorisé même en RGB332 via trans buffer (conversion RGB332->RGB565) + garde flush; draw lines ajustées si trans buffer plus petit.
+- Perf métriques: stats draw ajoutées (`draw_count/avg_us/max_us`) dans `UI_GFX_STATUS` et snapshots; build optimisé `-O2 -ffast-math` dans `platformio.ini`.
+- Validation: `pio run -e freenove_esp32s3` ✅, upload `/dev/cu.usbmodem5AB90753301` ✅.
+
+## [2026-02-24] SCENE_WIN_ETAPE flush/fx back-pressure
+
+- Scope: UI Freenove (SCENE_WIN_ETAPE). Guarded LVGL flush re-entrance + FX/LVGL pipeline back-pressure (skip FX when DMA/flush busy; no lv_timer_handler while pending). UI_GFX_STATUS now reports fx_fps/fx_frames/fx_skip_busy + flush block/overflow counters; intro debug overlay shows fx_fps.
+- Evidence: code only (no artifacts/logs generated in this session).
+- Next steps: run `pio run -e freenove_esp32s3` then (if hardware) `tools/dev/post_upload_checklist.sh --port <PORT> --baud 115200` and check UI_GFX_STATUS (`fx_fps≈18`, flush pending=0, fx_skip_busy stable).
+
+## [2026-02-24] Mic runtime gating by scene
+
+- Scope: Freenove UI runtime. Mic processing can be toggled per scène via `UiManager::renderScene` → `HardwareManager::setMicRuntimeEnabled`, now disabled when waveform/LA overlay not needed (e.g., WIN_ETAPE clean loop). Hardware snapshot cleared when mic is off; re-enabled auto when needed.
+- Validation: `pio run -e freenove_esp32s3` ✅, upload ✅ `/dev/cu.usbmodem5AB90753301`.
+- Next: observe telemetry on SCENE_WIN_ETAPE (mic fields should stay at 0 when disabled); re-run `UI_GFX_STATUS`/`PERF_STATUS` if required.
+
+## [2026-02-24] Standardisation checklist post-upload
+
+- Scope: outillage visuel + stabilité Freenove.
+- Travaux:
+  - Added `tools/dev/post_upload_checklist.sh` (auto-détection port série, upload optionnel, capture N lignes de logs, validation minimale série, `SCENE_GOTO` check optionnel, confirmation visuelle manuelle).
+  - Added `docs/ui/post_upload_checklist.md` (mode d’emploi de la checklist).
+  - Evidence location:
+    - `artifacts/post_upload/<timestamp>/post_upload_serial.log`
+    - `artifacts/post_upload/<timestamp>/upload.log`
+    - `artifacts/post_upload/<timestamp>/ports.json`
+- Limites constatées:
+  - la validation visuelle reste manuelle (pas d’accès caméra depuis cette session Codex).
+
 ## [2026-02-24] Programme Freenove 3 vagues - fondations architecture/memoire/perf
 
 - Checkpoint securite execute:
@@ -1397,3 +1559,57 @@
   - `pio run -e freenove_esp32s3` ✅
   - `ZACUS_ENV=freenove_esp32s3 ./tools/dev/run_matrix_and_smoke.sh` ✅ (smoke SKIP attendu: mapping port USB non conforme policy LOCATION)
 [20260224-060831] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260224-060831, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_20260224-060831/summary.md
+
+## SCENE_WIN_ETAPE - texte LVGL simple (2026-02-24)
+
+- Checkpoint:
+  - `/tmp/zacus_checkpoint/20260224_153719_wip.patch`
+  - `/tmp/zacus_checkpoint/20260224_153719_status.txt`
+- Ajustements:
+  - `ui_manager.cpp` durcit le mode texte simplifie quand `UI_WIN_ETAPE_SIMPLIFIED=1`:
+    - suppression des animations texte titre/sous-titre (drop/reveal/sine/jitter/celebrate),
+    - sous-titre force en rendu statique via `applySubtitleScroll -> kNone`,
+    - texte cracktro/clean conserve en labels LVGL simples.
+- Validation:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - capture serie manuelle `/dev/tty.usbmodem5AB90753301` ✅ (`PONG`, logs WIN_ETAPE actifs, pas de freeze observe pendant capture).
+- Limitation:
+  - `./tools/dev/post_upload_checklist.sh --env freenove_esp32s3 --scene SCENE_WIN_ETAPE --required-regex "GFX_STATUS|RESOURCE_STATUS"` en echec port auto-detect (`Aucun port ESP32 detecte`), contournement par port explicite.
+
+## Hotfix affichage glitch (2026-02-24)
+
+- Checkpoint:
+  - `/tmp/zacus_checkpoint/20260224_154509_wip.patch`
+  - `/tmp/zacus_checkpoint/20260224_154509_status.txt`
+- Correctif stabilite applique:
+  - `platformio.ini`: `UI_DMA_RGB332_ASYNC_EXPERIMENTAL=0` (desactivation chemin async experimental RGB332).
+  - `ui_manager.cpp`: garde explicite dans `initDmaEngine()` pour forcer flush sync quand RGB332 async experimental est desactive.
+- Validation:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - monitor serie manuel (`/dev/tty.usbmodem5AB90753301`) ✅ (`PONG`, logs WIN_ETAPE periodiques, pas de freeze observe pendant capture).
+
+## Hotfix glitch persistant - mode safe UI-only (2026-02-24)
+
+- Correctif:
+  - `ui_manager.cpp`: en mode `UI_WIN_ETAPE_SIMPLIFIED=1`, forcer `fx_enabled=false` dans `startIntro()` pour isoler totalement le chemin LVGL (pas de blit FX).
+- Validation:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - monitor serie manuel ✅ (`fx_fps=0`, `ui_fps ~58-61`, `PONG`, logs WIN_ETAPE stables sur capture).
+
+## Hotfix rendu FX LovyanGFX (2026-02-24)
+
+- Hypothese suite capture utilisateur: artefacts visuels majoritairement lies au shader de fond FX + blit DMA LGFX.
+- Correctifs:
+  - `ui_manager.cpp`: reactivation du fond FX en mode simplifie (retour architecture demandee `sprite LGFX + overlay LVGL`).
+  - `fx_engine.cpp`: blit FX en mode sync (`UI_FX_DMA_BLIT=0`) pour eviter les artefacts DMA LGFX.
+  - `fx_engine.cpp`: shader de fond simplifie (gradient lisse + scanline douce) pour supprimer les motifs "glitch" repetitifs.
+  - `ui_manager.cpp`: taille sprite simplifiee derivee de la resolution ecran (`display/2`) avec cible `10 fps`.
+  - `fx_engine.cpp`: hauteur sprite max passe a `240` pour conserver le ratio sur ecrans hauts.
+  - `platformio.ini`: ajout explicite `-DUI_FX_DMA_BLIT=0`.
+- Validation:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - monitor serie manuel ✅ (`fx_fps~8`, `PONG`, logs WIN_ETAPE actifs).

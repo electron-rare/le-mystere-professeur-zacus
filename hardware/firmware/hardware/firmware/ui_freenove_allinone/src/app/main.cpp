@@ -25,6 +25,9 @@
 #include "runtime/la_trigger_service.h"
 #include "runtime/perf/perf_monitor.h"
 #include "runtime/provisioning/credential_store.h"
+#include "runtime/resource/resource_coordinator.h"
+#include "runtime/simd/simd_accel.h"
+#include "runtime/simd/simd_accel_bench.h"
 #include "runtime/runtime_config_service.h"
 #include "runtime/runtime_services.h"
 #include "runtime/runtime_config_types.h"
@@ -35,6 +38,8 @@
 #include "system/rate_limited_log.h"
 #include "system/runtime_metrics.h"
 #include "touch_manager.h"
+#include "ui/audio_player/amiga_audio_player.h"
+#include "ui/camera_capture/win311_camera_ui.h"
 #include "ui_manager.h"
 
 #ifndef ZACUS_FW_VERSION
@@ -59,6 +64,12 @@ constexpr const char* kProvisionStatusPath = "/api/provision/status";
 constexpr const char* kSetupWifiConnectPath = "/api/wifi/connect";
 constexpr const char* kSetupNetworkWifiConnectPath = "/api/network/wifi/connect";
 constexpr size_t kWebAuthTokenCapacity = 65U;
+#if defined(USE_AUDIO) && (USE_AUDIO != 0)
+constexpr const char* kAmpMusicPathPrimary = "/music";
+constexpr const char* kAmpMusicPathFallback1 = "/audio/music";
+constexpr const char* kAmpMusicPathFallback2 = "/audio";
+#endif
+constexpr const char* kCameraSceneId = "SCENE_CAMERA_SCAN";
 
 AudioManager g_audio;
 ScenarioManager g_scenario;
@@ -92,14 +103,26 @@ bool g_has_ring_sent_for_win_etape = false;
 bool g_win_etape_ui_refresh_pending = false;
 bool g_setup_mode = true;
 bool g_web_auth_required = false;
+bool g_resource_profile_auto = true;
 char g_web_auth_token[kWebAuthTokenCapacity] = {0};
 char g_last_action_step_key[72] = {0};
 char g_serial_line[kSerialLineCapacity] = {0};
 size_t g_serial_line_len = 0U;
 RuntimeServices g_runtime_services;
 AppCoordinator g_app_coordinator;
+runtime::resource::ResourceCoordinator g_resource_coordinator;
+#if defined(USE_AUDIO) && (USE_AUDIO != 0)
+ui::audio::AmigaAudioPlayer g_amp_player;
+bool g_amp_ready = false;
+bool g_amp_scene_active = false;
+char g_amp_base_dir[40] = "/music";
+#endif
+ui::camera::Win311CameraUI g_camera_player;
+bool g_camera_scene_active = false;
+bool g_camera_scene_ready = false;
 
 bool dispatchScenarioEventByName(const char* event_name, uint32_t now_ms);
+bool parseBoolToken(const char* text, bool* out_value);
 
 const char* audioPackToFile(const char* pack_id) {
   if (pack_id == nullptr || pack_id[0] == '\0') {
@@ -213,6 +236,62 @@ void copyText(char* out, size_t out_size, const char* text) {
   }
   std::strncpy(out, text, out_size - 1U);
   out[out_size - 1U] = '\0';
+}
+
+void applySceneResourcePolicy(const ScenarioSnapshot& snapshot) {
+  if (!g_resource_profile_auto) {
+    return;
+  }
+  const char* screen_scene_id = (snapshot.screen_scene_id != nullptr) ? snapshot.screen_scene_id : "n/a";
+  const bool is_win_etape_step =
+      (snapshot.step != nullptr && snapshot.step->id != nullptr &&
+       std::strcmp(snapshot.step->id, kStepWinEtape) == 0 &&
+       snapshot.audio_pack_id != nullptr && std::strcmp(snapshot.audio_pack_id, kPackWin) == 0);
+  const bool is_win_etape_scene = (screen_scene_id != nullptr && std::strcmp(screen_scene_id, "SCENE_WIN_ETAPE") == 0);
+  const bool is_win_etape = is_win_etape_step || is_win_etape_scene;
+  const bool is_la_scene =
+      (screen_scene_id != nullptr && std::strstr(screen_scene_id, "LA") != nullptr) ||
+      (snapshot.step != nullptr && snapshot.step->id != nullptr && std::strstr(snapshot.step->id, "LA") != nullptr);
+  const bool requires_mic =
+      g_hardware_cfg.mic_enabled &&
+      (is_la_scene || g_la_trigger.gate_active || g_la_trigger.timeout_pending);
+  const runtime::resource::ResourceProfile target =
+      is_win_etape ? runtime::resource::ResourceProfile::kGfxFocus
+                   : (requires_mic ? runtime::resource::ResourceProfile::kGfxPlusMic
+                                   : runtime::resource::ResourceProfile::kGfxPlusCamSnapshot);
+  if (g_resource_coordinator.profile() != target) {
+    g_resource_coordinator.setProfile(target);
+    Serial.printf("[RESOURCE] auto profile=%s scene=%s screen=%s pack=%s\n",
+                  g_resource_coordinator.profileName(),
+                  snapshot.step != nullptr && snapshot.step->id != nullptr ? snapshot.step->id : "n/a",
+                  screen_scene_id,
+                  snapshot.audio_pack_id != nullptr ? snapshot.audio_pack_id : "n/a");
+  }
+}
+
+void applyResourceProfileAutoCommand(const char* arg, bool* out_parse_ok) {
+  bool enabled = false;
+  bool parse_ok = parseBoolToken(arg, &enabled);
+  if (out_parse_ok != nullptr) {
+    *out_parse_ok = parse_ok;
+  }
+  if (!parse_ok) {
+    return;
+  }
+  g_resource_profile_auto = enabled;
+  if (g_resource_profile_auto) {
+    applySceneResourcePolicy(g_scenario.snapshot());
+  }
+}
+
+void applyMicRuntimePolicy() {
+  if (!g_hardware_started) {
+    return;
+  }
+  const bool should_run =
+      g_hardware_cfg.mic_enabled &&
+      (g_resource_coordinator.shouldRunMic() || g_la_trigger.gate_active || g_la_trigger.timeout_pending);
+  g_hardware.setMicRuntimeEnabled(should_run);
 }
 
 void logBootMemoryProfile() {
@@ -682,6 +761,18 @@ void runtimeTickBridge(uint32_t now_ms, RuntimeServices* services);
 void serialDispatchBridge(const char* command_line, uint32_t now_ms, RuntimeServices* services);
 void refreshSceneIfNeeded(bool force_render);
 void startPendingAudioIfAny();
+#if defined(USE_AUDIO) && (USE_AUDIO != 0)
+bool isAmpSceneId(const char* scene_id);
+bool ensureAmpInitialized();
+size_t scanAmpPlaylistWithFallback();
+void syncAmpSceneState(const ScenarioSnapshot& snapshot);
+void printAmpStatus();
+#endif
+bool isCameraSceneId(const char* scene_id);
+bool ensureCameraUiInitialized();
+void syncCameraSceneState(const ScenarioSnapshot& snapshot);
+bool dispatchCameraSceneButton(uint8_t key, bool long_press);
+void printCameraRecorderStatus();
 void executeStoryActionsForStep(const ScenarioSnapshot& snapshot, uint32_t now_ms);
 bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot, uint32_t now_ms);
 void webFillWifiStatus(JsonObject out, const NetworkManager::Snapshot& net);
@@ -746,6 +837,8 @@ void appendCompactRuntimeStatus(JsonObject out) {
   out["audio_playing"] = g_audio.isPlaying();
   out["hw_ready"] = hardware.ready;
   out["cam_enabled"] = camera.enabled;
+  out["cam_scene_active"] = g_camera_scene_active;
+  out["cam_recorder"] = camera.recorder_session_active;
   out["media_recording"] = media.recording;
 }
 
@@ -1265,9 +1358,233 @@ bool sendRingCommandToRtc() {
   return ok;
 }
 
+#if defined(USE_AUDIO) && (USE_AUDIO != 0)
+bool isAmpSceneId(const char* scene_id) {
+  if (scene_id == nullptr || scene_id[0] == '\0') {
+    return false;
+  }
+  return std::strcmp(scene_id, "SCENE_MP3_PLAYER") == 0 ||
+         std::strcmp(scene_id, "SCENE_AUDIO_PLAYER") == 0 ||
+         std::strcmp(scene_id, "SCENE_MP3") == 0;
+}
+
+bool beginAmpAtBase(const char* base_dir) {
+  if (base_dir == nullptr || base_dir[0] == '\0') {
+    return false;
+  }
+  ui::audio::AmigaAudioPlayer::UiConfig ui_cfg;
+  ui_cfg.base_dir = base_dir;
+  ui_cfg.start_visible = false;
+  ui_cfg.auto_scan = false;
+  ui_cfg.dim_background = true;
+  ui_cfg.capture_keys_when_visible = true;
+  const bool ok = g_amp_player.begin(ui_cfg, ui::audio::AudioPlayerService::Config{});
+  if (ok) {
+    copyText(g_amp_base_dir, sizeof(g_amp_base_dir), base_dir);
+    g_amp_ready = true;
+    Serial.printf("[AMP] ready base_dir=%s\n", g_amp_base_dir);
+  }
+  return ok;
+}
+
+bool ensureAmpInitialized() {
+  if (g_amp_ready) {
+    return true;
+  }
+  // Keep AMP backend lazy to avoid dual Audio/I2S contention with story audio.
+  if (!g_amp_scene_active) {
+    return false;
+  }
+  const char* const candidates[] = {kAmpMusicPathPrimary, kAmpMusicPathFallback1, kAmpMusicPathFallback2};
+  for (const char* candidate : candidates) {
+    if (beginAmpAtBase(candidate)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+size_t scanAmpPlaylistWithFallback() {
+  if (!ensureAmpInitialized()) {
+    return 0U;
+  }
+  size_t count = g_amp_player.service().scanPlaylist();
+  if (count > 0U) {
+    return count;
+  }
+
+  const char* const candidates[] = {kAmpMusicPathPrimary, kAmpMusicPathFallback1, kAmpMusicPathFallback2};
+  for (const char* candidate : candidates) {
+    if (std::strcmp(candidate, g_amp_base_dir) == 0) {
+      continue;
+    }
+    g_amp_player.end();
+    g_amp_ready = false;
+    if (!beginAmpAtBase(candidate)) {
+      continue;
+    }
+    count = g_amp_player.service().scanPlaylist();
+    if (count > 0U) {
+      return count;
+    }
+  }
+  return count;
+}
+
+void syncAmpSceneState(const ScenarioSnapshot& snapshot) {
+  const bool want_amp_scene = isAmpSceneId(snapshot.screen_scene_id);
+  if (want_amp_scene == g_amp_scene_active) {
+    return;
+  }
+  g_amp_scene_active = want_amp_scene;
+  if (g_amp_scene_active) {
+    g_audio.stop();
+    if (ensureAmpInitialized()) {
+      (void)scanAmpPlaylistWithFallback();
+      g_amp_player.show();
+    }
+    Serial.println("[AMP] scene owner=amp");
+    return;
+  }
+  if (g_amp_ready) {
+    g_amp_player.service().stop();
+    g_amp_player.hide();
+  }
+  Serial.println("[AMP] scene owner=story_audio");
+}
+
+void printAmpStatus() {
+  if (!ensureAmpInitialized()) {
+    Serial.println("AMP_STATUS ready=0");
+    return;
+  }
+  const ui::audio::AudioPlayerService::Stats stats = g_amp_player.service().stats();
+  const size_t count = g_amp_player.service().trackCount();
+  const size_t index = g_amp_player.service().currentIndex();
+  const char* path = g_amp_player.service().currentPath();
+  Serial.printf("AMP_STATUS ready=1 visible=%u scene=%u base=%s tracks=%u idx=%u path=%s state=%u pos=%lu dur=%lu vu=%u\n",
+                g_amp_player.visible() ? 1U : 0U,
+                g_amp_scene_active ? 1U : 0U,
+                g_amp_base_dir,
+                static_cast<unsigned int>(count),
+                static_cast<unsigned int>(index),
+                (path != nullptr && path[0] != '\0') ? path : "n/a",
+                static_cast<unsigned int>(stats.state),
+                static_cast<unsigned long>(stats.position_s),
+                static_cast<unsigned long>(stats.duration_s),
+                static_cast<unsigned int>(stats.vu));
+}
+#endif
+
+bool isCameraSceneId(const char* scene_id) {
+  if (scene_id == nullptr || scene_id[0] == '\0') {
+    return false;
+  }
+  return std::strcmp(scene_id, kCameraSceneId) == 0;
+}
+
+bool ensureCameraUiInitialized() {
+  if (g_camera_scene_ready) {
+    return true;
+  }
+  ui::camera::Win311CameraUI::UiConfig ui_cfg;
+  ui_cfg.start_visible = false;
+  ui_cfg.base_dir = "/picture";
+  ui_cfg.camera = &g_camera;
+  ui_cfg.capture_keys_when_visible = true;
+  ui::camera::CameraCaptureService::Config service_cfg;
+  service_cfg.camera = &g_camera;
+  service_cfg.base_dir = "/picture";
+  g_camera_scene_ready = g_camera_player.begin(ui_cfg, service_cfg);
+  if (!g_camera_scene_ready) {
+    Serial.println("[CAM_UI] init failed");
+    return false;
+  }
+  g_camera_player.hide();
+  Serial.println("[CAM_UI] ready");
+  return true;
+}
+
+void syncCameraSceneState(const ScenarioSnapshot& snapshot) {
+  const bool want_camera_scene = isCameraSceneId(snapshot.screen_scene_id);
+  if (want_camera_scene == g_camera_scene_active) {
+    return;
+  }
+  g_camera_scene_active = want_camera_scene;
+  if (g_camera_scene_active) {
+    if (!ensureCameraUiInitialized()) {
+      g_camera_scene_active = false;
+      return;
+    }
+    if (!g_camera.startRecorderSession()) {
+      Serial.println("[CAM_UI] recorder session start failed");
+      g_camera_player.show();
+      return;
+    }
+    g_camera_player.show();
+    Serial.println("[CAM_UI] scene owner=recorder");
+    return;
+  }
+  if (g_camera_scene_ready) {
+    g_camera_player.hide();
+    g_camera_player.service().discard_frozen();
+  }
+  g_camera.stopRecorderSession();
+  Serial.println("[CAM_UI] scene owner=legacy");
+}
+
+bool dispatchCameraSceneButton(uint8_t key, bool long_press) {
+  if (!g_camera_scene_active || !g_camera_scene_ready) {
+    return false;
+  }
+  ui::camera::Win311CameraUI::InputAction action = ui::camera::Win311CameraUI::InputAction::kSnapToggle;
+  switch (key) {
+    case 1U:
+      action = ui::camera::Win311CameraUI::InputAction::kSnapToggle;
+      break;
+    case 2U:
+      action = ui::camera::Win311CameraUI::InputAction::kSave;
+      break;
+    case 3U:
+      action = long_press ? ui::camera::Win311CameraUI::InputAction::kGalleryNext
+                          : ui::camera::Win311CameraUI::InputAction::kGalleryToggle;
+      break;
+    case 4U:
+      action = ui::camera::Win311CameraUI::InputAction::kDeleteSelected;
+      break;
+    case 5U:
+      action = ui::camera::Win311CameraUI::InputAction::kClose;
+      break;
+    default:
+      return false;
+  }
+  return g_camera_player.handleInputAction(action);
+}
+
+void printCameraRecorderStatus() {
+  const CameraManager::Snapshot camera = g_camera.snapshot();
+  Serial.printf(
+      "CAM_REC_STATUS scene=%u ui_ready=%u visible=%u session=%u frozen=%u preview=%ux%u selected=%s last=%s err=%s\n",
+      g_camera_scene_active ? 1U : 0U,
+      g_camera_scene_ready ? 1U : 0U,
+      (g_camera_scene_ready && g_camera_player.visible()) ? 1U : 0U,
+      camera.recorder_session_active ? 1U : 0U,
+      camera.recorder_frozen ? 1U : 0U,
+      static_cast<unsigned int>(camera.recorder_preview_width),
+      static_cast<unsigned int>(camera.recorder_preview_height),
+      camera.recorder_selected_file[0] != '\0' ? camera.recorder_selected_file : "n/a",
+      camera.last_file[0] != '\0' ? camera.last_file : "n/a",
+      camera.last_error[0] != '\0' ? camera.last_error : "none");
+}
+
 void onAudioFinished(const char* track, void* ctx) {
   (void)ctx;
   Serial.printf("[MAIN] audio done: %s\n", track != nullptr ? track : "unknown");
+#if defined(USE_AUDIO) && (USE_AUDIO != 0)
+  if (g_amp_scene_active) {
+    return;
+  }
+#endif
   const ScenarioSnapshot snapshot = g_scenario.snapshot();
   if (snapshot.step != nullptr &&
       snapshot.step->id != nullptr &&
@@ -1294,13 +1611,14 @@ void printRuntimeStatus() {
   const HardwareManager::Snapshot& hw = g_hardware.snapshotRef();
   const CameraManager::Snapshot camera = g_camera.snapshot();
   const MediaManager::Snapshot media = g_media.snapshot();
+  const runtime::resource::ResourceCoordinatorSnapshot resource = g_resource_coordinator.snapshot();
   const char* scenario_id = scenarioIdFromSnapshot(snapshot);
   const char* step_id = stepIdFromSnapshot(snapshot);
   const char* screen_id = (snapshot.screen_scene_id != nullptr) ? snapshot.screen_scene_id : "n/a";
   const char* audio_pack = (snapshot.audio_pack_id != nullptr) ? snapshot.audio_pack_id : "n/a";
   Serial.printf("STATUS scenario=%s step=%s screen=%s pack=%s audio=%u track=%s codec=%s bitrate=%u profile=%u:%s fx=%u:%s vol=%u "
                 "net=%s/%s sta=%u connecting=%u ap=%u espnow=%u peers=%u ip=%s key=%u mv=%d "
-                "hw=%u mic=%u battery=%u cam=%u media_play=%u rec=%u\n",
+                "hw=%u mic=%u battery=%u cam=%u media_play=%u rec=%u res=%s pressure=%u mic_should=%u cam_allow=%u\n",
                 scenario_id,
                 step_id,
                 screen_id,
@@ -1329,7 +1647,11 @@ void printRuntimeStatus() {
                 hw.battery_percent,
                 camera.enabled ? 1U : 0U,
                 media.playing ? 1U : 0U,
-                media.recording ? 1U : 0U);
+                media.recording ? 1U : 0U,
+                g_resource_coordinator.profileName(),
+                resource.graphics_pressure ? 1U : 0U,
+                resource.mic_should_run ? 1U : 0U,
+                resource.allow_camera_ops ? 1U : 0U);
 }
 
 void printHardwareStatus() {
@@ -1400,7 +1722,9 @@ void printHardwareStatusJson() {
 
 void printCameraStatus() {
   const CameraManager::Snapshot camera = g_camera.snapshot();
-  Serial.printf("CAM_STATUS supported=%u enabled=%u init=%u frame=%s quality=%u fb=%u xclk=%lu captures=%lu fails=%lu last=%s err=%s\n",
+  Serial.printf(
+      "CAM_STATUS supported=%u enabled=%u init=%u frame=%s quality=%u fb=%u xclk=%lu captures=%lu fails=%lu "
+      "rec_scene=%u rec_session=%u rec_frozen=%u preview=%ux%u last=%s err=%s\n",
                 camera.supported ? 1U : 0U,
                 camera.enabled ? 1U : 0U,
                 camera.initialized ? 1U : 0U,
@@ -1410,8 +1734,72 @@ void printCameraStatus() {
                 static_cast<unsigned long>(camera.xclk_hz),
                 static_cast<unsigned long>(camera.capture_count),
                 static_cast<unsigned long>(camera.fail_count),
+                g_camera_scene_active ? 1U : 0U,
+                camera.recorder_session_active ? 1U : 0U,
+                camera.recorder_frozen ? 1U : 0U,
+                static_cast<unsigned int>(camera.recorder_preview_width),
+                static_cast<unsigned int>(camera.recorder_preview_height),
                 camera.last_file[0] != '\0' ? camera.last_file : "n/a",
                 camera.last_error[0] != '\0' ? camera.last_error : "none");
+}
+
+bool approveCameraOperation(const char* operation, String* out_error) {
+  if (g_resource_coordinator.approveCameraOperation()) {
+    return true;
+  }
+  if (out_error != nullptr) {
+    *out_error = "camera_blocked_by_resource_profile";
+  }
+  Serial.printf("[RESOURCE] camera op blocked profile=%s op=%s\n",
+                g_resource_coordinator.profileName(),
+                (operation != nullptr) ? operation : "unknown");
+  return false;
+}
+
+void printResourceStatus() {
+  const runtime::resource::ResourceCoordinatorSnapshot snapshot = g_resource_coordinator.snapshot();
+  const UiMemorySnapshot ui_mem = g_ui.memorySnapshot();
+  Serial.printf(
+      "RESOURCE_STATUS profile=%s profile_auto=%u pressure=%u mic_should_run=%u mic_force=%u cam_allow=%u pressure_until=%lu mic_hold_until=%lu cam_cooldown_until=%lu cam_allowed=%lu cam_blocked=%lu "
+      "delta_ovf=%lu delta_block=%lu draw_avg=%lu draw_max=%lu flush_avg=%lu flush_max=%lu fx_fps=%u ui_block=%lu ui_ovf=%lu ui_stall=%lu ui_recover=%lu\n",
+      g_resource_coordinator.profileName(),
+      g_resource_profile_auto ? 1U : 0U,
+      snapshot.graphics_pressure ? 1U : 0U,
+      snapshot.mic_should_run ? 1U : 0U,
+      snapshot.mic_force_on ? 1U : 0U,
+      snapshot.allow_camera_ops ? 1U : 0U,
+      static_cast<unsigned long>(snapshot.pressure_until_ms),
+      static_cast<unsigned long>(snapshot.mic_hold_until_ms),
+      static_cast<unsigned long>(snapshot.camera_cooldown_until_ms),
+      static_cast<unsigned long>(snapshot.camera_allowed_ops),
+      static_cast<unsigned long>(snapshot.camera_blocked_ops),
+      static_cast<unsigned long>(snapshot.flush_overflow_delta),
+      static_cast<unsigned long>(snapshot.flush_blocked_delta),
+      static_cast<unsigned long>(snapshot.last_draw_avg_us),
+      static_cast<unsigned long>(snapshot.last_draw_max_us),
+      static_cast<unsigned long>(snapshot.last_flush_avg_us),
+      static_cast<unsigned long>(snapshot.last_flush_max_us),
+      static_cast<unsigned int>(ui_mem.fx_fps),
+      static_cast<unsigned long>(ui_mem.flush_blocked),
+      static_cast<unsigned long>(ui_mem.flush_overflow),
+      static_cast<unsigned long>(ui_mem.flush_stall),
+      static_cast<unsigned long>(ui_mem.flush_recover));
+}
+
+void printSimdStatus() {
+  const runtime::simd::SimdAccelStatus& status = runtime::simd::status();
+  Serial.printf("SIMD_STATUS enabled=%u esp_dsp=%u selftest_runs=%lu selftest_fail=%lu bench_runs=%lu loops=%lu pixels=%lu l8_us=%lu idx_us=%lu rgb888_us=%lu gain_us=%lu\n",
+                status.simd_path_enabled ? 1U : 0U,
+                status.esp_dsp_enabled ? 1U : 0U,
+                static_cast<unsigned long>(status.selftest_runs),
+                static_cast<unsigned long>(status.selftest_failures),
+                static_cast<unsigned long>(status.bench_runs),
+                static_cast<unsigned long>(status.bench_loops),
+                static_cast<unsigned long>(status.bench_pixels),
+                static_cast<unsigned long>(status.bench_l8_to_rgb565_us),
+                static_cast<unsigned long>(status.bench_idx8_to_rgb565_us),
+                static_cast<unsigned long>(status.bench_rgb888_to_rgb565_us),
+                static_cast<unsigned long>(status.bench_s16_gain_q15_us));
 }
 
 void printMediaStatus() {
@@ -1882,6 +2270,14 @@ void webFillCameraStatus(JsonObject out) {
   out["last_capture_ms"] = camera.last_capture_ms;
   out["last_file"] = camera.last_file;
   out["last_error"] = camera.last_error;
+  out["scene_active"] = g_camera_scene_active;
+  out["ui_ready"] = g_camera_scene_ready;
+  out["ui_visible"] = g_camera_scene_ready ? g_camera_player.visible() : false;
+  out["recorder_session_active"] = camera.recorder_session_active;
+  out["recorder_frozen"] = camera.recorder_frozen;
+  out["recorder_preview_width"] = camera.recorder_preview_width;
+  out["recorder_preview_height"] = camera.recorder_preview_height;
+  out["recorder_selected_file"] = camera.recorder_selected_file;
 }
 
 void webFillMediaStatus(JsonObject out, uint32_t now_ms) {
@@ -2140,6 +2536,9 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
   if (std::strcmp(action_id, "ACTION_CAMERA_SNAPSHOT") == 0) {
     const char* filename = action_doc["config"]["filename"] | "";
     const char* event_name = action_doc["config"]["event_on_success"] | "SERIAL:CAMERA_CAPTURED";
+    if (!approveCameraOperation("action_camera_snapshot", nullptr)) {
+      return false;
+    }
     String out_path;
     const bool ok = g_camera.snapshotToFile(filename[0] != '\0' ? filename : nullptr, &out_path);
     Serial.printf("[ACTION] CAMERA_SNAPSHOT ok=%u path=%s\n", ok ? 1U : 0U, ok ? out_path.c_str() : "n/a");
@@ -2239,6 +2638,33 @@ bool dispatchControlAction(const String& action_raw, uint32_t now_ms, String* ou
     return false;
   }
 
+  auto parseRecorderFormat = [](const String& value,
+                                ui::camera::CameraCaptureService::CaptureFormat* out_format) -> bool {
+    if (out_format == nullptr) {
+      return false;
+    }
+    String normalized = value;
+    normalized.trim();
+    normalized.toLowerCase();
+    if (normalized.isEmpty() || normalized == "auto") {
+      *out_format = ui::camera::CameraCaptureService::CaptureFormat::Auto;
+      return true;
+    }
+    if (normalized == "bmp") {
+      *out_format = ui::camera::CameraCaptureService::CaptureFormat::Bmp24;
+      return true;
+    }
+    if (normalized == "jpg" || normalized == "jpeg") {
+      *out_format = ui::camera::CameraCaptureService::CaptureFormat::Jpeg;
+      return true;
+    }
+    if (normalized == "raw" || normalized == "rgb565") {
+      *out_format = ui::camera::CameraCaptureService::CaptureFormat::RawRGB565;
+      return true;
+    }
+    return false;
+  };
+
   if (action.equalsIgnoreCase("UNLOCK")) {
     return dispatchScenarioEventByName("UNLOCK", now_ms);
   }
@@ -2289,10 +2715,215 @@ bool dispatchControlAction(const String& action_raw, uint32_t now_ms, String* ou
     printCameraStatus();
     return true;
   }
+  if (action.equalsIgnoreCase("CAM_REC_STATUS")) {
+    printCameraRecorderStatus();
+    return true;
+  }
+  if (action.equalsIgnoreCase("CAM_UI_SHOW")) {
+    if (!g_camera_scene_active) {
+      if (out_error != nullptr) {
+        *out_error = "camera_scene_inactive";
+      }
+      return false;
+    }
+    if (!ensureCameraUiInitialized()) {
+      if (out_error != nullptr) {
+        *out_error = "camera_ui_not_ready";
+      }
+      return false;
+    }
+    g_camera_player.show();
+    return true;
+  }
+  if (action.equalsIgnoreCase("CAM_UI_HIDE")) {
+    if (!g_camera_scene_active || !g_camera_scene_ready) {
+      if (out_error != nullptr) {
+        *out_error = "camera_scene_inactive";
+      }
+      return false;
+    }
+    g_camera_player.hide();
+    return true;
+  }
+  if (action.equalsIgnoreCase("CAM_UI_TOGGLE")) {
+    if (!g_camera_scene_active || !g_camera_scene_ready) {
+      if (out_error != nullptr) {
+        *out_error = "camera_scene_inactive";
+      }
+      return false;
+    }
+    g_camera_player.toggle();
+    return true;
+  }
+  if (action.equalsIgnoreCase("CAM_REC_SNAP")) {
+    if (!g_camera_scene_active || !g_camera_scene_ready) {
+      if (out_error != nullptr) {
+        *out_error = "camera_scene_inactive";
+      }
+      return false;
+    }
+    const bool was_frozen = g_camera_player.service().has_frozen();
+    if (!g_camera_player.handleInputAction(ui::camera::Win311CameraUI::InputAction::kSnapToggle)) {
+      if (out_error != nullptr) {
+        *out_error = "camera_snap_failed";
+      }
+      return false;
+    }
+    const bool now_frozen = g_camera_player.service().has_frozen();
+    if (!was_frozen && !now_frozen) {
+      if (out_error != nullptr) {
+        *out_error = "camera_snap_failed";
+      }
+      return false;
+    }
+    return true;
+  }
+  if (startsWithIgnoreCase(action.c_str(), "CAM_REC_SAVE")) {
+    if (!g_camera_scene_active || !g_camera_scene_ready) {
+      if (out_error != nullptr) {
+        *out_error = "camera_scene_inactive";
+      }
+      return false;
+    }
+    const size_t prefix_len = std::strlen("CAM_REC_SAVE");
+    String format_arg = action.substring(static_cast<unsigned int>(prefix_len));
+    ui::camera::CameraCaptureService::CaptureFormat format = ui::camera::CameraCaptureService::CaptureFormat::Auto;
+    if (!parseRecorderFormat(format_arg, &format)) {
+      if (out_error != nullptr) {
+        *out_error = "cam_rec_save_arg";
+      }
+      return false;
+    }
+    if (!g_camera_player.service().has_frozen()) {
+      if (out_error != nullptr) {
+        *out_error = "camera_not_frozen";
+      }
+      return false;
+    }
+    String out_path;
+    const bool ok = g_camera_player.service().save_frozen(out_path, format);
+    if (!ok && out_error != nullptr) {
+      *out_error = "camera_save_failed";
+    }
+    return ok;
+  }
+  if (action.equalsIgnoreCase("CAM_REC_GALLERY")) {
+    if (!g_camera_scene_active || !g_camera_scene_ready) {
+      if (out_error != nullptr) {
+        *out_error = "camera_scene_inactive";
+      }
+      return false;
+    }
+    return g_camera_player.handleInputAction(ui::camera::Win311CameraUI::InputAction::kGalleryToggle);
+  }
+  if (action.equalsIgnoreCase("CAM_REC_NEXT")) {
+    if (!g_camera_scene_active || !g_camera_scene_ready) {
+      if (out_error != nullptr) {
+        *out_error = "camera_scene_inactive";
+      }
+      return false;
+    }
+    return g_camera_player.handleInputAction(ui::camera::Win311CameraUI::InputAction::kGalleryNext);
+  }
+  if (action.equalsIgnoreCase("CAM_REC_DELETE")) {
+    if (!g_camera_scene_active || !g_camera_scene_ready) {
+      if (out_error != nullptr) {
+        *out_error = "camera_scene_inactive";
+      }
+      return false;
+    }
+    return g_camera_player.handleInputAction(ui::camera::Win311CameraUI::InputAction::kDeleteSelected);
+  }
+  if (action.equalsIgnoreCase("RESOURCE_STATUS")) {
+    printResourceStatus();
+    return true;
+  }
+  if (action.equalsIgnoreCase("SIMD_STATUS")) {
+    printSimdStatus();
+    return true;
+  }
+  if (action.equalsIgnoreCase("SIMD_SELFTEST")) {
+    return runtime::simd::runSelfTestCommand();
+  }
+  if (startsWithIgnoreCase(action.c_str(), "SIMD_BENCH")) {
+    uint32_t loops = 200U;
+    uint32_t pixels = 7680U;
+    const size_t prefix_len = std::strlen("SIMD_BENCH");
+    String args = action.substring(static_cast<unsigned int>(prefix_len));
+    args.trim();
+    if (!args.isEmpty()) {
+      const int sep = args.indexOf(' ');
+      String loops_text = (sep < 0) ? args : args.substring(0, static_cast<unsigned int>(sep));
+      String pixels_text = (sep < 0) ? String("") : args.substring(static_cast<unsigned int>(sep + 1));
+      loops_text.trim();
+      pixels_text.trim();
+      if (!loops_text.isEmpty()) {
+        loops = static_cast<uint32_t>(std::strtoul(loops_text.c_str(), nullptr, 10));
+      }
+      if (!pixels_text.isEmpty()) {
+        pixels = static_cast<uint32_t>(std::strtoul(pixels_text.c_str(), nullptr, 10));
+      }
+    }
+    const runtime::simd::SimdBenchResult result = runtime::simd::runBenchCommand(loops, pixels);
+    Serial.printf("SIMD_BENCH loops=%lu pixels=%lu l8_us=%lu idx_us=%lu rgb888_us=%lu gain_us=%lu\n",
+                  static_cast<unsigned long>(result.loops),
+                  static_cast<unsigned long>(result.pixels),
+                  static_cast<unsigned long>(result.l8_to_rgb565_us),
+                  static_cast<unsigned long>(result.idx8_to_rgb565_us),
+                  static_cast<unsigned long>(result.rgb888_to_rgb565_us),
+                  static_cast<unsigned long>(result.s16_gain_q15_us));
+    return true;
+  }
+  if (startsWithIgnoreCase(action.c_str(), "RESOURCE_PROFILE_AUTO")) {
+    const size_t prefix_len = std::strlen("RESOURCE_PROFILE_AUTO");
+    String profile_auto = action.substring(static_cast<unsigned int>(prefix_len));
+    profile_auto.trim();
+    bool parse_ok = false;
+    applyResourceProfileAutoCommand(profile_auto.c_str(), &parse_ok);
+    if (!parse_ok) {
+      if (out_error != nullptr) {
+        *out_error = "resource_profile_auto_arg";
+      }
+      return false;
+    }
+    return true;
+  }
+  if (startsWithIgnoreCase(action.c_str(), "RESOURCE_PROFILE")) {
+    const size_t prefix_len = std::strlen("RESOURCE_PROFILE");
+    String profile = action.substring(static_cast<unsigned int>(prefix_len));
+    profile.trim();
+    if (profile.isEmpty()) {
+      printResourceStatus();
+      return true;
+    }
+    if (!g_resource_coordinator.parseAndSetProfile(profile.c_str())) {
+      if (out_error != nullptr) {
+        *out_error = "resource_profile_arg";
+      }
+      return false;
+    }
+    g_resource_profile_auto = false;
+    return true;
+  }
   if (action.equalsIgnoreCase("CAM_ON")) {
+    if (g_camera_scene_active) {
+      if (out_error != nullptr) {
+        *out_error = "camera_busy_recorder_owner";
+      }
+      return false;
+    }
+    if (!approveCameraOperation("cam_on", out_error)) {
+      return false;
+    }
     return g_camera.start();
   }
   if (action.equalsIgnoreCase("CAM_OFF")) {
+    if (g_camera_scene_active) {
+      if (out_error != nullptr) {
+        *out_error = "camera_busy_recorder_owner";
+      }
+      return false;
+    }
     g_camera.stop();
     return true;
   }
@@ -2380,6 +3011,11 @@ bool dispatchControlAction(const String& action_raw, uint32_t now_ms, String* ou
       }
       return false;
     }
+    if (scene_id == "SCENE_LOCK") {
+      scene_id = "SCENE_LOCKED";
+    } else if (scene_id == "LOCKED" || scene_id == "LOCK") {
+      scene_id = "SCENE_LOCKED";
+    }
     const bool ok = g_scenario.gotoScene(scene_id.c_str(), now_ms, "scene_goto_control");
     if (!ok) {
       if (out_error != nullptr) {
@@ -2438,6 +3074,15 @@ bool dispatchControlAction(const String& action_raw, uint32_t now_ms, String* ou
   }
 
   if (startsWithIgnoreCase(action.c_str(), "CAM_SNAPSHOT")) {
+    if (g_camera_scene_active) {
+      if (out_error != nullptr) {
+        *out_error = "camera_busy_recorder_owner";
+      }
+      return false;
+    }
+    if (!approveCameraOperation("cam_snapshot", out_error)) {
+      return false;
+    }
     const size_t prefix_len = std::strlen("CAM_SNAPSHOT");
     String filename = action.substring(static_cast<unsigned int>(prefix_len));
     filename.trim();
@@ -2561,6 +3206,26 @@ void webBuildStatusDocument(StaticJsonDocument<4096>* out_document) {
 
   JsonObject media = (*out_document)["media"].to<JsonObject>();
   webFillMediaStatus(media, millis());
+
+  const runtime::resource::ResourceCoordinatorSnapshot resource_snapshot = g_resource_coordinator.snapshot();
+  const UiMemorySnapshot ui_snapshot = g_ui.memorySnapshot();
+  JsonObject resource = (*out_document)["resource"].to<JsonObject>();
+  resource["profile"] = g_resource_coordinator.profileName();
+  resource["profile_auto"] = g_resource_profile_auto;
+  resource["graphics_pressure"] = resource_snapshot.graphics_pressure;
+  resource["mic_should_run"] = resource_snapshot.mic_should_run;
+  resource["mic_force_on"] = resource_snapshot.mic_force_on;
+  resource["allow_camera_ops"] = resource_snapshot.allow_camera_ops;
+  resource["mic_hold_until_ms"] = resource_snapshot.mic_hold_until_ms;
+  resource["camera_allowed_ops"] = resource_snapshot.camera_allowed_ops;
+  resource["camera_blocked_ops"] = resource_snapshot.camera_blocked_ops;
+  resource["flush_overflow_delta"] = resource_snapshot.flush_overflow_delta;
+  resource["flush_blocked_delta"] = resource_snapshot.flush_blocked_delta;
+  resource["fx_fps"] = ui_snapshot.fx_fps;
+  resource["flush_blocked"] = ui_snapshot.flush_blocked;
+  resource["flush_overflow"] = ui_snapshot.flush_overflow;
+  resource["flush_stall"] = ui_snapshot.flush_stall;
+  resource["flush_recover"] = ui_snapshot.flush_recover;
 }
 
 void webSendStatus() {
@@ -2701,16 +3366,38 @@ void setupWebUi() {
   });
 
   webOnApi("/api/camera/on", HTTP_POST, []() {
+    if (g_camera_scene_active) {
+      g_web_server.send(409, "application/json", "{\"ok\":false,\"error\":\"camera_busy_recorder_owner\"}");
+      return;
+    }
+    String err;
+    if (!approveCameraOperation("web_cam_on", &err)) {
+      g_web_server.send(429, "application/json", "{\"ok\":false,\"error\":\"camera_blocked_by_resource_profile\"}");
+      return;
+    }
     const bool ok = g_camera.start();
     webSendResult("CAM_ON", ok);
   });
 
   webOnApi("/api/camera/off", HTTP_POST, []() {
+    if (g_camera_scene_active) {
+      g_web_server.send(409, "application/json", "{\"ok\":false,\"error\":\"camera_busy_recorder_owner\"}");
+      return;
+    }
     g_camera.stop();
     webSendResult("CAM_OFF", true);
   });
 
   webOnApi("/api/camera/snapshot.jpg", HTTP_GET, []() {
+    if (g_camera_scene_active) {
+      g_web_server.send(409, "application/json", "{\"ok\":false,\"error\":\"camera_busy_recorder_owner\"}");
+      return;
+    }
+    String err;
+    if (!approveCameraOperation("web_cam_snapshot", &err)) {
+      g_web_server.send(429, "application/json", "{\"ok\":false,\"error\":\"camera_blocked_by_resource_profile\"}");
+      return;
+    }
     String out_path;
     if (!g_camera.snapshotToFile(nullptr, &out_path)) {
       g_web_server.send(500, "application/json", "{\"ok\":false,\"error\":\"camera_snapshot_failed\"}");
@@ -3261,6 +3948,10 @@ void refreshSceneIfNeeded(bool force_render) {
     g_hardware.setSceneHint(snapshot.screen_scene_id);
   }
   executeStoryActionsForStep(snapshot, now_ms);
+#if defined(USE_AUDIO) && (USE_AUDIO != 0)
+  syncAmpSceneState(snapshot);
+#endif
+  syncCameraSceneState(snapshot);
 
   const char* step_id = (snapshot.step != nullptr && snapshot.step->id != nullptr) ? snapshot.step->id : "n/a";
   const String screen_payload = g_storage.loadScenePayloadById(snapshot.screen_scene_id);
@@ -3269,6 +3960,7 @@ void refreshSceneIfNeeded(bool force_render) {
                 snapshot.screen_scene_id != nullptr ? snapshot.screen_scene_id : "n/a",
                 snapshot.audio_pack_id != nullptr ? snapshot.audio_pack_id : "n/a",
                 g_audio.isPlaying() ? 1U : 0U);
+  applySceneResourcePolicy(snapshot);
   UiSceneFrame frame = {};
   frame.scenario = snapshot.scenario;
   frame.screen_scene_id = snapshot.screen_scene_id;
@@ -3280,6 +3972,16 @@ void refreshSceneIfNeeded(bool force_render) {
 }
 
 void startPendingAudioIfAny() {
+#if defined(USE_AUDIO) && (USE_AUDIO != 0)
+  if (g_amp_scene_active) {
+    String ignored_pack;
+    if (g_scenario.consumeAudioRequest(&ignored_pack)) {
+      Serial.printf("[MAIN] skip story audio while AMP owns scene pack=%s\n", ignored_pack.c_str());
+      g_scenario.notifyAudioDone(millis());
+    }
+    return;
+  }
+#endif
   String audio_pack;
   if (!g_scenario.consumeAudioRequest(&audio_pack)) {
     return;
@@ -3370,16 +4072,19 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
         "SC_LIST SC_LOAD <id> SCENE_GOTO <scene_id> SC_COVERAGE SC_REVALIDATE SC_REVALIDATE_ALL SC_EVENT <type> [name] "
         "SC_EVENT_RAW <name> "
         "STORY_REFRESH_SD STORY_SD_STATUS "
-        "UI_GFX_STATUS UI_MEM_STATUS PERF_STATUS PERF_RESET "
+        "UI_GFX_STATUS UI_MEM_STATUS PERF_STATUS PERF_RESET RESOURCE_STATUS RESOURCE_PROFILE <gfx_focus|gfx_plus_mic|gfx_plus_cam_snapshot> RESOURCE_PROFILE_AUTO <on|off> "
+        "SIMD_STATUS SIMD_SELFTEST SIMD_BENCH [loops] [pixels] "
         "HW_STATUS HW_STATUS_JSON HW_LED_SET <r> <g> <b> [brightness] [pulse] HW_LED_AUTO <ON|OFF> HW_MIC_STATUS HW_BAT_STATUS "
         "MIC_TUNER_STATUS [ON|OFF|<period_ms>] "
         "CAM_STATUS CAM_ON CAM_OFF CAM_SNAPSHOT [filename] "
+        "CAM_UI_SHOW CAM_UI_HIDE CAM_UI_TOGGLE CAM_REC_SNAP CAM_REC_SAVE [auto|bmp|jpg|raw] CAM_REC_GALLERY CAM_REC_NEXT CAM_REC_DELETE CAM_REC_STATUS "
         "MEDIA_LIST <picture|music|recorder> MEDIA_PLAY <path> MEDIA_STOP REC_START [seconds] [filename] REC_STOP REC_STATUS "
         "NET_STATUS WIFI_STATUS WIFI_TEST WIFI_STA <ssid> <pass> WIFI_CONNECT <ssid> <pass> WIFI_PROVISION <ssid> <pass> WIFI_FORGET WIFI_DISCONNECT "
         "AUTH_STATUS AUTH_TOKEN_ROTATE [token] "
         "WIFI_AP_ON [ssid] [pass] WIFI_AP_OFF "
         "ESPNOW_ON ESPNOW_OFF ESPNOW_STATUS ESPNOW_STATUS_JSON ESPNOW_PEER_ADD <mac> ESPNOW_PEER_DEL <mac> ESPNOW_PEER_LIST "
         "ESPNOW_SEND <text|json> "
+        "AMP_SHOW AMP_HIDE AMP_TOGGLE AMP_SCAN AMP_PLAY <idx|path> AMP_NEXT AMP_PREV AMP_STOP AMP_STATUS "
         "AUDIO_TEST AUDIO_TEST_FS AUDIO_PROFILE <idx> AUDIO_FX <idx> AUDIO_STATUS VOL <0..21> AUDIO_STOP STOP");
     return;
   }
@@ -3395,6 +4100,105 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
     g_ui.dumpStatus(UiStatusTopic::kMemory);
     return;
   }
+#if defined(USE_AUDIO) && (USE_AUDIO != 0)
+  if (std::strcmp(command, "AMP_STATUS") == 0) {
+    printAmpStatus();
+    return;
+  }
+  if (std::strcmp(command, "AMP_SHOW") == 0) {
+    const bool ok = ensureAmpInitialized();
+    if (ok) {
+      g_amp_player.show();
+    }
+    Serial.printf("ACK AMP_SHOW ok=%u\n", ok ? 1U : 0U);
+    return;
+  }
+  if (std::strcmp(command, "AMP_HIDE") == 0) {
+    const bool ok = ensureAmpInitialized();
+    if (ok) {
+      g_amp_player.hide();
+    }
+    Serial.printf("ACK AMP_HIDE ok=%u\n", ok ? 1U : 0U);
+    return;
+  }
+  if (std::strcmp(command, "AMP_TOGGLE") == 0) {
+    const bool ok = ensureAmpInitialized();
+    if (ok) {
+      g_amp_player.toggle();
+    }
+    Serial.printf("ACK AMP_TOGGLE ok=%u\n", ok ? 1U : 0U);
+    return;
+  }
+  if (std::strcmp(command, "AMP_SCAN") == 0) {
+    const size_t count = scanAmpPlaylistWithFallback();
+    Serial.printf("ACK AMP_SCAN tracks=%u base=%s\n",
+                  static_cast<unsigned int>(count),
+                  g_amp_base_dir);
+    return;
+  }
+  if (std::strcmp(command, "AMP_PLAY") == 0) {
+    if (!ensureAmpInitialized()) {
+      Serial.println("ERR AMP_NOT_READY");
+      return;
+    }
+    if (argument == nullptr || argument[0] == '\0') {
+      g_amp_player.service().playIndex(g_amp_player.service().currentIndex());
+      Serial.println("ACK AMP_PLAY current");
+      return;
+    }
+    char arg_text[kSerialLineCapacity] = {0};
+    copyText(arg_text, sizeof(arg_text), argument);
+    trimAsciiInPlace(arg_text);
+    if (arg_text[0] == '\0') {
+      g_amp_player.service().playIndex(g_amp_player.service().currentIndex());
+      Serial.println("ACK AMP_PLAY current");
+      return;
+    }
+    bool numeric = true;
+    for (size_t i = 0U; arg_text[i] != '\0'; ++i) {
+      if (!std::isdigit(static_cast<unsigned char>(arg_text[i]))) {
+        numeric = false;
+        break;
+      }
+    }
+    if (numeric) {
+      const unsigned long index = std::strtoul(arg_text, nullptr, 10);
+      g_amp_player.service().playIndex(static_cast<size_t>(index));
+      Serial.printf("ACK AMP_PLAY idx=%lu\n", index);
+    } else {
+      g_amp_player.service().playPath(arg_text);
+      Serial.printf("ACK AMP_PLAY path=%s\n", arg_text);
+    }
+    return;
+  }
+  if (std::strcmp(command, "AMP_NEXT") == 0) {
+    if (!ensureAmpInitialized()) {
+      Serial.println("ERR AMP_NOT_READY");
+      return;
+    }
+    g_amp_player.service().next();
+    Serial.println("ACK AMP_NEXT");
+    return;
+  }
+  if (std::strcmp(command, "AMP_PREV") == 0) {
+    if (!ensureAmpInitialized()) {
+      Serial.println("ERR AMP_NOT_READY");
+      return;
+    }
+    g_amp_player.service().prev();
+    Serial.println("ACK AMP_PREV");
+    return;
+  }
+  if (std::strcmp(command, "AMP_STOP") == 0) {
+    if (!ensureAmpInitialized()) {
+      Serial.println("ERR AMP_NOT_READY");
+      return;
+    }
+    g_amp_player.service().stop();
+    Serial.println("ACK AMP_STOP");
+    return;
+  }
+#endif
   if (std::strcmp(command, "PERF_STATUS") == 0) {
     perfMonitor().dumpStatus();
     return;
@@ -3402,6 +4206,90 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
   if (std::strcmp(command, "PERF_RESET") == 0) {
     perfMonitor().reset();
     Serial.println("ACK PERF_RESET");
+    return;
+  }
+  if (std::strcmp(command, "RESOURCE_STATUS") == 0) {
+    printResourceStatus();
+    return;
+  }
+  if (std::strcmp(command, "RESOURCE_PROFILE") == 0) {
+    if (argument == nullptr || argument[0] == '\0') {
+      printResourceStatus();
+      return;
+    }
+    char profile_arg[48] = {0};
+    copyText(profile_arg, sizeof(profile_arg), argument);
+    trimAsciiInPlace(profile_arg);
+    if (!g_resource_coordinator.parseAndSetProfile(profile_arg)) {
+      Serial.println("ERR RESOURCE_PROFILE_ARG");
+      return;
+    }
+    g_resource_profile_auto = false;
+    Serial.printf("ACK RESOURCE_PROFILE profile=%s\n", g_resource_coordinator.profileName());
+    printResourceStatus();
+    return;
+  }
+  if (std::strcmp(command, "RESOURCE_PROFILE_AUTO") == 0) {
+    if (argument == nullptr || argument[0] == '\0') {
+      Serial.printf("ERR RESOURCE_PROFILE_AUTO_ARG arg=%s\n", argument == nullptr ? "missing" : "empty");
+      return;
+    }
+    char profile_auto_arg[24] = {0};
+    copyText(profile_auto_arg, sizeof(profile_auto_arg), argument);
+    trimAsciiInPlace(profile_auto_arg);
+    bool parse_ok = false;
+    applyResourceProfileAutoCommand(profile_auto_arg, &parse_ok);
+    if (!parse_ok) {
+      Serial.println("ERR RESOURCE_PROFILE_AUTO_ARG");
+      return;
+    }
+    Serial.printf("ACK RESOURCE_PROFILE_AUTO profile=%s auto=%u\n",
+                  g_resource_coordinator.profileName(),
+                  g_resource_profile_auto ? 1U : 0U);
+    printResourceStatus();
+    return;
+  }
+  if (std::strcmp(command, "SIMD_STATUS") == 0) {
+    printSimdStatus();
+    return;
+  }
+  if (std::strcmp(command, "SIMD_SELFTEST") == 0) {
+    const bool ok = runtime::simd::runSelfTestCommand();
+    Serial.printf("ACK SIMD_SELFTEST ok=%u\n", ok ? 1U : 0U);
+    printSimdStatus();
+    return;
+  }
+  if (std::strcmp(command, "SIMD_BENCH") == 0) {
+    uint32_t loops = 200U;
+    uint32_t pixels = 7680U;
+    if (argument != nullptr && argument[0] != '\0') {
+      char args[40] = {0};
+      copyText(args, sizeof(args), argument);
+      trimAsciiInPlace(args);
+      char* second = std::strchr(args, ' ');
+      if (second != nullptr) {
+        *second = '\0';
+        ++second;
+        while (*second == ' ') {
+          ++second;
+        }
+      }
+      if (args[0] != '\0') {
+        loops = static_cast<uint32_t>(std::strtoul(args, nullptr, 10));
+      }
+      if (second != nullptr && second[0] != '\0') {
+        pixels = static_cast<uint32_t>(std::strtoul(second, nullptr, 10));
+      }
+    }
+    const runtime::simd::SimdBenchResult result = runtime::simd::runBenchCommand(loops, pixels);
+    Serial.printf("SIMD_BENCH loops=%lu pixels=%lu l8_us=%lu idx_us=%lu rgb888_us=%lu gain_us=%lu\n",
+                  static_cast<unsigned long>(result.loops),
+                  static_cast<unsigned long>(result.pixels),
+                  static_cast<unsigned long>(result.l8_to_rgb565_us),
+                  static_cast<unsigned long>(result.idx8_to_rgb565_us),
+                  static_cast<unsigned long>(result.rgb888_to_rgb565_us),
+                  static_cast<unsigned long>(result.s16_gain_q15_us));
+    printSimdStatus();
     return;
   }
   if (std::strcmp(command, "BTN_READ") == 0) {
@@ -3530,13 +4418,21 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
     printCameraStatus();
     return;
   }
+  if (std::strcmp(command, "CAM_REC_STATUS") == 0) {
+    printCameraRecorderStatus();
+    return;
+  }
   if (std::strcmp(command, "REC_STATUS") == 0) {
     printMediaStatus();
     return;
   }
   if (std::strcmp(command, "HW_LED_SET") == 0 || std::strcmp(command, "HW_LED_AUTO") == 0 ||
       std::strcmp(command, "CAM_ON") == 0 || std::strcmp(command, "CAM_OFF") == 0 ||
-      std::strcmp(command, "CAM_SNAPSHOT") == 0 || std::strcmp(command, "MEDIA_LIST") == 0 ||
+      std::strcmp(command, "CAM_SNAPSHOT") == 0 || std::strcmp(command, "CAM_UI_SHOW") == 0 ||
+      std::strcmp(command, "CAM_UI_HIDE") == 0 || std::strcmp(command, "CAM_UI_TOGGLE") == 0 ||
+      std::strcmp(command, "CAM_REC_SNAP") == 0 || std::strcmp(command, "CAM_REC_SAVE") == 0 ||
+      std::strcmp(command, "CAM_REC_GALLERY") == 0 || std::strcmp(command, "CAM_REC_NEXT") == 0 ||
+      std::strcmp(command, "CAM_REC_DELETE") == 0 || std::strcmp(command, "MEDIA_LIST") == 0 ||
       std::strcmp(command, "MEDIA_PLAY") == 0 || std::strcmp(command, "MEDIA_STOP") == 0 ||
       std::strcmp(command, "REC_START") == 0 || std::strcmp(command, "REC_STOP") == 0 ||
       std::strcmp(command, "SCENE_GOTO") == 0) {
@@ -3958,6 +4854,7 @@ void setup() {
   }
   RuntimeConfigService::load(g_storage, &g_network_cfg, &g_hardware_cfg, &g_camera_cfg, &g_media_cfg);
   loadBootProvisioningState();
+  g_resource_coordinator.begin();
   Serial.printf("[MAIN] default scenario checksum=%lu\n",
                 static_cast<unsigned long>(g_storage.checksum(kDefaultScenarioFile)));
   Serial.printf("[MAIN] story storage sd=%u\n", g_storage.hasSdCard() ? 1U : 0U);
@@ -3969,8 +4866,13 @@ void setup() {
   g_media.begin(g_media_cfg);
   g_camera.begin(g_camera_cfg);
   if (g_camera_cfg.enabled_on_boot) {
-    const bool cam_ok = g_camera.start();
-    Serial.printf("[CAM] boot start=%u\n", cam_ok ? 1U : 0U);
+    String cam_error;
+    if (approveCameraOperation("boot_cam_on", &cam_error)) {
+      const bool cam_ok = g_camera.start();
+      Serial.printf("[CAM] boot start=%u\n", cam_ok ? 1U : 0U);
+    } else {
+      Serial.printf("[CAM] boot start blocked profile=%s\n", g_resource_coordinator.profileName());
+    }
   }
   if (g_hardware_cfg.enabled_on_boot) {
     g_hardware_started = g_hardware.begin();
@@ -4032,6 +4934,7 @@ void setup() {
   g_last_action_step_key[0] = '\0';
 
   g_ui.begin();
+  g_ui.setHardwareController(&g_hardware);
   UiLaMetrics boot_la_metrics = {};
   boot_la_metrics.locked = false;
   boot_la_metrics.stability_pct = 0U;
@@ -4041,6 +4944,14 @@ void setup() {
   boot_la_metrics.gate_timeout_ms = g_hardware_cfg.mic_la_timeout_ms;
   g_ui.setLaMetrics(boot_la_metrics);
   g_ui.setHardwareSnapshotRef(&g_hardware.snapshotRef());
+#if defined(USE_AUDIO) && (USE_AUDIO != 0)
+  g_amp_ready = false;
+  g_amp_scene_active = false;
+  copyText(g_amp_base_dir, sizeof(g_amp_base_dir), kAmpMusicPathPrimary);
+  Serial.println("[AMP] lazy init (on SCENE_MP3_PLAYER)");
+#endif
+  g_camera_scene_active = false;
+  g_camera_scene_ready = ensureCameraUiInitialized();
   refreshSceneIfNeeded(true);
   startPendingAudioIfAny();
 
@@ -4054,6 +4965,7 @@ void setup() {
   g_runtime_services.hardware = &g_hardware;
   g_runtime_services.camera = &g_camera;
   g_runtime_services.media = &g_media;
+  g_runtime_services.resource_coordinator = &g_resource_coordinator;
   g_runtime_services.network_cfg = &g_network_cfg;
   g_runtime_services.hardware_cfg = &g_hardware_cfg;
   g_runtime_services.camera_cfg = &g_camera_cfg;
@@ -4077,7 +4989,18 @@ void runRuntimeIteration(uint32_t now_ms) {
     ui_event.key = event.key;
     ui_event.long_press = event.long_press;
     g_ui.submitInputEvent(ui_event);
-    notifyScenarioButtonGuarded(event.key, event.long_press, event_ms, "physical_button");
+    if (g_camera_scene_active) {
+      (void)dispatchCameraSceneButton(event.key, event.long_press);
+    }
+#if defined(USE_AUDIO) && (USE_AUDIO != 0)
+    if (!g_amp_scene_active && !g_camera_scene_active) {
+      notifyScenarioButtonGuarded(event.key, event.long_press, event_ms, "physical_button");
+    }
+#else
+    if (!g_camera_scene_active) {
+      notifyScenarioButtonGuarded(event.key, event.long_press, event_ms, "physical_button");
+    }
+#endif
     if (g_hardware_started) {
       g_hardware.noteButton(event.key, event.long_press, event_ms);
     }
@@ -4104,6 +5027,7 @@ void runRuntimeIteration(uint32_t now_ms) {
   g_network.update(now_ms);
   perfMonitor().endSample(PerfSection::kNetworkUpdate, network_started_us);
   if (g_hardware_started) {
+    applyMicRuntimePolicy();
     g_hardware.update(now_ms);
     maybeEmitHardwareEvents(now_ms);
     maybeLogHardwareTelemetry(now_ms);
@@ -4177,7 +5101,13 @@ void runRuntimeIteration(uint32_t now_ms) {
   }
 
   const uint32_t audio_started_us = perfMonitor().beginSample();
+#if defined(USE_AUDIO) && (USE_AUDIO != 0)
+  if (!g_amp_scene_active) {
+    g_audio.update();
+  }
+#else
   g_audio.update();
+#endif
   perfMonitor().endSample(PerfSection::kAudioUpdate, audio_started_us);
   g_media.update(now_ms, &g_audio);
   const uint32_t scenario_started_us = perfMonitor().beginSample();
@@ -4203,6 +5133,13 @@ void runRuntimeIteration(uint32_t now_ms) {
   refreshSceneIfNeeded(false);
   const uint32_t ui_started_us = perfMonitor().beginSample();
   g_ui.tick(now_ms);
+#if defined(USE_AUDIO) && (USE_AUDIO != 0)
+  if (g_amp_ready) {
+    g_amp_player.tick(now_ms);
+  }
+#endif
+  g_resource_coordinator.update(g_ui.memorySnapshot(), now_ms);
+  applyMicRuntimePolicy();
   RuntimeMetrics::instance().noteUiFrame(now_ms);
   perfMonitor().endSample(PerfSection::kUiTick, ui_started_us);
   RuntimeMetrics::instance().logPeriodic(now_ms);

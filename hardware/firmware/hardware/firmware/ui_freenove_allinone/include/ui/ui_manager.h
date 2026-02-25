@@ -57,6 +57,29 @@ struct UiMemorySnapshot {
   bool dma_async_enabled = false;
   uint32_t draw_buffer_bytes = 0U;
   uint32_t trans_buffer_bytes = 0U;
+  uint16_t selected_trans_lines = 0U;
+  uint32_t async_fallback_count = 0U;
+  uint16_t fx_fps = 0U;
+  uint32_t fx_frame_count = 0U;
+  uint32_t fx_blit_cpu_us = 0U;
+  uint32_t fx_blit_submit_us = 0U;
+  uint32_t fx_blit_wait_us = 0U;
+  uint32_t fx_blit_tail_wait_us = 0U;
+  uint32_t fx_dma_timeout_count = 0U;
+  uint32_t fx_blit_fail_busy = 0U;
+  uint32_t fx_skip_flush_busy = 0U;
+  uint32_t flush_blocked = 0U;
+  uint32_t flush_overflow = 0U;
+  uint32_t flush_time_avg_us = 0U;
+  uint32_t flush_time_max_us = 0U;
+  uint32_t flush_stall = 0U;
+  uint32_t flush_recover = 0U;
+  uint32_t draw_time_avg_us = 0U;
+  uint32_t draw_time_max_us = 0U;
+  uint32_t draw_lvgl_us = 0U;
+  uint32_t flush_spi_us = 0U;
+  uint32_t draw_flush_stall = 0U;
+  uint16_t conv_pixels_per_ms = 0U;
 };
 
 enum class UiStatusTopic : uint8_t {
@@ -75,6 +98,7 @@ class UiManager {
 
   bool begin();
   void tick(uint32_t now_ms);
+  void setHardwareController(HardwareManager* hardware);
   void setHardwareSnapshot(const HardwareManager::Snapshot& snapshot);
   void setHardwareSnapshotRef(const HardwareManager::Snapshot* snapshot);
   void setLaMetrics(const UiLaMetrics& metrics);
@@ -144,6 +168,11 @@ class UiManager {
     DONE,
   };
 
+  enum class IntroRenderMode : uint8_t {
+    kLegacy = 0,
+    kFxOnlyV8,
+  };
+
   enum class Intro3DMode : uint8_t {
     kWireCube = 0,
     kRotoZoom,
@@ -209,6 +238,17 @@ class UiManager {
     char fx_3d[20] = {0};
     char fx_3d_quality[16] = {0};
     char font_mode[16] = {0};
+    ui::fx::FxPreset fx_preset_a = ui::fx::FxPreset::kDemo;
+    ui::fx::FxPreset fx_preset_b = ui::fx::FxPreset::kWinner;
+    ui::fx::FxPreset fx_preset_c = ui::fx::FxPreset::kBoingball;
+    ui::fx::FxMode fx_mode_a = ui::fx::FxMode::kClassic;
+    ui::fx::FxMode fx_mode_b = ui::fx::FxMode::kClassic;
+    ui::fx::FxMode fx_mode_c = ui::fx::FxMode::kClassic;
+    char fx_scroll_text_a[240] = {0};
+    char fx_scroll_text_b[240] = {0};
+    char fx_scroll_text_c[240] = {0};
+    ui::fx::FxScrollFont fx_scroll_font = ui::fx::FxScrollFont::kItalic;
+    uint16_t fx_bpm = 125U;
   };
 
   struct IntroGlyphSlot {
@@ -220,14 +260,20 @@ class UiManager {
     bool pending = false;
     bool using_dma = false;
     bool converted = false;
+    bool dma_in_flight = false;
+    bool prepared = false;
     lv_disp_drv_t* disp = nullptr;
     lv_area_t area = {0, 0, 0, 0};
+    const lv_color_t* src = nullptr;
+    const uint16_t* prepared_tx = nullptr;
+    uint16_t col_count = 0U;
     uint32_t started_ms = 0U;
     uint32_t row_count = 0U;
   };
 
   struct BufferConfig {
     uint16_t lines = 0U;
+    uint16_t selected_trans_lines = 0U;
     uint8_t bpp = 16U;
     bool draw_in_psram = false;
     bool full_frame = false;
@@ -241,7 +287,16 @@ class UiManager {
     uint32_t sync_flush_count = 0U;
     uint32_t flush_time_total_us = 0U;
     uint32_t flush_time_max_us = 0U;
+    uint32_t draw_count = 0U;
+    uint32_t draw_time_total_us = 0U;
+    uint32_t draw_time_max_us = 0U;
     uint32_t flush_busy_poll_count = 0U;
+    uint32_t flush_overflow_count = 0U;
+    uint32_t flush_blocked_count = 0U;
+    uint32_t flush_stall_count = 0U;
+    uint32_t flush_recover_count = 0U;
+    uint32_t fx_skip_flush_busy = 0U;
+    uint32_t async_fallback_count = 0U;
   };
 
   void createWidgets();
@@ -253,8 +308,9 @@ class UiManager {
   void startIntroIfNeeded(bool force_restart);
   void startIntro();
   void stopIntroAndCleanup();
-  void requestIntroSkip();
   void transitionIntroState(IntroState next_state);
+  void hideLegacyIntroObjectsForFxOnly();
+  void applyIntroFxOnlyPhasePreset(IntroState state);
   void tickIntro();
   void configureBPhaseStart();
   void updateBPhase(uint32_t dt_ms, uint32_t now_ms, uint32_t state_elapsed_ms);
@@ -298,10 +354,12 @@ class UiManager {
   void initGraphicsPipeline();
   bool allocateDrawBuffers();
   bool initDmaEngine();
+  bool isDisplayOutputBusy() const;
   void pollAsyncFlush();
   void completePendingFlush();
   uint16_t convertLineRgb332ToRgb565(const lv_color_t* src, uint16_t* dst, uint32_t px_count) const;
   lv_color_t quantize565ToTheme256(lv_color_t color) const;
+  void invalidateFxOverlayObjects();
   void updatePageLine();
   void stopSceneAnimations();
   void applySceneEffect(SceneEffect effect);
@@ -325,6 +383,9 @@ class UiManager {
   void applyThemeColors(uint32_t bg_rgb, uint32_t accent_rgb, uint32_t text_rgb);
   void resetSceneTimeline();
   void onTimelineTick(uint16_t elapsed_ms);
+  bool isWinEtapeSceneId(const char* scene_id) const;
+  bool isDirectFxSceneId(const char* scene_id) const;
+  void cleanupSceneTransitionAssets(const char* from_scene_id, const char* to_scene_id);
 
   static void displayFlushCb(lv_disp_drv_t* disp, const lv_area_t* area, lv_color_t* color_p);
   static void keypadReadCb(lv_indev_drv_t* drv, lv_indev_data_t* data);
@@ -333,6 +394,7 @@ class UiManager {
   static void animSetX(void* obj, int32_t value);
   static void animSetStyleTranslateX(void* obj, int32_t value);
   static void animSetStyleTranslateY(void* obj, int32_t value);
+  static void animSetStyleRotate(void* obj, int32_t value);
   static void animSetFireworkTranslateX(void* obj, int32_t value);
   static void animSetFireworkTranslateY(void* obj, int32_t value);
   static void animSetOpa(void* obj, int32_t value);
@@ -342,6 +404,7 @@ class UiManager {
   static void animSetRandomTranslateX(void* obj, int32_t value);
   static void animSetRandomTranslateY(void* obj, int32_t value);
   static void animSetRandomOpa(void* obj, int32_t value);
+  static void animSetRandomTextOpa(void* obj, int32_t value);
   static void animTimelineTickCb(void* obj, int32_t value);
   static void animWinEtapeShowcaseTickCb(void* obj, int32_t value);
   static void animSetWinTitleReveal(void* obj, int32_t value);
@@ -355,6 +418,7 @@ class UiManager {
   lv_color_t* draw_buf2_ = nullptr;
   bool draw_buf1_owned_ = false;
   bool draw_buf2_owned_ = false;
+  HardwareManager* hardware_ = nullptr;
   uint16_t* dma_trans_buf_ = nullptr;
   size_t dma_trans_buf_pixels_ = 0U;
   bool dma_trans_buf_owned_ = false;
@@ -368,6 +432,11 @@ class UiManager {
   bool dma_requested_ = false;
   bool dma_available_ = false;
   bool async_flush_enabled_ = false;
+  bool pending_lvgl_flush_request_ = false;
+  bool pending_full_repaint_request_ = false;
+  uint32_t flush_pending_since_ms_ = 0U;
+  uint32_t flush_last_progress_ms_ = 0U;
+  uint32_t async_fallback_until_ms_ = 0U;
   uint32_t graphics_stats_last_report_ms_ = 0U;
 
   lv_obj_t* scene_root_ = nullptr;
@@ -439,12 +508,13 @@ class UiManager {
   uint8_t demo_strobe_level_ = 65U;
   bool win_etape_fireworks_mode_ = false;
   uint8_t win_etape_showcase_phase_ = 0xFFU;
+  bool direct_fx_scene_active_ = false;
+  ui::fx::FxPreset direct_fx_scene_preset_ = ui::fx::FxPreset::kDemo;
   uint32_t last_lvgl_tick_ms_ = 0U;
   bool intro_created_ = false;
   bool intro_active_ = false;
-  bool intro_skip_requested_ = false;
-  bool intro_skip_latched_ = false;
   bool intro_clean_loop_only_ = false;
+  IntroRenderMode intro_render_mode_ = IntroRenderMode::kLegacy;
   IntroState intro_state_ = IntroState::DONE;
   Intro3DMode intro_3d_mode_ = Intro3DMode::kWireCube;
   Intro3DQuality intro_3d_quality_ = Intro3DQuality::kAuto;
@@ -504,6 +574,7 @@ class UiManager {
   float intro_roto_phase_ = 0.0f;
   bool intro_debug_overlay_enabled_ = false;
   uint32_t intro_phase_log_next_ms_ = 0U;
+  uint32_t intro_overlay_invalidate_ms_ = 0U;
   uint8_t intro_c_fx_stage_ = 0U;
   uint32_t intro_c_fx_stage_start_ms_ = 0U;
   uint32_t intro_rng_state_ = 0x1234ABCDUL;

@@ -21,12 +21,20 @@ constexpr ScreenSceneDef kScenes[] = {
     {"SCENE_MEDIA_ARCHIVE", 2U, 2U},
     {"SCENE_READY", 2U, 2U},
     {"SCENE_WIN", 1U, 2U},
+    {"SCENE_WINNER", 1U, 2U},
+    {"SCENE_FIREWORKS", 1U, 2U},
     {"SCENE_WIN_ETAPE", 1U, 2U},
+    {"SCENE_MP3_PLAYER", 1U, 2U},
 };
 
 // Controlled legacy aliases used during the migration window.
 constexpr SceneAliasDef kSceneAliases[] = {
     {"SCENE_LA_DETECT", "SCENE_LA_DETECTOR"},
+    {"SCENE_LOCK", "SCENE_LOCKED"},
+    {"LOCKED", "SCENE_LOCKED"},
+    {"LOCK", "SCENE_LOCKED"},
+    {"SCENE_AUDIO_PLAYER", "SCENE_MP3_PLAYER"},
+    {"SCENE_MP3", "SCENE_MP3_PLAYER"},
 };
 
 const ScreenSceneDef* findScene(const char* sceneId) {

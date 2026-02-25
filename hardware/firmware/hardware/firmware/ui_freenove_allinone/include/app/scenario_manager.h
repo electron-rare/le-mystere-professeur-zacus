@@ -79,6 +79,7 @@ class ScenarioManager {
   bool timer_fired_ = false;
   uint32_t etape2_due_at_ms_ = 0U;
   String pending_audio_pack_;
+  String forced_screen_scene_id_;
   String initial_step_override_;
   StepResourceOverride step_resource_overrides_[kMaxStepResourceOverrides];
   uint8_t step_resource_override_count_ = 0U;

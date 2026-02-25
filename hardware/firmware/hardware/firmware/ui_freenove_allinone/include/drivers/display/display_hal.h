@@ -24,8 +24,9 @@ class DisplayHal {
 
   virtual bool initDma(bool use_double_buffer) = 0;
   virtual bool dmaBusy() const = 0;
+  virtual bool waitDmaComplete(uint32_t timeout_us) = 0;
 
-  virtual void startWrite() = 0;
+  virtual bool startWrite() = 0;
   virtual void endWrite() = 0;
 
   virtual void setAddrWindow(int16_t x, int16_t y, int16_t w, int16_t h) = 0;

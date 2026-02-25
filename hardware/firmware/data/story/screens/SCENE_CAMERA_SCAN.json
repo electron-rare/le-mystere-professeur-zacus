@@ -1,57 +1,38 @@
 {
   "id": "SCENE_CAMERA_SCAN",
-  "title": "CAMERA SCAN",
-  "subtitle": "Capture des indices visuels",
-  "symbol": "SCAN",
-  "effect": "radar",
+  "title": "CAMERA RECORDER",
+  "subtitle": "Mode capture",
+  "symbol": "",
+  "effect": "none",
   "visual": {
     "show_title": false,
-    "show_symbol": true,
-    "effect_speed_ms": 840
+    "show_subtitle": false,
+    "show_symbol": false,
+    "effect_speed_ms": 0
   },
   "theme": {
-    "bg": "#041A24",
-    "accent": "#5CE6FF",
-    "text": "#E9FBFF"
+    "bg": "#050A14",
+    "accent": "#6EDBFF",
+    "text": "#EAF6FF"
   },
   "timeline": {
     "loop": true,
-    "duration_ms": 2200,
+    "duration_ms": 1200,
     "keyframes": [
       {
         "at_ms": 0,
-        "effect": "radar",
-        "speed_ms": 840,
+        "effect": "none",
+        "speed_ms": 0,
         "theme": {
-          "bg": "#041A24",
-          "accent": "#5CE6FF",
-          "text": "#E9FBFF"
-        }
-      },
-      {
-        "at_ms": 1200,
-        "effect": "wave",
-        "speed_ms": 620,
-        "theme": {
-          "bg": "#072838",
-          "accent": "#8AF1FF",
-          "text": "#F5FEFF"
-        }
-      },
-      {
-        "at_ms": 2200,
-        "effect": "radar",
-        "speed_ms": 760,
-        "theme": {
-          "bg": "#041A24",
-          "accent": "#5CE6FF",
-          "text": "#E9FBFF"
+          "bg": "#050A14",
+          "accent": "#6EDBFF",
+          "text": "#EAF6FF"
         }
       }
     ]
   },
   "transition": {
-    "effect": "slide_left",
-    "duration_ms": 230
+    "effect": "fade",
+    "duration_ms": 180
   }
 }

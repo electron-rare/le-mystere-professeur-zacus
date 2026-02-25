@@ -54,12 +54,12 @@
 
 #define LV_USE_ARC 0
 #define LV_USE_BAR 0
-#define LV_USE_BTN 0
+#define LV_USE_BTN 1
 #define LV_USE_BTNMATRIX 0
 #define LV_USE_CANVAS 0
 #define LV_USE_CHECKBOX 0
 #define LV_USE_DROPDOWN 0
-#define LV_USE_IMG 0
+#define LV_USE_IMG 1
 #define LV_USE_LABEL 1
 #define LV_LABEL_TEXT_SELECTION 0
 #define LV_LABEL_LONG_TXT_HINT 1
@@ -76,7 +76,7 @@
 #define LV_USE_IMGBTN 0
 #define LV_USE_KEYBOARD 0
 #define LV_USE_LED 0
-#define LV_USE_LIST 0
+#define LV_USE_LIST 1
 #define LV_USE_MENU 0
 #define LV_USE_METER 0
 #define LV_USE_MSGBOX 0

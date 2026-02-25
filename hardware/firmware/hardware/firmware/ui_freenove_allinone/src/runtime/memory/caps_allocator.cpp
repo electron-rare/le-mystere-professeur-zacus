@@ -26,6 +26,51 @@ void noteAllocFailure(size_t bytes, const char* tag, const char* source) {
 
 }  // namespace
 
+void* CapsAllocator::allocInternalDmaAligned(size_t alignment,
+                                             size_t bytes,
+                                             const char* tag,
+                                             bool* out_used_fallback) {
+  if (out_used_fallback != nullptr) {
+    *out_used_fallback = false;
+  }
+  if (bytes == 0U) {
+    return nullptr;
+  }
+  if (alignment < sizeof(void*)) {
+    alignment = sizeof(void*);
+  }
+
+#if defined(ARDUINO_ARCH_ESP32)
+  void* ptr = heap_caps_aligned_alloc(alignment,
+                                      bytes,
+                                      MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  if (ptr != nullptr) {
+    return ptr;
+  }
+  ptr = heap_caps_aligned_alloc(alignment, bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  if (ptr != nullptr) {
+    if (out_used_fallback != nullptr) {
+      *out_used_fallback = true;
+    }
+    Serial.printf("[MEM] alloc_fallback source=INTERNAL_DMA_ALIGNED->INTERNAL_ALIGNED bytes=%u tag=%s align=%u\n",
+                  static_cast<unsigned int>(bytes),
+                  (tag != nullptr) ? tag : "n/a",
+                  static_cast<unsigned int>(alignment));
+    return ptr;
+  }
+  noteAllocFailure(bytes, tag, "INTERNAL_DMA_ALIGNED");
+  return nullptr;
+#else
+  void* ptr = nullptr;
+  const int rc = posix_memalign(&ptr, alignment, bytes);
+  if (rc != 0 || ptr == nullptr) {
+    noteAllocFailure(bytes, tag, "ALIGNED_MALLOC");
+    return nullptr;
+  }
+  return ptr;
+#endif
+}
+
 void* CapsAllocator::allocInternalDma(size_t bytes, const char* tag, bool* out_used_fallback) {
   if (out_used_fallback != nullptr) {
     *out_used_fallback = false;

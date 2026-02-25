@@ -1,0 +1,115 @@
+{
+  "meta": {
+    "title": "Demo 3D Pack (Tunnel / Rotozoom / Wirecube)",
+    "fps": 50,
+    "bpm": 125,
+    "seed": 424242,
+    "internal": {
+      "w": 160,
+      "h": 120,
+      "fmt": "I8"
+    }
+  },
+  "clips": [
+    {
+      "id": "intro_flash",
+      "t0": 0.0,
+      "t1": 2.0,
+      "track": "UI",
+      "fx": "transition_flash",
+      "params": {
+        "flashFrames": 2,
+        "fadeOut": 1.0
+      }
+    },
+    {
+      "id": "partA_tunnel",
+      "t0": 2.0,
+      "t1": 22.0,
+      "track": "BG",
+      "fx": "tunnel3d",
+      "params": {
+        "speed": 0.8,
+        "rotSpeed": 0.15
+      }
+    },
+    {
+      "id": "partA_scroll",
+      "t0": 2.0,
+      "t1": 22.0,
+      "track": "UI",
+      "fx": "scrolltext",
+      "params": {
+        "textId": "greetz_01",
+        "speed": 1.2,
+        "waveAmp": 14,
+        "wavePeriod": 160
+      }
+    },
+    {
+      "id": "partB_rotozoom",
+      "t0": 22.0,
+      "t1": 44.0,
+      "track": "BG",
+      "fx": "rotozoom",
+      "params": {
+        "rotSpeed": 0.18,
+        "zoomBase": 0.9,
+        "zoomAmp": 0.25
+      }
+    },
+    {
+      "id": "partB_wirecube",
+      "t0": 22.0,
+      "t1": 44.0,
+      "track": "MID",
+      "fx": "wirecube",
+      "params": {
+        "rotX": 0.21,
+        "rotY": 0.27,
+        "rotZ": 0.11
+      }
+    },
+    {
+      "id": "partC_plasma",
+      "t0": 44.0,
+      "t1": 62.0,
+      "track": "BG",
+      "fx": "plasma",
+      "params": {
+        "speed": 0.035,
+        "contrast": 0.8
+      }
+    },
+    {
+      "id": "outro",
+      "t0": 62.0,
+      "t1": 70.0,
+      "track": "UI",
+      "fx": "scrolltext",
+      "params": {
+        "textId": "credits_01",
+        "speed": 0.8,
+        "waveAmp": 6,
+        "wavePeriod": 220
+      }
+    }
+  ],
+  "mods": [
+    {
+      "clip": "partA_tunnel",
+      "param": "palShift",
+      "type": "beat_pulse",
+      "args": {
+        "amount": 16,
+        "decay": 0.65
+      }
+    }
+  ],
+  "events": [
+    {
+      "t": 22.0,
+      "type": "flash"
+    }
+  ]
+}

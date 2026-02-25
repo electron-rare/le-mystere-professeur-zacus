@@ -1,0 +1,64 @@
+{
+  "meta": {
+    "title": "Fireworks Preset",
+    "fps": 50,
+    "bpm": 125,
+    "seed": 9988,
+    "internal": {
+      "w": 160,
+      "h": 120,
+      "fmt": "I8"
+    }
+  },
+  "clips": [
+    {
+      "id": "bg_starfield",
+      "t0": 0.0,
+      "t1": 18.0,
+      "track": "BG",
+      "fx": "starfield",
+      "params": {
+        "stars": 180,
+        "speedNear": 3.2,
+        "driftAmp": 2.0
+      }
+    },
+    {
+      "id": "mid_shadebobs",
+      "t0": 0.0,
+      "t1": 18.0,
+      "track": "MID",
+      "fx": "shadebobs",
+      "params": {
+        "bobs": 20,
+        "radius": 7,
+        "invertOnBar": false
+      }
+    },
+    {
+      "id": "ui_flash",
+      "t0": 0.0,
+      "t1": 1.2,
+      "track": "UI",
+      "fx": "transition_flash",
+      "params": {
+        "flashFrames": 1,
+        "fadeOut": 1.1
+      }
+    }
+  ],
+  "mods": [
+    {
+      "clip": "mid_shadebobs",
+      "param": "radius",
+      "type": "sine",
+      "args": {
+        "base": 7,
+        "amp": 2,
+        "freqHz": 0.75,
+        "phase": 0.0
+      }
+    }
+  ],
+  "events": []
+}

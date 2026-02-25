@@ -152,12 +152,16 @@ pio run -e freenove_esp32s3 -t upload --upload-port <PORT>
 ## Intro Amiga92 (`SCENE_WIN_ETAPE`)
 
 - Activation: l'intro A/B/C est lancee automatiquement quand `screen_scene_id == SCENE_WIN_ETAPE`.
-- Sequence:
-  - A (30000 ms): copper circular/wavy + starfield 3 couches + logo overshoot + scroller milieu rapide + rollback bas.
-  - B (15000 ms): `B1` crash intense (3000..5000 ms, defaut 4000) + `B2` interlude (roto/tunnel + copper overlay + pulses fireworks).
-  - C (20000 ms): fond sobre + reveal `BRAVO Brigade Z` + scroller milieu ping-pong/wavy.
-  - ensuite: boucle de la phase C.
-- Skip: tout appui bouton ou touch pendant A/B saute directement vers C (puis C loop).
+- Mode runtime: `FX_ONLY_V9` avec rendu timeline FX (plasma/starfield/rasterbars + tunnel3d/rotozoom/wirecube + boingball) et overlay LVGL conserve.
+- Sequence timeline verrouillee: `A(30000ms) -> B(15000ms) -> C(20000ms) -> C loop`.
+- Mapping presets (default):
+  - A: `demo`
+  - B: `winner`
+  - C: `boingball`
+- Font scroller default: `italic`.
+- BPM default: `125`.
+- Boing shadow path: assembleur S3 active par defaut (`UI_BOING_SHADOW_ASM=1`) avec fallback C automatique.
+- Log de boot FX: `boing_shadow_path=asm|c`.
 
 ### Overrides runtime (TXT + JSON)
 
@@ -166,16 +170,15 @@ pio run -e freenove_esp32s3 -t upload --upload-port <PORT>
   2) `/SCENE_WIN_ETAPE.json`
   3) `/ui/SCENE_WIN_ETAPE.json`
   4) `/ui/scene_win_etape.txt`
-- Cles supportees (TXT/JSON aliases):
-  - `logo_text` / `LOGO_TEXT`
-  - `mid_a_scroll` / `MID_A_SCROLL`
-  - `bot_a_scroll` / `BOT_A_SCROLL`
-  - `clean_title` / `C_TITLE`
-  - `clean_scroll` / `C_SCROLL`
-  - `a_ms`, `b_ms`, `c_ms`, `b1_ms`
-  - `speed_mid_a`, `speed_bot_a`, `speed_c`
-  - `stars`, `fx_3d`, `fx_3d_quality`
-  - `font_mode` (`orbitron|pixel|auto`)
+- Cles supportees:
+  - `A_MS`, `B_MS`, `C_MS`
+  - `FX_PRESET_A`, `FX_PRESET_B`, `FX_PRESET_C` (`demo|winner|fireworks|boingball`)
+  - `FX_MODE_A`, `FX_MODE_B`, `FX_MODE_C` (`classic|starfield3d|dotsphere3d|voxel|raycorridor`)
+  - `FX_SCROLL_TEXT_A`, `FX_SCROLL_TEXT_B`, `FX_SCROLL_TEXT_C`
+  - `FX_SCROLL_FONT` (`basic|bold|outline|italic`)
+  - `FX_BPM` (`60..220`)
+- Rupture de compatibilite volontaire:
+  - anciennes cles FX `FX_3D`, `FX_3D_QUALITY`, `FONT_MODE` ne sont plus prises en charge dans ce flux.
 
 Exemples:
 - JSON: `data/SCENE_WIN_ETAPE.json`
@@ -185,11 +188,52 @@ Exemples:
 
 - Tick fixe: `42 ms` (`~24 FPS` cible), `dt` clamp pour robustesse.
 - Zero allocation par frame dans la boucle intro (`tickIntro`).
+- Blit LGFX: fast-path 2x active (`UI_FX_BLIT_FAST_2X=1`) si ratio source/ecran exact, fallback scaler general sinon.
 - Caps objets scene: `<=140` (petit ecran), `<=260` (grand ecran).
 - Pools fixes:
   - stars: `48`
   - fireworks: `72`
   - wave glyph+shadow: `64 + 64`
+- `UI_GFX_STATUS` expose `fx_fps/fx_frames/fx_skip_busy` + compteurs `flush_block/overflow` pour diagnostiquer les saccades LVGL/FX.
+
+## Scenes demoscene exposees
+
+- IDs canoniques ajoutes: `SCENE_WINNER`, `SCENE_FIREWORKS`.
+- Fichiers data:
+  - `data/story/screens/SCENE_WINNER.json`
+  - `data/story/screens/SCENE_FIREWORKS.json`
+- Registry story: `hardware/libs/story/src/resources/screen_scene_registry.cpp`.
+
+## Scene lecteur MP3 (`SCENE_MP3_PLAYER`)
+
+- Scene canonique: `SCENE_MP3_PLAYER`.
+- Aliases supportes: `SCENE_AUDIO_PLAYER`, `SCENE_MP3`.
+- Data scene: `data/story/screens/SCENE_MP3_PLAYER.json`.
+- Mode runtime: overlay LVGL "AmigaAMP" + backend `AudioPlayerService` (scan `/music`, fallback `/audio/music`, fallback `/audio`).
+- Arbitrage audio:
+  - en scene MP3, l'audio scenario est suspendu;
+  - en sortie de scene MP3, pipeline audio scenario restaure.
+- Commandes serie:
+  - `AMP_SHOW`, `AMP_HIDE`, `AMP_TOGGLE`
+  - `AMP_SCAN`, `AMP_PLAY <idx|path>`, `AMP_NEXT`, `AMP_PREV`, `AMP_STOP`, `AMP_STATUS`
+
+## Scene camera recorder (`SCENE_CAMERA_SCAN`)
+
+- Binding scene: entree `SCENE_CAMERA_SCAN` -> session recorder camera active (`RGB565/QVGA`) + overlay Win311 visible.
+- Sortie scene: overlay masque, frame gelee purgee, retour mode snapshot legacy (`JPEG`).
+- Mapping boutons physiques:
+  - `BTN1`: `SNAP/LIVE`
+  - `BTN2`: `SAVE`
+  - `BTN3`: `GALLERY` (appui long: `NEXT`)
+  - `BTN4`: `DELETE`
+  - `BTN5`: `CLOSE` overlay
+- Commandes serie:
+  - `CAM_UI_SHOW`, `CAM_UI_HIDE`, `CAM_UI_TOGGLE`
+  - `CAM_REC_SNAP`, `CAM_REC_SAVE [auto|bmp|jpg|raw]`
+  - `CAM_REC_GALLERY`, `CAM_REC_NEXT`, `CAM_REC_DELETE`, `CAM_REC_STATUS`
+- Ownership runtime:
+  - pendant `SCENE_CAMERA_SCAN`, les boutons physiques ne sont pas forwardes au scenario;
+  - commandes legacy `CAM_ON/CAM_OFF/CAM_SNAPSHOT` renvoient `camera_busy_recorder_owner`.
 
 ### Visual verification mode
 

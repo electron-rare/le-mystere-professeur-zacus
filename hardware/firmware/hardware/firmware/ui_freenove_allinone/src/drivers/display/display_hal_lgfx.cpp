@@ -131,15 +131,30 @@ class LovyanGfxDisplayHal final : public DisplayHal {
     return const_cast<FreenoveLgfxDevice&>(display_).dmaBusy();
   }
 
-  void startWrite() override {
+  bool waitDmaComplete(uint32_t timeout_us) override {
+    if (!dmaBusy()) {
+      return true;
+    }
+    const uint32_t started_us = micros();
+    while (dmaBusy()) {
+      if ((micros() - started_us) >= timeout_us) {
+        return !dmaBusy();
+      }
+      delayMicroseconds(20U);
+    }
+    return true;
+  }
+
+  bool startWrite() override {
     if (write_locked_) {
-      return;
+      return true;
     }
     if (!SpiBusManager::instance().lock(250U)) {
-      return;
+      return false;
     }
     display_.startWrite();
     write_locked_ = true;
+    return true;
   }
 
   void endWrite() override {

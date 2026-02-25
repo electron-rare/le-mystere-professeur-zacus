@@ -5,6 +5,7 @@
 #include <LittleFS.h>
 #include <cstring>
 
+#include "resources/screen_scene_registry.h"
 #include "scenarios/default_scenario_v2.h"
 
 namespace {
@@ -187,6 +188,7 @@ void ScenarioManager::reset() {
   }
   step_entered_at_ms_ = millis();
   pending_audio_pack_.remove(0);
+  forced_screen_scene_id_.remove(0);
   scene_changed_ = true;
   timer_armed_ = false;
   timer_fired_ = false;
@@ -285,7 +287,19 @@ bool ScenarioManager::gotoScene(const char* scene_id, uint32_t now_ms, const cha
     runImmediateTransitions(now_ms, enter_source);
     return true;
   }
-  return false;
+  const char* normalized_scene = storyNormalizeScreenSceneId(scene_id);
+  if (normalized_scene == nullptr) {
+    return false;
+  }
+  if (currentStep() == nullptr) {
+    return false;
+  }
+  forced_screen_scene_id_ = normalized_scene;
+  scene_changed_ = true;
+  Serial.printf("[SCENARIO] scene override via=%s id=%s\n",
+                (source != nullptr && source[0] != '\0') ? source : "scene_goto",
+                normalized_scene);
+  return true;
 }
 
 ScenarioSnapshot ScenarioManager::snapshot() const {
@@ -299,6 +313,9 @@ ScenarioSnapshot ScenarioManager::snapshot() const {
     uint8_t action_count = out.step->resources.actionCount;
     applyStepResourceOverride(out.step, &screen_scene_id, &audio_pack_id, &action_ids, &action_count);
     out.screen_scene_id = screen_scene_id;
+    if (!forced_screen_scene_id_.isEmpty()) {
+      out.screen_scene_id = forced_screen_scene_id_.c_str();
+    }
     out.audio_pack_id = audio_pack_id;
     out.action_ids = action_ids;
     out.action_count = action_count;
@@ -463,6 +480,7 @@ void ScenarioManager::enterStep(int8_t step_index, uint32_t now_ms, const char* 
   }
 
   pending_audio_pack_.remove(0);
+  forced_screen_scene_id_.remove(0);
   const char* screen_scene_id = step->resources.screenSceneId;
   const char* audio_pack_id = step->resources.audioPackId;
   applyStepResourceOverride(step, &screen_scene_id, &audio_pack_id);

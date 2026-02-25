@@ -1,0 +1,138 @@
+{
+  "meta": {
+    "title": "Demo 90s Pack",
+    "fps": 50,
+    "bpm": 125,
+    "seed": 1337,
+    "internal": {
+      "w": 160,
+      "h": 120,
+      "fmt": "I8"
+    }
+  },
+  "clips": [
+    {
+      "id": "intro_flash",
+      "t0": 0.0,
+      "t1": 2.5,
+      "track": "UI",
+      "fx": "transition_flash",
+      "params": {
+        "flashFrames": 2,
+        "fadeOut": 1.2
+      }
+    },
+    {
+      "id": "partA_star_scroll",
+      "t0": 2.5,
+      "t1": 22.5,
+      "track": "BG",
+      "fx": "starfield",
+      "params": {
+        "layers": 3,
+        "stars": 160,
+        "driftAmp": 2,
+        "speedNear": 2.2
+      }
+    },
+    {
+      "id": "partA_scroll",
+      "t0": 2.5,
+      "t1": 22.5,
+      "track": "UI",
+      "fx": "scrolltext",
+      "params": {
+        "textId": "greetz_01",
+        "speed": 1.2,
+        "waveAmp": 14,
+        "wavePeriod": 160
+      }
+    },
+    {
+      "id": "partB_rasters",
+      "t0": 22.5,
+      "t1": 42.5,
+      "track": "MID",
+      "fx": "rasterbars",
+      "params": {
+        "bars": 6,
+        "thickness": 18,
+        "amp": 36,
+        "speed": 0.045
+      }
+    },
+    {
+      "id": "partB_shadebobs",
+      "t0": 22.5,
+      "t1": 42.5,
+      "track": "MID",
+      "fx": "shadebobs",
+      "params": {
+        "bobs": 16,
+        "radius": 8,
+        "decay": 0.92,
+        "mode": "ADD"
+      }
+    },
+    {
+      "id": "partC_plasma",
+      "t0": 42.5,
+      "t1": 62.0,
+      "track": "BG",
+      "fx": "plasma",
+      "params": {
+        "speed": 0.035,
+        "paletteId": "plasma_cyan",
+        "contrast": 0.8
+      }
+    },
+    {
+      "id": "outro",
+      "t0": 62.0,
+      "t1": 70.0,
+      "track": "UI",
+      "fx": "scrolltext",
+      "params": {
+        "textId": "credits_01",
+        "speed": 0.8,
+        "waveAmp": 6,
+        "wavePeriod": 220
+      }
+    }
+  ],
+  "mods": [
+    {
+      "clip": "partB_rasters",
+      "param": "amp",
+      "type": "beat_pulse",
+      "args": {
+        "amount": 10,
+        "decay": 0.75
+      }
+    },
+    {
+      "clip": "partA_scroll",
+      "param": "waveAmp",
+      "type": "sine",
+      "args": {
+        "base": 12,
+        "amp": 6,
+        "freqHz": 0.12,
+        "phase": 0.0
+      }
+    }
+  ],
+  "events": [
+    {
+      "t": 22.5,
+      "type": "flash"
+    },
+    {
+      "bar": 8,
+      "type": "palette_shift",
+      "args": {
+        "value": 1
+      }
+    }
+  ]
+}

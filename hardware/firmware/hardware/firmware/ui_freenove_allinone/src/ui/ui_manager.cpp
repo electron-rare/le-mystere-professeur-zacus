@@ -13,6 +13,7 @@
 
 #if defined(ARDUINO_ARCH_ESP32)
 #include <esp_heap_caps.h>
+#include <esp_log.h>
 #endif
 
 #include "ui_freenove_config.h"
@@ -21,12 +22,29 @@
 #include "runtime/memory/caps_allocator.h"
 #include "runtime/memory/safe_size.h"
 #include "runtime/perf/perf_monitor.h"
+#include "runtime/simd/simd_accel.h"
 #include "ui/scene_element.h"
 #include "ui/scene_state.h"
 #include "ui/fx/fx_engine.h"
 #include "ui_fonts.h"
 
 namespace {
+
+#ifndef UI_DEBUG_LOG
+#define UI_DEBUG_LOG 0
+#endif
+
+#if defined(ARDUINO_ARCH_ESP32) && defined(CORE_DEBUG_LEVEL) && (CORE_DEBUG_LEVEL > 0)
+#define UI_LOGI(fmt, ...) ESP_LOGI("UI", fmt, ##__VA_ARGS__)
+#else
+#define UI_LOGI(fmt, ...) Serial.printf("[UI] " fmt "\n", ##__VA_ARGS__)
+#endif
+
+#if UI_DEBUG_LOG
+#define UI_LOGD(fmt, ...) UI_LOGI(fmt, ##__VA_ARGS__)
+#else
+#define UI_LOGD(fmt, ...) do {} while (0)
+#endif
 
 #ifndef UI_COLOR_256
 #define UI_COLOR_256 1
@@ -60,8 +78,20 @@ namespace {
 #define UI_DMA_FLUSH_ASYNC 1
 #endif
 
+#ifndef UI_DMA_RGB332_ASYNC_EXPERIMENTAL
+#define UI_DMA_RGB332_ASYNC_EXPERIMENTAL 0
+#endif
+
 #ifndef UI_DMA_TRANS_BUF_LINES
 #define UI_DMA_TRANS_BUF_LINES UI_DRAW_BUF_LINES
+#endif
+
+#ifndef UI_CONV_LINEBUF_RGB565
+#define UI_CONV_LINEBUF_RGB565 1
+#endif
+
+#ifndef UI_SIMD_EXPERIMENTAL
+#define UI_SIMD_EXPERIMENTAL 0
 #endif
 
 #ifndef UI_FULL_FRAME_BENCH
@@ -70,6 +100,10 @@ namespace {
 
 #ifndef UI_DEMO_AUTORUN_WIN_ETAPE
 #define UI_DEMO_AUTORUN_WIN_ETAPE 0
+#endif
+
+#ifndef UI_WIN_ETAPE_SIMPLIFIED
+#define UI_WIN_ETAPE_SIMPLIFIED 1
 #endif
 
 UiManager* g_instance = nullptr;
@@ -82,9 +116,14 @@ constexpr bool kUseThemeQuantizeRuntime = (UI_FORCE_THEME_256 != 0);
 constexpr bool kUseAsyncDmaRuntime = (UI_DMA_FLUSH_ASYNC != 0);
 constexpr bool kUsePsramLineBuffersRuntime = (UI_DRAW_BUF_IN_PSRAM != 0);
 constexpr bool kUseDmaTxInDramRuntime = (UI_DMA_TX_IN_DRAM != 0);
+[[maybe_unused]] constexpr bool kUseRgb332AsyncExperimental = (UI_DMA_RGB332_ASYNC_EXPERIMENTAL != 0);
 constexpr bool kUseFullFrameBenchRuntime = (UI_FULL_FRAME_BENCH != 0);
 constexpr bool kUseDemoAutorunWinEtapeRuntime = (UI_DEMO_AUTORUN_WIN_ETAPE != 0);
+constexpr bool kUseWinEtapeSimplifiedEffects = (UI_WIN_ETAPE_SIMPLIFIED != 0);
 constexpr uint32_t kFullFrameBenchMinFreePsram = 256U * 1024U;
+constexpr uint32_t kFlushStallTimeoutMs = 240U;
+constexpr uint32_t kAsyncFallbackRecoverMs = 1500U;
+constexpr uint32_t kLvglFlushDmaWaitUs = 12000U;
 
 int16_t activeDisplayWidth() {
   lv_disp_t* display = lv_disp_get_default();
@@ -401,13 +440,22 @@ constexpr const char* kWinEtapeDemoTitle = "BRAVO Brigade Z";
 constexpr const char* kWinEtapeDemoScroll =
     "Vous n’avez plus qu’a valider sur le téléphone qui sonne";
 constexpr const char* kWinEtapeWaitingSubtitle = "Validation par reponse au telephone";
+constexpr const char* kWinEtapeFxScrollTextA =
+    "DEMO MODE - BRAVO BRIGADE Z - LE MYSTERE DU PROFESSEUR ZACUS - ";
+constexpr const char* kWinEtapeFxScrollTextB =
+    "WINNER MODE - STAGE B - KEEP THE BEAT - ";
+constexpr const char* kWinEtapeFxScrollTextC =
+    "BOINGBALL MODE - SCENE WIN ETAPE - ";
 
 constexpr uint16_t kIntroTickMs = 42U;
+constexpr uint32_t kUiUpdateFrameMs = 42U;
 constexpr uint32_t kIntroCracktroMsDefault = 30000U;
 constexpr uint32_t kIntroTransitionMsDefault = 15000U;
 constexpr uint32_t kIntroCleanMsDefault = 20000U;
+constexpr uint16_t kIntroFxBpmDefault = 125U;
 constexpr uint16_t kIntroB1CrashMsDefault = 4000U;
 constexpr uint16_t kIntroOutroMs = 400U;
+constexpr uint32_t kWinEtapeAutorunLoopMs = 120000U;
 constexpr uint32_t kIntroCracktroMsMin = 1000U;
 constexpr uint32_t kIntroCracktroMsMax = 120000U;
 constexpr uint32_t kIntroTransitionMsMin = 300U;
@@ -439,24 +487,24 @@ constexpr uint16_t kIntroCubeScale = 88U;
 constexpr int16_t kIntroBottomScrollMarginPx = 8;
 constexpr uint8_t kIntroCenterScrollPadSpaces = 14U;
 
-// Retro key color set (RGB332-friendly) used by SCENE_WIN_ETAPE only.
+// Retro key color set used by SCENE_WIN_ETAPE (friendly both for RGB332 and RGB565 displays).
 constexpr uint32_t kIntroPaletteRgb[] = {
-    0x000022UL,  // 0 bg0
-    0x001144UL,  // 1 bg1
-    0x002E6AUL,  // 2 bg2
+    0x000020UL,  // 0 bg0
+    0x00112FUL,  // 1 bg1
+    0x0A2B54UL,  // 2 bg2
     0x00FFFFUL,  // 3 accent cyan
-    0xFF00FFUL,  // 4 accent magenta
-    0xFFFF00UL,  // 5 accent yellow
-    0x0044AAUL,  // 6 accent blue
+    0xFF55FFUL,  // 4 accent magenta
+    0xFFFF55UL,  // 5 accent yellow
+    0x005ACCUL,  // 6 accent blue
     0xFFFFFFUL,  // 7 text white
     0x000000UL,  // 8 shadow black
-    0x7FD7FFUL,  // 9 text light blue
-    0xFFAA55UL,  // 10 warm particle
-    0x1A3355UL,  // 11 dither stripe dark
-    0x23466FUL,  // 12 dither stripe mid
-    0x10233FUL,  // 13 tunnel stripe dark
-    0x18365DUL,  // 14 tunnel stripe light
-    0xD4F2FFUL,  // 15 star near white-blue
+    0x9ED7FFUL,  // 9 text light blue
+    0xFFB26BUL,  // 10 warm particle
+    0x163255UL,  // 11 dither stripe dark
+    0x23456AUL,  // 12 dither stripe mid
+    0x0F2D4EUL,  // 13 tunnel stripe dark
+    0x1A4E75UL,  // 14 tunnel stripe light
+    0xD8EFFFUL,  // 15 star near white-blue
 };
 
 constexpr uint8_t kIntroPaletteCount =
@@ -545,6 +593,131 @@ bool parseFloatText(const String& text, float* out_value) {
   return true;
 }
 
+bool parseFxPresetToken(const String& text, ui::fx::FxPreset* out_preset) {
+  if (out_preset == nullptr || text.length() == 0U) {
+    return false;
+  }
+  String normalized = trimCopy(text);
+  normalized.toLowerCase();
+  if (normalized == "demo") {
+    *out_preset = ui::fx::FxPreset::kDemo;
+    return true;
+  }
+  if (normalized == "winner") {
+    *out_preset = ui::fx::FxPreset::kWinner;
+    return true;
+  }
+  if (normalized == "fireworks") {
+    *out_preset = ui::fx::FxPreset::kFireworks;
+    return true;
+  }
+  if (normalized == "boingball") {
+    *out_preset = ui::fx::FxPreset::kBoingball;
+    return true;
+  }
+  return false;
+}
+
+bool parseFxModeToken(const String& text, ui::fx::FxMode* out_mode) {
+  if (out_mode == nullptr || text.length() == 0U) {
+    return false;
+  }
+  String normalized = trimCopy(text);
+  normalized.toLowerCase();
+  if (normalized == "classic") {
+    *out_mode = ui::fx::FxMode::kClassic;
+    return true;
+  }
+  if (normalized == "starfield3d" || normalized == "starfield") {
+    *out_mode = ui::fx::FxMode::kStarfield3D;
+    return true;
+  }
+  if (normalized == "dotsphere3d" || normalized == "dot_sphere" || normalized == "dotsphere") {
+    *out_mode = ui::fx::FxMode::kDotSphere3D;
+    return true;
+  }
+  if (normalized == "voxel" || normalized == "voxellandscape") {
+    *out_mode = ui::fx::FxMode::kVoxelLandscape;
+    return true;
+  }
+  if (normalized == "raycorridor" || normalized == "ray") {
+    *out_mode = ui::fx::FxMode::kRayCorridor;
+    return true;
+  }
+  return false;
+}
+
+bool parseFxScrollFontToken(const String& text, ui::fx::FxScrollFont* out_font) {
+  if (out_font == nullptr || text.length() == 0U) {
+    return false;
+  }
+  String normalized = trimCopy(text);
+  normalized.toLowerCase();
+  if (normalized == "basic") {
+    *out_font = ui::fx::FxScrollFont::kBasic;
+    return true;
+  }
+  if (normalized == "bold") {
+    *out_font = ui::fx::FxScrollFont::kBold;
+    return true;
+  }
+  if (normalized == "outline") {
+    *out_font = ui::fx::FxScrollFont::kOutline;
+    return true;
+  }
+  if (normalized == "italic") {
+    *out_font = ui::fx::FxScrollFont::kItalic;
+    return true;
+  }
+  return false;
+}
+
+const char* fxPresetToken(ui::fx::FxPreset preset) {
+  switch (preset) {
+    case ui::fx::FxPreset::kDemo:
+      return "demo";
+    case ui::fx::FxPreset::kWinner:
+      return "winner";
+    case ui::fx::FxPreset::kFireworks:
+      return "fireworks";
+    case ui::fx::FxPreset::kBoingball:
+      return "boingball";
+    default:
+      return "demo";
+  }
+}
+
+const char* fxModeToken(ui::fx::FxMode mode) {
+  switch (mode) {
+    case ui::fx::FxMode::kStarfield3D:
+      return "starfield3d";
+    case ui::fx::FxMode::kDotSphere3D:
+      return "dotsphere3d";
+    case ui::fx::FxMode::kVoxelLandscape:
+      return "voxel";
+    case ui::fx::FxMode::kRayCorridor:
+      return "raycorridor";
+    case ui::fx::FxMode::kClassic:
+    default:
+      return "classic";
+  }
+}
+
+const char* fxScrollFontToken(ui::fx::FxScrollFont font) {
+  switch (font) {
+    case ui::fx::FxScrollFont::kBasic:
+      return "basic";
+    case ui::fx::FxScrollFont::kBold:
+      return "bold";
+    case ui::fx::FxScrollFont::kOutline:
+      return "outline";
+    case ui::fx::FxScrollFont::kItalic:
+      return "italic";
+    default:
+      return "basic";
+  }
+}
+
 float easeOutBack(float t) {
   const float c1 = 1.70158f;
   const float c3 = c1 + 1.0f;
@@ -553,6 +726,21 @@ float easeOutBack(float t) {
 }
 
 }  // namespace
+
+void UiManager::animSetRandomTextOpa(void* obj, int32_t value) {
+  if (obj == nullptr) {
+    return;
+  }
+  lv_obj_t* target = static_cast<lv_obj_t*>(obj);
+  constexpr uint8_t min_opa = 60U;
+  constexpr uint8_t max_opa = LV_OPA_COVER;
+  const uint32_t mixed =
+      mixNoise(static_cast<uint32_t>(value) * 1664525UL + 1013904223UL, reinterpret_cast<uintptr_t>(target) ^ 0x7F4A7C15UL);
+  const uint16_t span = static_cast<uint16_t>(max_opa - min_opa);
+  const lv_opa_t out = static_cast<lv_opa_t>(min_opa + static_cast<uint16_t>(mixed % (static_cast<uint32_t>(span) + 1U)));
+  lv_obj_set_style_text_opa(target, out, LV_PART_MAIN);
+  lv_obj_set_style_opa(target, out, LV_PART_MAIN);
+}
 
 bool UiManager::begin() {
   if (ready_) {
@@ -567,13 +755,13 @@ bool UiManager::begin() {
   display_cfg.height = FREENOVE_LCD_HEIGHT;
   display_cfg.rotation = FREENOVE_LCD_ROTATION;
   if (!drivers::display::displayHal().begin(display_cfg)) {
-    Serial.println("[UI] display init failed");
+    UI_LOGI("display init failed");
     return false;
   }
   drivers::display::displayHal().fillScreen(0x0000U);
   initGraphicsPipeline();
   if (draw_buf1_ == nullptr) {
-    Serial.println("[UI] graphics pipeline init failed");
+    UI_LOGI("graphics pipeline init failed");
     return false;
   }
 
@@ -625,10 +813,9 @@ bool UiManager::begin() {
   last_lvgl_tick_ms_ = millis();
   graphics_stats_last_report_ms_ = last_lvgl_tick_ms_;
   ready_ = true;
-  Serial.printf("[UI] LVGL + display ready backend=%s\n",
-                drivers::display::displayHalUsesLovyanGfx() ? "lgfx" : "tftespi");
+  UI_LOGI("LVGL + display ready backend=%s", drivers::display::displayHalUsesLovyanGfx() ? "lgfx" : "tftespi");
   if (kUseDemoAutorunWinEtapeRuntime) {
-    Serial.println("[UI] autorun SCENE_WIN_ETAPE enabled");
+    UI_LOGI("autorun SCENE_WIN_ETAPE enabled");
   }
   dumpGraphicsStatus();
   return true;
@@ -637,6 +824,10 @@ bool UiManager::begin() {
 void UiManager::tick(uint32_t now_ms) {
   (void)now_ms;
   update();
+}
+
+void UiManager::setHardwareController(HardwareManager* hardware) {
+  hardware_ = hardware;
 }
 
 void UiManager::setLaMetrics(const UiLaMetrics& metrics) {
@@ -679,44 +870,105 @@ void UiManager::update() {
   }
   const uint32_t now_ms = millis();
   const uint32_t elapsed_ms = now_ms - last_lvgl_tick_ms_;
-  if (elapsed_ms > 0U) {
+  const bool needs_trans_buffer = kUseColor256Runtime || buffer_cfg_.draw_in_psram;
+  if (!async_flush_enabled_ &&
+      dma_requested_ &&
+      dma_available_ &&
+      !buffer_cfg_.dma_enabled &&
+      !buffer_cfg_.full_frame &&
+      async_fallback_until_ms_ != 0U &&
+      static_cast<int32_t>(now_ms - async_fallback_until_ms_) >= 0 &&
+      !flush_ctx_.pending) {
+    if (!needs_trans_buffer || dma_trans_buf_ != nullptr) {
+      async_flush_enabled_ = true;
+      buffer_cfg_.dma_enabled = true;
+      async_fallback_until_ms_ = 0U;
+      UI_LOGI("DMA async rearmed after fallback");
+    }
+  }
+  const bool flush_busy_now = isDisplayOutputBusy();
+  auto run_lvgl_draw = [this]() {
+    if (pending_full_repaint_request_ && lv_scr_act() != nullptr) {
+      lv_obj_invalidate(lv_scr_act());
+      pending_full_repaint_request_ = false;
+    }
+    const uint32_t draw_start = micros();
+    lv_timer_handler();
+    const uint32_t draw_elapsed = micros() - draw_start;
+    graphics_stats_.draw_time_total_us += draw_elapsed;
+    if (draw_elapsed > graphics_stats_.draw_time_max_us) {
+      graphics_stats_.draw_time_max_us = draw_elapsed;
+    }
+    graphics_stats_.draw_count += 1U;
+  };
+
+  if (elapsed_ms >= kUiUpdateFrameMs) {
     lv_tick_inc(elapsed_ms);
     last_lvgl_tick_ms_ = now_ms;
+  } else {
+    if (pending_lvgl_flush_request_ && !flush_busy_now) {
+      run_lvgl_draw();
+      pending_lvgl_flush_request_ = false;
+    }
+    pollAsyncFlush();
+    return;
   }
   if (player_ui_.consumeDirty()) {
     updatePageLine();
   }
   renderMicrophoneWaveform();
   pollAsyncFlush();
-  if (intro_active_) {
-    ui::fx::FxScenePhase fx_phase = ui::fx::FxScenePhase::kIdle;
-    switch (intro_state_) {
-      case IntroState::PHASE_A_CRACKTRO:
-        fx_phase = ui::fx::FxScenePhase::kPhaseA;
-        break;
-      case IntroState::PHASE_B_TRANSITION:
-        fx_phase = ui::fx::FxScenePhase::kPhaseB;
-        break;
-      case IntroState::PHASE_C_CLEAN:
-      case IntroState::PHASE_C_LOOP:
-        fx_phase = ui::fx::FxScenePhase::kPhaseC;
-        break;
-      default:
-        fx_phase = ui::fx::FxScenePhase::kIdle;
-        break;
+  const bool flush_busy =
+      isDisplayOutputBusy();
+  const bool fx_candidate = (intro_active_ || direct_fx_scene_active_) && fx_engine_.enabled();
+  if (flush_busy) {
+    graphics_stats_.flush_blocked_count += 1U;
+    if (fx_candidate) {
+      graphics_stats_.fx_skip_flush_busy += 1U;
+    }
+    pending_lvgl_flush_request_ = true;
+    pollAsyncFlush();
+    return;
+  }
+  // Frame order contract: FX (LGFX) -> invalidate LVGL overlay -> lv_timer_handler when bus is free.
+  if (fx_candidate) {
+    ui::fx::FxScenePhase fx_phase = ui::fx::FxScenePhase::kPhaseC;
+    if (intro_active_) {
+      fx_phase = ui::fx::FxScenePhase::kIdle;
+      switch (intro_state_) {
+        case IntroState::PHASE_A_CRACKTRO:
+          fx_phase = ui::fx::FxScenePhase::kPhaseA;
+          break;
+        case IntroState::PHASE_B_TRANSITION:
+          fx_phase = ui::fx::FxScenePhase::kPhaseB;
+          break;
+        case IntroState::PHASE_C_CLEAN:
+        case IntroState::PHASE_C_LOOP:
+          fx_phase = ui::fx::FxScenePhase::kPhaseC;
+          break;
+        default:
+          fx_phase = ui::fx::FxScenePhase::kIdle;
+          break;
+      }
     }
     if (fx_engine_.renderFrame(now_ms,
                                drivers::display::displayHal(),
                                static_cast<uint16_t>(activeDisplayWidth()),
                                static_cast<uint16_t>(activeDisplayHeight()),
                                fx_phase)) {
-      lv_obj_t* overlay_root = (intro_root_ != nullptr) ? intro_root_ : scene_root_;
-      if (overlay_root != nullptr) {
-        lv_obj_invalidate(overlay_root);
-      }
+      invalidateFxOverlayObjects();
     }
   }
-  lv_timer_handler();
+  if (isDisplayOutputBusy()) {
+    graphics_stats_.flush_blocked_count += 1U;
+    pending_lvgl_flush_request_ = true;
+    pollAsyncFlush();
+    if (isDisplayOutputBusy()) {
+      return;
+    }
+  }
+  run_lvgl_draw();
+  pending_lvgl_flush_request_ = false;
   pollAsyncFlush();
 }
 
@@ -724,6 +976,11 @@ void UiManager::initGraphicsPipeline() {
   flush_ctx_ = {};
   buffer_cfg_ = {};
   graphics_stats_ = {};
+  pending_lvgl_flush_request_ = false;
+  pending_full_repaint_request_ = false;
+  flush_pending_since_ms_ = 0U;
+  flush_last_progress_ms_ = 0U;
+  async_fallback_until_ms_ = 0U;
 
   if (draw_buf1_owned_ && draw_buf1_ != nullptr) {
     runtime::memory::CapsAllocator::release(draw_buf1_);
@@ -751,6 +1008,7 @@ void UiManager::initGraphicsPipeline() {
   dma_requested_ = false;
   dma_available_ = false;
   async_flush_enabled_ = false;
+  buffer_cfg_.selected_trans_lines = 0U;
 
   if (kUseColor256Runtime) {
     for (uint16_t value = 0; value < 256U; ++value) {
@@ -769,7 +1027,7 @@ void UiManager::initGraphicsPipeline() {
   }
 
   if (!allocateDrawBuffers()) {
-    Serial.println("[UI] draw buffer allocation failed");
+    UI_LOGI("draw buffer allocation failed");
     return;
   }
   initDmaEngine();
@@ -801,7 +1059,7 @@ bool UiManager::allocateDrawBuffers() {
     size_t full_bytes = 0U;
     if (!runtime::memory::safeMulSize(static_cast<size_t>(width), static_cast<size_t>(height), &full_pixels) ||
         !runtime::memory::safeMulSize(full_pixels, sizeof(lv_color_t), &full_bytes)) {
-      Serial.println("[UI] full-frame size overflow, fallback to line buffers");
+      UI_LOGI("full-frame size overflow, fallback to line buffers");
       full_pixels = 0U;
       full_bytes = 0U;
     }
@@ -831,11 +1089,10 @@ bool UiManager::allocateDrawBuffers() {
       buffer_cfg_.full_frame = true;
       buffer_cfg_.double_buffer = false;
       buffer_cfg_.draw_in_psram = true;
-      Serial.printf("[UI] draw buffer full-frame bench enabled bytes=%u\n",
-                    static_cast<unsigned int>(full_bytes));
+      UI_LOGI("draw buffer full-frame bench enabled bytes=%u", static_cast<unsigned int>(full_bytes));
       return true;
     }
-    Serial.println("[UI] full-frame bench requested but unavailable, fallback to line buffers");
+    UI_LOGI("full-frame bench requested but unavailable, fallback to line buffers");
   }
 
   uint16_t line_candidates[12] = {0};
@@ -891,7 +1148,7 @@ bool UiManager::allocateDrawBuffers() {
       size_t bytes = 0U;
       if (!runtime::memory::safeMulSize(static_cast<size_t>(width), static_cast<size_t>(lines), &pixels) ||
           !runtime::memory::safeMulSize(pixels, sizeof(lv_color_t), &bytes)) {
-        Serial.printf("[UI] draw buffer size overflow lines=%u\n", static_cast<unsigned int>(lines));
+        UI_LOGD("draw buffer size overflow lines=%u", static_cast<unsigned int>(lines));
         continue;
       }
       lv_color_t* first = allocate_buffer(bytes, draw_in_psram, "ui.draw.first");
@@ -907,10 +1164,10 @@ bool UiManager::allocateDrawBuffers() {
         buffer_cfg_.lines = lines;
         buffer_cfg_.double_buffer = true;
         buffer_cfg_.draw_in_psram = draw_in_psram;
-        Serial.printf("[UI] draw buffers ready lines=%u bytes=%u source=%s double=1\n",
-                      static_cast<unsigned int>(lines),
-                      static_cast<unsigned int>(bytes),
-                      draw_in_psram ? "PSRAM" : "SRAM_DMA");
+        UI_LOGI("draw buffers ready lines=%u bytes=%u source=%s double=1",
+                static_cast<unsigned int>(lines),
+                static_cast<unsigned int>(bytes),
+                draw_in_psram ? "PSRAM" : "SRAM_DMA");
         return true;
       }
 
@@ -921,10 +1178,10 @@ bool UiManager::allocateDrawBuffers() {
       buffer_cfg_.lines = lines;
       buffer_cfg_.double_buffer = false;
       buffer_cfg_.draw_in_psram = draw_in_psram;
-      Serial.printf("[UI] draw buffer fallback mono lines=%u bytes=%u source=%s\n",
-                    static_cast<unsigned int>(lines),
-                    static_cast<unsigned int>(bytes),
-                    draw_in_psram ? "PSRAM" : "SRAM_DMA");
+      UI_LOGI("draw buffer fallback mono lines=%u bytes=%u source=%s",
+              static_cast<unsigned int>(lines),
+              static_cast<unsigned int>(bytes),
+              draw_in_psram ? "PSRAM" : "SRAM_DMA");
       return true;
     }
     return false;
@@ -936,8 +1193,7 @@ bool UiManager::allocateDrawBuffers() {
   if (!allocated) {
     allocated = try_allocate_draw(!preferred_psram);
     if (allocated) {
-      Serial.printf("[UI] draw buffer source fallback=%s\n",
-                    (!preferred_psram) ? "PSRAM" : "SRAM_DMA");
+      UI_LOGI("draw buffer source fallback=%s", (!preferred_psram) ? "PSRAM" : "SRAM_DMA");
     }
   }
   if (!allocated) {
@@ -987,8 +1243,7 @@ bool UiManager::allocateDrawBuffers() {
       size_t trans_bytes = 0U;
       if (!runtime::memory::safeMulSize(static_cast<size_t>(width), static_cast<size_t>(trans_lines), &trans_pixels) ||
           !runtime::memory::safeMulSize(trans_pixels, sizeof(uint16_t), &trans_bytes)) {
-        Serial.printf("[UI] trans buffer size overflow lines=%u\n",
-                      static_cast<unsigned int>(trans_lines));
+        UI_LOGD("trans buffer size overflow lines=%u", static_cast<unsigned int>(trans_lines));
         continue;
       }
       dma_trans_buf_ = static_cast<uint16_t*>(
@@ -1009,8 +1264,7 @@ bool UiManager::allocateDrawBuffers() {
       size_t trans_bytes = 0U;
       if (!runtime::memory::safeMulSize(static_cast<size_t>(width), static_cast<size_t>(trans_lines), &trans_pixels) ||
           !runtime::memory::safeMulSize(trans_pixels, sizeof(uint16_t), &trans_bytes)) {
-        Serial.printf("[UI] trans buffer size overflow lines=%u\n",
-                      static_cast<unsigned int>(trans_lines));
+        UI_LOGD("trans buffer size overflow lines=%u", static_cast<unsigned int>(trans_lines));
       } else {
         dma_trans_buf_ = static_cast<uint16_t*>(
             runtime::memory::CapsAllocator::allocDefault(trans_bytes, "ui.trans"));
@@ -1023,21 +1277,26 @@ bool UiManager::allocateDrawBuffers() {
     }
 #endif
     if (dma_trans_buf_ != nullptr && selected_trans_lines > 0U) {
-      Serial.printf("[UI] trans buffer ready lines=%u pixels=%u source=%s\n",
-                    static_cast<unsigned int>(selected_trans_lines),
-                    static_cast<unsigned int>(dma_trans_buf_pixels_),
-                    kUseDmaTxInDramRuntime ? "INTERNAL_DMA" : "DEFAULT");
-      if (kUseAsyncDmaRuntime && !kUseColor256Runtime && selected_trans_lines < buffer_cfg_.lines) {
-        Serial.printf("[UI] draw lines reduced for trans buffer: %u -> %u\n",
-                      static_cast<unsigned int>(buffer_cfg_.lines),
-                      static_cast<unsigned int>(selected_trans_lines));
+      buffer_cfg_.selected_trans_lines = selected_trans_lines;
+      UI_LOGI("trans buffer ready lines=%u pixels=%u source=%s",
+              static_cast<unsigned int>(selected_trans_lines),
+              static_cast<unsigned int>(dma_trans_buf_pixels_),
+              kUseDmaTxInDramRuntime ? "INTERNAL_DMA" : "DEFAULT");
+      if (selected_trans_lines < buffer_cfg_.lines &&
+          (kUseAsyncDmaRuntime || kUseColor256Runtime || buffer_cfg_.draw_in_psram)) {
+        UI_LOGI("draw lines reduced for trans buffer: %u -> %u",
+                static_cast<unsigned int>(buffer_cfg_.lines),
+                static_cast<unsigned int>(selected_trans_lines));
         buffer_cfg_.lines = selected_trans_lines;
       }
     } else {
+      buffer_cfg_.selected_trans_lines = 0U;
       dma_trans_buf_owned_ = false;
       dma_trans_buf_pixels_ = 0U;
-      Serial.println("[UI] trans buffer unavailable; async DMA may be disabled");
+      UI_LOGI("trans buffer unavailable; async DMA may be disabled");
     }
+  } else {
+    buffer_cfg_.selected_trans_lines = 0U;
   }
 
   return draw_buf1_ != nullptr;
@@ -1054,61 +1313,223 @@ bool UiManager::initDmaEngine() {
 
   dma_available_ = drivers::display::displayHal().initDma(false);
   if (!dma_available_) {
-    Serial.println("[UI] DMA engine unavailable, keeping sync flush");
-    buffer_cfg_.dma_enabled = false;
-    return false;
-  }
-
-  if (kUseColor256Runtime) {
-    Serial.println("[UI] DMA async disabled in RGB332 mode (stability guard)");
+    UI_LOGI("DMA engine unavailable, keeping sync flush");
     buffer_cfg_.dma_enabled = false;
     return false;
   }
 
   const bool needs_trans_buffer = kUseColor256Runtime || buffer_cfg_.draw_in_psram;
   if (needs_trans_buffer && dma_trans_buf_ == nullptr) {
-    Serial.println("[UI] DMA enabled but trans buffer missing, keeping sync flush");
+    UI_LOGI("DMA enabled but trans buffer missing, keeping sync flush");
+    buffer_cfg_.dma_enabled = false;
+    return false;
+  }
+
+  if (kUseColor256Runtime && !kUseRgb332AsyncExperimental) {
+    UI_LOGI("RGB332 async DMA disabled (UI_DMA_RGB332_ASYNC_EXPERIMENTAL=0), keeping sync flush");
     buffer_cfg_.dma_enabled = false;
     return false;
   }
 
   if (buffer_cfg_.full_frame) {
-    Serial.println("[UI] full-frame bench forces sync flush");
+    UI_LOGI("full-frame bench forces sync flush");
     buffer_cfg_.dma_enabled = false;
     return false;
   }
 
   async_flush_enabled_ = true;
   buffer_cfg_.dma_enabled = true;
-  Serial.println("[UI] DMA async flush enabled");
+  async_fallback_until_ms_ = 0U;
+  if (kUseColor256Runtime) {
+    UI_LOGI("DMA async enabled (RGB332 -> RGB565 via trans buffer)");
+  } else {
+    UI_LOGI("DMA async flush enabled");
+  }
   return true;
+}
+
+bool UiManager::isDisplayOutputBusy() const {
+  if (flush_ctx_.pending) {
+    return true;
+  }
+  return drivers::display::displayHal().dmaBusy();
 }
 
 void UiManager::pollAsyncFlush() {
   if (!flush_ctx_.pending) {
+    flush_pending_since_ms_ = 0U;
     return;
   }
+
+  const uint32_t now_ms = millis();
+  if (flush_pending_since_ms_ == 0U) {
+    flush_pending_since_ms_ = now_ms;
+    flush_last_progress_ms_ = now_ms;
+  }
+
+  auto recover_stalled_flush = [this]() {
+    const bool used_dma = flush_ctx_.using_dma;
+    if (flush_ctx_.disp != nullptr) {
+      lv_disp_flush_ready(flush_ctx_.disp);
+    }
+    flush_ctx_ = {};
+    flush_pending_since_ms_ = 0U;
+    flush_last_progress_ms_ = millis();
+    pending_lvgl_flush_request_ = true;
+    pending_full_repaint_request_ = true;
+    graphics_stats_.flush_stall_count += 1U;
+    graphics_stats_.flush_recover_count += 1U;
+    if (used_dma && async_flush_enabled_) {
+      async_flush_enabled_ = false;
+      buffer_cfg_.dma_enabled = false;
+      graphics_stats_.async_fallback_count += 1U;
+      async_fallback_until_ms_ = millis() + kAsyncFallbackRecoverMs;
+    }
+  };
+
   if (flush_ctx_.using_dma && dma_available_ && drivers::display::displayHal().dmaBusy()) {
     graphics_stats_.flush_busy_poll_count += 1U;
+    if ((now_ms - flush_pending_since_ms_) >= kFlushStallTimeoutMs) {
+      recover_stalled_flush();
+    }
     return;
   }
+
   completePendingFlush();
+  if (!flush_ctx_.pending) {
+    flush_pending_since_ms_ = 0U;
+    flush_last_progress_ms_ = now_ms;
+    return;
+  }
+  if ((now_ms - flush_pending_since_ms_) >= kFlushStallTimeoutMs) {
+    recover_stalled_flush();
+  }
 }
 
 void UiManager::completePendingFlush() {
   if (!flush_ctx_.pending) {
     return;
   }
-  if (flush_ctx_.using_dma) {
-    drivers::display::displayHal().endWrite();
+
+  drivers::display::DisplayHal& display = drivers::display::displayHal();
+  const uint32_t width = static_cast<uint32_t>(flush_ctx_.col_count);
+  const uint32_t height = static_cast<uint32_t>(flush_ctx_.row_count);
+  if (width == 0U || height == 0U || flush_ctx_.src == nullptr || flush_ctx_.disp == nullptr) {
+    if (flush_ctx_.disp != nullptr) {
+      lv_disp_flush_ready(flush_ctx_.disp);
+    }
+    flush_ctx_ = {};
+    flush_pending_since_ms_ = 0U;
+    flush_last_progress_ms_ = millis();
+    return;
   }
+
+  const uint32_t pixel_count = width * height;
+  const bool has_valid_dma_tx = flush_ctx_.prepared && (flush_ctx_.prepared_tx != nullptr);
+  bool use_dma = flush_ctx_.using_dma;
+  if (use_dma && !has_valid_dma_tx) {
+    use_dma = false;
+  }
+
+  if (flush_ctx_.using_dma && flush_ctx_.dma_in_flight) {
+    if (display.dmaBusy()) {
+      graphics_stats_.flush_busy_poll_count += 1U;
+      return;
+    }
+    if (!display.startWrite()) {
+      graphics_stats_.flush_busy_poll_count += 1U;
+      return;
+    }
+    display.endWrite();
+    flush_ctx_.dma_in_flight = false;
+    if (flush_ctx_.disp != nullptr) {
+      lv_disp_flush_ready(flush_ctx_.disp);
+    }
+    const uint32_t elapsed_us = micros() - flush_ctx_.started_ms;
+    graphics_stats_.flush_count += 1U;
+    graphics_stats_.dma_flush_count += 1U;
+    graphics_stats_.flush_time_total_us += elapsed_us;
+    if (elapsed_us > graphics_stats_.flush_time_max_us) {
+      graphics_stats_.flush_time_max_us = elapsed_us;
+    }
+    perfMonitor().noteUiFlush(true, elapsed_us);
+    flush_ctx_ = {};
+    flush_pending_since_ms_ = 0U;
+    flush_last_progress_ms_ = millis();
+    return;
+  } else {
+    if (flush_ctx_.using_dma && use_dma) {
+      if (!display.startWrite()) {
+        graphics_stats_.flush_busy_poll_count += 1U;
+        return;
+      }
+      display.pushImageDma(flush_ctx_.area.x1,
+                           flush_ctx_.area.y1,
+                           static_cast<int16_t>(width),
+                           static_cast<int16_t>(height),
+                           flush_ctx_.prepared_tx);
+      display.endWrite();
+      flush_ctx_.dma_in_flight = true;
+      flush_last_progress_ms_ = millis();
+      return;
+    }
+
+    if (!display.startWrite()) {
+      return;
+    }
+    if (flush_ctx_.converted) {
+      display.setAddrWindow(flush_ctx_.area.x1,
+                           flush_ctx_.area.y1,
+                           static_cast<int16_t>(width),
+                           static_cast<int16_t>(height));
+      if (flush_ctx_.prepared && flush_ctx_.prepared_tx != nullptr) {
+        display.pushColors(flush_ctx_.prepared_tx, pixel_count, true);
+      } else if (dma_trans_buf_ != nullptr && dma_trans_buf_pixels_ >= width) {
+        for (uint32_t row = 0U; row < height; ++row) {
+          const lv_color_t* src_row = flush_ctx_.src + (row * width);
+          convertLineRgb332ToRgb565(src_row, dma_trans_buf_, width);
+          display.pushColors(dma_trans_buf_, width, true);
+        }
+      } else {
+        static uint16_t row_buffer[(FREENOVE_LCD_WIDTH > FREENOVE_LCD_HEIGHT) ? FREENOVE_LCD_WIDTH
+                                                                           : FREENOVE_LCD_HEIGHT];
+        const uint32_t max_row = sizeof(row_buffer) / sizeof(row_buffer[0]);
+        const lv_color_t* src = flush_ctx_.src;
+        if (src != nullptr && width <= max_row) {
+          for (uint32_t row = 0U; row < height; ++row) {
+            const lv_color_t* src_row = src + (row * width);
+            convertLineRgb332ToRgb565(src_row, row_buffer, width);
+            display.pushColors(row_buffer, width, true);
+          }
+        } else {
+          for (uint32_t pixel = 0U; pixel < pixel_count; ++pixel) {
+#if LV_COLOR_DEPTH == 8
+            const uint16_t c565 = rgb332_to_565_lut_[src[pixel].full];
+            display.pushColor(c565);
+#else
+            display.pushColor(static_cast<uint16_t>(src[pixel].full));
+#endif
+          }
+        }
+      }
+      display.endWrite();
+    } else {
+      display.setAddrWindow(flush_ctx_.area.x1,
+                           flush_ctx_.area.y1,
+                           static_cast<int16_t>(width),
+                           static_cast<int16_t>(height));
+      display.pushColors(reinterpret_cast<const uint16_t*>(flush_ctx_.src), pixel_count, true);
+      display.endWrite();
+    }
+  }
+
   if (flush_ctx_.disp != nullptr) {
     lv_disp_flush_ready(flush_ctx_.disp);
   }
 
   const uint32_t elapsed_us = micros() - flush_ctx_.started_ms;
   graphics_stats_.flush_count += 1U;
-  if (flush_ctx_.using_dma) {
+  if (use_dma) {
     graphics_stats_.dma_flush_count += 1U;
   } else {
     graphics_stats_.sync_flush_count += 1U;
@@ -1117,8 +1538,10 @@ void UiManager::completePendingFlush() {
   if (elapsed_us > graphics_stats_.flush_time_max_us) {
     graphics_stats_.flush_time_max_us = elapsed_us;
   }
-  perfMonitor().noteUiFlush(flush_ctx_.using_dma, elapsed_us);
+  perfMonitor().noteUiFlush(use_dma, elapsed_us);
   flush_ctx_ = {};
+  flush_pending_since_ms_ = 0U;
+  flush_last_progress_ms_ = millis();
 }
 
 uint16_t UiManager::convertLineRgb332ToRgb565(const lv_color_t* src,
@@ -1127,14 +1550,22 @@ uint16_t UiManager::convertLineRgb332ToRgb565(const lv_color_t* src,
   if (src == nullptr || dst == nullptr || px_count == 0U || !color_lut_ready_) {
     return 0U;
   }
-  for (uint32_t index = 0U; index < px_count; ++index) {
 #if LV_COLOR_DEPTH == 8
-    const uint8_t rgb332 = src[index].full;
-    dst[index] = rgb332_to_565_lut_[rgb332];
-#else
-    dst[index] = src[index].full;
-#endif
+  if (sizeof(lv_color_t) == sizeof(uint8_t)) {
+    runtime::simd::simd_index8_to_rgb565(dst,
+                                         reinterpret_cast<const uint8_t*>(src),
+                                         rgb332_to_565_lut_,
+                                         static_cast<size_t>(px_count));
+    return static_cast<uint16_t>((px_count > 0xFFFFU) ? 0xFFFFU : px_count);
   }
+  for (uint32_t index = 0U; index < px_count; ++index) {
+    dst[index] = rgb332_to_565_lut_[src[index].full];
+  }
+#else
+  for (uint32_t index = 0U; index < px_count; ++index) {
+    dst[index] = src[index].full;
+  }
+#endif
   return static_cast<uint16_t>((px_count > 0xFFFFU) ? 0xFFFFU : px_count);
 }
 
@@ -1157,12 +1588,68 @@ lv_color_t UiManager::quantize565ToTheme256(lv_color_t color) const {
 #endif
 }
 
+void UiManager::invalidateFxOverlayObjects() {
+  if (intro_active_ && intro_root_ != nullptr) {
+    // Keep the LVGL overlay above FX by forcing an overlay redraw each rendered FX frame.
+    lv_obj_invalidate(intro_root_);
+    return;
+  }
+
+  bool invalidated = false;
+  auto invalidate_if_visible = [&](lv_obj_t* obj) {
+    if (obj == nullptr || lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN)) {
+      return;
+    }
+    lv_obj_invalidate(obj);
+    invalidated = true;
+  };
+
+  if (intro_active_) {
+    invalidate_if_visible(intro_logo_shadow_label_);
+    invalidate_if_visible(intro_logo_label_);
+    invalidate_if_visible(intro_crack_scroll_label_);
+    invalidate_if_visible(intro_bottom_scroll_label_);
+    invalidate_if_visible(intro_clean_title_shadow_label_);
+    invalidate_if_visible(intro_clean_title_label_);
+    invalidate_if_visible(intro_clean_scroll_label_);
+    invalidate_if_visible(intro_debug_label_);
+    if (!kUseWinEtapeSimplifiedEffects) {
+      const uint8_t glyph_count =
+          (intro_wave_glyph_count_ > kIntroWaveGlyphMax) ? kIntroWaveGlyphMax : intro_wave_glyph_count_;
+      for (uint8_t index = 0U; index < glyph_count; ++index) {
+        invalidate_if_visible(intro_wave_slots_[index].shadow);
+        invalidate_if_visible(intro_wave_slots_[index].glyph);
+      }
+    }
+  } else {
+    invalidate_if_visible(scene_title_label_);
+    invalidate_if_visible(scene_subtitle_label_);
+    invalidate_if_visible(scene_symbol_label_);
+    invalidate_if_visible(page_label_);
+  }
+
+  if (!invalidated) {
+    if (intro_root_ != nullptr) {
+      lv_obj_invalidate(intro_root_);
+      return;
+    }
+    if (scene_root_ != nullptr) {
+      lv_obj_invalidate(scene_root_);
+      return;
+    }
+    drivers::display::displayHalInvalidateOverlay();
+  }
+}
+
 void UiManager::dumpGraphicsStatus() const {
-  const uint32_t avg_us = (graphics_stats_.flush_count == 0U)
-                              ? 0U
-                              : (graphics_stats_.flush_time_total_us / graphics_stats_.flush_count);
-  Serial.printf(
-      "[UI] GFX_STATUS depth=%u mode=%s theme256=%u lines=%u double=%u source=%s full_frame=%u dma_req=%u dma_async=%u trans_px=%u pending=%u flush=%lu dma=%lu sync=%lu avg_us=%lu max_us=%lu\n",
+  const uint32_t flush_avg_us = (graphics_stats_.flush_count == 0U)
+                                  ? 0U
+                                  : (graphics_stats_.flush_time_total_us / graphics_stats_.flush_count);
+  const uint32_t draw_avg_us =
+      (graphics_stats_.draw_count == 0U) ? 0U : (graphics_stats_.draw_time_total_us / graphics_stats_.draw_count);
+  const ui::fx::FxEngineStats fx_stats = fx_engine_.stats();
+  UI_LOGI(
+      "GFX_STATUS depth=%u mode=%s theme256=%u lines=%u double=%u source=%s full_frame=%u dma_req=%u dma_async=%u trans_px=%u trans_lines=%u pending=%u flush=%lu dma=%lu sync=%lu flush_spi_avg=%lu flush_spi_max=%lu draw_lvgl_avg=%lu draw_lvgl_max=%lu fx_fps=%u fx_frames=%lu fx_blit=%lu/%lu/%lu tail=%lu fx_dma_to=%lu fx_fail=%lu fx_skip_busy=%lu block=%lu ovf=%lu stall=%lu recover=%lu async_fallback=%lu",
       static_cast<unsigned int>(LV_COLOR_DEPTH),
       kUseColor256Runtime ? "RGB332" : "RGB565",
       kUseThemeQuantizeRuntime ? 1U : 0U,
@@ -1173,12 +1660,29 @@ void UiManager::dumpGraphicsStatus() const {
       dma_requested_ ? 1U : 0U,
       async_flush_enabled_ ? 1U : 0U,
       static_cast<unsigned int>(dma_trans_buf_pixels_),
+      static_cast<unsigned int>(buffer_cfg_.selected_trans_lines),
       flush_ctx_.pending ? 1U : 0U,
       static_cast<unsigned long>(graphics_stats_.flush_count),
       static_cast<unsigned long>(graphics_stats_.dma_flush_count),
       static_cast<unsigned long>(graphics_stats_.sync_flush_count),
-      static_cast<unsigned long>(avg_us),
-      static_cast<unsigned long>(graphics_stats_.flush_time_max_us));
+      static_cast<unsigned long>(flush_avg_us),
+      static_cast<unsigned long>(graphics_stats_.flush_time_max_us),
+      static_cast<unsigned long>(draw_avg_us),
+      static_cast<unsigned long>(graphics_stats_.draw_time_max_us),
+      static_cast<unsigned int>(fx_stats.fps),
+      static_cast<unsigned long>(fx_stats.frame_count),
+      static_cast<unsigned long>(fx_stats.blit_cpu_us),
+      static_cast<unsigned long>(fx_stats.blit_dma_submit_us),
+      static_cast<unsigned long>(fx_stats.blit_dma_wait_us),
+      static_cast<unsigned long>(fx_stats.dma_tail_wait_us),
+      static_cast<unsigned long>(fx_stats.dma_timeout_count),
+      static_cast<unsigned long>(fx_stats.blit_fail_busy),
+      static_cast<unsigned long>(graphics_stats_.fx_skip_flush_busy),
+      static_cast<unsigned long>(graphics_stats_.flush_blocked_count),
+      static_cast<unsigned long>(graphics_stats_.flush_overflow_count),
+      static_cast<unsigned long>(graphics_stats_.flush_stall_count),
+      static_cast<unsigned long>(graphics_stats_.flush_recover_count),
+      static_cast<unsigned long>(graphics_stats_.async_fallback_count));
 }
 
 UiMemorySnapshot UiManager::memorySnapshot() const {
@@ -1221,35 +1725,82 @@ UiMemorySnapshot UiManager::memorySnapshot() const {
   size_t trans_bytes = 0U;
   runtime::memory::safeMulSize(dma_trans_buf_pixels_, sizeof(uint16_t), &trans_bytes);
   snapshot.trans_buffer_bytes = static_cast<uint32_t>((trans_bytes > 0xFFFFFFFFULL) ? 0xFFFFFFFFULL : trans_bytes);
+  snapshot.selected_trans_lines = buffer_cfg_.selected_trans_lines;
+  snapshot.async_fallback_count = graphics_stats_.async_fallback_count;
+  const ui::fx::FxEngineStats fx_stats = fx_engine_.stats();
+  snapshot.fx_fps = fx_stats.fps;
+  snapshot.fx_frame_count = fx_stats.frame_count;
+  snapshot.fx_blit_cpu_us = fx_stats.blit_cpu_us;
+  snapshot.fx_blit_submit_us = fx_stats.blit_dma_submit_us;
+  snapshot.fx_blit_wait_us = fx_stats.blit_dma_wait_us;
+  snapshot.fx_blit_tail_wait_us = fx_stats.dma_tail_wait_us;
+  snapshot.fx_dma_timeout_count = fx_stats.dma_timeout_count;
+  snapshot.fx_blit_fail_busy = fx_stats.blit_fail_busy;
+  snapshot.fx_skip_flush_busy = graphics_stats_.fx_skip_flush_busy;
+  snapshot.flush_blocked = graphics_stats_.flush_blocked_count;
+  snapshot.flush_overflow = graphics_stats_.flush_overflow_count;
+  snapshot.flush_stall = graphics_stats_.flush_stall_count;
+  snapshot.flush_recover = graphics_stats_.flush_recover_count;
+  snapshot.draw_flush_stall = graphics_stats_.flush_stall_count;
+  const uint32_t fx_pixels = static_cast<uint32_t>(activeDisplayWidth()) * static_cast<uint32_t>(activeDisplayHeight());
+  snapshot.conv_pixels_per_ms = 0U;
+  if (fx_pixels != 0U && fx_stats.blit_cpu_us != 0U) {
+    const uint32_t px_per_ms = (fx_pixels * 1000U) / fx_stats.blit_cpu_us;
+    snapshot.conv_pixels_per_ms = static_cast<uint16_t>((px_per_ms > 0xFFFFU) ? 0xFFFFU : px_per_ms);
+  }
+  if (graphics_stats_.flush_count > 0U) {
+    snapshot.flush_time_avg_us = graphics_stats_.flush_time_total_us / graphics_stats_.flush_count;
+  } else {
+    snapshot.flush_time_avg_us = 0U;
+  }
+  snapshot.flush_time_max_us = graphics_stats_.flush_time_max_us;
+  if (graphics_stats_.draw_count > 0U) {
+    snapshot.draw_time_avg_us = graphics_stats_.draw_time_total_us / graphics_stats_.draw_count;
+  } else {
+    snapshot.draw_time_avg_us = 0U;
+  }
+  snapshot.draw_time_max_us = graphics_stats_.draw_time_max_us;
+  snapshot.flush_spi_us = snapshot.flush_time_avg_us;
+  snapshot.draw_lvgl_us = snapshot.draw_time_avg_us;
   return snapshot;
 }
 
 void UiManager::dumpMemoryStatus() const {
   const UiMemorySnapshot snapshot = memorySnapshot();
 #if LV_USE_MEM_MONITOR
-  Serial.printf("[UI] LV_MEM used=%u free=%u frag=%u%% max_used=%u\n",
-                static_cast<unsigned int>(snapshot.lv_mem_used),
-                static_cast<unsigned int>(snapshot.lv_mem_free),
-                static_cast<unsigned int>(snapshot.lv_mem_frag_pct),
-                static_cast<unsigned int>(snapshot.lv_mem_max_used));
+  UI_LOGI("LV_MEM used=%u free=%u frag=%u%% max_used=%u",
+          static_cast<unsigned int>(snapshot.lv_mem_used),
+          static_cast<unsigned int>(snapshot.lv_mem_free),
+          static_cast<unsigned int>(snapshot.lv_mem_frag_pct),
+          static_cast<unsigned int>(snapshot.lv_mem_max_used));
 #else
-  Serial.println("[UI] LV_MEM monitor disabled at compile-time");
+  UI_LOGI("LV_MEM monitor disabled at compile-time");
 #endif
 #if defined(ARDUINO_ARCH_ESP32)
-  Serial.printf("[UI] HEAP internal=%u dma=%u psram=%u largest_dma=%u\n",
-                static_cast<unsigned int>(snapshot.heap_internal_free),
-                static_cast<unsigned int>(snapshot.heap_dma_free),
-                static_cast<unsigned int>(snapshot.heap_psram_free),
-                static_cast<unsigned int>(snapshot.heap_largest_dma_block));
+  UI_LOGI("HEAP internal=%u dma=%u psram=%u largest_dma=%u",
+          static_cast<unsigned int>(snapshot.heap_internal_free),
+          static_cast<unsigned int>(snapshot.heap_dma_free),
+          static_cast<unsigned int>(snapshot.heap_psram_free),
+          static_cast<unsigned int>(snapshot.heap_largest_dma_block));
 #endif
-  Serial.printf("[UI] MEM_SNAPSHOT draw_lines=%u draw_psram=%u full_frame=%u dma_async=%u draw_bytes=%u trans_bytes=%u alloc_fail=%lu\n",
-                static_cast<unsigned int>(snapshot.draw_lines),
-                snapshot.draw_in_psram ? 1U : 0U,
-                snapshot.full_frame ? 1U : 0U,
-                snapshot.dma_async_enabled ? 1U : 0U,
-                static_cast<unsigned int>(snapshot.draw_buffer_bytes),
-                static_cast<unsigned int>(snapshot.trans_buffer_bytes),
-                static_cast<unsigned long>(snapshot.alloc_failures));
+  UI_LOGI("MEM_SNAPSHOT draw_lines=%u draw_psram=%u full_frame=%u dma_async=%u draw_bytes=%u trans_bytes=%u trans_lines=%u alloc_fail=%lu draw_lvgl=%lu flush_spi=%lu draw_stall=%lu conv_px_ms=%u async_fb=%lu fx_blit=%lu/%lu/%lu tail=%lu",
+          static_cast<unsigned int>(snapshot.draw_lines),
+          snapshot.draw_in_psram ? 1U : 0U,
+          snapshot.full_frame ? 1U : 0U,
+          snapshot.dma_async_enabled ? 1U : 0U,
+          static_cast<unsigned int>(snapshot.draw_buffer_bytes),
+          static_cast<unsigned int>(snapshot.trans_buffer_bytes),
+          static_cast<unsigned int>(snapshot.selected_trans_lines),
+          static_cast<unsigned long>(snapshot.alloc_failures),
+          static_cast<unsigned long>(snapshot.draw_lvgl_us),
+          static_cast<unsigned long>(snapshot.flush_spi_us),
+          static_cast<unsigned long>(snapshot.draw_flush_stall),
+          static_cast<unsigned int>(snapshot.conv_pixels_per_ms),
+          static_cast<unsigned long>(snapshot.async_fallback_count),
+          static_cast<unsigned long>(snapshot.fx_blit_cpu_us),
+          static_cast<unsigned long>(snapshot.fx_blit_submit_us),
+          static_cast<unsigned long>(snapshot.fx_blit_wait_us),
+          static_cast<unsigned long>(snapshot.fx_blit_tail_wait_us));
 }
 
 void UiManager::setHardwareSnapshot(const HardwareManager::Snapshot& snapshot) {
@@ -1310,6 +1861,23 @@ void UiManager::resetIntroConfigDefaults() {
   copyStringBounded(intro_config_.fx_3d, sizeof(intro_config_.fx_3d), "rotozoom");
   copyStringBounded(intro_config_.fx_3d_quality, sizeof(intro_config_.fx_3d_quality), "auto");
   copyStringBounded(intro_config_.font_mode, sizeof(intro_config_.font_mode), "orbitron");
+  intro_config_.fx_preset_a = ui::fx::FxPreset::kDemo;
+  intro_config_.fx_preset_b = ui::fx::FxPreset::kWinner;
+  intro_config_.fx_preset_c = ui::fx::FxPreset::kBoingball;
+  intro_config_.fx_mode_a = ui::fx::FxMode::kStarfield3D;
+  intro_config_.fx_mode_b = ui::fx::FxMode::kDotSphere3D;
+  intro_config_.fx_mode_c = ui::fx::FxMode::kRayCorridor;
+  copyStringBounded(intro_config_.fx_scroll_text_a,
+                    sizeof(intro_config_.fx_scroll_text_a),
+                    kWinEtapeFxScrollTextA);
+  copyStringBounded(intro_config_.fx_scroll_text_b,
+                    sizeof(intro_config_.fx_scroll_text_b),
+                    kWinEtapeFxScrollTextB);
+  copyStringBounded(intro_config_.fx_scroll_text_c,
+                    sizeof(intro_config_.fx_scroll_text_c),
+                    kWinEtapeFxScrollTextC);
+  intro_config_.fx_scroll_font = ui::fx::FxScrollFont::kItalic;
+  intro_config_.fx_bpm = kIntroFxBpmDefault;
 }
 
 void UiManager::parseSceneWinEtapeTxtOverrides(const char* payload) {
@@ -1345,29 +1913,6 @@ void UiManager::parseSceneWinEtapeTxtOverrides(const char* payload) {
     String value = trimCopy(line.substring(sep + 1));
     key.toUpperCase();
 
-    if (key == "LOGO_TEXT") {
-      copyStringBounded(intro_config_.logo_text, sizeof(intro_config_.logo_text), value.c_str());
-      continue;
-    }
-    if (key == "A_SCROLL" || key == "MID_A_SCROLL" || key == "CRACK_SCROLL") {
-      copyStringBounded(intro_config_.crack_scroll, sizeof(intro_config_.crack_scroll), value.c_str());
-      continue;
-    }
-    if (key == "A_SCROLL_BOTTOM" || key == "BOTTOM_SCROLL" || key == "BOT_A_SCROLL") {
-      copyStringBounded(intro_config_.crack_bottom_scroll,
-                        sizeof(intro_config_.crack_bottom_scroll),
-                        value.c_str());
-      continue;
-    }
-    if (key == "C_TITLE" || key == "CLEAN_TITLE") {
-      copyStringBounded(intro_config_.clean_title, sizeof(intro_config_.clean_title), value.c_str());
-      continue;
-    }
-    if (key == "C_SCROLL" || key == "CLEAN_SCROLL") {
-      copyStringBounded(intro_config_.clean_scroll, sizeof(intro_config_.clean_scroll), value.c_str());
-      continue;
-    }
-
     uint32_t parsed_u32 = 0U;
     if (key == "A_MS" && parseUint32Text(value, &parsed_u32)) {
       intro_config_.a_duration_ms = parsed_u32;
@@ -1381,75 +1926,70 @@ void UiManager::parseSceneWinEtapeTxtOverrides(const char* payload) {
       intro_config_.c_duration_ms = parsed_u32;
       continue;
     }
-    if ((key == "B1_MS" || key == "B1_CRASH_MS") && parseUint32Text(value, &parsed_u32)) {
-      intro_config_.b1_crash_ms = static_cast<uint16_t>(parsed_u32);
-      continue;
-    }
-    if ((key == "SPEED_A" || key == "SPEED_MID_A") && parseUint32Text(value, &parsed_u32)) {
-      intro_config_.scroll_a_px_per_sec = static_cast<uint16_t>(parsed_u32);
-      continue;
-    }
-    if ((key == "SPEED_BOT_A" || key == "SPEED_A_BOTTOM") && parseUint32Text(value, &parsed_u32)) {
-      intro_config_.scroll_bot_a_px_per_sec = static_cast<uint16_t>(parsed_u32);
-      continue;
-    }
-    if (key == "SPEED_C" && parseUint32Text(value, &parsed_u32)) {
-      intro_config_.scroll_c_px_per_sec = static_cast<uint16_t>(parsed_u32);
-      continue;
-    }
-    if (key == "SINE_AMP_A" && parseUint32Text(value, &parsed_u32)) {
-      intro_config_.sine_amp_a_px = static_cast<uint8_t>(parsed_u32);
-      continue;
-    }
-    if (key == "SINE_AMP_C" && parseUint32Text(value, &parsed_u32)) {
-      intro_config_.sine_amp_c_px = static_cast<uint8_t>(parsed_u32);
-      continue;
-    }
-    if (key == "SINE_PERIOD" && parseUint32Text(value, &parsed_u32)) {
-      intro_config_.sine_period_px = static_cast<uint16_t>(parsed_u32);
+    if (key == "FX_BPM" && parseUint32Text(value, &parsed_u32)) {
+      intro_config_.fx_bpm = static_cast<uint16_t>(parsed_u32);
       continue;
     }
 
-    float parsed_float = 0.0f;
-    if (key == "SINE_PHASE_SPEED" && parseFloatText(value, &parsed_float)) {
-      intro_config_.sine_phase_speed = parsed_float;
-      continue;
-    }
-
-    if (key == "STARS") {
-      String normalized = value;
-      normalized.toLowerCase();
-      if (normalized == "auto") {
-        intro_config_.stars_override = -1;
-      } else {
-        int16_t parsed_i16 = 0;
-        if (parseInt16Text(value, &parsed_i16)) {
-          intro_config_.stars_override = parsed_i16;
-        }
+    if (key == "FX_PRESET_A") {
+      ui::fx::FxPreset preset = intro_config_.fx_preset_a;
+      if (parseFxPresetToken(value, &preset)) {
+        intro_config_.fx_preset_a = preset;
       }
       continue;
     }
-
-    if (key == "FX_BACKEND") {
-      copyStringBounded(intro_config_.fx_backend, sizeof(intro_config_.fx_backend), value.c_str());
+    if (key == "FX_PRESET_B") {
+      ui::fx::FxPreset preset = intro_config_.fx_preset_b;
+      if (parseFxPresetToken(value, &preset)) {
+        intro_config_.fx_preset_b = preset;
+      }
       continue;
     }
-    if (key == "FX_QUALITY") {
-      copyStringBounded(intro_config_.fx_quality, sizeof(intro_config_.fx_quality), value.c_str());
+    if (key == "FX_PRESET_C") {
+      ui::fx::FxPreset preset = intro_config_.fx_preset_c;
+      if (parseFxPresetToken(value, &preset)) {
+        intro_config_.fx_preset_c = preset;
+      }
       continue;
     }
-    if (key == "FX_3D") {
-      copyStringBounded(intro_config_.fx_3d, sizeof(intro_config_.fx_3d), value.c_str());
+    if (key == "FX_MODE_A") {
+      ui::fx::FxMode mode = intro_config_.fx_mode_a;
+      if (parseFxModeToken(value, &mode)) {
+        intro_config_.fx_mode_a = mode;
+      }
       continue;
     }
-    if (key == "FX_3D_QUALITY") {
-      copyStringBounded(intro_config_.fx_3d_quality,
-                        sizeof(intro_config_.fx_3d_quality),
-                        value.c_str());
+    if (key == "FX_MODE_B") {
+      ui::fx::FxMode mode = intro_config_.fx_mode_b;
+      if (parseFxModeToken(value, &mode)) {
+        intro_config_.fx_mode_b = mode;
+      }
       continue;
     }
-    if (key == "FONT_MODE") {
-      copyStringBounded(intro_config_.font_mode, sizeof(intro_config_.font_mode), value.c_str());
+    if (key == "FX_MODE_C") {
+      ui::fx::FxMode mode = intro_config_.fx_mode_c;
+      if (parseFxModeToken(value, &mode)) {
+        intro_config_.fx_mode_c = mode;
+      }
+      continue;
+    }
+    if (key == "FX_SCROLL_TEXT_A") {
+      copyStringBounded(intro_config_.fx_scroll_text_a, sizeof(intro_config_.fx_scroll_text_a), value.c_str());
+      continue;
+    }
+    if (key == "FX_SCROLL_TEXT_B") {
+      copyStringBounded(intro_config_.fx_scroll_text_b, sizeof(intro_config_.fx_scroll_text_b), value.c_str());
+      continue;
+    }
+    if (key == "FX_SCROLL_TEXT_C") {
+      copyStringBounded(intro_config_.fx_scroll_text_c, sizeof(intro_config_.fx_scroll_text_c), value.c_str());
+      continue;
+    }
+    if (key == "FX_SCROLL_FONT") {
+      ui::fx::FxScrollFont font = intro_config_.fx_scroll_font;
+      if (parseFxScrollFontToken(value, &font)) {
+        intro_config_.fx_scroll_font = font;
+      }
       continue;
     }
   }
@@ -1462,42 +2002,10 @@ void UiManager::parseSceneWinEtapeJsonOverrides(const char* payload, const char*
   DynamicJsonDocument doc(4096);
   const DeserializationError err = deserializeJson(doc, payload);
   if (err) {
-    Serial.printf("[UI] intro overrides parse error path=%s err=%s defaults\n",
-                  (path_for_log != nullptr) ? path_for_log : "n/a",
-                  err.c_str());
+    UI_LOGI("intro overrides parse error path=%s err=%s defaults",
+            (path_for_log != nullptr) ? path_for_log : "n/a",
+            err.c_str());
     return;
-  }
-
-  const char* logo_text = doc["logo_text"] | doc["LOGO_TEXT"] | doc["logoText"] | "";
-  const char* crack_scroll =
-      doc["crack_scroll"] | doc["CRACK_SCROLL"] | doc["A_SCROLL"] | doc["MID_A_SCROLL"] |
-      doc["mid_a_scroll"] |
-      doc["crackScroll"] | "";
-  const char* crack_bottom_scroll =
-      doc["crack_bottom_scroll"] | doc["BOTTOM_SCROLL"] | doc["A_SCROLL_BOTTOM"] |
-      doc["bot_a_scroll"] |
-      doc["BOT_A_SCROLL"] | "";
-  const char* clean_title =
-      doc["clean_title"] | doc["CLEAN_TITLE"] | doc["C_TITLE"] | doc["cleanTitle"] | "";
-  const char* clean_scroll =
-      doc["clean_scroll"] | doc["CLEAN_SCROLL"] | doc["C_SCROLL"] | doc["cleanScroll"] | "";
-
-  if (logo_text[0] != '\0') {
-    copyStringBounded(intro_config_.logo_text, sizeof(intro_config_.logo_text), logo_text);
-  }
-  if (crack_scroll[0] != '\0') {
-    copyStringBounded(intro_config_.crack_scroll, sizeof(intro_config_.crack_scroll), crack_scroll);
-  }
-  if (crack_bottom_scroll[0] != '\0') {
-    copyStringBounded(intro_config_.crack_bottom_scroll,
-                      sizeof(intro_config_.crack_bottom_scroll),
-                      crack_bottom_scroll);
-  }
-  if (clean_title[0] != '\0') {
-    copyStringBounded(intro_config_.clean_title, sizeof(intro_config_.clean_title), clean_title);
-  }
-  if (clean_scroll[0] != '\0') {
-    copyStringBounded(intro_config_.clean_scroll, sizeof(intro_config_.clean_scroll), clean_scroll);
   }
 
   if (doc["A_MS"].is<unsigned int>()) {
@@ -1515,93 +2023,78 @@ void UiManager::parseSceneWinEtapeJsonOverrides(const char* payload, const char*
   } else if (doc["c_ms"].is<unsigned int>()) {
     intro_config_.c_duration_ms = doc["c_ms"].as<unsigned int>();
   }
-  if (doc["B1_MS"].is<unsigned int>()) {
-    intro_config_.b1_crash_ms = static_cast<uint16_t>(doc["B1_MS"].as<unsigned int>());
-  } else if (doc["b1_ms"].is<unsigned int>()) {
-    intro_config_.b1_crash_ms = static_cast<uint16_t>(doc["b1_ms"].as<unsigned int>());
-  }
-  if (doc["SPEED_MID_A"].is<unsigned int>()) {
-    intro_config_.scroll_a_px_per_sec = static_cast<uint16_t>(doc["SPEED_MID_A"].as<unsigned int>());
-  } else if (doc["speed_mid_a"].is<unsigned int>()) {
-    intro_config_.scroll_a_px_per_sec = static_cast<uint16_t>(doc["speed_mid_a"].as<unsigned int>());
-  } else if (doc["SPEED_A"].is<unsigned int>()) {
-    intro_config_.scroll_a_px_per_sec = static_cast<uint16_t>(doc["SPEED_A"].as<unsigned int>());
-  } else if (doc["speed_a"].is<unsigned int>()) {
-    intro_config_.scroll_a_px_per_sec = static_cast<uint16_t>(doc["speed_a"].as<unsigned int>());
-  }
-  if (doc["SPEED_BOT_A"].is<unsigned int>()) {
-    intro_config_.scroll_bot_a_px_per_sec = static_cast<uint16_t>(doc["SPEED_BOT_A"].as<unsigned int>());
-  } else if (doc["speed_bot_a"].is<unsigned int>()) {
-    intro_config_.scroll_bot_a_px_per_sec = static_cast<uint16_t>(doc["speed_bot_a"].as<unsigned int>());
-  }
-  if (doc["SPEED_C"].is<unsigned int>()) {
-    intro_config_.scroll_c_px_per_sec = static_cast<uint16_t>(doc["SPEED_C"].as<unsigned int>());
-  } else if (doc["speed_c"].is<unsigned int>()) {
-    intro_config_.scroll_c_px_per_sec = static_cast<uint16_t>(doc["speed_c"].as<unsigned int>());
-  }
-  if (doc["SINE_AMP_A"].is<unsigned int>()) {
-    intro_config_.sine_amp_a_px = static_cast<uint8_t>(doc["SINE_AMP_A"].as<unsigned int>());
-  } else if (doc["sine_amp_a"].is<unsigned int>()) {
-    intro_config_.sine_amp_a_px = static_cast<uint8_t>(doc["sine_amp_a"].as<unsigned int>());
-  }
-  if (doc["SINE_AMP_C"].is<unsigned int>()) {
-    intro_config_.sine_amp_c_px = static_cast<uint8_t>(doc["SINE_AMP_C"].as<unsigned int>());
-  } else if (doc["sine_amp_c"].is<unsigned int>()) {
-    intro_config_.sine_amp_c_px = static_cast<uint8_t>(doc["sine_amp_c"].as<unsigned int>());
-  }
-  if (doc["SINE_PERIOD"].is<unsigned int>()) {
-    intro_config_.sine_period_px = static_cast<uint16_t>(doc["SINE_PERIOD"].as<unsigned int>());
-  } else if (doc["sine_period"].is<unsigned int>()) {
-    intro_config_.sine_period_px = static_cast<uint16_t>(doc["sine_period"].as<unsigned int>());
-  }
-  if (doc["SINE_PHASE_SPEED"].is<float>()) {
-    intro_config_.sine_phase_speed = doc["SINE_PHASE_SPEED"].as<float>();
-  } else if (doc["sine_phase_speed"].is<float>()) {
-    intro_config_.sine_phase_speed = doc["sine_phase_speed"].as<float>();
+  if (doc["FX_BPM"].is<unsigned int>()) {
+    intro_config_.fx_bpm = static_cast<uint16_t>(doc["FX_BPM"].as<unsigned int>());
+  } else if (doc["fx_bpm"].is<unsigned int>()) {
+    intro_config_.fx_bpm = static_cast<uint16_t>(doc["fx_bpm"].as<unsigned int>());
   }
 
-  if (doc["STARS"].is<const char*>()) {
-    const char* stars_text = doc["STARS"].as<const char*>();
-    if (stars_text != nullptr && std::strcmp(stars_text, "auto") == 0) {
-      intro_config_.stars_override = -1;
+  auto parse_preset = [&](const char* key_upper, const char* key_lower, ui::fx::FxPreset* target) {
+    if (target == nullptr) {
+      return;
     }
-  } else if (doc["stars"].is<const char*>()) {
-    const char* stars_text = doc["stars"].as<const char*>();
-    if (stars_text != nullptr && std::strcmp(stars_text, "auto") == 0) {
-      intro_config_.stars_override = -1;
+    const char* token = "";
+    if (key_upper != nullptr && key_upper[0] != '\0') {
+      token = doc[key_upper] | "";
+    }
+    if ((token == nullptr || token[0] == '\0') && key_lower != nullptr && key_lower[0] != '\0') {
+      token = doc[key_lower] | "";
+    }
+    if (token != nullptr && token[0] != '\0') {
+      ui::fx::FxPreset parsed = *target;
+      if (parseFxPresetToken(String(token), &parsed)) {
+        *target = parsed;
+      }
+    }
+  };
+  parse_preset("FX_PRESET_A", "fx_preset_a", &intro_config_.fx_preset_a);
+  parse_preset("FX_PRESET_B", "fx_preset_b", &intro_config_.fx_preset_b);
+  parse_preset("FX_PRESET_C", "fx_preset_c", &intro_config_.fx_preset_c);
+
+  auto parse_mode = [&](const char* key_upper, const char* key_lower, ui::fx::FxMode* target) {
+    if (target == nullptr) {
+      return;
+    }
+    const char* token = "";
+    if (key_upper != nullptr && key_upper[0] != '\0') {
+      token = doc[key_upper] | "";
+    }
+    if ((token == nullptr || token[0] == '\0') && key_lower != nullptr && key_lower[0] != '\0') {
+      token = doc[key_lower] | "";
+    }
+    if (token != nullptr && token[0] != '\0') {
+      ui::fx::FxMode parsed = *target;
+      if (parseFxModeToken(String(token), &parsed)) {
+        *target = parsed;
+      }
+    }
+  };
+  parse_mode("FX_MODE_A", "fx_mode_a", &intro_config_.fx_mode_a);
+  parse_mode("FX_MODE_B", "fx_mode_b", &intro_config_.fx_mode_b);
+  parse_mode("FX_MODE_C", "fx_mode_c", &intro_config_.fx_mode_c);
+
+  const char* scroll_a = doc["FX_SCROLL_TEXT_A"] | doc["fx_scroll_text_a"] | "";
+  if (scroll_a != nullptr && scroll_a[0] != '\0') {
+    copyStringBounded(intro_config_.fx_scroll_text_a, sizeof(intro_config_.fx_scroll_text_a), scroll_a);
+  }
+  const char* scroll_b = doc["FX_SCROLL_TEXT_B"] | doc["fx_scroll_text_b"] | "";
+  if (scroll_b != nullptr && scroll_b[0] != '\0') {
+    copyStringBounded(intro_config_.fx_scroll_text_b, sizeof(intro_config_.fx_scroll_text_b), scroll_b);
+  }
+  const char* scroll_c = doc["FX_SCROLL_TEXT_C"] | doc["fx_scroll_text_c"] | "";
+  if (scroll_c != nullptr && scroll_c[0] != '\0') {
+    copyStringBounded(intro_config_.fx_scroll_text_c, sizeof(intro_config_.fx_scroll_text_c), scroll_c);
+  }
+
+  const char* font = doc["FX_SCROLL_FONT"] | doc["fx_scroll_font"] | "";
+  if (font != nullptr && font[0] != '\0') {
+    ui::fx::FxScrollFont parsed = intro_config_.fx_scroll_font;
+    if (parseFxScrollFontToken(String(font), &parsed)) {
+      intro_config_.fx_scroll_font = parsed;
     }
   }
-  if (doc["STARS"].is<int>()) {
-    intro_config_.stars_override = static_cast<int16_t>(doc["STARS"].as<int>());
-  } else if (doc["stars"].is<int>()) {
-    intro_config_.stars_override = static_cast<int16_t>(doc["stars"].as<int>());
-  }
 
-  const char* fx_backend = doc["FX_BACKEND"] | doc["fx_backend"] | "";
-  if (fx_backend[0] != '\0') {
-    copyStringBounded(intro_config_.fx_backend, sizeof(intro_config_.fx_backend), fx_backend);
-  }
-  const char* fx_quality = doc["FX_QUALITY"] | doc["fx_quality"] | "";
-  if (fx_quality[0] != '\0') {
-    copyStringBounded(intro_config_.fx_quality, sizeof(intro_config_.fx_quality), fx_quality);
-  }
-  const char* fx_3d = doc["FX_3D"] | doc["fx_3d"] | "";
-  if (fx_3d[0] != '\0') {
-    copyStringBounded(intro_config_.fx_3d, sizeof(intro_config_.fx_3d), fx_3d);
-  }
-  const char* fx_3d_quality = doc["FX_3D_QUALITY"] | doc["fx_3d_quality"] | "";
-  if (fx_3d_quality[0] != '\0') {
-    copyStringBounded(intro_config_.fx_3d_quality,
-                      sizeof(intro_config_.fx_3d_quality),
-                      fx_3d_quality);
-  }
-  const char* font_mode = doc["FONT_MODE"] | doc["font_mode"] | doc["fontMode"] | "";
-  if (font_mode[0] != '\0') {
-    copyStringBounded(intro_config_.font_mode, sizeof(intro_config_.font_mode), font_mode);
-  }
-
-  Serial.printf("[UI] intro overrides loaded from %s\n",
-                (path_for_log != nullptr) ? path_for_log : "json");
+  UI_LOGI("intro overrides loaded from %s", (path_for_log != nullptr) ? path_for_log : "json");
 }
 
 void UiManager::loadSceneWinEtapeOverrides() {
@@ -1641,12 +2134,12 @@ void UiManager::loadSceneWinEtapeOverrides() {
     lower_path.toLowerCase();
     if (lower_path.endsWith(".txt")) {
       parseSceneWinEtapeTxtOverrides(payload.c_str());
-      Serial.printf("[UI] intro overrides loaded from %s\n", loaded_path.c_str());
+      UI_LOGI("intro overrides loaded from %s", loaded_path.c_str());
     } else {
       parseSceneWinEtapeJsonOverrides(payload.c_str(), loaded_path.c_str());
     }
   } else {
-    Serial.println("[UI] intro overrides: no file, defaults");
+    UI_LOGI("intro overrides: no file, defaults");
   }
 
   intro_config_.a_duration_ms =
@@ -1655,43 +2148,21 @@ void UiManager::loadSceneWinEtapeOverrides() {
       clampValue<uint32_t>(intro_config_.b_duration_ms, kIntroTransitionMsMin, kIntroTransitionMsMax);
   intro_config_.c_duration_ms =
       clampValue<uint32_t>(intro_config_.c_duration_ms, kIntroCleanMsMin, kIntroCleanMsMax);
-  intro_config_.b1_crash_ms =
-      clampValue<uint16_t>(intro_config_.b1_crash_ms, kIntroB1CrashMsMin, kIntroB1CrashMsMax);
-  intro_config_.scroll_a_px_per_sec =
-      clampValue<uint16_t>(intro_config_.scroll_a_px_per_sec, kIntroScrollSpeedMin, kIntroScrollSpeedMax);
-  intro_config_.scroll_bot_a_px_per_sec =
-      clampValue<uint16_t>(intro_config_.scroll_bot_a_px_per_sec, kIntroScrollBotSpeedMin, kIntroScrollBotSpeedMax);
-  intro_config_.scroll_c_px_per_sec =
-      clampValue<uint16_t>(intro_config_.scroll_c_px_per_sec, kIntroScrollSpeedMin, kIntroScrollSpeedMax);
-  intro_config_.sine_amp_a_px =
-      clampValue<uint8_t>(intro_config_.sine_amp_a_px, kIntroSineAmpMin, kIntroSineAmpMax);
-  intro_config_.sine_amp_c_px =
-      clampValue<uint8_t>(intro_config_.sine_amp_c_px, kIntroSineAmpMin, kIntroSineAmpMax);
-  intro_config_.sine_period_px =
-      clampValue<uint16_t>(intro_config_.sine_period_px, kIntroSinePeriodMin, kIntroSinePeriodMax);
-  intro_config_.sine_phase_speed =
-      clampValue<float>(intro_config_.sine_phase_speed, kIntroSinePhaseSpeedMin, kIntroSinePhaseSpeedMax);
-
-  if (intro_config_.stars_override < 0) {
-    intro_config_.stars_override = -1;
-  } else {
-    intro_config_.stars_override =
-        clampValue<int16_t>(intro_config_.stars_override, static_cast<int16_t>(60), static_cast<int16_t>(220));
+  intro_config_.fx_bpm = clampValue<uint16_t>(intro_config_.fx_bpm, 60U, 220U);
+  if (intro_config_.fx_scroll_text_a[0] == '\0') {
+    copyStringBounded(intro_config_.fx_scroll_text_a,
+                      sizeof(intro_config_.fx_scroll_text_a),
+                      kWinEtapeFxScrollTextA);
   }
-  if (intro_config_.fx_backend[0] == '\0') {
-    copyStringBounded(intro_config_.fx_backend, sizeof(intro_config_.fx_backend), "auto");
+  if (intro_config_.fx_scroll_text_b[0] == '\0') {
+    copyStringBounded(intro_config_.fx_scroll_text_b,
+                      sizeof(intro_config_.fx_scroll_text_b),
+                      kWinEtapeFxScrollTextB);
   }
-  if (intro_config_.fx_quality[0] == '\0') {
-    copyStringBounded(intro_config_.fx_quality, sizeof(intro_config_.fx_quality), "auto");
-  }
-  if (intro_config_.fx_3d[0] == '\0') {
-    copyStringBounded(intro_config_.fx_3d, sizeof(intro_config_.fx_3d), "rotozoom");
-  }
-  if (intro_config_.fx_3d_quality[0] == '\0') {
-    copyStringBounded(intro_config_.fx_3d_quality, sizeof(intro_config_.fx_3d_quality), "auto");
-  }
-  if (intro_config_.font_mode[0] == '\0') {
-    copyStringBounded(intro_config_.font_mode, sizeof(intro_config_.font_mode), "orbitron");
+  if (intro_config_.fx_scroll_text_c[0] == '\0') {
+    copyStringBounded(intro_config_.fx_scroll_text_c,
+                      sizeof(intro_config_.fx_scroll_text_c),
+                      kWinEtapeFxScrollTextC);
   }
 
   intro_b1_crash_ms_ = intro_config_.b1_crash_ms;
@@ -1708,7 +2179,7 @@ void UiManager::ensureIntroCreated() {
   lv_obj_remove_style_all(intro_root_);
   lv_obj_set_size(intro_root_, LV_PCT(100), LV_PCT(100));
   lv_obj_set_style_bg_color(intro_root_, introPaletteColor(0), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(intro_root_, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(intro_root_, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_clear_flag(intro_root_, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_add_flag(intro_root_, LV_OBJ_FLAG_HIDDEN);
 
@@ -2052,8 +2523,9 @@ void UiManager::createLogoLabel(const char* text) {
   lv_label_set_text(intro_logo_shadow_label_, intro_logo_ascii_);
   lv_obj_align(intro_logo_shadow_label_, LV_ALIGN_TOP_MID, 1, 23);
   lv_obj_align(intro_logo_label_, LV_ALIGN_TOP_MID, 0, 22);
-  lv_obj_set_style_translate_y(intro_logo_shadow_label_, -80, LV_PART_MAIN);
-  lv_obj_set_style_translate_y(intro_logo_label_, -80, LV_PART_MAIN);
+  const int16_t start_y = kUseWinEtapeSimplifiedEffects ? 0 : -80;
+  lv_obj_set_style_translate_y(intro_logo_shadow_label_, start_y, LV_PART_MAIN);
+  lv_obj_set_style_translate_y(intro_logo_label_, start_y, LV_PART_MAIN);
   lv_obj_clear_flag(intro_logo_shadow_label_, LV_OBJ_FLAG_HIDDEN);
   lv_obj_clear_flag(intro_logo_label_, LV_OBJ_FLAG_HIDDEN);
 }
@@ -2066,7 +2538,8 @@ void UiManager::configureWavySineScroller(const char* text,
                                           int16_t base_y,
                                           bool large_text,
                                           bool limit_to_half_width) {
-  String padded = asciiFallbackForUiText(text);
+  String wave_text = asciiFallbackForUiText(text);
+  String padded = wave_text;
   // Keep some visual breathing room so the scroller does not look clipped on screen edges.
   String pad;
   for (uint8_t i = 0U; i < kIntroCenterScrollPadSpaces; ++i) {
@@ -2116,6 +2589,36 @@ void UiManager::configureWavySineScroller(const char* text,
   if (large_text) {
     intro_wave_amp_px_ = resolveCenterWaveAmplitudePx(wave_font);
     intro_wave_base_y_ = static_cast<int16_t>(height / 2);
+  }
+
+  if (kUseWinEtapeSimplifiedEffects) {
+    intro_wave_glyph_count_ = 0U;
+    for (uint8_t i = 0U; i < kIntroWaveGlyphMax; ++i) {
+      if (intro_wave_slots_[i].glyph != nullptr) {
+        lv_obj_add_flag(intro_wave_slots_[i].glyph, LV_OBJ_FLAG_HIDDEN);
+      }
+      if (intro_wave_slots_[i].shadow != nullptr) {
+        lv_obj_add_flag(intro_wave_slots_[i].shadow, LV_OBJ_FLAG_HIDDEN);
+      }
+    }
+
+    lv_obj_t* active_scroll = large_text ? intro_clean_scroll_label_ : intro_crack_scroll_label_;
+    lv_obj_t* inactive_scroll = large_text ? intro_crack_scroll_label_ : intro_clean_scroll_label_;
+    if (inactive_scroll != nullptr) {
+      lv_obj_add_flag(inactive_scroll, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (active_scroll != nullptr) {
+      lv_label_set_text(active_scroll, wave_text.c_str());
+      lv_obj_set_style_text_font(active_scroll, wave_font, LV_PART_MAIN);
+      lv_obj_set_style_text_color(active_scroll, introPaletteColor(7), LV_PART_MAIN);
+      lv_obj_set_style_text_opa(active_scroll, LV_OPA_90, LV_PART_MAIN);
+      lv_obj_set_style_text_align(active_scroll, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+      lv_label_set_long_mode(active_scroll, LV_LABEL_LONG_CLIP);
+      lv_obj_set_width(active_scroll, static_cast<lv_coord_t>((width > 24) ? (width - 24) : width));
+      lv_obj_align(active_scroll, LV_ALIGN_TOP_MID, 0, base_y);
+      lv_obj_clear_flag(active_scroll, LV_OBJ_FLAG_HIDDEN);
+    }
+    return;
   }
 
   if (intro_wave_text_len_ == 0U) {
@@ -2242,6 +2745,9 @@ void UiManager::updateWavySineScroller(uint32_t dt_ms, uint32_t now_ms) {
           static_cast<int32_t>((static_cast<uint32_t>(intro_wave_speed_px_per_sec_) * dt_ms * 256U) /
                                1000U);
       const int16_t char_width_q8 = static_cast<int16_t>(intro_wave_char_width_ << 8);
+      if (char_width_q8 <= 0) {
+        return;
+      }
       while (intro_wave_pingpong_x_q8_ >= char_width_q8) {
         intro_wave_pingpong_x_q8_ -= char_width_q8;
         intro_wave_head_index_ = static_cast<uint16_t>((intro_wave_head_index_ + 1U) % intro_wave_text_len_);
@@ -2599,12 +3105,6 @@ void UiManager::startIntroIfNeeded(bool force_restart) {
   if (!intro_created_ || intro_root_ == nullptr) {
     return;
   }
-  if (force_restart) {
-    intro_skip_latched_ = false;
-  }
-  if (intro_skip_latched_ && !force_restart) {
-    return;
-  }
   if (intro_active_ && !force_restart) {
     return;
   }
@@ -2637,6 +3137,8 @@ void UiManager::startIntro() {
   String fx_backend_mode = intro_config_.fx_backend;
   fx_backend_mode.toLowerCase();
   const bool fx_lgfx_available = fx_engine_.config().lgfx_backend;
+  intro_render_mode_ = fx_lgfx_available ? IntroRenderMode::kFxOnlyV8 : IntroRenderMode::kLegacy;
+
   bool fx_enabled = fx_lgfx_available;
   if (fx_backend_mode == "lvgl_canvas" || fx_backend_mode == "lvgl") {
     fx_enabled = false;
@@ -2657,10 +3159,40 @@ void UiManager::startIntro() {
   } else if (fx_quality_mode == "high") {
     fx_quality_level = 3U;
   }
+  if (kUseWinEtapeSimplifiedEffects && fx_quality_mode == "auto") {
+    fx_quality_level = 1U;
+  }
   fx_engine_.setQualityLevel(fx_quality_level);
+  if (kUseWinEtapeSimplifiedEffects) {
+    const ui::fx::FxEngineConfig current_fx_cfg = fx_engine_.config();
+    ui::fx::FxEngineConfig simplified_fx_cfg = current_fx_cfg;
+    const uint16_t display_w = static_cast<uint16_t>(activeDisplayWidth() > 0 ? activeDisplayWidth()
+                                                                               : current_fx_cfg.sprite_width);
+    const uint16_t display_h = static_cast<uint16_t>(activeDisplayHeight() > 0 ? activeDisplayHeight()
+                                                                                 : current_fx_cfg.sprite_height);
+    simplified_fx_cfg.sprite_width = clampValue<uint16_t>(static_cast<uint16_t>(display_w / 2U), 96U, 240U);
+    simplified_fx_cfg.sprite_height = clampValue<uint16_t>(static_cast<uint16_t>(display_h / 2U), 72U, 240U);
+    simplified_fx_cfg.target_fps = 10U;
+    if (current_fx_cfg.sprite_width != simplified_fx_cfg.sprite_width ||
+        current_fx_cfg.sprite_height != simplified_fx_cfg.sprite_height ||
+        current_fx_cfg.target_fps != simplified_fx_cfg.target_fps) {
+      fx_engine_.begin(simplified_fx_cfg);
+      fx_engine_.setEnabled(fx_enabled);
+      fx_engine_.setQualityLevel(fx_quality_level);
+    }
+  }
+  if (kUseWinEtapeSimplifiedEffects &&
+      static_cast<uint8_t>(intro_3d_quality_resolved_) >
+          static_cast<uint8_t>(Intro3DQuality::kLow)) {
+    intro_3d_quality_resolved_ = Intro3DQuality::kLow;
+  }
+  if (intro_render_mode_ == IntroRenderMode::kFxOnlyV8) {
+    fx_enabled = fx_lgfx_available;
+    fx_engine_.setEnabled(fx_enabled);
+    fx_engine_.setBpm(intro_config_.fx_bpm);
+    fx_engine_.setScrollFont(intro_config_.fx_scroll_font);
+  }
 
-  intro_skip_latched_ = false;
-  intro_skip_requested_ = false;
   intro_clean_loop_only_ = false;
   intro_active_ = true;
   intro_state_ = IntroState::DONE;
@@ -2669,6 +3201,7 @@ void UiManager::startIntro() {
   intro_wave_last_ms_ = intro_total_start_ms_;
   intro_debug_next_ms_ = intro_total_start_ms_;
   intro_phase_log_next_ms_ = intro_total_start_ms_ + 5000U;
+  intro_overlay_invalidate_ms_ = 0U;
   intro_debug_overlay_enabled_ = false;
   intro_b1_done_ = false;
   intro_next_b2_pulse_ms_ = 0U;
@@ -2687,6 +3220,9 @@ void UiManager::startIntro() {
   lv_obj_set_style_translate_x(intro_root_, 0, LV_PART_MAIN);
   lv_obj_set_style_translate_y(intro_root_, 0, LV_PART_MAIN);
   lv_obj_clear_flag(intro_root_, LV_OBJ_FLAG_HIDDEN);
+  if (intro_render_mode_ == IntroRenderMode::kFxOnlyV8) {
+    hideLegacyIntroObjectsForFxOnly();
+  }
 
   transitionIntroState(IntroState::PHASE_A_CRACKTRO);
 
@@ -2697,33 +3233,132 @@ void UiManager::startIntro() {
     lv_timer_resume(intro_timer_);
   }
 
-  Serial.printf("[UI][WIN_ETAPE] start A=%lu B=%lu C=%lu B1=%u speedMidA=%u speedBotA=%u speedC=%u quality=%u mode=%u\n",
-                static_cast<unsigned long>(intro_config_.a_duration_ms),
-                static_cast<unsigned long>(intro_config_.b_duration_ms),
-                static_cast<unsigned long>(intro_config_.c_duration_ms),
-                static_cast<unsigned int>(intro_b1_crash_ms_),
-                static_cast<unsigned int>(intro_scroll_mid_a_px_per_sec_),
-                static_cast<unsigned int>(intro_scroll_bot_a_px_per_sec_),
-                static_cast<unsigned int>(intro_config_.scroll_c_px_per_sec),
-                static_cast<unsigned int>(intro_3d_quality_resolved_),
-                static_cast<unsigned int>(intro_3d_mode_));
-  Serial.printf("[UI][WIN_ETAPE] fx backend=%s enabled=%u quality=%s target_fps=%u sprite=%ux%u\n",
-                fx_backend_mode.c_str(),
-                fx_enabled ? 1U : 0U,
-                fx_quality_mode.c_str(),
-                static_cast<unsigned int>(fx_engine_.config().target_fps),
-                static_cast<unsigned int>(fx_engine_.config().sprite_width),
-                static_cast<unsigned int>(fx_engine_.config().sprite_height));
+  UI_LOGI("[WIN_ETAPE] start mode=%s A=%lu B=%lu C=%lu quality=%u 3d=%u",
+          (intro_render_mode_ == IntroRenderMode::kFxOnlyV8) ? "fx_only_v8" : "legacy",
+          static_cast<unsigned long>(intro_config_.a_duration_ms),
+          static_cast<unsigned long>(intro_config_.b_duration_ms),
+          static_cast<unsigned long>(intro_config_.c_duration_ms),
+          static_cast<unsigned int>(intro_3d_quality_resolved_),
+          static_cast<unsigned int>(intro_3d_mode_));
+  UI_LOGI("[WIN_ETAPE] fx backend=%s enabled=%u quality=%s target_fps=%u sprite=%ux%u bpm=%u font=%s",
+          fx_backend_mode.c_str(),
+          fx_enabled ? 1U : 0U,
+          fx_quality_mode.c_str(),
+          static_cast<unsigned int>(fx_engine_.config().target_fps),
+          static_cast<unsigned int>(fx_engine_.config().sprite_width),
+          static_cast<unsigned int>(fx_engine_.config().sprite_height),
+          static_cast<unsigned int>(intro_config_.fx_bpm),
+          fxScrollFontToken(intro_config_.fx_scroll_font));
+  UI_LOGI("[WIN_ETAPE] presets A=%s B=%s C=%s",
+          fxPresetToken(intro_config_.fx_preset_a),
+          fxPresetToken(intro_config_.fx_preset_b),
+          fxPresetToken(intro_config_.fx_preset_c));
+  UI_LOGI("[WIN_ETAPE] fx modes A=%s B=%s C=%s",
+          fxModeToken(intro_config_.fx_mode_a),
+          fxModeToken(intro_config_.fx_mode_b),
+          fxModeToken(intro_config_.fx_mode_c));
 }
 
-void UiManager::requestIntroSkip() {
-  if (!intro_active_) {
+void UiManager::hideLegacyIntroObjectsForFxOnly() {
+  intro_copper_count_ = 0U;
+  intro_star_count_ = 0U;
+  intro_firework_active_count_ = 0U;
+  intro_wave_glyph_count_ = 0U;
+
+  for (lv_obj_t* bar : scene_cracktro_bars_) {
+    if (bar != nullptr) {
+      lv_obj_add_flag(bar, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+  for (lv_obj_t* star : scene_starfield_) {
+    if (star != nullptr) {
+      lv_obj_add_flag(star, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+  for (lv_obj_t* layer : intro_gradient_layers_) {
+    if (layer != nullptr) {
+      lv_obj_add_flag(layer, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+  for (uint8_t i = 0U; i < kIntroWaveGlyphMax; ++i) {
+    if (intro_wave_slots_[i].glyph != nullptr) {
+      lv_obj_add_flag(intro_wave_slots_[i].glyph, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (intro_wave_slots_[i].shadow != nullptr) {
+      lv_obj_add_flag(intro_wave_slots_[i].shadow, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+  for (uint8_t i = 0U; i < kIntroWireEdgeCount; ++i) {
+    if (intro_wire_lines_[i] != nullptr) {
+      lv_obj_add_flag(intro_wire_lines_[i], LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+  for (uint8_t i = 0U; i < kIntroRotoStripeMax; ++i) {
+    if (intro_roto_stripes_[i] != nullptr) {
+      lv_obj_add_flag(intro_roto_stripes_[i], LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+  for (uint8_t i = 0U; i < 72U; ++i) {
+    if (intro_firework_particles_[i] != nullptr) {
+      lv_obj_add_flag(intro_firework_particles_[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    intro_firework_states_[i].active = false;
+  }
+
+  if (intro_logo_label_ != nullptr) {
+    lv_obj_add_flag(intro_logo_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (intro_logo_shadow_label_ != nullptr) {
+    lv_obj_add_flag(intro_logo_shadow_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (intro_crack_scroll_label_ != nullptr) {
+    lv_obj_add_flag(intro_crack_scroll_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (intro_bottom_scroll_label_ != nullptr) {
+    lv_obj_add_flag(intro_bottom_scroll_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (intro_clean_title_label_ != nullptr) {
+    lv_obj_add_flag(intro_clean_title_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (intro_clean_title_shadow_label_ != nullptr) {
+    lv_obj_add_flag(intro_clean_title_shadow_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (intro_clean_scroll_label_ != nullptr) {
+    lv_obj_add_flag(intro_clean_scroll_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+  if (intro_debug_label_ != nullptr) {
+    lv_obj_add_flag(intro_debug_label_, LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+void UiManager::applyIntroFxOnlyPhasePreset(IntroState state) {
+  ui::fx::FxPreset preset = intro_config_.fx_preset_a;
+  ui::fx::FxMode mode = intro_config_.fx_mode_a;
+  const char* text = intro_config_.fx_scroll_text_a;
+  if (state == IntroState::PHASE_B_TRANSITION) {
+    preset = intro_config_.fx_preset_b;
+    mode = intro_config_.fx_mode_b;
+    text = intro_config_.fx_scroll_text_b;
+  } else if (state == IntroState::PHASE_C_CLEAN || state == IntroState::PHASE_C_LOOP) {
+    preset = intro_config_.fx_preset_c;
+    mode = intro_config_.fx_mode_c;
+    text = intro_config_.fx_scroll_text_c;
+  }
+
+  fx_engine_.setPreset(preset);
+  fx_engine_.setMode(mode);
+  fx_engine_.setBpm(intro_config_.fx_bpm);
+  fx_engine_.setScrollFont(intro_config_.fx_scroll_font);
+  if (text == nullptr || text[0] == '\0') {
+    fx_engine_.setScrollText(nullptr);
     return;
   }
-  if (intro_state_ == IntroState::PHASE_A_CRACKTRO || intro_state_ == IntroState::PHASE_B_TRANSITION) {
-    intro_skip_latched_ = true;
-    intro_skip_requested_ = true;
+  const String ascii_text = asciiFallbackForUiText(text);
+  if (ascii_text.length() == 0U) {
+    fx_engine_.setScrollText(nullptr);
+    return;
   }
+  fx_engine_.setScrollText(ascii_text.c_str());
 }
 
 void UiManager::transitionIntroState(IntroState next_state) {
@@ -2745,13 +3380,62 @@ void UiManager::transitionIntroState(IntroState next_state) {
     }
   };
 
+  if (intro_render_mode_ == IntroRenderMode::kFxOnlyV8) {
+    hideLegacyIntroObjectsForFxOnly();
+    if (next_state == IntroState::PHASE_A_CRACKTRO ||
+        next_state == IntroState::PHASE_B_TRANSITION ||
+        next_state == IntroState::PHASE_C_CLEAN ||
+        next_state == IntroState::PHASE_C_LOOP) {
+      applyIntroFxOnlyPhasePreset(next_state);
+      UI_LOGI("[WIN_ETAPE] phase=%s preset=%s bpm=%u font=%s",
+              (next_state == IntroState::PHASE_A_CRACKTRO)
+                  ? "A"
+                  : ((next_state == IntroState::PHASE_B_TRANSITION) ? "B"
+                                                                     : ((next_state == IntroState::PHASE_C_CLEAN)
+                                                                            ? "C"
+                                                                            : "C_LOOP")),
+              (next_state == IntroState::PHASE_A_CRACKTRO)
+                  ? fxPresetToken(intro_config_.fx_preset_a)
+                  : ((next_state == IntroState::PHASE_B_TRANSITION)
+                         ? fxPresetToken(intro_config_.fx_preset_b)
+                         : fxPresetToken(intro_config_.fx_preset_c)),
+              static_cast<unsigned int>(intro_config_.fx_bpm),
+              fxScrollFontToken(intro_config_.fx_scroll_font));
+      UI_LOGI("[WIN_ETAPE] phase=%s mode=%s",
+              (next_state == IntroState::PHASE_A_CRACKTRO)
+                  ? "A"
+                  : ((next_state == IntroState::PHASE_B_TRANSITION) ? "B"
+                                                                     : ((next_state == IntroState::PHASE_C_CLEAN)
+                                                                            ? "C"
+                                                                            : "C_LOOP")),
+              (next_state == IntroState::PHASE_A_CRACKTRO)
+                  ? fxModeToken(intro_config_.fx_mode_a)
+                  : ((next_state == IntroState::PHASE_B_TRANSITION)
+                         ? fxModeToken(intro_config_.fx_mode_b)
+                         : fxModeToken(intro_config_.fx_mode_c)));
+      return;
+    }
+    if (next_state == IntroState::OUTRO) {
+      return;
+    }
+    if (next_state == IntroState::DONE) {
+      stopIntroAndCleanup();
+      hide_wave_text();
+      return;
+    }
+  }
+
   if (next_state == IntroState::PHASE_A_CRACKTRO) {
     intro_b1_done_ = false;
     intro_next_b2_pulse_ms_ = 0U;
     intro_wave_half_height_mode_ = false;
     intro_cube_morph_phase_ = 0.0f;
-    const uint8_t bar_count = static_cast<uint8_t>(clampValue<int16_t>(h / 22, 8, 18));
-    int16_t stars = static_cast<int16_t>(clampValue<int32_t>(area / 1200, 60, 220));
+    const uint8_t bar_count = kUseWinEtapeSimplifiedEffects
+                                  ? 0U
+                                  : static_cast<uint8_t>(clampValue<int16_t>(h / 22, 8, 18));
+    int16_t stars = kUseWinEtapeSimplifiedEffects
+                        ? 0
+                        : static_cast<int16_t>(clampValue<int32_t>(area / 1200, 60, 220));
     if (intro_config_.stars_override > 0) {
       stars = intro_config_.stars_override;
     }
@@ -2790,29 +3474,42 @@ void UiManager::transitionIntroState(IntroState next_state) {
         lv_obj_add_flag(layer, LV_OBJ_FLAG_HIDDEN);
       }
     }
-    createWireCube();
-    createRotoZoom();
-    for (uint8_t i = 0U; i < kIntroRotoStripeMax; ++i) {
-      if (intro_roto_stripes_[i] != nullptr) {
-        lv_obj_add_flag(intro_roto_stripes_[i], LV_OBJ_FLAG_HIDDEN);
+    if (kUseWinEtapeSimplifiedEffects) {
+      for (uint8_t i = 0U; i < kIntroWireEdgeCount; ++i) {
+        if (intro_wire_lines_[i] != nullptr) {
+          lv_obj_add_flag(intro_wire_lines_[i], LV_OBJ_FLAG_HIDDEN);
+        }
+      }
+      for (uint8_t i = 0U; i < kIntroRotoStripeMax; ++i) {
+        if (intro_roto_stripes_[i] != nullptr) {
+          lv_obj_add_flag(intro_roto_stripes_[i], LV_OBJ_FLAG_HIDDEN);
+        }
+      }
+    } else {
+      createWireCube();
+      createRotoZoom();
+      for (uint8_t i = 0U; i < kIntroRotoStripeMax; ++i) {
+        if (intro_roto_stripes_[i] != nullptr) {
+          lv_obj_add_flag(intro_roto_stripes_[i], LV_OBJ_FLAG_HIDDEN);
+        }
       }
     }
 
-    Serial.printf("[UI][WIN_ETAPE] phase=A obj=%u stars=%u particles=%u quality=%u\n",
-                  static_cast<unsigned int>(intro_copper_count_ + intro_star_count_ + (intro_wave_glyph_count_ * 2U) + kIntroWireEdgeCount + 8U),
-                  static_cast<unsigned int>(intro_star_count_),
-                  static_cast<unsigned int>(intro_firework_active_count_),
-                  static_cast<unsigned int>(intro_3d_quality_resolved_));
+    UI_LOGI("[WIN_ETAPE] phase=A obj=%u stars=%u particles=%u quality=%u",
+            static_cast<unsigned int>(intro_copper_count_ + intro_star_count_ + (intro_wave_glyph_count_ * 2U) + kIntroWireEdgeCount + 8U),
+            static_cast<unsigned int>(intro_star_count_),
+            static_cast<unsigned int>(intro_firework_active_count_),
+            static_cast<unsigned int>(intro_3d_quality_resolved_));
     return;
   }
 
   if (next_state == IntroState::PHASE_B_TRANSITION) {
     configureBPhaseStart();
-    Serial.printf("[UI][WIN_ETAPE] phase=B obj=%u stars=%u particles=%u quality=%u\n",
-                  static_cast<unsigned int>(intro_copper_count_ + intro_star_count_ + intro_firework_active_count_ + (intro_wave_glyph_count_ * 2U) + kIntroWireEdgeCount + 8U),
-                  static_cast<unsigned int>(intro_star_count_),
-                  static_cast<unsigned int>(intro_firework_active_count_),
-                  static_cast<unsigned int>(intro_3d_quality_resolved_));
+    UI_LOGI("[WIN_ETAPE] phase=B obj=%u stars=%u particles=%u quality=%u",
+            static_cast<unsigned int>(intro_copper_count_ + intro_star_count_ + intro_firework_active_count_ + (intro_wave_glyph_count_ * 2U) + kIntroWireEdgeCount + 8U),
+            static_cast<unsigned int>(intro_star_count_),
+            static_cast<unsigned int>(intro_firework_active_count_),
+            static_cast<unsigned int>(intro_3d_quality_resolved_));
     return;
   }
 
@@ -2820,7 +3517,9 @@ void UiManager::transitionIntroState(IntroState next_state) {
     startCleanReveal();
     intro_c_fx_stage_ = 0U;
     intro_c_fx_stage_start_ms_ = t_state0_ms_;
-    int16_t stars = static_cast<int16_t>(clampValue<int32_t>(area / 1500, 60, 140));
+    int16_t stars = kUseWinEtapeSimplifiedEffects
+                        ? 0
+                        : static_cast<int16_t>(clampValue<int32_t>(area / 1500, 60, 140));
     if (stars > static_cast<int16_t>(kStarfieldCount)) {
       stars = static_cast<int16_t>(kStarfieldCount);
     }
@@ -2848,7 +3547,7 @@ void UiManager::transitionIntroState(IntroState next_state) {
       lv_obj_add_flag(intro_logo_shadow_label_, LV_OBJ_FLAG_HIDDEN);
     }
 
-    if (intro_3d_mode_ == Intro3DMode::kWireCube) {
+    if (!kUseWinEtapeSimplifiedEffects && intro_3d_mode_ == Intro3DMode::kWireCube) {
       createWireCube();
       for (uint8_t i = 0U; i < kIntroRotoStripeMax; ++i) {
         if (intro_roto_stripes_[i] != nullptr) {
@@ -2861,15 +3560,23 @@ void UiManager::transitionIntroState(IntroState next_state) {
           lv_obj_add_flag(intro_wire_lines_[i], LV_OBJ_FLAG_HIDDEN);
         }
       }
-      createRotoZoom();
+      if (kUseWinEtapeSimplifiedEffects) {
+        for (uint8_t i = 0U; i < kIntroRotoStripeMax; ++i) {
+          if (intro_roto_stripes_[i] != nullptr) {
+            lv_obj_add_flag(intro_roto_stripes_[i], LV_OBJ_FLAG_HIDDEN);
+          }
+        }
+      } else {
+        createRotoZoom();
+      }
     }
 
-    Serial.printf("[UI][WIN_ETAPE] phase=%s obj=%u stars=%u particles=%u quality=%u\n",
-                  (next_state == IntroState::PHASE_C_CLEAN) ? "C" : "C_LOOP",
-                  static_cast<unsigned int>(intro_star_count_ + (intro_wave_glyph_count_ * 2U) + 18U),
-                  static_cast<unsigned int>(intro_star_count_),
-                  static_cast<unsigned int>(intro_firework_active_count_),
-                  static_cast<unsigned int>(intro_3d_quality_resolved_));
+    UI_LOGI("[WIN_ETAPE] phase=%s obj=%u stars=%u particles=%u quality=%u",
+            (next_state == IntroState::PHASE_C_CLEAN) ? "C" : "C_LOOP",
+            static_cast<unsigned int>(intro_star_count_ + (intro_wave_glyph_count_ * 2U) + 18U),
+            static_cast<unsigned int>(intro_star_count_),
+            static_cast<unsigned int>(intro_firework_active_count_),
+            static_cast<unsigned int>(intro_3d_quality_resolved_));
     return;
   }
 
@@ -2889,6 +3596,21 @@ void UiManager::configureBPhaseStart() {
   intro_b1_done_ = false;
   intro_wave_half_height_mode_ = false;
   intro_next_b2_pulse_ms_ = t_state0_ms_ + static_cast<uint32_t>(intro_b1_crash_ms_) + 2400U;
+  if (kUseWinEtapeSimplifiedEffects) {
+    intro_b1_done_ = true;
+    intro_firework_active_count_ = 0U;
+    for (uint8_t i = 0U; i < kIntroWireEdgeCount; ++i) {
+      if (intro_wire_lines_[i] != nullptr) {
+        lv_obj_add_flag(intro_wire_lines_[i], LV_OBJ_FLAG_HIDDEN);
+      }
+    }
+    for (uint8_t i = 0U; i < kIntroRotoStripeMax; ++i) {
+      if (intro_roto_stripes_[i] != nullptr) {
+        lv_obj_add_flag(intro_roto_stripes_[i], LV_OBJ_FLAG_HIDDEN);
+      }
+    }
+    return;
+  }
   createRotoZoom();
   startGlitch(intro_b1_crash_ms_);
   startFireworks();
@@ -2898,8 +3620,13 @@ void UiManager::updateBPhase(uint32_t dt_ms, uint32_t now_ms, uint32_t state_ela
   updateCopperBars(now_ms - intro_total_start_ms_);
   updateStarfield(dt_ms);
   updateWavySineScroller(dt_ms, now_ms);
-  updateBottomRollbackScroller(dt_ms);
-  animateLogoOvershoot();
+  if (!kUseWinEtapeSimplifiedEffects) {
+    updateBottomRollbackScroller(dt_ms);
+    animateLogoOvershoot();
+  }
+  if (kUseWinEtapeSimplifiedEffects) {
+    return;
+  }
   updateFireworks(dt_ms);
 
   if (state_elapsed_ms < intro_b1_crash_ms_) {
@@ -3088,13 +3815,25 @@ void UiManager::startCleanReveal() {
   intro_clean_next_char_ms_ = lv_tick_get();
 
   if (intro_clean_title_label_ != nullptr) {
-    lv_label_set_text(intro_clean_title_label_, "");
+    if (kUseWinEtapeSimplifiedEffects) {
+      lv_label_set_text(intro_clean_title_label_, intro_clean_title_ascii_);
+    } else {
+      lv_label_set_text(intro_clean_title_label_, "");
+    }
     lv_obj_align(intro_clean_title_label_, LV_ALIGN_TOP_MID, 0, 20);
+    lv_obj_set_style_translate_y(intro_clean_title_label_, 0, LV_PART_MAIN);
+    lv_obj_set_style_opa(intro_clean_title_label_, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_clear_flag(intro_clean_title_label_, LV_OBJ_FLAG_HIDDEN);
   }
   if (intro_clean_title_shadow_label_ != nullptr) {
-    lv_label_set_text(intro_clean_title_shadow_label_, "");
+    if (kUseWinEtapeSimplifiedEffects) {
+      lv_label_set_text(intro_clean_title_shadow_label_, intro_clean_title_ascii_);
+    } else {
+      lv_label_set_text(intro_clean_title_shadow_label_, "");
+    }
     lv_obj_align(intro_clean_title_shadow_label_, LV_ALIGN_TOP_MID, 1, 21);
+    lv_obj_set_style_translate_y(intro_clean_title_shadow_label_, 0, LV_PART_MAIN);
+    lv_obj_set_style_opa(intro_clean_title_shadow_label_, LV_OPA_70, LV_PART_MAIN);
     lv_obj_clear_flag(intro_clean_title_shadow_label_, LV_OBJ_FLAG_HIDDEN);
   }
   if (intro_clean_scroll_label_ != nullptr) {
@@ -3104,7 +3843,6 @@ void UiManager::startCleanReveal() {
 
 void UiManager::stopIntroAndCleanup() {
   intro_active_ = false;
-  intro_skip_requested_ = false;
   intro_state_ = IntroState::DONE;
   intro_b1_done_ = false;
   intro_glitch_duration_ms_ = 0U;
@@ -3118,6 +3856,7 @@ void UiManager::stopIntroAndCleanup() {
   intro_cube_morph_phase_ = 0.0f;
   intro_c_fx_stage_ = 0U;
   intro_c_fx_stage_start_ms_ = 0U;
+  intro_overlay_invalidate_ms_ = 0U;
 
   if (intro_timer_ != nullptr) {
     lv_timer_pause(intro_timer_);
@@ -3178,6 +3917,9 @@ void UiManager::stopIntroAndCleanup() {
   if (intro_logo_shadow_label_ != nullptr) {
     lv_obj_add_flag(intro_logo_shadow_label_, LV_OBJ_FLAG_HIDDEN);
   }
+  if (intro_crack_scroll_label_ != nullptr) {
+    lv_obj_add_flag(intro_crack_scroll_label_, LV_OBJ_FLAG_HIDDEN);
+  }
   if (intro_bottom_scroll_label_ != nullptr) {
     lv_obj_add_flag(intro_bottom_scroll_label_, LV_OBJ_FLAG_HIDDEN);
   }
@@ -3187,9 +3929,14 @@ void UiManager::stopIntroAndCleanup() {
   if (intro_clean_title_shadow_label_ != nullptr) {
     lv_obj_add_flag(intro_clean_title_shadow_label_, LV_OBJ_FLAG_HIDDEN);
   }
+  if (intro_clean_scroll_label_ != nullptr) {
+    lv_obj_add_flag(intro_clean_scroll_label_, LV_OBJ_FLAG_HIDDEN);
+  }
   if (intro_debug_label_ != nullptr) {
     lv_obj_add_flag(intro_debug_label_, LV_OBJ_FLAG_HIDDEN);
   }
+  fx_engine_.setEnabled(false);
+  fx_engine_.reset();
 }
 
 void UiManager::updateFireworks(uint32_t dt_ms) {
@@ -3247,6 +3994,9 @@ void UiManager::updateCleanReveal(uint32_t dt_ms) {
   if (intro_clean_title_label_ == nullptr || intro_clean_title_shadow_label_ == nullptr) {
     return;
   }
+  if (kUseWinEtapeSimplifiedEffects) {
+    return;
+  }
   const uint32_t now = lv_tick_get();
   const size_t target_len = std::strlen(intro_clean_title_ascii_);
   if (intro_clean_reveal_chars_ < target_len && now >= intro_clean_next_char_ms_) {
@@ -3288,6 +4038,9 @@ void UiManager::updateSineScroller(uint32_t t_ms) {
 }
 
 uint8_t UiManager::estimateIntroObjectCount() const {
+  if (intro_render_mode_ == IntroRenderMode::kFxOnlyV8) {
+    return 0U;
+  }
   uint16_t active_roto = 0U;
   for (uint8_t i = 0U; i < kIntroRotoStripeMax; ++i) {
     if (intro_roto_stripes_[i] != nullptr && !lv_obj_has_flag(intro_roto_stripes_[i], LV_OBJ_FLAG_HIDDEN)) {
@@ -3359,13 +4112,15 @@ void UiManager::updateIntroDebugOverlay(uint32_t dt_ms) {
   }
   intro_debug_next_ms_ = now + 250U;
 
+  const ui::fx::FxEngineStats fx_stats = fx_engine_.stats();
   lv_label_set_text_fmt(intro_debug_label_,
-                        "phase=%u obj=%u stars=%u p=%u q=%u",
+                        "phase=%u obj=%u stars=%u p=%u q=%u fx=%u",
                         static_cast<unsigned int>(intro_state_),
                         static_cast<unsigned int>(estimateIntroObjectCount()),
                         static_cast<unsigned int>(intro_star_count_),
                         static_cast<unsigned int>(intro_firework_active_count_),
-                        static_cast<unsigned int>(intro_3d_quality_resolved_));
+                        static_cast<unsigned int>(intro_3d_quality_resolved_),
+                        static_cast<unsigned int>(fx_stats.fps));
   lv_obj_clear_flag(intro_debug_label_, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -3374,6 +4129,11 @@ void UiManager::tickIntro() {
     return;
   }
   const uint32_t now = lv_tick_get();
+  if (kUseDemoAutorunWinEtapeRuntime && (now - intro_total_start_ms_ >= kWinEtapeAutorunLoopMs)) {
+    UI_LOGI("[WIN_ETAPE] autorun loop timeout: restarting A->B->C");
+    startIntro();
+    return;
+  }
   uint32_t dt_ms = now - last_tick_ms_;
   if (dt_ms > 100U) {
     dt_ms = 100U;
@@ -3381,29 +4141,54 @@ void UiManager::tickIntro() {
   last_tick_ms_ = now;
   const uint32_t state_elapsed = now - t_state0_ms_;
 
-  if (intro_skip_requested_ &&
-      (intro_state_ == IntroState::PHASE_A_CRACKTRO || intro_state_ == IntroState::PHASE_B_TRANSITION)) {
-    intro_skip_requested_ = false;
-    transitionIntroState(IntroState::PHASE_C_CLEAN);
-  }
-
   fx_engine_.setSceneCounts(estimateIntroObjectCount(), intro_star_count_, intro_firework_active_count_);
 
   if (now >= intro_phase_log_next_ms_) {
     intro_phase_log_next_ms_ = now + 5000U;
     const UiMemorySnapshot mem = memorySnapshot();
     const ui::fx::FxEngineStats fx_stats = fx_engine_.stats();
-    Serial.printf("[UI][WIN_ETAPE] phase=%u t=%lu obj=%u stars=%u particles=%u fx_fps=%u q=%u heap_int=%u heap_psram=%u largest_dma=%u\n",
-                  static_cast<unsigned int>(intro_state_),
-                  static_cast<unsigned long>(state_elapsed),
-                  static_cast<unsigned int>(estimateIntroObjectCount()),
-                  static_cast<unsigned int>(intro_star_count_),
-                  static_cast<unsigned int>(intro_firework_active_count_),
-                  static_cast<unsigned int>(fx_stats.fps),
-                  static_cast<unsigned int>(intro_3d_quality_resolved_),
-                  static_cast<unsigned int>(mem.heap_internal_free),
-                  static_cast<unsigned int>(mem.heap_psram_free),
-                  static_cast<unsigned int>(mem.heap_largest_dma_block));
+    UI_LOGI("[WIN_ETAPE] phase=%u t=%lu obj=%u stars=%u particles=%u fx_fps=%u q=%u heap_int=%u heap_psram=%u largest_dma=%u",
+            static_cast<unsigned int>(intro_state_),
+            static_cast<unsigned long>(state_elapsed),
+            static_cast<unsigned int>(estimateIntroObjectCount()),
+            static_cast<unsigned int>(intro_star_count_),
+            static_cast<unsigned int>(intro_firework_active_count_),
+            static_cast<unsigned int>(fx_stats.fps),
+            static_cast<unsigned int>(intro_3d_quality_resolved_),
+            static_cast<unsigned int>(mem.heap_internal_free),
+            static_cast<unsigned int>(mem.heap_psram_free),
+            static_cast<unsigned int>(mem.heap_largest_dma_block));
+  }
+
+  if (intro_render_mode_ == IntroRenderMode::kFxOnlyV8) {
+    updateIntroDebugOverlay(dt_ms);
+    switch (intro_state_) {
+      case IntroState::PHASE_A_CRACKTRO:
+        if (state_elapsed >= intro_config_.a_duration_ms) {
+          transitionIntroState(IntroState::PHASE_B_TRANSITION);
+        }
+        break;
+      case IntroState::PHASE_B_TRANSITION:
+        if (state_elapsed >= intro_config_.b_duration_ms) {
+          transitionIntroState(IntroState::PHASE_C_CLEAN);
+        }
+        break;
+      case IntroState::PHASE_C_CLEAN:
+        if (state_elapsed >= intro_config_.c_duration_ms) {
+          transitionIntroState(IntroState::PHASE_C_LOOP);
+        }
+        break;
+      case IntroState::PHASE_C_LOOP:
+        if (state_elapsed >= intro_config_.c_duration_ms) {
+          transitionIntroState(IntroState::PHASE_C_LOOP);
+        }
+        break;
+      case IntroState::OUTRO:
+      case IntroState::DONE:
+      default:
+        break;
+    }
+    return;
   }
 
   switch (intro_state_) {
@@ -3425,9 +4210,13 @@ void UiManager::tickIntro() {
       updateCopperBars(now - intro_total_start_ms_);
       updateStarfield(dt_ms);
       updateWavySineScroller(dt_ms, now);
-      updateBottomRollbackScroller(dt_ms);
-      animateLogoOvershoot();
-      updateWireCube(dt_ms, false);
+      if (!kUseWinEtapeSimplifiedEffects) {
+        updateBottomRollbackScroller(dt_ms);
+        animateLogoOvershoot();
+      }
+      if (!kUseWinEtapeSimplifiedEffects) {
+        updateWireCube(dt_ms, false);
+      }
       updateIntroDebugOverlay(dt_ms);
       if (state_elapsed >= intro_config_.a_duration_ms) {
         transitionIntroState(IntroState::PHASE_B_TRANSITION);
@@ -3443,16 +4232,22 @@ void UiManager::tickIntro() {
       break;
 
     case IntroState::PHASE_C_CLEAN:
-      updateC3DStage(now);
+      if (!kUseWinEtapeSimplifiedEffects) {
+        updateC3DStage(now);
+      }
       updateStarfield(dt_ms);
-      if (intro_3d_mode_ == Intro3DMode::kWireCube) {
-        updateWireCube(dt_ms, false);
-      } else {
-        updateRotoZoom(dt_ms);
+      if (!kUseWinEtapeSimplifiedEffects) {
+        if (intro_3d_mode_ == Intro3DMode::kWireCube) {
+          updateWireCube(dt_ms, false);
+        } else {
+          updateRotoZoom(dt_ms);
+        }
       }
       updateWavySineScroller(dt_ms, now);
       updateCleanReveal(dt_ms);
-      updateFireworks(dt_ms);
+      if (!kUseWinEtapeSimplifiedEffects) {
+        updateFireworks(dt_ms);
+      }
       updateIntroDebugOverlay(dt_ms);
       if (state_elapsed >= intro_config_.c_duration_ms) {
         transitionIntroState(IntroState::PHASE_C_LOOP);
@@ -3460,16 +4255,22 @@ void UiManager::tickIntro() {
       break;
 
     case IntroState::PHASE_C_LOOP:
-      updateC3DStage(now);
+      if (!kUseWinEtapeSimplifiedEffects) {
+        updateC3DStage(now);
+      }
       updateStarfield(dt_ms);
-      if (intro_3d_mode_ == Intro3DMode::kWireCube) {
-        updateWireCube(dt_ms, false);
-      } else {
-        updateRotoZoom(dt_ms);
+      if (!kUseWinEtapeSimplifiedEffects) {
+        if (intro_3d_mode_ == Intro3DMode::kWireCube) {
+          updateWireCube(dt_ms, false);
+        } else {
+          updateRotoZoom(dt_ms);
+        }
       }
       updateWavySineScroller(dt_ms, now);
       updateCleanReveal(dt_ms);
-      updateFireworks(dt_ms);
+      if (!kUseWinEtapeSimplifiedEffects) {
+        updateFireworks(dt_ms);
+      }
       updateIntroDebugOverlay(dt_ms);
       if (state_elapsed >= intro_config_.c_duration_ms) {
         transitionIntroState(IntroState::PHASE_C_LOOP);
@@ -3772,6 +4573,11 @@ void UiManager::renderMicrophoneWaveform() {
   };
 
   if (!ready_ || scene_waveform_ == nullptr) {
+    return;
+  }
+  if (kUseWinEtapeSimplifiedEffects && intro_active_) {
+    hide_waveform();
+    updateLaOverlay(false, 0U, 0, 0U, 0U, 0U);
     return;
   }
   const HardwareManager::Snapshot* active_snapshot = waveform_snapshot_ref_;
@@ -4125,25 +4931,30 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   const char* step_id_for_ui = (step_id != nullptr && step_id[0] != '\0') ? step_id : "";
   const char* audio_pack_id_for_ui = (audio_pack_id != nullptr && audio_pack_id[0] != '\0') ? audio_pack_id : "";
   if (normalized_scene_id == nullptr) {
-    Serial.printf("[UI] unknown scene id '%s' in scenario=%s step=%s\n", raw_scene_id, scenario_id, step_id_for_log);
+    UI_LOGI("unknown scene id '%s' in scenario=%s step=%s", raw_scene_id, scenario_id, step_id_for_log);
     return;
   }
   if (normalized_scene_id != nullptr && std::strcmp(raw_scene_id, normalized_scene_id) != 0) {
-    Serial.printf("[UI] scene alias normalized: %s -> %s\n", raw_scene_id, normalized_scene_id);
+    UI_LOGI("scene alias normalized: %s -> %s", raw_scene_id, normalized_scene_id);
   }
   const char* scene_id = normalized_scene_id;
   const bool scene_changed = (std::strcmp(last_scene_id_, scene_id) != 0);
   const bool has_previous_scene = (last_scene_id_[0] != '\0');
   const bool win_etape_intro_scene = (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0);
+  const bool direct_fx_scene = isDirectFxSceneId(scene_id);
+  const bool is_locked_scene = (std::strcmp(scene_id, "SCENE_LOCKED") == 0);
+  if (scene_changed && has_previous_scene) {
+    cleanupSceneTransitionAssets(last_scene_id_, scene_id);
+  }
 
   if (!win_etape_intro_scene && intro_active_) {
     stopIntroAndCleanup();
   }
-  if (!win_etape_intro_scene) {
-    intro_skip_latched_ = false;
-  }
   if (win_etape_intro_scene && intro_active_ && !scene_changed) {
     return;
+  }
+  if (!direct_fx_scene) {
+    direct_fx_scene_active_ = false;
   }
 
   auto parseEffectToken = [](const char* token, SceneEffect fallback, const char* source) -> SceneEffect {
@@ -4179,7 +4990,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     if (std::strcmp(normalized, "celebrate") == 0 || std::strcmp(normalized, "reward") == 0) {
       return SceneEffect::kCelebrate;
     }
-    Serial.printf("[UI] unknown effect token '%s' in %s, fallback\n", token, source);
+    UI_LOGD("unknown effect token '%s' in %s, fallback", token, source);
     return SceneEffect::kPulse;
   };
 
@@ -4223,7 +5034,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
         std::strcmp(normalized, "camera_flash") == 0) {
       return SceneTransition::kGlitch;
     }
-    Serial.printf("[UI] unknown transition token '%s' in %s, fallback\n", token, source);
+    UI_LOGD("unknown transition token '%s' in %s, fallback", token, source);
     return fallback;
   };
 
@@ -4299,15 +5110,19 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   uint32_t accent_rgb = 0x2A76FFUL;
   uint32_t text_rgb = 0xE8F1FFUL;
 
-  if (std::strcmp(scene_id, "SCENE_LOCKED") == 0) {
+  if (is_locked_scene) {
     title = "Module U-SON PROTO";
     subtitle = "VERIFICATION EN COURS";
-    symbol = "LOCK";
+    symbol = "";
     effect = SceneEffect::kGlitch;
+    show_title = true;
+    show_subtitle = true;
+    show_symbol = false;
     waveform_enabled = true;
     waveform_sample_count = HardwareManager::kMicWaveformCapacity;
     waveform_amplitude_pct = 100U;
     waveform_jitter = true;
+    demo_mode = "standard";
     bg_rgb = 0x07070FUL;
     accent_rgb = 0xFFB74EUL;
     text_rgb = 0xF6FBFFUL;
@@ -4347,14 +5162,34 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     bg_rgb = 0x24090CUL;
     accent_rgb = 0xFF6A52UL;
     text_rgb = 0xFFF2EBUL;
-  } else if (std::strcmp(scene_id, "SCENE_WIN") == 0 || std::strcmp(scene_id, "SCENE_REWARD") == 0) {
+  } else if (std::strcmp(scene_id, "SCENE_WIN") == 0 ||
+             std::strcmp(scene_id, "SCENE_REWARD") == 0 ||
+             std::strcmp(scene_id, "SCENE_WINNER") == 0) {
     title = "VICTOIRE";
     symbol = "WIN";
-    effect = SceneEffect::kCelebrate;
+    effect = (std::strcmp(scene_id, "SCENE_WINNER") == 0) ? SceneEffect::kNone : SceneEffect::kCelebrate;
     bg_rgb = 0x231038UL;
     accent_rgb = 0xF4CB4AUL;
     text_rgb = 0xFFF6C7UL;
-    subtitle = "Etape validee";
+    subtitle = (std::strcmp(scene_id, "SCENE_WINNER") == 0) ? "Mode Winner actif" : "Etape validee";
+  } else if (std::strcmp(scene_id, "SCENE_FIREWORKS") == 0) {
+    title = "FIREWORKS";
+    subtitle = "Mode celebration";
+    symbol = "WIN";
+    effect = SceneEffect::kNone;
+    bg_rgb = 0x120825UL;
+    accent_rgb = 0xFFB65CUL;
+    text_rgb = 0xFFF4E6UL;
+    demo_mode = "fireworks";
+  } else if (std::strcmp(scene_id, "SCENE_MP3_PLAYER") == 0) {
+    title = "LECTEUR MP3";
+    subtitle = "AmigaAMP";
+    symbol = "PLAY";
+    effect = SceneEffect::kNone;
+    bg_rgb = 0x101A36UL;
+    accent_rgb = 0x66B4FFUL;
+    text_rgb = 0xF3F9FFUL;
+    show_symbol = false;
   } else if (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0) {
     title = "BRAVO!";
     subtitle = audio_playing ? "Validation en cours..." : kWinEtapeWaitingSubtitle;
@@ -4663,8 +5498,20 @@ void UiManager::renderScene(const ScenarioDef* scenario,
         }
       }
     } else {
-      Serial.printf("[UI] invalid scene payload (%s)\n", error.c_str());
+      UI_LOGD("invalid scene payload (%s)", error.c_str());
     }
+  }
+
+  if (is_locked_scene) {
+    title = "Module U-SON PROTO";
+    subtitle = "VERIFICATION EN COURS";
+    show_title = true;
+    show_subtitle = true;
+    show_symbol = false;
+    effect = SceneEffect::kGlitch;
+    demo_mode = "standard";
+    const uint32_t speed_entropy = mixNoise(static_cast<uint32_t>(lv_tick_get()), reinterpret_cast<uintptr_t>(this) ^ 0xA5A37UL);
+    effect_speed_ms = static_cast<uint16_t>(80U + (speed_entropy % 141U));
   }
 
   if (waveform_sample_count == 0U) {
@@ -4672,17 +5519,24 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   } else if (waveform_sample_count > HardwareManager::kMicWaveformCapacity) {
     waveform_sample_count = HardwareManager::kMicWaveformCapacity;
   }
+  if (is_locked_scene) {
+    show_symbol = false;
+  }
   if (waveform_sample_count < 2U) {
     waveform_sample_count = 2U;
   }
   if (waveform_amplitude_pct > 100U) {
     waveform_amplitude_pct = 100U;
   }
+  const bool mic_needed = la_detection_scene_ || waveform_enabled;
+  if (hardware_ != nullptr) {
+    hardware_->setMicRuntimeEnabled(mic_needed);
+  }
   configureWaveformOverlay((waveform_snapshot_ref_ != nullptr) ? waveform_snapshot_ref_
-                                                                : (waveform_snapshot_valid_ ? &waveform_snapshot_
-                                                                                            : nullptr),
-                          waveform_enabled,
-                          waveform_sample_count,
+                                                               : (waveform_snapshot_valid_ ? &waveform_snapshot_
+                                                                                           : nullptr),
+                           waveform_enabled,
+                           waveform_sample_count,
                           waveform_amplitude_pct,
                           waveform_jitter);
   if (win_etape_intro_scene) {
@@ -4697,11 +5551,41 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     title = "BRAVO!";
     subtitle = audio_playing ? "Validation en cours..." : kWinEtapeWaitingSubtitle;
   }
+  if (is_locked_scene) {
+    title = "Module U-SON PROTO";
+    subtitle = "VERIFICATION EN COURS";
+  }
+  if (is_locked_scene) {
+    resetSceneTimeline();
+  }
   if (win_etape_bravo_mode && timeline_keyframe_count_ > 1U) {
     timeline_keyframe_count_ = 1U;
     timeline_duration_ms_ = 0U;
     timeline_loop_ = true;
     timeline_effect_index_ = -1;
+  }
+  if (direct_fx_scene) {
+    direct_fx_scene_active_ = fx_engine_.config().lgfx_backend;
+    if (direct_fx_scene_active_) {
+      direct_fx_scene_preset_ =
+          (std::strcmp(scene_id, "SCENE_FIREWORKS") == 0) ? ui::fx::FxPreset::kFireworks : ui::fx::FxPreset::kWinner;
+      fx_engine_.setEnabled(true);
+      fx_engine_.setPreset(direct_fx_scene_preset_);
+      fx_engine_.setMode(ui::fx::FxMode::kClassic);
+      fx_engine_.setBpm(125U);
+      fx_engine_.setScrollFont(ui::fx::FxScrollFont::kItalic);
+      const String fx_scroll_text = asciiFallbackForUiText((subtitle.length() > 0U) ? subtitle.c_str() : title.c_str());
+      if (fx_scroll_text.length() > 0U) {
+        fx_engine_.setScrollText(fx_scroll_text.c_str());
+      } else {
+        fx_engine_.setScrollText(nullptr);
+      }
+    }
+  } else if (!win_etape_intro_scene) {
+    direct_fx_scene_active_ = false;
+    if (!intro_active_) {
+      fx_engine_.setEnabled(false);
+    }
   }
 
   stopSceneAnimations();
@@ -4767,6 +5651,16 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     lv_obj_add_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
   }
   applyTextLayout(title_align, subtitle_align);
+  if (scene_title_label_ != nullptr && !lv_obj_has_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN)) {
+    lv_obj_move_foreground(scene_title_label_);
+    lv_obj_set_style_opa(scene_title_label_, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_transform_angle(scene_title_label_, 0, LV_PART_MAIN);
+  }
+  if (scene_subtitle_label_ != nullptr && !lv_obj_has_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN)) {
+    lv_obj_move_foreground(scene_subtitle_label_);
+    lv_obj_set_style_opa(scene_subtitle_label_, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_transform_angle(scene_subtitle_label_, 0, LV_PART_MAIN);
+  }
   applySceneFraming(frame_dx, frame_dy, frame_scale_pct, frame_split_layout);
   applySubtitleScroll(subtitle_scroll_mode, subtitle_scroll_speed_ms, subtitle_scroll_pause_ms, subtitle_scroll_loop);
   for (lv_obj_t* particle : scene_particles_) {
@@ -4793,34 +5687,90 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   if (scene_changed && has_previous_scene) {
     applySceneTransition(transition, transition_ms);
   }
+  if (is_locked_scene && scene_title_label_ != nullptr) {
+    lv_obj_clear_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(scene_title_label_);
+    const bool title_bounce_inverted =
+        ((mixNoise(static_cast<uint32_t>(effect_speed_ms), reinterpret_cast<uintptr_t>(scene_title_label_)) & 1U) != 0U);
+    lv_anim_t title_bounce;
+    lv_anim_init(&title_bounce);
+    lv_anim_set_var(&title_bounce, scene_title_label_);
+    lv_anim_set_exec_cb(&title_bounce, animSetSineTranslateY);
+    lv_anim_set_values(&title_bounce, title_bounce_inverted ? 4095 : 0, title_bounce_inverted ? 0 : 4095);
+    lv_anim_set_time(&title_bounce, resolveAnimMs(980U));
+    lv_anim_set_playback_time(&title_bounce, resolveAnimMs(980U));
+    lv_anim_set_repeat_count(&title_bounce, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&title_bounce);
+    lv_anim_t title_lock_opa;
+    lv_anim_init(&title_lock_opa);
+    lv_anim_set_var(&title_lock_opa, scene_title_label_);
+    lv_anim_set_exec_cb(&title_lock_opa, animSetRandomTextOpa);
+    lv_anim_set_values(&title_lock_opa, 0, 4095);
+    lv_anim_set_time(&title_lock_opa, resolveAnimMs(72U));
+    lv_anim_set_repeat_count(&title_lock_opa, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&title_lock_opa);
+    lv_obj_set_style_text_opa(scene_title_label_, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_opa(scene_title_label_, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_transform_angle(scene_title_label_, 0, LV_PART_MAIN);
+    lv_obj_set_style_text_color(scene_title_label_, lv_color_hex(0xFFFFFFUL), LV_PART_MAIN);
+  }
+  if (is_locked_scene && scene_subtitle_label_ != nullptr) {
+    lv_obj_clear_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(scene_subtitle_label_);
+    lv_anim_t subtitle_lock_jitter_x;
+    lv_anim_init(&subtitle_lock_jitter_x);
+    lv_anim_set_var(&subtitle_lock_jitter_x, scene_subtitle_label_);
+    lv_anim_set_exec_cb(&subtitle_lock_jitter_x, animSetRandomTranslateX);
+    lv_anim_set_values(&subtitle_lock_jitter_x, 0, 4095);
+    lv_anim_set_time(&subtitle_lock_jitter_x, resolveAnimMs(66U));
+    lv_anim_set_repeat_count(&subtitle_lock_jitter_x, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&subtitle_lock_jitter_x);
+
+    lv_anim_t subtitle_lock_jitter_y;
+    lv_anim_init(&subtitle_lock_jitter_y);
+    lv_anim_set_var(&subtitle_lock_jitter_y, scene_subtitle_label_);
+    lv_anim_set_exec_cb(&subtitle_lock_jitter_y, animSetRandomTranslateY);
+    lv_anim_set_values(&subtitle_lock_jitter_y, 0, 4095);
+    lv_anim_set_time(&subtitle_lock_jitter_y, resolveAnimMs(58U));
+    lv_anim_set_repeat_count(&subtitle_lock_jitter_y, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&subtitle_lock_jitter_y);
+    lv_anim_t subtitle_lock_opa;
+    lv_anim_init(&subtitle_lock_opa);
+    lv_anim_set_var(&subtitle_lock_opa, scene_subtitle_label_);
+    lv_anim_set_exec_cb(&subtitle_lock_opa, animSetRandomTextOpa);
+    lv_anim_set_values(&subtitle_lock_opa, 0, 4095);
+    lv_anim_set_time(&subtitle_lock_opa, resolveAnimMs(56U));
+    lv_anim_set_repeat_count(&subtitle_lock_opa, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&subtitle_lock_opa);
+    lv_obj_set_style_text_opa(scene_subtitle_label_, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_opa(scene_subtitle_label_, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_transform_angle(scene_subtitle_label_, 0, LV_PART_MAIN);
+    lv_obj_set_style_text_color(scene_subtitle_label_, lv_color_hex(0xFFFFFFUL), LV_PART_MAIN);
+  }
+  if (is_locked_scene && scene_symbol_label_ != nullptr) {
+    lv_obj_add_flag(scene_symbol_label_, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(scene_symbol_label_, "");
+  }
   std::strncpy(last_scene_id_, scene_id, sizeof(last_scene_id_) - 1U);
   last_scene_id_[sizeof(last_scene_id_) - 1U] = '\0';
   updatePageLine();
-  Serial.printf("[UI] scene=%s effect=%u speed=%u title=%u symbol=%u scenario=%s audio=%u timeline=%u transition=%u:%u\n",
-                scene_id,
-                static_cast<unsigned int>(effect),
-                static_cast<unsigned int>(effect_speed_ms_),
-                show_title ? 1U : 0U,
-                show_symbol ? 1U : 0U,
-                scenario_id,
-                audio_playing ? 1U : 0U,
-                static_cast<unsigned int>(timeline_keyframe_count_),
-                static_cast<unsigned int>(transition),
-                static_cast<unsigned int>(transition_ms));
+  UI_LOGI("scene=%s effect=%u speed=%u title=%u symbol=%u scenario=%s audio=%u timeline=%u transition=%u:%u",
+          scene_id,
+          static_cast<unsigned int>(effect),
+          static_cast<unsigned int>(effect_speed_ms_),
+          show_title ? 1U : 0U,
+          show_symbol ? 1U : 0U,
+          scenario_id,
+          audio_playing ? 1U : 0U,
+          static_cast<unsigned int>(timeline_keyframe_count_),
+          static_cast<unsigned int>(transition),
+          static_cast<unsigned int>(transition_ms));
   if (win_etape_intro_scene) {
     startIntroIfNeeded(scene_changed);
   }
 }
 
 void UiManager::handleButton(uint8_t key, bool long_press) {
-  if (intro_active_) {
-    if (intro_state_ == IntroState::PHASE_A_CRACKTRO || intro_state_ == IntroState::PHASE_B_TRANSITION) {
-      requestIntroSkip();
-    } else if (long_press || key == 5U) {
-      intro_debug_overlay_enabled_ = !intro_debug_overlay_enabled_;
-      Serial.printf("[UI][WIN_ETAPE] debug_overlay=%u\n", intro_debug_overlay_enabled_ ? 1U : 0U);
-    }
-  }
   UiAction action;
   action.source = long_press ? UiActionSource::kKeyLong : UiActionSource::kKeyShort;
   action.key = key;
@@ -4831,18 +5781,9 @@ void UiManager::handleButton(uint8_t key, bool long_press) {
 }
 
 void UiManager::handleTouch(int16_t x, int16_t y, bool touched) {
-  const bool was_touched = touch_pressed_;
   touch_x_ = x;
   touch_y_ = y;
   touch_pressed_ = touched;
-  if (touched && intro_active_) {
-    if (intro_state_ == IntroState::PHASE_A_CRACKTRO || intro_state_ == IntroState::PHASE_B_TRANSITION) {
-      requestIntroSkip();
-    } else if (!was_touched) {
-      intro_debug_overlay_enabled_ = !intro_debug_overlay_enabled_;
-      Serial.printf("[UI][WIN_ETAPE] debug_overlay=%u\n", intro_debug_overlay_enabled_ ? 1U : 0U);
-    }
-  }
 }
 
 void UiManager::createWidgets() {
@@ -5043,6 +5984,42 @@ void UiManager::updatePageLine() {
                         snapshot.offset);
 }
 
+bool UiManager::isWinEtapeSceneId(const char* scene_id) const {
+  if (scene_id == nullptr || scene_id[0] == '\0') {
+    return false;
+  }
+  return std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0;
+}
+
+bool UiManager::isDirectFxSceneId(const char* scene_id) const {
+  if (scene_id == nullptr || scene_id[0] == '\0') {
+    return false;
+  }
+  return std::strcmp(scene_id, "SCENE_WINNER") == 0 ||
+         std::strcmp(scene_id, "SCENE_FIREWORKS") == 0;
+}
+
+void UiManager::cleanupSceneTransitionAssets(const char* from_scene_id, const char* to_scene_id) {
+  const bool from_win_etape = isWinEtapeSceneId(from_scene_id);
+  const bool to_win_etape = isWinEtapeSceneId(to_scene_id);
+  const bool from_direct_fx = isDirectFxSceneId(from_scene_id);
+  const bool to_direct_fx = isDirectFxSceneId(to_scene_id);
+  UI_LOGI("cleanup scene assets transition %s -> %s", from_scene_id, to_scene_id);
+  if (from_win_etape || to_win_etape || from_direct_fx || to_direct_fx) {
+    if (intro_active_) {
+      stopIntroAndCleanup();
+    }
+    direct_fx_scene_active_ = false;
+    fx_engine_.setEnabled(false);
+    fx_engine_.reset();
+    return;
+  }
+
+  direct_fx_scene_active_ = false;
+  fx_engine_.setEnabled(false);
+  fx_engine_.reset();
+}
+
 void UiManager::stopSceneAnimations() {
   if (scene_root_ == nullptr) {
     return;
@@ -5128,6 +6105,7 @@ void UiManager::stopSceneAnimations() {
     lv_obj_align(scene_title_label_, LV_ALIGN_TOP_MID, 0, 10);
     lv_obj_set_style_translate_x(scene_title_label_, 0, LV_PART_MAIN);
     lv_obj_set_style_translate_y(scene_title_label_, 0, LV_PART_MAIN);
+    lv_obj_set_style_transform_angle(scene_title_label_, 0, LV_PART_MAIN);
   }
   if (scene_symbol_label_ != nullptr) {
     lv_anim_del(scene_symbol_label_, nullptr);
@@ -5135,6 +6113,7 @@ void UiManager::stopSceneAnimations() {
     lv_obj_align(scene_symbol_label_, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_translate_x(scene_symbol_label_, 0, LV_PART_MAIN);
     lv_obj_set_style_translate_y(scene_symbol_label_, 0, LV_PART_MAIN);
+    lv_obj_set_style_transform_angle(scene_symbol_label_, 0, LV_PART_MAIN);
   }
   if (scene_subtitle_label_ != nullptr) {
     lv_anim_del(scene_subtitle_label_, nullptr);
@@ -5147,6 +6126,7 @@ void UiManager::stopSceneAnimations() {
     lv_obj_align(scene_subtitle_label_, LV_ALIGN_BOTTOM_MID, 0, -20);
     lv_obj_set_style_translate_x(scene_subtitle_label_, 0, LV_PART_MAIN);
     lv_obj_set_style_translate_y(scene_subtitle_label_, 0, LV_PART_MAIN);
+    lv_obj_set_style_transform_angle(scene_subtitle_label_, 0, LV_PART_MAIN);
   }
 
   for (lv_obj_t* particle : scene_particles_) {
@@ -5310,18 +6290,20 @@ void UiManager::startWinEtapeCracktroPhase() {
     lv_obj_set_style_text_font(scene_title_label_, UiFonts::fontBodyM(), LV_PART_MAIN);
     lv_obj_set_style_text_letter_space(scene_title_label_, 2, LV_PART_MAIN);
     lv_obj_align(scene_title_label_, LV_ALIGN_TOP_MID, 0, 24);
-    lv_obj_set_style_translate_y(scene_title_label_, -66, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(scene_title_label_, kUseWinEtapeSimplifiedEffects ? 0 : -66, LV_PART_MAIN);
     lv_obj_clear_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
 
-    lv_anim_t title_drop;
-    lv_anim_init(&title_drop);
-    lv_anim_set_var(&title_drop, scene_title_label_);
-    lv_anim_set_exec_cb(&title_drop, animSetStyleTranslateY);
-    lv_anim_set_values(&title_drop, -66, 0);
-    lv_anim_set_time(&title_drop, resolveAnimMs(920U));
-    lv_anim_set_delay(&title_drop, 120U);
-    lv_anim_set_path_cb(&title_drop, lv_anim_path_overshoot);
-    lv_anim_start(&title_drop);
+    if (!kUseWinEtapeSimplifiedEffects) {
+      lv_anim_t title_drop;
+      lv_anim_init(&title_drop);
+      lv_anim_set_var(&title_drop, scene_title_label_);
+      lv_anim_set_exec_cb(&title_drop, animSetStyleTranslateY);
+      lv_anim_set_values(&title_drop, -66, 0);
+      lv_anim_set_time(&title_drop, resolveAnimMs(920U));
+      lv_anim_set_delay(&title_drop, 120U);
+      lv_anim_set_path_cb(&title_drop, lv_anim_path_overshoot);
+      lv_anim_start(&title_drop);
+    }
   }
 
   if (scene_subtitle_label_ != nullptr) {
@@ -5488,7 +6470,7 @@ void UiManager::startWinEtapeCleanPhase() {
 
   if (scene_title_label_ != nullptr) {
     lv_anim_del(scene_title_label_, nullptr);
-    lv_label_set_text(scene_title_label_, "");
+    lv_label_set_text(scene_title_label_, kUseWinEtapeSimplifiedEffects ? kWinEtapeDemoTitle : "");
     lv_obj_set_style_text_font(scene_title_label_, UiFonts::fontBodyM(), LV_PART_MAIN);
     lv_obj_set_style_text_letter_space(scene_title_label_, 1, LV_PART_MAIN);
     lv_obj_align(scene_title_label_, LV_ALIGN_TOP_MID, 0, 24);
@@ -5496,14 +6478,16 @@ void UiManager::startWinEtapeCleanPhase() {
     lv_obj_set_style_translate_y(scene_title_label_, 0, LV_PART_MAIN);
     lv_obj_clear_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
 
-    lv_anim_t title_reveal;
-    lv_anim_init(&title_reveal);
-    lv_anim_set_var(&title_reveal, scene_title_label_);
-    lv_anim_set_exec_cb(&title_reveal, animSetWinTitleReveal);
-    lv_anim_set_values(&title_reveal, 0, static_cast<int32_t>(std::strlen(kWinEtapeDemoTitle)));
-    lv_anim_set_time(&title_reveal, resolveAnimMs(1700U));
-    lv_anim_set_delay(&title_reveal, 80U);
-    lv_anim_start(&title_reveal);
+    if (!kUseWinEtapeSimplifiedEffects) {
+      lv_anim_t title_reveal;
+      lv_anim_init(&title_reveal);
+      lv_anim_set_var(&title_reveal, scene_title_label_);
+      lv_anim_set_exec_cb(&title_reveal, animSetWinTitleReveal);
+      lv_anim_set_values(&title_reveal, 0, static_cast<int32_t>(std::strlen(kWinEtapeDemoTitle)));
+      lv_anim_set_time(&title_reveal, resolveAnimMs(1700U));
+      lv_anim_set_delay(&title_reveal, 80U);
+      lv_anim_start(&title_reveal);
+    }
   }
 
   if (scene_subtitle_label_ != nullptr) {
@@ -5512,17 +6496,20 @@ void UiManager::startWinEtapeCleanPhase() {
     lv_obj_set_style_text_font(scene_subtitle_label_, UiFonts::fontBodyS(), LV_PART_MAIN);
     lv_obj_set_style_text_letter_space(scene_subtitle_label_, 0, LV_PART_MAIN);
     lv_obj_align(scene_subtitle_label_, LV_ALIGN_BOTTOM_MID, 0, -14);
+    lv_obj_set_style_translate_y(scene_subtitle_label_, 0, LV_PART_MAIN);
     lv_obj_clear_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
     applySubtitleScroll(SceneScrollMode::kMarquee, resolveAnimMs(7600U), 500U, true);
 
-    lv_anim_t subtitle_sine;
-    lv_anim_init(&subtitle_sine);
-    lv_anim_set_var(&subtitle_sine, scene_subtitle_label_);
-    lv_anim_set_exec_cb(&subtitle_sine, animSetSineTranslateY);
-    lv_anim_set_values(&subtitle_sine, 0, 4095);
-    lv_anim_set_time(&subtitle_sine, resolveAnimMs(2600U));
-    lv_anim_set_repeat_count(&subtitle_sine, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_start(&subtitle_sine);
+    if (!kUseWinEtapeSimplifiedEffects) {
+      lv_anim_t subtitle_sine;
+      lv_anim_init(&subtitle_sine);
+      lv_anim_set_var(&subtitle_sine, scene_subtitle_label_);
+      lv_anim_set_exec_cb(&subtitle_sine, animSetSineTranslateY);
+      lv_anim_set_values(&subtitle_sine, 0, 4095);
+      lv_anim_set_time(&subtitle_sine, resolveAnimMs(2600U));
+      lv_anim_set_repeat_count(&subtitle_sine, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&subtitle_sine);
+    }
   }
 }
 
@@ -5734,29 +6721,33 @@ void UiManager::applySceneEffect(SceneEffect effect) {
 
   if (effect == SceneEffect::kGlitch) {
     const uint16_t glitch_ms = resolveAnimMs(88);
+    const bool rotate_direction_forward =
+        ((mixNoise(static_cast<uint32_t>(lv_tick_get()), reinterpret_cast<uintptr_t>(scene_root_) ^ 0xA5B4C3D2UL) & 1U) != 0U);
 
-    int32_t root_low_opa = static_cast<int32_t>(LV_OPA_COVER) - static_cast<int32_t>(demo_strobe_level_) * 4;
-    if (root_low_opa < 8) {
-      root_low_opa = 8;
-    }
-    if (root_low_opa > LV_OPA_COVER) {
-      root_low_opa = LV_OPA_COVER;
-    }
-    lv_anim_set_var(&anim, scene_root_);
-    lv_anim_set_exec_cb(&anim, animSetOpa);
-    lv_anim_set_values(&anim, root_low_opa, LV_OPA_COVER);
-    lv_anim_set_time(&anim, glitch_ms);
-    lv_anim_set_playback_time(&anim, glitch_ms);
-    lv_anim_start(&anim);
+    lv_obj_set_style_opa(scene_root_, LV_OPA_COVER, LV_PART_MAIN);
 
-    lv_anim_t root_noise;
-    lv_anim_init(&root_noise);
-    lv_anim_set_var(&root_noise, scene_root_);
-    lv_anim_set_exec_cb(&root_noise, animSetRandomOpa);
-    lv_anim_set_values(&root_noise, 0, 4095);
-    lv_anim_set_time(&root_noise, resolveAnimMs(56));
-    lv_anim_set_repeat_count(&root_noise, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_start(&root_noise);
+    if (scene_core_ != nullptr) {
+      lv_anim_t core_rot;
+      lv_anim_init(&core_rot);
+      lv_anim_set_var(&core_rot, scene_core_);
+      lv_anim_set_exec_cb(&core_rot, animSetStyleRotate);
+      lv_anim_set_values(&core_rot, rotate_direction_forward ? -3600 : 3600, rotate_direction_forward ? 3600 : -3600);
+      lv_anim_set_time(&core_rot, glitch_ms);
+      lv_anim_set_playback_time(&core_rot, glitch_ms);
+      lv_anim_set_repeat_count(&core_rot, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&core_rot);
+    }
+    if (scene_fx_bar_ != nullptr) {
+      lv_anim_t bar_rot;
+      lv_anim_init(&bar_rot);
+      lv_anim_set_var(&bar_rot, scene_fx_bar_);
+      lv_anim_set_exec_cb(&bar_rot, animSetStyleRotate);
+      lv_anim_set_values(&bar_rot, rotate_direction_forward ? -900 : 900, rotate_direction_forward ? 900 : -900);
+      lv_anim_set_time(&bar_rot, static_cast<uint16_t>(glitch_ms + 120U));
+      lv_anim_set_playback_time(&bar_rot, static_cast<uint16_t>(glitch_ms + 120U));
+      lv_anim_set_repeat_count(&bar_rot, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_start(&bar_rot);
+    }
 
     if (scene_core_ != nullptr) {
       lv_anim_t core_x;
@@ -5932,7 +6923,7 @@ void UiManager::applySceneEffect(SceneEffect effect) {
       lv_anim_start(&symbol_y);
     }
 
-    if (scene_subtitle_label_ != nullptr) {
+    if (!kUseWinEtapeSimplifiedEffects && scene_subtitle_label_ != nullptr) {
       lv_anim_t subtitle_jitter_x;
       lv_anim_init(&subtitle_jitter_x);
       lv_anim_set_var(&subtitle_jitter_x, scene_subtitle_label_);
@@ -5941,15 +6932,6 @@ void UiManager::applySceneEffect(SceneEffect effect) {
       lv_anim_set_time(&subtitle_jitter_x, resolveAnimMs(66));
       lv_anim_set_repeat_count(&subtitle_jitter_x, LV_ANIM_REPEAT_INFINITE);
       lv_anim_start(&subtitle_jitter_x);
-
-      lv_anim_t subtitle_opa;
-      lv_anim_init(&subtitle_opa);
-      lv_anim_set_var(&subtitle_opa, scene_subtitle_label_);
-      lv_anim_set_exec_cb(&subtitle_opa, animSetRandomOpa);
-      lv_anim_set_values(&subtitle_opa, 0, 4095);
-      lv_anim_set_time(&subtitle_opa, resolveAnimMs(58));
-      lv_anim_set_repeat_count(&subtitle_opa, LV_ANIM_REPEAT_INFINITE);
-      lv_anim_start(&subtitle_opa);
     }
     return;
   }
@@ -6215,7 +7197,7 @@ void UiManager::applySceneEffect(SceneEffect effect) {
       lv_anim_set_repeat_count(&symbol_celebrate, LV_ANIM_REPEAT_INFINITE);
       lv_anim_start(&symbol_celebrate);
     }
-    if (fireworks_mode && scene_title_label_ != nullptr) {
+    if (!kUseWinEtapeSimplifiedEffects && fireworks_mode && scene_title_label_ != nullptr) {
       lv_anim_t title_celebrate;
       lv_anim_init(&title_celebrate);
       lv_anim_set_var(&title_celebrate, scene_title_label_);
@@ -6227,7 +7209,7 @@ void UiManager::applySceneEffect(SceneEffect effect) {
       lv_anim_set_repeat_delay(&title_celebrate, firework_pause_ms);
       lv_anim_start(&title_celebrate);
     }
-    if (fireworks_mode && scene_subtitle_label_ != nullptr) {
+    if (!kUseWinEtapeSimplifiedEffects && fireworks_mode && scene_subtitle_label_ != nullptr) {
       lv_anim_t subtitle_celebrate;
       lv_anim_init(&subtitle_celebrate);
       lv_anim_set_var(&subtitle_celebrate, scene_subtitle_label_);
@@ -6456,6 +7438,9 @@ void UiManager::applySubtitleScroll(SceneScrollMode mode, uint16_t speed_ms, uin
   if (scene_subtitle_label_ == nullptr) {
     return;
   }
+  if (kUseWinEtapeSimplifiedEffects) {
+    mode = SceneScrollMode::kNone;
+  }
   lv_anim_del(scene_subtitle_label_, nullptr);
 
   int16_t label_width = activeDisplayWidth() - 32;
@@ -6665,6 +7650,15 @@ void UiManager::animSetStyleTranslateY(void* obj, int32_t value) {
     return;
   }
   lv_obj_set_style_translate_y(static_cast<lv_obj_t*>(obj), static_cast<int16_t>(value), LV_PART_MAIN);
+}
+
+void UiManager::animSetStyleRotate(void* obj, int32_t value) {
+  if (obj == nullptr) {
+    return;
+  }
+  lv_obj_t* target = static_cast<lv_obj_t*>(obj);
+  const int16_t angle = static_cast<int16_t>(value);
+  lv_obj_set_style_transform_angle(target, angle, LV_PART_MAIN);
 }
 
 void UiManager::animSetOpa(void* obj, int32_t value) {
@@ -6889,6 +7883,19 @@ void UiManager::displayFlushCb(lv_disp_drv_t* disp, const lv_area_t* area, lv_co
 
   UiManager* self = g_instance;
   drivers::display::DisplayHal& display = drivers::display::displayHal();
+  if (self->isDisplayOutputBusy()) {
+    self->pollAsyncFlush();
+    if (self->isDisplayOutputBusy()) {
+      self->graphics_stats_.flush_overflow_count += 1U;
+      self->graphics_stats_.flush_blocked_count += 1U;
+      self->pending_lvgl_flush_request_ = true;
+      if (!self->pending_full_repaint_request_) {
+        self->pending_full_repaint_request_ = true;
+      }
+      lv_disp_flush_ready(disp);
+      return;
+    }
+  }
   const uint32_t width = static_cast<uint32_t>(area->x2 - area->x1 + 1);
   const uint32_t height = static_cast<uint32_t>(area->y2 - area->y1 + 1);
   const uint32_t pixel_count = width * height;
@@ -6914,23 +7921,54 @@ void UiManager::displayFlushCb(lv_disp_drv_t* disp, const lv_area_t* area, lv_co
   }
 
   if (async_dma) {
-    display.startWrite();
+    if (!display.startWrite()) {
+      self->graphics_stats_.flush_overflow_count += 1U;
+      self->graphics_stats_.flush_blocked_count += 1U;
+      self->pending_lvgl_flush_request_ = true;
+      self->pending_full_repaint_request_ = true;
+      lv_disp_flush_ready(disp);
+      return;
+    }
     display.pushImageDma(area->x1,
                          area->y1,
                          static_cast<int16_t>(width),
                          static_cast<int16_t>(height),
                          tx_pixels);
-    self->flush_ctx_.pending = true;
-    self->flush_ctx_.using_dma = true;
-    self->flush_ctx_.converted = (needs_convert || needs_copy_to_trans);
-    self->flush_ctx_.disp = disp;
-    self->flush_ctx_.area = *area;
-    self->flush_ctx_.row_count = height;
-    self->flush_ctx_.started_ms = started_us;
+    const bool dma_done = display.waitDmaComplete(kLvglFlushDmaWaitUs);
+    display.endWrite();
+
+    const uint32_t elapsed_us = micros() - started_us;
+    self->graphics_stats_.flush_count += 1U;
+    self->graphics_stats_.dma_flush_count += 1U;
+    self->graphics_stats_.flush_time_total_us += elapsed_us;
+    if (elapsed_us > self->graphics_stats_.flush_time_max_us) {
+      self->graphics_stats_.flush_time_max_us = elapsed_us;
+    }
+    if (!dma_done && self->async_flush_enabled_) {
+      self->graphics_stats_.flush_stall_count += 1U;
+      self->graphics_stats_.flush_recover_count += 1U;
+      self->graphics_stats_.async_fallback_count += 1U;
+      self->async_flush_enabled_ = false;
+      self->buffer_cfg_.dma_enabled = false;
+      self->async_fallback_until_ms_ = millis() + kAsyncFallbackRecoverMs;
+      self->pending_lvgl_flush_request_ = true;
+      self->pending_full_repaint_request_ = true;
+    }
+    perfMonitor().noteUiFlush(true, elapsed_us);
+    self->flush_pending_since_ms_ = 0U;
+    self->flush_last_progress_ms_ = millis();
+    lv_disp_flush_ready(disp);
     return;
   }
 
-  display.startWrite();
+  if (!display.startWrite()) {
+    self->graphics_stats_.flush_overflow_count += 1U;
+    self->graphics_stats_.flush_blocked_count += 1U;
+    self->pending_lvgl_flush_request_ = true;
+    self->pending_full_repaint_request_ = true;
+    lv_disp_flush_ready(disp);
+    return;
+  }
   display.setAddrWindow(area->x1, area->y1, static_cast<int16_t>(width), static_cast<int16_t>(height));
 
   if (needs_convert && !tx_pixels_prepared) {
@@ -6974,6 +8012,8 @@ void UiManager::displayFlushCb(lv_disp_drv_t* disp, const lv_area_t* area, lv_co
     self->graphics_stats_.flush_time_max_us = elapsed_us;
   }
   perfMonitor().noteUiFlush(false, elapsed_us);
+  self->flush_pending_since_ms_ = 0U;
+  self->flush_last_progress_ms_ = millis();
   lv_disp_flush_ready(disp);
 }
 

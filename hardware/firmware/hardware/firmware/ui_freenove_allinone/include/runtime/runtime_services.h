@@ -15,6 +15,10 @@
 #include "touch_manager.h"
 #include "ui_manager.h"
 
+namespace runtime::resource {
+class ResourceCoordinator;
+}
+
 struct RuntimeServices;
 
 using RuntimeTickHook = void (*)(uint32_t now_ms, RuntimeServices* services);
@@ -33,6 +37,7 @@ struct RuntimeServices {
   HardwareManager* hardware = nullptr;
   CameraManager* camera = nullptr;
   MediaManager* media = nullptr;
+  runtime::resource::ResourceCoordinator* resource_coordinator = nullptr;
 
   RuntimeNetworkConfig* network_cfg = nullptr;
   RuntimeHardwareConfig* hardware_cfg = nullptr;

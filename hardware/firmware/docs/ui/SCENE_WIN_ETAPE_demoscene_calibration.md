@@ -1,5 +1,35 @@
 # SCENE_WIN_ETAPE demoscene calibration (A/B/C + C loop)
 
+## FX runtime lock (current)
+- Render mode: `FX_ONLY_V9` on `SCENE_WIN_ETAPE` (legacy intro widgets hidden, LGFX FX + LVGL overlay kept).
+- Timeline: `A=30000ms`, `B=15000ms`, `C=20000ms`, then infinite `C` loop.
+- Presets by phase:
+  - `A -> demo`
+  - `B -> winner`
+  - `C/C_LOOP -> boingball`
+- Modes 3D by phase (default):
+  - `A -> starfield3d`
+  - `B -> dotsphere3d`
+  - `C/C_LOOP -> raycorridor`
+- V9 timeline mapping:
+  - `demo -> /ui/fx/timelines/demo_3d.json` (fallback `/ui/fx/timelines/demo_90s.json`)
+  - `winner -> /ui/fx/timelines/winner.json`
+  - `fireworks -> /ui/fx/timelines/fireworks.json`
+  - `boingball -> /ui/fx/timelines/boingball.json`
+- Scroller:
+  - font: `italic` by default (`basic|bold|outline|italic` supported)
+  - text: phase-specific via `FX_SCROLL_TEXT_A/B/C`
+  - BPM sync: `FX_BPM`, default `125` (`60..220`)
+- Override schema (new keys only): `A_MS`, `B_MS`, `C_MS`, `FX_PRESET_*`, `FX_MODE_*`, `FX_SCROLL_TEXT_*`, `FX_SCROLL_FONT`, `FX_BPM`.
+- Compatibility break: legacy keys `FX_3D`, `FX_3D_QUALITY`, `FONT_MODE` are intentionally ignored.
+- Memory/perf constraints:
+  - no per-frame allocations in FX render loop
+  - boing shadow darken path: ASM S3 by default (`UI_BOING_SHADOW_ASM=1`), C fallback if unavailable
+  - boot evidence log: `boing_shadow_path=asm|c`
+  - fast blit path: 2x scaler (`UI_FX_BLIT_FAST_2X=1`) when source/display ratio is exact
+  - LGFX line-buffer blit path preserved; `UI_GFX_STATUS` must keep `fx_fps > 0` and no panic/reboot markers
+  - scenes `SCENE_WINNER` and `SCENE_FIREWORKS` exposed in story registry/data
+
 ## References consulted
 
 ### Query set executed
@@ -105,9 +135,11 @@
 | LVGL display/canvas refs | fixed tick, dt clamp, object caps | All runtime skills |
 
 ## Final firmware behavior lock
-- Sequence: `A(30000) -> B(15000: B1 crash + B2 interlude) -> C(20000) -> C loop`.
-- Skip behavior: input in A/B jumps to C clean start.
-- C scroller: horizontal ping-pong + sine, bounded to center half-height band (`>=50%` screen height).
-- Cleanup: intro timer paused on exit, all intro objects hidden/reset.
-- Autorun gate: `UI_DEMO_AUTORUN_WIN_ETAPE=1` forces scene playback at boot.
+- Sequence: `A(30000) -> B(15000) -> C(20000) -> C loop`.
+- Phase preset lock: `A=demo`, `B=winner`, `C=boingball`.
+- Phase mode lock: `A=starfield3d`, `B=dotsphere3d`, `C=raycorridor`.
+- Override lock: `A_MS/B_MS/C_MS + FX_PRESET_* + FX_MODE_* + FX_SCROLL_* + FX_BPM` uniquement.
+- Inputs disabled for sequence control (A/B skip + overlay toggle removed).
+- Autorun test loop: full A->B->C chain repeats every 2 minutes (`UI_DEMO_AUTORUN_WIN_ETAPE` context).
+- Cleanup: intro timer paused on exit, all intro legacy objects hidden/reset.
 - Runtime telemetry every 5s: `phase`, `t`, `obj`, `stars`, `particles`, `fx_fps`, `heap_internal`, `heap_psram`, `largest_dma`.

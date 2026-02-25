@@ -111,6 +111,7 @@ bool HardwareManager::begin() {
 #endif
 
   snapshot_.mic_ready = beginMic();
+  snapshot_.mic_ready = snapshot_.mic_ready && mic_enabled_runtime_;
   if (snapshot_.mic_ready) {
     Serial.printf("[HW] mic I2S ready sck=%d ws=%d din=%d\n", FREENOVE_I2S_IN_SCK, FREENOVE_I2S_IN_WS, FREENOVE_I2S_IN_DIN);
   } else {
@@ -177,6 +178,30 @@ const HardwareManager::Snapshot& HardwareManager::snapshotRef() const {
   return snapshot_;
 }
 
+void HardwareManager::setMicRuntimeEnabled(bool enabled) {
+  if (mic_enabled_runtime_ == enabled) {
+    return;
+  }
+  mic_enabled_runtime_ = enabled;
+  snapshot_.mic_ready = mic_enabled_runtime_ && mic_driver_ready_;
+  if (!mic_enabled_runtime_) {
+    snapshot_.mic_level_percent = 0U;
+    snapshot_.mic_peak = 0U;
+    snapshot_.mic_freq_hz = 0U;
+    snapshot_.mic_pitch_cents = 0;
+    snapshot_.mic_pitch_confidence = 0U;
+    snapshot_.mic_waveform_count = 0U;
+    snapshot_.mic_waveform_head = 0U;
+    std::memset(snapshot_.mic_waveform, 0, sizeof(snapshot_.mic_waveform));
+  } else {
+    next_mic_ms_ = 0U;
+  }
+}
+
+bool HardwareManager::micRuntimeEnabled() const {
+  return mic_enabled_runtime_;
+}
+
 bool HardwareManager::beginMic() {
   i2s_config_t config = {};
   config.mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_RX);
@@ -215,6 +240,9 @@ bool HardwareManager::beginMic() {
 }
 
 void HardwareManager::updateMic(uint32_t now_ms) {
+  if (!mic_enabled_runtime_) {
+    return;
+  }
   if (!snapshot_.mic_ready) {
     return;
   }

@@ -1,23 +1,21 @@
-# SCENE_WIN_ETAPE runtime overrides (TXT)
-# If absent, firmware falls back to hardcoded defaults.
-
-LOGO_TEXT=Professeur ZACUS
-# Center scrollers are auto-padded by runtime (14 spaces on each side).
-MID_A_SCROLL=PROUDLY PRESENTS ... ... NO CLOUD • PURE SIGNAL ...
-BOT_A_SCROLL=... Le Professeur SAILLANT Franck HOTAMP vous salue bien ...
-C_TITLE=BRAVO Brigade Z
-C_SCROLL=Vous n'avez plus qu'a valider sur le telephone qui sonne
+# SCENE_WIN_ETAPE FX v9 overrides
+# New schema only (legacy FX_3D/FX_3D_QUALITY/FONT_MODE keys are ignored).
 
 A_MS=30000
 B_MS=15000
 C_MS=20000
-B1_MS=4000
 
-SPEED_MID_A=216
-SPEED_BOT_A=108
-SPEED_C=72
+FX_PRESET_A=demo
+FX_PRESET_B=winner
+FX_PRESET_C=boingball
 
-STARS=auto
-FX_3D=wirecube
-FX_3D_QUALITY=auto
-FONT_MODE=orbitron
+FX_MODE_A=starfield3d
+FX_MODE_B=dotsphere3d
+FX_MODE_C=raycorridor
+
+FX_SCROLL_TEXT_A=DEMO MODE - BRAVO BRIGADE Z - LE MYSTERE DU PROFESSEUR ZACUS -
+FX_SCROLL_TEXT_B=WINNER MODE - STAGE B - KEEP THE BEAT -
+FX_SCROLL_TEXT_C=BOINGBALL MODE - SCENE WIN ETAPE -
+
+FX_SCROLL_FONT=italic
+FX_BPM=125

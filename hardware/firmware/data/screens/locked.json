@@ -6,7 +6,7 @@
   "effect": "blink",
   "visual": {
     "show_title": true,
-    "show_symbol": true,
+    "show_symbol": false,
     "effect_speed_ms": 90
   },
   "theme": {

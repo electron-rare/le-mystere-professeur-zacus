@@ -64,6 +64,8 @@ class HardwareManager {
   void clearManualLed();
   Snapshot snapshot() const;
   const Snapshot& snapshotRef() const;
+  void setMicRuntimeEnabled(bool enabled);
+  bool micRuntimeEnabled() const;
 
  private:
   bool beginMic();
@@ -137,6 +139,7 @@ class HardwareManager {
   uint16_t pitch_freq_window_[kPitchSmoothingSamples] = {0U};
   int16_t pitch_cents_window_[kPitchSmoothingSamples] = {0};
   uint8_t pitch_conf_window_[kPitchSmoothingSamples] = {0U};
+  bool mic_enabled_runtime_ = true;
 
   // Keep DSP buffers off the loop task stack to avoid canary overflows.
   int32_t mic_raw_samples_[kMicReadSamples] = {};

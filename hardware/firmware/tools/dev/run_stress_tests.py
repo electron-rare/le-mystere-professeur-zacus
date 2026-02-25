@@ -405,25 +405,44 @@ def run_scenario_legacy_sc(
             log_line(log_fp, f"WARN scenario {scenario} load failed: {info}")
         return False
 
-    for cmd in ("UNLOCK", "NEXT", "NEXT", "NEXT"):
-        send_cmd(ser, cmd)
-        ok, info, critical = scan_for_patterns(
-            ser,
-            2.0,
-            log_fp,
-            ring,
-            [
-                re.compile(rf"ACK {cmd}$", re.IGNORECASE),
-                re.compile(r"step=STEP_(DONE|WIN)", re.IGNORECASE),
-                re.compile(r"STEP_(DONE|WIN)", re.IGNORECASE),
-            ],
-            require_ui_link,
-        )
-        if not ok and critical:
-            log_line(log_fp, f"CRITICAL {info}")
+    # Legacy Freenove story flow expects SC_EVENT serial BTN_NEXT transitions.
+    # Keep NEXT as fallback for backward compatibility.
+    drive_steps = [
+        ("UNLOCK", "UNLOCK"),
+        ("SC_EVENT serial BTN_NEXT", "NEXT"),
+        ("SC_EVENT serial BTN_NEXT", "NEXT"),
+        ("SC_EVENT serial BTN_NEXT", "NEXT"),
+    ]
+    for primary_cmd, fallback_cmd in drive_steps:
+        progressed = False
+        for cmd in (primary_cmd, fallback_cmd):
+            send_cmd(ser, cmd)
+            ok, info, critical = scan_for_patterns(
+                ser,
+                2.4,
+                log_fp,
+                ring,
+                [
+                    re.compile(r"ACK\s+SC_EVENT\s+ok=1", re.IGNORECASE),
+                    re.compile(r"ACK\s+UNLOCK(\s+ok=1)?", re.IGNORECASE),
+                    re.compile(r"ACK\s+NEXT(\s+ok=1)?", re.IGNORECASE),
+                    re.compile(r"\[SCENARIO\]\s+transition", re.IGNORECASE),
+                    re.compile(r"step=STEP_(DONE|WIN)", re.IGNORECASE),
+                    re.compile(r"STEP_(DONE|WIN)", re.IGNORECASE),
+                ],
+                require_ui_link,
+            )
+            if not ok and critical:
+                log_line(log_fp, f"CRITICAL {info}")
+                return False
+            if line_has_done(info):
+                return True
+            if ok:
+                progressed = True
+                break
+        if not progressed:
+            log_line(log_fp, f"WARN scenario {scenario} no progression after `{primary_cmd}`")
             return False
-        if line_has_done(info):
-            return True
 
     send_cmd(ser, "STATUS")
     ok, info, critical = scan_for_patterns(

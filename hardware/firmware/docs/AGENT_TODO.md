@@ -1,3 +1,27 @@
+## [2026-02-25] USB modem - correction scripts smoke story + rerun
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260225_215404_wip.patch`
+  - `/tmp/zacus_checkpoint/20260225_215404_status.txt`
+- Port cible:
+  - `/dev/cu.usbmodem5AB90753301` (ESP32)
+- Correctifs:
+  - `tools/dev/verify_story_default_flow.py`
+    - flow aligne scenario runtime `DEFAULT` (initial `SCENE_U_SON_PROTO`),
+    - assertions passees de `screen` seul a `step+screen`,
+    - sequence events mise a jour: `button ANY` -> `serial BTN_NEXT` -> `serial FORCE_DONE` -> `serial BTN_NEXT` -> `button ANY`.
+  - `lib/zacus_story_portable/test_story_4scenarios.py`
+    - migration commandes legacy JSON (`story.load/status`, `STORY_FORCE_STEP`) vers commandes runtime actuelles (`SC_LOAD`, `STATUS`, `SC_EVENT`),
+    - verification `ACK SC_LOAD`,
+    - verification status parse (`scenario/step/screen`) + check scenario courant.
+- Gates/evidence:
+  - `python3 -m py_compile tools/dev/verify_story_default_flow.py lib/zacus_story_portable/test_story_4scenarios.py` ✅
+  - `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 8 --wait-port 10` ✅
+  - `python3 tools/dev/verify_story_default_flow.py --port /dev/cu.usbmodem5AB90753301 --baud 115200` ✅
+  - `python3 tools/dev/test_story_4scenarios.py --port /dev/cu.usbmodem5AB90753301 --baud 115200` ✅
+    - evidence: `artifacts/rc_live/test_4scenarios_20260225-215755.log`
+  - `./tools/dev/story-gen validate` ✅
+
 ## [2026-02-25] Audit + correction/optimisation Freenove (lot refactor+stabilite+perf partiels)
 
 - Skills chain active (ordre):

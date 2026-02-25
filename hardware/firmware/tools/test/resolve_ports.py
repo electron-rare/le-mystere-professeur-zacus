@@ -225,6 +225,17 @@ def resolve_ports(args):
         details.update(manual_details)
         notes = classify_notes + manual_notes
 
+        # Single-board Freenove setups often expose one usbmodem endpoint that must be treated as ESP32.
+        if "esp32" in required and not found.get("esp32"):
+            esp8266_port = found.get("esp8266", "")
+            if esp8266_port and len(snapshot) == 1:
+                found["esp32"] = esp8266_port
+                details["esp32"] = {
+                    "location": details.get("esp8266", {}).get("location", ""),
+                    "reason": "single-port-remap:esp8266->esp32",
+                }
+                notes.append(f"single-port remap applied for esp32: {esp8266_port}")
+
         best_found = found
         best_details = details
 

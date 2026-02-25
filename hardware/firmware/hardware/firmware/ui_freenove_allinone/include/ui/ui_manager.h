@@ -381,6 +381,9 @@ class UiManager {
   void renderMicrophoneWaveform();
   uint16_t resolveAnimMs(uint16_t fallback_ms) const;
   void applyThemeColors(uint32_t bg_rgb, uint32_t accent_rgb, uint32_t text_rgb);
+  static uint32_t hashScenePayload(const char* payload);
+  bool shouldApplySceneStaticState(const char* scene_id, const char* payload_json, bool scene_changed) const;
+  void applySceneDynamicState(const String& subtitle, bool show_subtitle, bool audio_playing, uint32_t text_rgb);
   void resetSceneTimeline();
   void onTimelineTick(uint16_t elapsed_ms);
   bool isWinEtapeSceneId(const char* scene_id) const;
@@ -504,6 +507,8 @@ class UiManager {
   int8_t timeline_effect_index_ = -1;
   uint8_t particleIndexForObj(const lv_obj_t* target) const;
   char last_scene_id_[40] = {0};
+  uint32_t last_payload_crc_ = 0U;
+  bool last_audio_playing_ = false;
   uint8_t demo_particle_count_ = 4U;
   uint8_t demo_strobe_level_ = 65U;
   bool win_etape_fireworks_mode_ = false;

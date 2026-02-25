@@ -26,6 +26,7 @@
 #include "runtime/perf/perf_monitor.h"
 #include "runtime/provisioning/credential_store.h"
 #include "runtime/resource/resource_coordinator.h"
+#include "runtime/scene_fx_orchestrator.h"
 #include "runtime/simd/simd_accel.h"
 #include "runtime/simd/simd_accel_bench.h"
 #include "runtime/runtime_config_service.h"
@@ -111,6 +112,7 @@ size_t g_serial_line_len = 0U;
 RuntimeServices g_runtime_services;
 AppCoordinator g_app_coordinator;
 runtime::resource::ResourceCoordinator g_resource_coordinator;
+SceneFxOrchestrator g_scene_fx_orchestrator;
 #if defined(USE_AUDIO) && (USE_AUDIO != 0)
 ui::audio::AmigaAudioPlayer g_amp_player;
 bool g_amp_ready = false;
@@ -765,11 +767,13 @@ void startPendingAudioIfAny();
 bool isAmpSceneId(const char* scene_id);
 bool ensureAmpInitialized();
 size_t scanAmpPlaylistWithFallback();
+void setAmpSceneActive(bool active);
 void syncAmpSceneState(const ScenarioSnapshot& snapshot);
 void printAmpStatus();
 #endif
 bool isCameraSceneId(const char* scene_id);
 bool ensureCameraUiInitialized();
+void setCameraSceneActive(bool active);
 void syncCameraSceneState(const ScenarioSnapshot& snapshot);
 bool dispatchCameraSceneButton(uint8_t key, bool long_press);
 void printCameraRecorderStatus();
@@ -1433,10 +1437,14 @@ size_t scanAmpPlaylistWithFallback() {
 
 void syncAmpSceneState(const ScenarioSnapshot& snapshot) {
   const bool want_amp_scene = isAmpSceneId(snapshot.screen_scene_id);
-  if (want_amp_scene == g_amp_scene_active) {
+  setAmpSceneActive(want_amp_scene);
+}
+
+void setAmpSceneActive(bool active) {
+  if (active == g_amp_scene_active) {
     return;
   }
-  g_amp_scene_active = want_amp_scene;
+  g_amp_scene_active = active;
   if (g_amp_scene_active) {
     g_audio.stop();
     if (ensureAmpInitialized()) {
@@ -1507,10 +1515,14 @@ bool ensureCameraUiInitialized() {
 
 void syncCameraSceneState(const ScenarioSnapshot& snapshot) {
   const bool want_camera_scene = isCameraSceneId(snapshot.screen_scene_id);
-  if (want_camera_scene == g_camera_scene_active) {
+  setCameraSceneActive(want_camera_scene);
+}
+
+void setCameraSceneActive(bool active) {
+  if (active == g_camera_scene_active) {
     return;
   }
-  g_camera_scene_active = want_camera_scene;
+  g_camera_scene_active = active;
   if (g_camera_scene_active) {
     if (!ensureCameraUiInitialized()) {
       g_camera_scene_active = false;
@@ -3938,20 +3950,31 @@ void serialDispatchBridge(const char* command_line, uint32_t now_ms, RuntimeServ
 
 void refreshSceneIfNeeded(bool force_render) {
   const bool changed = g_scenario.consumeSceneChanged();
-  if (!force_render && !changed) {
+  const ScenarioSnapshot snapshot = g_scenario.snapshot();
+  const SceneTransitionPlan transition =
+      g_scene_fx_orchestrator.planTransition(snapshot.screen_scene_id, changed, force_render);
+  if (!transition.should_apply) {
     return;
   }
 
-  const ScenarioSnapshot snapshot = g_scenario.snapshot();
   const uint32_t now_ms = millis();
+
+  // Explicit transition ordering: pre-exit -> release old owner resources.
+  if (transition.owner_changed) {
+#if defined(USE_AUDIO) && (USE_AUDIO != 0)
+    if (transition.from_owner == SceneRuntimeOwner::kAmp) {
+      setAmpSceneActive(false);
+    }
+#endif
+    if (transition.from_owner == SceneRuntimeOwner::kCamera) {
+      setCameraSceneActive(false);
+    }
+  }
+
   if (g_hardware_started && g_hardware_cfg.led_auto_from_scene && snapshot.screen_scene_id != nullptr) {
     g_hardware.setSceneHint(snapshot.screen_scene_id);
   }
   executeStoryActionsForStep(snapshot, now_ms);
-#if defined(USE_AUDIO) && (USE_AUDIO != 0)
-  syncAmpSceneState(snapshot);
-#endif
-  syncCameraSceneState(snapshot);
 
   const char* step_id = (snapshot.step != nullptr && snapshot.step->id != nullptr) ? snapshot.step->id : "n/a";
   const String screen_payload = g_storage.loadScenePayloadById(snapshot.screen_scene_id);
@@ -3969,6 +3992,19 @@ void refreshSceneIfNeeded(bool force_render) {
   frame.audio_playing = g_audio.isPlaying();
   frame.screen_payload_json = screen_payload.isEmpty() ? nullptr : screen_payload.c_str();
   g_ui.submitSceneFrame(frame);
+
+  // Apply new owner resources after scene config is committed in UI.
+  if (transition.owner_changed) {
+#if defined(USE_AUDIO) && (USE_AUDIO != 0)
+    if (transition.to_owner == SceneRuntimeOwner::kAmp) {
+      setAmpSceneActive(true);
+    }
+#endif
+    if (transition.to_owner == SceneRuntimeOwner::kCamera) {
+      setCameraSceneActive(true);
+    }
+  }
+  g_scene_fx_orchestrator.applyTransition(transition);
 }
 
 void startPendingAudioIfAny() {

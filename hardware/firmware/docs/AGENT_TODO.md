@@ -1,3 +1,37 @@
+## [2026-02-25] Skill HAL_VERIFCATOR_STATUS (scene-aware hardware gating)
+
+- Creation skill global:
+  - `~/.codex/skills/hal-verificator-status/SKILL.md`
+  - `~/.codex/skills/hal-verificator-status/agents/openai.yaml`
+  - `~/.codex/skills/hal-verificator-status/scripts/run_hal_verification.sh`
+  - `~/.codex/skills/hal-verificator-status/references/checklist.md`
+- Scope validation couverte:
+  - camera (`CAM_STATUS rec_scene`), amp (`AMP_STATUS scene`), micro (`RESOURCE_STATUS mic_should_run`).
+  - verification activation/desactivation par scene via plan explicite `SCENE:cam=,amp=,mic=`.
+- Miroir doc versionne:
+  - `docs/skills/hal-verificator-status.md`
+
+## [2026-02-25] Scene/FX orchestrator refactor + VERIFICATOR skills
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260225_093916_wip.patch`
+  - `/tmp/zacus_checkpoint/20260225_093916_status.txt`
+- Refactor runtime:
+  - ajout orchestrateur `SceneFxOrchestrator` (`ui_freenove_allinone/include|src/app/scene_fx_orchestrator.*`) pour planifier ownership `Story/IntroFx/DirectFx/Amp/Camera`.
+  - `main.cpp`: ordre explicite transition owner `pre-exit -> render scene -> post-enter`.
+  - `UiManager`: cache scene payload hash + `audio_playing` pour eviter reinitialisations statiques inutiles; cleanup FX recentre.
+  - `ScenarioManager`: logs de transition structures (`from_step`, `to_step`, `from_scene`, `to_scene`, `event`, `source`, `audio_pack`) + trace chaines immediates.
+  - `resolve_ports.py`: remap mono-port robuste (`esp8266 -> esp32`) pour setup Freenove single-usb.
+- Skills crees (global + scripts):
+  - `~/.codex/skills/scene-verificator/`
+  - `~/.codex/skills/fx-verificator/`
+  - `scene-verificator` etendu pour piloter des triggers de test (`CMD@SCENE`) et verifier la progression post-trigger.
+- Miroir doc versionne:
+  - `docs/skills/scene-verificator.md`
+  - `docs/skills/fx-verificator.md`
+- Verification a executer en fin de run:
+  - build Freenove, serial smoke, scene chain, FX status, stress test.
+
 ## [2026-02-24] Plan v4 integration (FX3D modes + SCENE_CAMERA_SCAN recorder Win311)
 
 - Skills chain executee (ordre): `freenove-firmware-orchestrator` -> `firmware-graphics-stack` -> `firmware-camera-stack` -> `firmware-fx-overlay-lovyangfx` -> `firmware-build-stack`.

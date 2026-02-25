@@ -1,0 +1,8 @@
+{
+  "id": "ACTION_ESP_NOW_SEND_ETAPE2",
+  "type": "espnow_send",
+  "config": {
+    "target": "broadcast",
+    "payload": "ACK_WIN2"
+  }
+}

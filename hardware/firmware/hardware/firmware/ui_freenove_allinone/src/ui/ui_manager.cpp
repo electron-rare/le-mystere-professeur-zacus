@@ -5010,10 +5010,13 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   const uint32_t payload_crc = hashScenePayload(screen_payload_json);
   const bool static_state_changed = shouldApplySceneStaticState(scene_id, screen_payload_json, scene_changed);
   const bool has_previous_scene = (last_scene_id_[0] != '\0');
-  const bool win_etape_intro_scene = (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0);
+  const bool win_etape_intro_scene = (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0 ||
+                                      std::strcmp(scene_id, "SCENE_WIN_ETAPE1") == 0 ||
+                                      std::strcmp(scene_id, "SCENE_WIN_ETAPE2") == 0);
   const bool direct_fx_scene = isDirectFxSceneId(scene_id);
   const bool is_locked_scene = (std::strcmp(scene_id, "SCENE_LOCKED") == 0);
-  const bool qr_scene = (std::strcmp(scene_id, "SCENE_CAMERA_SCAN") == 0);
+  const bool qr_scene = (std::strcmp(scene_id, "SCENE_CAMERA_SCAN") == 0 ||
+                         std::strcmp(scene_id, "SCENE_QR_DETECTOR") == 0);
   if (static_state_changed && scene_changed && has_previous_scene) {
     cleanupSceneTransitionAssets(last_scene_id_, scene_id);
   }
@@ -5194,7 +5197,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     bg_rgb = 0x07070FUL;
     accent_rgb = 0xFFB74EUL;
     text_rgb = 0xF6FBFFUL;
-  } else if (std::strcmp(scene_id, "SCENE_BROKEN") == 0) {
+  } else if (std::strcmp(scene_id, "SCENE_BROKEN") == 0 || std::strcmp(scene_id, "SCENE_U_SON_PROTO") == 0) {
     title = "PROTO U-SON";
     subtitle = "Signal brouille";
     symbol = "ALERT";
@@ -5202,6 +5205,14 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     bg_rgb = 0x2A0508UL;
     accent_rgb = 0xFF4A45UL;
     text_rgb = 0xFFD5D1UL;
+  } else if (std::strcmp(scene_id, "SCENE_WARNING") == 0) {
+    title = "ALERTE";
+    subtitle = "Signal anormal";
+    symbol = "WARN";
+    effect = SceneEffect::kBlink;
+    bg_rgb = 0x261209UL;
+    accent_rgb = 0xFF9A4AUL;
+    text_rgb = 0xFFF2E6UL;
   } else if (std::strcmp(scene_id, "SCENE_LA_DETECTOR") == 0 || std::strcmp(scene_id, "SCENE_SEARCH") == 0) {
     title = "DETECTEUR DE RESONNANCE";
     subtitle = "";
@@ -5220,7 +5231,18 @@ void UiManager::renderScene(const ScenarioDef* scenario,
       frame_split_layout = true;
       frame_dy = 8;
     }
-  } else if (std::strcmp(scene_id, "SCENE_CAMERA_SCAN") == 0) {
+  } else if (std::strcmp(scene_id, "SCENE_LEFOU_DETECTOR") == 0) {
+    title = "DETECTEUR LEFOU";
+    subtitle = "Analyse en cours";
+    symbol = "AUDIO";
+    effect = SceneEffect::kWave;
+    bg_rgb = 0x071B1AUL;
+    accent_rgb = 0x46E6C8UL;
+    text_rgb = 0xE9FFF9UL;
+    show_title = true;
+    show_subtitle = true;
+    show_symbol = true;
+  } else if (std::strcmp(scene_id, "SCENE_CAMERA_SCAN") == 0 || std::strcmp(scene_id, "SCENE_QR_DETECTOR") == 0) {
     title = "ZACUS QR VALIDATION";
     subtitle = "Scan du QR final";
     symbol = "QR";
@@ -5292,7 +5314,9 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     accent_rgb = 0x66B4FFUL;
     text_rgb = 0xF3F9FFUL;
     show_symbol = false;
-  } else if (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0) {
+  } else if (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0 ||
+             std::strcmp(scene_id, "SCENE_WIN_ETAPE1") == 0 ||
+             std::strcmp(scene_id, "SCENE_WIN_ETAPE2") == 0) {
     title = "BRAVO!";
     subtitle = audio_playing ? "Validation en cours..." : kWinEtapeWaitingSubtitle;
     symbol = "WIN";
@@ -5308,6 +5332,17 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     win_etape_bravo_mode = true;
     win_etape_fireworks = false;
     subtitle_scroll_mode = SceneScrollMode::kNone;
+  } else if (std::strcmp(scene_id, "SCENE_FINAL_WIN") == 0) {
+    title = "FINAL WIN";
+    subtitle = "Mission accomplie";
+    symbol = "WIN";
+    effect = SceneEffect::kCelebrate;
+    bg_rgb = 0x1C0C2EUL;
+    accent_rgb = 0xFFCC5CUL;
+    text_rgb = 0xFFF7E4UL;
+    show_title = true;
+    show_subtitle = true;
+    show_symbol = true;
   } else if (std::strcmp(scene_id, "SCENE_READY") == 0 || std::strcmp(scene_id, "SCENE_MEDIA_ARCHIVE") == 0) {
     title = "PRET";
     subtitle = "Scenario termine";

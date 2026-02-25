@@ -28,8 +28,16 @@ except Exception:  # pragma: no cover - dependency error surfaced at runtime
 
 
 ALLOWED_TRIGGER = {"on_event", "after_ms", "immediate"}
-ALLOWED_EVENT = {"none", "unlock", "audio_done", "timer", "serial", "action"}
-ALLOWED_APP = {"LA_DETECTOR", "AUDIO_PACK", "SCREEN_SCENE", "MP3_GATE", "WIFI_STACK", "ESPNOW_STACK"}
+ALLOWED_EVENT = {"none", "unlock", "audio_done", "timer", "serial", "button", "espnow", "action"}
+ALLOWED_APP = {
+    "LA_DETECTOR",
+    "AUDIO_PACK",
+    "SCREEN_SCENE",
+    "MP3_GATE",
+    "WIFI_STACK",
+    "ESPNOW_STACK",
+    "QR_UNLOCK_APP",
+}
 
 EVENT_CPP = {
     "none": "StoryEventType::kNone",
@@ -37,6 +45,8 @@ EVENT_CPP = {
     "audio_done": "StoryEventType::kAudioDone",
     "timer": "StoryEventType::kTimer",
     "serial": "StoryEventType::kSerial",
+    "button": "StoryEventType::kButton",
+    "espnow": "StoryEventType::kEspNow",
     "action": "StoryEventType::kAction",
 }
 TRIGGER_CPP = {
@@ -51,6 +61,7 @@ APP_CPP = {
     "MP3_GATE": "StoryAppType::kMp3Gate",
     "WIFI_STACK": "StoryAppType::kWifiStack",
     "ESPNOW_STACK": "StoryAppType::kEspNowStack",
+    "QR_UNLOCK_APP": "StoryAppType::kQrUnlockApp",
 }
 
 DEFAULT_SCENE_PROFILE: dict[str, Any] = {
@@ -383,10 +394,173 @@ SCENE_PROFILES: dict[str, dict[str, Any]] = {
             },
         ],
     },
+    "SCENE_U_SON_PROTO": {
+        "title": "PROTO U-SON",
+        "subtitle": "Signal brouille",
+        "symbol": "ALERT",
+        "effect": "blink",
+        "effect_speed_ms": 180,
+        "theme": {"bg": "#2A0508", "accent": "#FF4A45", "text": "#FFF1F1"},
+        "transition": {"effect": "glitch", "duration_ms": 160},
+        "timeline": [
+            {
+                "at_ms": 0,
+                "effect": "blink",
+                "speed_ms": 180,
+                "theme": {"bg": "#2A0508", "accent": "#FF4A45", "text": "#FFF1F1"},
+            },
+            {
+                "at_ms": 900,
+                "effect": "scan",
+                "speed_ms": 520,
+                "theme": {"bg": "#3A0A10", "accent": "#FF7873", "text": "#FFF7F7"},
+            },
+        ],
+    },
+    "SCENE_WARNING": {
+        "title": "ALERTE",
+        "subtitle": "Signal anormal",
+        "symbol": "WARN",
+        "effect": "blink",
+        "effect_speed_ms": 240,
+        "theme": {"bg": "#261209", "accent": "#FF9A4A", "text": "#FFF2E6"},
+        "transition": {"effect": "fade", "duration_ms": 200},
+        "timeline": [
+            {
+                "at_ms": 0,
+                "effect": "blink",
+                "speed_ms": 240,
+                "theme": {"bg": "#261209", "accent": "#FF9A4A", "text": "#FFF2E6"},
+            },
+            {
+                "at_ms": 1400,
+                "effect": "pulse",
+                "speed_ms": 520,
+                "theme": {"bg": "#31170C", "accent": "#FFC071", "text": "#FFF8EF"},
+            },
+        ],
+    },
+    "SCENE_LEFOU_DETECTOR": {
+        "title": "DETECTEUR LEFOU",
+        "subtitle": "Analyse en cours",
+        "symbol": "AUDIO",
+        "effect": "wave",
+        "effect_speed_ms": 460,
+        "theme": {"bg": "#071B1A", "accent": "#46E6C8", "text": "#E9FFF9"},
+        "transition": {"effect": "zoom", "duration_ms": 250},
+        "timeline": [
+            {
+                "at_ms": 0,
+                "effect": "wave",
+                "speed_ms": 460,
+                "theme": {"bg": "#071B1A", "accent": "#46E6C8", "text": "#E9FFF9"},
+            },
+            {
+                "at_ms": 1200,
+                "effect": "radar",
+                "speed_ms": 620,
+                "theme": {"bg": "#0A2523", "accent": "#7FF2DA", "text": "#F2FFFC"},
+            },
+        ],
+    },
+    "SCENE_WIN_ETAPE1": {
+        "title": "WIN ETAPE 1",
+        "subtitle": "Validation distante",
+        "symbol": "WIN",
+        "effect": "celebrate",
+        "effect_speed_ms": 360,
+        "theme": {"bg": "#1E0F32", "accent": "#F5C64A", "text": "#FFF8E4"},
+        "transition": {"effect": "zoom", "duration_ms": 280},
+        "timeline": [
+            {
+                "at_ms": 0,
+                "effect": "celebrate",
+                "speed_ms": 360,
+                "theme": {"bg": "#1E0F32", "accent": "#F5C64A", "text": "#FFF8E4"},
+            },
+            {
+                "at_ms": 1200,
+                "effect": "pulse",
+                "speed_ms": 260,
+                "theme": {"bg": "#2A1645", "accent": "#FFD97A", "text": "#FFFDF3"},
+            },
+        ],
+    },
+    "SCENE_WIN_ETAPE2": {
+        "title": "WIN ETAPE 2",
+        "subtitle": "ACK en attente",
+        "symbol": "WIN",
+        "effect": "celebrate",
+        "effect_speed_ms": 340,
+        "theme": {"bg": "#220F3A", "accent": "#FFCE62", "text": "#FFF8EA"},
+        "transition": {"effect": "zoom", "duration_ms": 280},
+        "timeline": [
+            {
+                "at_ms": 0,
+                "effect": "celebrate",
+                "speed_ms": 340,
+                "theme": {"bg": "#220F3A", "accent": "#FFCE62", "text": "#FFF8EA"},
+            },
+            {
+                "at_ms": 1200,
+                "effect": "pulse",
+                "speed_ms": 260,
+                "theme": {"bg": "#2E1850", "accent": "#FFE18E", "text": "#FFFDF5"},
+            },
+        ],
+    },
+    "SCENE_QR_DETECTOR": {
+        "title": "ZACUS QR VALIDATION",
+        "subtitle": "Scan du QR final",
+        "symbol": "QR",
+        "effect": "none",
+        "effect_speed_ms": 0,
+        "theme": {"bg": "#102040", "accent": "#5CA3FF", "text": "#F3F7FF"},
+        "transition": {"effect": "fade", "duration_ms": 180},
+        "timeline": [
+            {
+                "at_ms": 0,
+                "effect": "none",
+                "speed_ms": 0,
+                "theme": {"bg": "#102040", "accent": "#5CA3FF", "text": "#F3F7FF"},
+            },
+            {
+                "at_ms": 1600,
+                "effect": "pulse",
+                "speed_ms": 520,
+                "theme": {"bg": "#142A52", "accent": "#8EC1FF", "text": "#FCFEFF"},
+            },
+        ],
+    },
+    "SCENE_FINAL_WIN": {
+        "title": "FINAL WIN",
+        "subtitle": "Mission accomplie",
+        "symbol": "WIN",
+        "effect": "celebrate",
+        "effect_speed_ms": 320,
+        "theme": {"bg": "#1C0C2E", "accent": "#FFCC5C", "text": "#FFF7E4"},
+        "transition": {"effect": "fade", "duration_ms": 240},
+        "timeline": [
+            {
+                "at_ms": 0,
+                "effect": "celebrate",
+                "speed_ms": 320,
+                "theme": {"bg": "#1C0C2E", "accent": "#FFCC5C", "text": "#FFF7E4"},
+            },
+            {
+                "at_ms": 1400,
+                "effect": "blink",
+                "speed_ms": 220,
+                "theme": {"bg": "#2A1642", "accent": "#FFE18D", "text": "#FFFDF3"},
+            },
+        ],
+    },
 }
 
 SCENE_ALIASES: dict[str, str] = {
     "SCENE_LA_DETECT": "SCENE_LA_DETECTOR",
+    "SCENE_U_SON": "SCENE_U_SON_PROTO",
+    "SCENE_LE_FOU_DETECTOR": "SCENE_LEFOU_DETECTOR",
 }
 
 
@@ -670,8 +844,10 @@ def _normalize_story_specs(files: list[Path]) -> list[dict[str, Any]]:
                         ValidationIssue(str(file_path), f"steps[{sidx}].transitions[{tidx}]", "must be mapping")
                     )
                     continue
-                trigger = str(transition.get("trigger", "on_event")).strip()
-                event_type = str(transition.get("event_type", "none")).strip()
+                trigger = str(transition.get("trigger", "on_event")).strip().lower()
+                event_type = str(transition.get("event_type", "none")).strip().lower()
+                if event_type == "esp_now":
+                    event_type = "espnow"
                 event_name = str(transition.get("event_name", "")).strip()
                 target_step_id = str(transition.get("target_step_id", "")).strip()
                 after_ms = transition.get("after_ms", 0)
@@ -783,6 +959,67 @@ def _validate_game_scenarios(game_scenario_files: list[Path]) -> list[str]:
         if sid:
             ids.append(sid)
     return sorted(ids)
+
+
+def _classify_game_yaml(file_path: Path) -> str:
+    doc = _load_yaml(file_path)
+    has_runtime = bool(doc.get("initial_step")) and isinstance(doc.get("steps"), list)
+    has_narrative = bool(doc.get("title")) and isinstance(doc.get("stations"), list)
+    has_template = isinstance(doc.get("prompt_input"), dict)
+    if has_template and not has_runtime and not has_narrative:
+        return "template"
+    if has_runtime and has_narrative:
+        raise StoryGenerationError(f"Ambiguous game scenario type in {file_path}: both runtime and narrative keys detected")
+    if has_runtime:
+        return "runtime"
+    if has_narrative:
+        return "narrative"
+    raise StoryGenerationError(f"Unknown game scenario format in {file_path}: cannot detect runtime/narrative/template")
+
+
+def _canonical_yaml_payload(path: Path) -> str:
+    data = _load_yaml(path)
+    return json.dumps(data, sort_keys=True, separators=(",", ":"))
+
+
+def _validate_runtime_mirror(spec_files: list[Path], runtime_game_files: list[Path]) -> None:
+    spec_by_id: dict[str, Path] = {}
+    for spec_file in spec_files:
+        scenario_id = str(_load_yaml(spec_file).get("id", "")).strip()
+        if scenario_id:
+            spec_by_id[scenario_id] = spec_file
+
+    runtime_by_id: dict[str, Path] = {}
+    for runtime_file in runtime_game_files:
+        scenario_id = str(_load_yaml(runtime_file).get("id", "")).strip()
+        if scenario_id:
+            runtime_by_id[scenario_id] = runtime_file
+
+    if "DEFAULT" not in spec_by_id or "DEFAULT" not in runtime_by_id:
+        raise StoryGenerationError("Strict mirror requires DEFAULT runtime YAML in both docs/protocols and game/scenarios")
+
+    for scenario_id, runtime_file in runtime_by_id.items():
+        spec_file = spec_by_id.get(scenario_id)
+        if spec_file is None:
+            continue
+        if _canonical_yaml_payload(runtime_file) != _canonical_yaml_payload(spec_file):
+            raise StoryGenerationError(
+                "Runtime YAML mirror mismatch for scenario "
+                f"{scenario_id}: {runtime_file} != {spec_file}"
+            )
+
+
+def _build_runtime_story_file_set(spec_files: list[Path], runtime_game_files: list[Path]) -> list[Path]:
+    selected: dict[str, Path] = {}
+    for spec_file in spec_files:
+        scenario_id = str(_load_yaml(spec_file).get("id", "")).strip()
+        if scenario_id:
+            selected[scenario_id] = spec_file
+    for runtime_file in runtime_game_files:
+        scenario_id = str(_load_yaml(runtime_file).get("id", "")).strip()
+        if scenario_id:
+            selected[scenario_id] = runtime_file
+    return [selected[key] for key in sorted(selected.keys())]
 
 
 def _sha_hex(payload: bytes) -> str:
@@ -1381,11 +1618,29 @@ def load_and_validate(paths: StoryPaths, spec_dir: Path | None = None, game_dir:
     spec_files = _list_yaml_files(actual_spec_dir)
     game_files = _list_yaml_files(actual_game_dir)
 
-    _validate_yamale(_schema_path("story_spec_schema.yamale"), spec_files)
-    _validate_yamale(_schema_path("game_scenario_schema.yamale"), game_files)
+    runtime_game_files: list[Path] = []
+    narrative_game_files: list[Path] = []
+    template_files: list[Path] = []
+    for file_path in game_files:
+        category = _classify_game_yaml(file_path)
+        if category == "runtime":
+            runtime_game_files.append(file_path)
+        elif category == "narrative":
+            narrative_game_files.append(file_path)
+        elif category == "template":
+            template_files.append(file_path)
 
-    scenarios = _normalize_story_specs(spec_files)
-    game_ids = _validate_game_scenarios(game_files)
+    _validate_yamale(_schema_path("story_spec_schema.yamale"), spec_files)
+    if runtime_game_files:
+        _validate_yamale(_schema_path("story_spec_schema.yamale"), runtime_game_files)
+    if template_files:
+        _validate_yamale(_schema_path("scenario_template_schema.yamale"), template_files)
+
+    _validate_runtime_mirror(spec_files, runtime_game_files)
+
+    runtime_story_files = _build_runtime_story_file_set(spec_files, runtime_game_files)
+    scenarios = _normalize_story_specs(runtime_story_files)
+    game_ids = _validate_game_scenarios(narrative_game_files)
     return scenarios, game_ids
 
 

@@ -1,0 +1,22 @@
+{
+  "id": "SCENE_WIN_ETAPE2",
+  "title": "WIN ETAPE 2",
+  "subtitle": "ACK en attente",
+  "symbol": "WIN",
+  "effect": "celebrate",
+  "visual": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "effect_speed_ms": 340
+  },
+  "theme": {
+    "bg": "#220F3A",
+    "accent": "#FFCE62",
+    "text": "#FFF8EA"
+  },
+  "transition": {
+    "effect": "zoom",
+    "duration_ms": 280
+  }
+}

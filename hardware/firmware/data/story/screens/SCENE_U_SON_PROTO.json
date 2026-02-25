@@ -1,0 +1,22 @@
+{
+  "id": "SCENE_U_SON_PROTO",
+  "title": "PROTO U-SON",
+  "subtitle": "Signal brouille",
+  "symbol": "ALERT",
+  "effect": "blink",
+  "visual": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "effect_speed_ms": 180
+  },
+  "theme": {
+    "bg": "#2A0508",
+    "accent": "#FF4A45",
+    "text": "#FFF1F1"
+  },
+  "transition": {
+    "effect": "glitch",
+    "duration_ms": 160
+  }
+}

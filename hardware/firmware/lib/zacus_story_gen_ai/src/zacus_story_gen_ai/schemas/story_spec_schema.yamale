@@ -8,7 +8,7 @@ steps: list(include('step'), min=1)
 ---
 app_binding:
   id: str()
-  app: enum('LA_DETECTOR', 'AUDIO_PACK', 'SCREEN_SCENE', 'MP3_GATE', 'WIFI_STACK', 'ESPNOW_STACK')
+  app: enum('LA_DETECTOR', 'AUDIO_PACK', 'SCREEN_SCENE', 'MP3_GATE', 'WIFI_STACK', 'ESPNOW_STACK', 'QR_UNLOCK_APP')
   config: include('la_config', required=False)
 
 la_config:
@@ -28,7 +28,7 @@ step:
 transition:
   id: str(required=False)
   trigger: enum('on_event', 'after_ms', 'immediate')
-  event_type: enum('none', 'unlock', 'audio_done', 'timer', 'serial', 'action')
+  event_type: enum('none', 'unlock', 'audio_done', 'timer', 'serial', 'button', 'espnow', 'action')
   event_name: str()
   target_step_id: str()
   after_ms: int(min=0)

@@ -1,0 +1,22 @@
+{
+  "id": "SCENE_FINAL_WIN",
+  "title": "FINAL WIN",
+  "subtitle": "Mission accomplie",
+  "symbol": "WIN",
+  "effect": "celebrate",
+  "visual": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "effect_speed_ms": 320
+  },
+  "theme": {
+    "bg": "#1C0C2E",
+    "accent": "#FFCC5C",
+    "text": "#FFF7E4"
+  },
+  "transition": {
+    "effect": "fade",
+    "duration_ms": 240
+  }
+}

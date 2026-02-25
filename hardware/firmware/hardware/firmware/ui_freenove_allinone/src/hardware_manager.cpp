@@ -5,14 +5,12 @@
 #include <cmath>
 #include <cstring>
 
-#include "resources/screen_scene_registry.h"
 #include "ui_freenove_config.h"
 
 namespace {
 
 constexpr uint8_t kDefaultLedBrightness = static_cast<uint8_t>(FREENOVE_WS2812_BRIGHTNESS);
 constexpr float kTwoPi = 6.2831853f;
-constexpr float kPitchConfidenceAlpha = 0.45f;
 constexpr float kTunerReferenceHz = 440.0f;
 constexpr uint16_t kTunerMinHz = 80U;
 constexpr uint16_t kTunerMaxHz = 1200U;
@@ -41,21 +39,21 @@ constexpr HardwareManager::LedPaletteEntry kLedPalette[] = {
     {"SCENE_U_SON_PROTO", 255U, 40U, 18U, 86U, true},
     {"SCENE_WARNING", 255U, 154U, 74U, 78U, true},
     {"SCENE_SIGNAL_SPIKE", 255U, 40U, 18U, 86U, true},
+    {"SCENE_LA_DETECT", 32U, 224U, 170U, 56U, true},
     {"SCENE_LA_DETECTOR", 32U, 224U, 170U, 56U, true},
     {"SCENE_LEFOU_DETECTOR", 70U, 230U, 200U, 56U, true},
     {"SCENE_SEARCH", 32U, 224U, 170U, 56U, true},
-    {"SCENE_WIN", 245U, 205U, 62U, 80U, true},
-    {"SCENE_WIN_ETAPE", 245U, 205U, 62U, 80U, true},
+    {"SCENE_QR_DETECTOR", 18U, 45U, 95U, 50U, true},
     {"SCENE_WIN_ETAPE1", 244U, 203U, 74U, 80U, true},
     {"SCENE_WIN_ETAPE2", 244U, 203U, 74U, 80U, true},
     {"SCENE_FINAL_WIN", 252U, 212U, 92U, 76U, false},
+    {"SCENE_WIN", 245U, 205U, 62U, 80U, true},
     {"SCENE_REWARD", 245U, 205U, 62U, 80U, true},
     {"SCENE_READY", 18U, 45U, 95U, 52U, false},
     {"SCENE_MP3_PLAYER", 18U, 45U, 95U, 52U, false},
     {"SCENE_MEDIA_MANAGER", 18U, 45U, 95U, 52U, false},
     {"SCENE_PHOTO_MANAGER", 18U, 45U, 95U, 52U, false},
     {"SCENE_CAMERA_SCAN", 18U, 45U, 95U, 52U, false},
-    {"SCENE_QR_DETECTOR", 18U, 45U, 95U, 52U, false},
     {"__DEFAULT__", 18U, 45U, 95U, 52U, false},
 };
 uint8_t clampU8(int value) {
@@ -122,7 +120,6 @@ bool HardwareManager::begin() {
 #endif
 
   snapshot_.mic_ready = beginMic();
-  snapshot_.mic_ready = snapshot_.mic_ready && mic_enabled_runtime_;
   if (snapshot_.mic_ready) {
     Serial.printf("[HW] mic I2S ready sck=%d ws=%d din=%d\n", FREENOVE_I2S_IN_SCK, FREENOVE_I2S_IN_WS, FREENOVE_I2S_IN_DIN);
   } else {
@@ -154,12 +151,10 @@ void HardwareManager::setSceneHint(const char* scene_id) {
   if (scene_id == nullptr || scene_id[0] == '\0') {
     return;
   }
-  const char* normalized_scene_id = storyNormalizeScreenSceneId(scene_id);
-  const char* effective_scene_id = (normalized_scene_id != nullptr) ? normalized_scene_id : scene_id;
-  if (std::strncmp(snapshot_.scene_id, effective_scene_id, sizeof(snapshot_.scene_id) - 1U) == 0) {
+  if (std::strncmp(snapshot_.scene_id, scene_id, sizeof(snapshot_.scene_id) - 1U) == 0) {
     return;
   }
-  setScenePalette(effective_scene_id);
+  setScenePalette(scene_id);
 }
 
 bool HardwareManager::setManualLed(uint8_t r, uint8_t g, uint8_t b, uint8_t brightness, bool pulse) {
@@ -187,30 +182,6 @@ HardwareManager::Snapshot HardwareManager::snapshot() const {
 
 const HardwareManager::Snapshot& HardwareManager::snapshotRef() const {
   return snapshot_;
-}
-
-void HardwareManager::setMicRuntimeEnabled(bool enabled) {
-  if (mic_enabled_runtime_ == enabled) {
-    return;
-  }
-  mic_enabled_runtime_ = enabled;
-  snapshot_.mic_ready = mic_enabled_runtime_ && mic_driver_ready_;
-  if (!mic_enabled_runtime_) {
-    snapshot_.mic_level_percent = 0U;
-    snapshot_.mic_peak = 0U;
-    snapshot_.mic_freq_hz = 0U;
-    snapshot_.mic_pitch_cents = 0;
-    snapshot_.mic_pitch_confidence = 0U;
-    snapshot_.mic_waveform_count = 0U;
-    snapshot_.mic_waveform_head = 0U;
-    std::memset(snapshot_.mic_waveform, 0, sizeof(snapshot_.mic_waveform));
-  } else {
-    next_mic_ms_ = 0U;
-  }
-}
-
-bool HardwareManager::micRuntimeEnabled() const {
-  return mic_enabled_runtime_;
 }
 
 bool HardwareManager::beginMic() {
@@ -251,9 +222,6 @@ bool HardwareManager::beginMic() {
 }
 
 void HardwareManager::updateMic(uint32_t now_ms) {
-  if (!mic_enabled_runtime_) {
-    return;
-  }
   if (!snapshot_.mic_ready) {
     return;
   }
@@ -406,23 +374,12 @@ void HardwareManager::updateMic(uint32_t now_ms) {
                           freq_hz,
                           cents,
                           confidence);
-  uint16_t smoothed_freq = 0U;
-  int16_t smoothed_cents = 0;
-  uint8_t smoothed_confidence = 0U;
-  applyPitchSmoothing(now_ms,
-                      freq_hz,
-                      cents,
-                      confidence,
-                      smoothed_freq,
-                      smoothed_cents,
-                      smoothed_confidence);
-
-  const bool has_pitch = (smoothed_confidence > 0U) && (smoothed_freq > 0U);
+  const bool has_pitch = (confidence > 0U) && (freq_hz > 0U);
 
   if (has_pitch) {
-    snapshot_.mic_freq_hz = smoothed_freq;
-    snapshot_.mic_pitch_cents = smoothed_cents;
-    snapshot_.mic_pitch_confidence = smoothed_confidence;
+    snapshot_.mic_freq_hz = freq_hz;
+    snapshot_.mic_pitch_cents = cents;
+    snapshot_.mic_pitch_confidence = confidence;
   } else {
     snapshot_.mic_freq_hz = 0U;
     snapshot_.mic_pitch_cents = 0;
@@ -551,7 +508,8 @@ bool HardwareManager::isBrokenSceneHint() const {
 }
 
 bool HardwareManager::isTunerSceneHint() const {
-  return (std::strcmp(snapshot_.scene_id, "SCENE_LA_DETECTOR") == 0) ||
+  return (std::strcmp(snapshot_.scene_id, "SCENE_LA_DETECT") == 0) ||
+         (std::strcmp(snapshot_.scene_id, "SCENE_LA_DETECTOR") == 0) ||
          (std::strcmp(snapshot_.scene_id, "SCENE_SEARCH") == 0);
 }
 
@@ -587,14 +545,10 @@ void HardwareManager::applyBrokenLedPattern(uint32_t now_ms,
 
   uint16_t secondary_led = primary_led;
   bool secondary_active = false;
-#if (FREENOVE_WS2812_COUNT > 1)
   if (led_count > 1U) {
-    const uint16_t secondary_span = static_cast<uint16_t>(led_count - 1U);
-    const uint16_t secondary_offset = static_cast<uint16_t>((slot_noise >> 8) % secondary_span);
-    secondary_led = static_cast<uint16_t>((primary_led + 1U + secondary_offset) % led_count);
+    secondary_led = static_cast<uint16_t>((primary_led + 1U + ((slot_noise >> 8) % (led_count - 1U))) % led_count);
     secondary_active = (((slot_noise >> 27) & 0x1U) == 1U) && (in_slot >= 24U) && (in_slot < 29U);
   }
-#endif
 
   for (uint16_t index = 0U; index < led_count; ++index) {
     const uint32_t led_noise = hash32(slot_noise ^ (static_cast<uint32_t>(index + 1U) * 0x27d4eb2dUL));
@@ -788,71 +742,6 @@ void HardwareManager::estimatePitch(uint16_t& freq_hz, int16_t& cents, uint8_t& 
   cents = snapshot_.mic_pitch_cents;
   confidence = snapshot_.mic_pitch_confidence;
   peak_for_window = snapshot_.mic_peak;
-}
-
-void HardwareManager::applyPitchSmoothing(uint32_t now_ms,
-                                         uint16_t raw_freq,
-                                         int16_t raw_cents,
-                                         uint8_t raw_confidence,
-                                         uint16_t& smoothed_freq,
-                                         int16_t& smoothed_cents,
-                                         uint8_t& smoothed_confidence) {
-  smoothed_freq = 0U;
-  smoothed_cents = 0;
-  smoothed_confidence = 0U;
-
-  if (raw_freq == 0U || raw_confidence == 0U) {
-    if (pitch_smoothing_last_ms_ != 0U && (now_ms - pitch_smoothing_last_ms_) > kPitchSmoothingStaleMs) {
-      pitch_confidence_ema_ = 0.0f;
-      pitch_smoothing_count_ = 0U;
-      pitch_smoothing_index_ = 0U;
-      pitch_smoothing_last_ms_ = now_ms;
-      return;
-    }
-    return;
-  }
-
-  if (pitch_smoothing_last_ms_ != 0U && (now_ms - pitch_smoothing_last_ms_) > kPitchSmoothingStaleMs) {
-    pitch_confidence_ema_ = 0.0f;
-    pitch_smoothing_count_ = 0U;
-    pitch_smoothing_index_ = 0U;
-  }
-  pitch_smoothing_last_ms_ = now_ms;
-
-  const uint8_t write_index = pitch_smoothing_index_;
-  pitch_freq_window_[write_index] = raw_freq;
-  pitch_cents_window_[write_index] = raw_cents;
-  pitch_conf_window_[write_index] = raw_confidence;
-  pitch_smoothing_index_ = static_cast<uint8_t>((pitch_smoothing_index_ + 1U) % kPitchSmoothingSamples);
-  if (pitch_smoothing_count_ < kPitchSmoothingSamples) {
-    ++pitch_smoothing_count_;
-  }
-
-  uint16_t freq_samples[kPitchSmoothingSamples] = {0U, 0U, 0U};
-  int16_t cents_samples[kPitchSmoothingSamples] = {0, 0, 0};
-  const uint8_t sample_count = pitch_smoothing_count_;
-  const uint8_t oldest_index =
-      static_cast<uint8_t>((pitch_smoothing_index_ + (kPitchSmoothingSamples - sample_count)) % kPitchSmoothingSamples);
-  for (uint8_t index = 0U; index < sample_count; ++index) {
-    const uint8_t src_index = static_cast<uint8_t>((oldest_index + index) % kPitchSmoothingSamples);
-    freq_samples[index] = pitch_freq_window_[src_index];
-    cents_samples[index] = pitch_cents_window_[src_index];
-  }
-
-  std::sort(freq_samples, freq_samples + sample_count);
-  std::sort(cents_samples, cents_samples + sample_count);
-  const uint8_t median_index = static_cast<uint8_t>(sample_count / 2U);
-  smoothed_freq = freq_samples[median_index];
-  smoothed_cents = cents_samples[median_index];
-
-  if (pitch_confidence_ema_ <= 0.1f) {
-    pitch_confidence_ema_ = static_cast<float>(raw_confidence);
-  } else {
-    pitch_confidence_ema_ =
-        (kPitchConfidenceAlpha * static_cast<float>(raw_confidence)) + ((1.0f - kPitchConfidenceAlpha) * pitch_confidence_ema_);
-  }
-  const uint8_t smoothed = static_cast<uint8_t>(std::round(pitch_confidence_ema_));
-  smoothed_confidence = (smoothed > 100U) ? 100U : smoothed;
 }
 
 void HardwareManager::estimatePitchFromSamples(const int16_t* samples,

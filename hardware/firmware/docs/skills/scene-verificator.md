@@ -5,9 +5,9 @@ Valider l'enchainement des scenes story sur Freenove avec des verdicts stricts e
 
 ## Verifications
 - `SCENE_GOTO` doit retourner `ACK ... ok=1` pour chaque scene cible.
-- Les triggers de test (`BTN_*`, `story.validate`, `STORY_*`) doivent etre emis et verifies.
+- Les triggers de test (`button:*`, `espnow:*`, `serial:*`) doivent etre emis et verifies.
 - Chaque trigger doit montrer une progression (changement `SCREEN_SYNC` ou changement scene/status).
-- Les alias de trigger sont geres: `BTN_*` (fallback `SC_EVENT serial ...`) et noms pointes (fallback `SC_EVENT_RAW ...`).
+- Les alias de trigger sont geres: `button:*` -> `SC_EVENT button ...`, `espnow:*` -> `SC_EVENT espnow ...`, `BTN_*` -> `SC_EVENT serial ...`.
 - `SCREEN_SYNC` doit montrer une transition de sequence, ou a defaut un changement de scene/status observable.
 - `story.status` doit rester coherent avec scene/step attendus.
 - Validation WS2812 stricte supportee par scene: `ws2812`, `led_auto`, `led=R/G/B`.
@@ -20,7 +20,7 @@ Valider l'enchainement des scenes story sur Freenove avec des verdicts stricts e
 ## Usage
 ```bash
 ~/.codex/skills/scene-verificator/scripts/run_scene_verification.sh /dev/cu.usbmodem5AB90753301 115200 \
-  "SCENE_LOCKED,SCENE_LA_DETECTOR,SCENE_WIN_ETAPE,SCENE_READY" \
-  "BTN_NEXT@SCENE_LOCKED,STORY_FORCE_ETAPE2@SCENE_LA_DETECTOR" \
-  "SCENE_LA_DETECTOR:ws2812=1,led_auto=1,led=0/0/0;SCENE_READY:ws2812=1,led_auto=1,led=18/45/95"
+  "SCENE_U_SON_PROTO,SCENE_LA_DETECTOR,SCENE_WIN_ETAPE1,SCENE_WARNING,SCENE_LEFOU_DETECTOR,SCENE_WIN_ETAPE2,SCENE_QR_DETECTOR,SCENE_FINAL_WIN,SCENE_MEDIA_MANAGER,SCENE_READY" \
+  "button:ANY@SCENE_U_SON_PROTO->SCENE_LA_DETECTOR,espnow:ACK_WIN1@SCENE_WIN_ETAPE1,serial:QR_OK@SCENE_QR_DETECTOR->SCENE_FINAL_WIN" \
+  "SCENE_QR_DETECTOR:ws2812=1,led_auto=1,led=18/45/95;SCENE_FINAL_WIN:ws2812=1,led_auto=1,led=252/212/92;SCENE_MEDIA_MANAGER:ws2812=1,led_auto=1,led=18/45/95"
 ```

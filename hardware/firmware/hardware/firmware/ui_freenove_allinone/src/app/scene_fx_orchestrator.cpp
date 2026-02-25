@@ -18,7 +18,10 @@ bool isCameraSceneId(const char* scene_id) {
 }
 
 bool isIntroSceneId(const char* scene_id) {
-  return (scene_id != nullptr && std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0);
+  return (scene_id != nullptr &&
+          (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0 ||
+           std::strcmp(scene_id, "SCENE_WIN_ETAPE1") == 0 ||
+           std::strcmp(scene_id, "SCENE_WIN_ETAPE2") == 0));
 }
 
 bool isDirectFxSceneId(const char* scene_id) {

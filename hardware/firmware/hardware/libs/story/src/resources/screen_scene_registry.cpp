@@ -13,11 +13,18 @@ struct SceneAliasDef {
 constexpr ScreenSceneDef kScenes[] = {
     {"SCENE_LOCKED", 0U, 0U},
     {"SCENE_BROKEN", 0U, 0U},
+    {"SCENE_U_SON_PROTO", 0U, 0U},
     {"SCENE_SEARCH", 1U, 1U},
     {"SCENE_LA_DETECTOR", 1U, 1U},
+    {"SCENE_LEFOU_DETECTOR", 1U, 1U},
+    {"SCENE_WARNING", 1U, 1U},
     {"SCENE_CAMERA_SCAN", 1U, 1U},
+    {"SCENE_QR_DETECTOR", 1U, 1U},
     {"SCENE_SIGNAL_SPIKE", 1U, 2U},
     {"SCENE_REWARD", 1U, 2U},
+    {"SCENE_WIN_ETAPE1", 1U, 2U},
+    {"SCENE_WIN_ETAPE2", 1U, 2U},
+    {"SCENE_FINAL_WIN", 1U, 2U},
     {"SCENE_MEDIA_ARCHIVE", 2U, 2U},
     {"SCENE_READY", 2U, 2U},
     {"SCENE_WIN", 1U, 2U},
@@ -32,6 +39,8 @@ constexpr ScreenSceneDef kScenes[] = {
 // Controlled legacy aliases used during the migration window.
 constexpr SceneAliasDef kSceneAliases[] = {
     {"SCENE_LA_DETECT", "SCENE_LA_DETECTOR"},
+    {"SCENE_U_SON", "SCENE_U_SON_PROTO"},
+    {"SCENE_LE_FOU_DETECTOR", "SCENE_LEFOU_DETECTOR"},
     {"SCENE_LOCK", "SCENE_LOCKED"},
     {"LOCKED", "SCENE_LOCKED"},
     {"LOCK", "SCENE_LOCKED"},

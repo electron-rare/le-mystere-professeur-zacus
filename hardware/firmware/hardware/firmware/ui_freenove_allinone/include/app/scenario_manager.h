@@ -30,6 +30,8 @@ class ScenarioManager {
   void notifyUnlock(uint32_t now_ms);
   void notifyButton(uint8_t key, bool long_press, uint32_t now_ms);
   void notifyAudioDone(uint32_t now_ms);
+  bool notifyButtonEvent(const char* event_name, uint32_t now_ms);
+  bool notifyEspNowEvent(const char* event_name, uint32_t now_ms);
   bool notifySerialEvent(const char* event_name, uint32_t now_ms);
   bool notifyTimerEvent(const char* event_name, uint32_t now_ms);
   bool notifyActionEvent(const char* event_name, uint32_t now_ms);
@@ -78,6 +80,9 @@ class ScenarioManager {
   bool timer_armed_ = false;
   bool timer_fired_ = false;
   uint32_t etape2_due_at_ms_ = 0U;
+  bool win_due_armed_ = false;
+  bool win_due_fired_ = false;
+  uint32_t win_due_at_ms_ = 0U;
   String pending_audio_pack_;
   String forced_screen_scene_id_;
   String initial_step_override_;

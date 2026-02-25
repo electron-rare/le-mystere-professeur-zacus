@@ -21,7 +21,7 @@ Verifier que les couches hardware (camera, micro, amp) et les 4 LED WS2812 Freen
 ## Usage
 ```bash
 ~/.codex/skills/hal-verificator-status/scripts/run_hal_verification.sh /dev/cu.usbmodem5AB90753301 115200 \
-  "SCENE_READY:cam=0,amp=0,mic=0,ws2812=1,led_auto=1,led=18/45/95;SCENE_LA_DETECTOR:cam=0,amp=0,mic=1,ws2812=1,led_auto=1,led=0/0/0;SCENE_MP3_PLAYER:cam=0,amp=1,mic=1,ws2812=1,led_auto=1,led=18/45/95;SCENE_CAMERA_SCAN:cam=0,amp=0,mic=1,ws2812=1,led_auto=1,led=18/45/95;SCENE_MEDIA_MANAGER:cam=0,amp=0,mic=0,ws2812=1,led_auto=1,led=18/45/95"
+  "SCENE_READY:cam=0,amp=0,mic=0,ws2812=1,led_auto=1,led=18/45/95;SCENE_LA_DETECTOR:cam=0,amp=0,mic=1,ws2812=1,led_auto=1,led=0/0/0;SCENE_MP3_PLAYER:cam=0,amp=1,mic=1,ws2812=1,led_auto=1,led=18/45/95;SCENE_QR_DETECTOR:cam=0,amp=0,mic=0,ws2812=1,led_auto=1,led=18/45/95;SCENE_FINAL_WIN:cam=0,amp=0,mic=0,ws2812=1,led_auto=1,led=252/212/92;SCENE_MEDIA_MANAGER:cam=0,amp=0,mic=0,ws2812=1,led_auto=1,led=18/45/95"
 
 # Variante policy-only (pas de couleur exacte)
 ~/.codex/skills/hal-verificator-status/scripts/run_hal_verification.sh /dev/cu.usbmodem5AB90753301 115200 \

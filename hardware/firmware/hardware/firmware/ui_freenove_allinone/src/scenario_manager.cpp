@@ -3,17 +3,14 @@
 
 #include <ArduinoJson.h>
 #include <LittleFS.h>
-#include <cstdio>
 #include <cstring>
 
-#include "resources/screen_scene_registry.h"
 #include "scenarios/default_scenario_v2.h"
 
 namespace {
 
 constexpr uint32_t kEtape2DelayMs = 15UL * 60UL * 1000UL;
 constexpr uint32_t kEtape2TestDelayMs = 5000U;
-constexpr uint32_t kWinDueDelayMs = 10UL * 60UL * 1000UL;
 
 bool eventNameMatches(const char* expected, const char* actual) {
   if (expected == nullptr || expected[0] == '\0') {
@@ -190,14 +187,10 @@ void ScenarioManager::reset() {
   }
   step_entered_at_ms_ = millis();
   pending_audio_pack_.remove(0);
-  forced_screen_scene_id_.remove(0);
   scene_changed_ = true;
   timer_armed_ = false;
   timer_fired_ = false;
   etape2_due_at_ms_ = 0U;
-  win_due_armed_ = false;
-  win_due_fired_ = false;
-  win_due_at_ms_ = 0U;
 
   const ScenarioSnapshot state = snapshot();
   if (state.audio_pack_id != nullptr && state.audio_pack_id[0] != '\0') {
@@ -214,10 +207,6 @@ void ScenarioManager::tick(uint32_t now_ms) {
     timer_fired_ = true;
     dispatchEvent(StoryEventType::kTimer, "ETAPE2_DUE", now_ms, "timer_due");
   }
-  if (win_due_armed_ && !win_due_fired_ && win_due_at_ms_ > 0U && now_ms >= win_due_at_ms_) {
-    win_due_fired_ = true;
-    dispatchEvent(StoryEventType::kTimer, "WIN_DUE", now_ms, "timer_win_due");
-  }
 }
 
 void ScenarioManager::notifyUnlock(uint32_t now_ms) {
@@ -229,38 +218,9 @@ void ScenarioManager::notifyUnlock(uint32_t now_ms) {
 
 void ScenarioManager::notifyButton(uint8_t key, bool long_press, uint32_t now_ms) {
   const StepDef* step = currentStep();
-
-  if (dispatchEvent(StoryEventType::kButton, "ANY", now_ms, long_press ? "btn_any_long" : "btn_any_short")) {
-    return;
-  }
-  char button_event[24] = {0};
-  std::snprintf(button_event,
-                sizeof(button_event),
-                "BTN%u_%s",
-                static_cast<unsigned int>(key),
-                long_press ? "LONG" : "SHORT");
-  if (dispatchEvent(StoryEventType::kButton, button_event, now_ms, "btn_specific")) {
-    return;
-  }
-
-  if (step != nullptr && key >= 1U && key <= 5U && step->id != nullptr) {
-    const char* screen_scene_id = step->resources.screenSceneId;
-    if (std::strcmp(step->id, "STEP_WAIT_ETAPE2") == 0) {
-      timer_armed_ = true;
-      timer_fired_ = false;
-      etape2_due_at_ms_ = now_ms + (test_mode_ ? kEtape2TestDelayMs : kEtape2DelayMs);
-      return;
-    }
-    if (screen_scene_id != nullptr &&
-        (std::strcmp(screen_scene_id, "SCENE_LA_DETECTOR") == 0 ||
-         std::strcmp(screen_scene_id, "SCENE_LA_DETECT") == 0)) {
-      timer_armed_ = true;
-      timer_fired_ = false;
-      etape2_due_at_ms_ = now_ms + (test_mode_ ? kEtape2TestDelayMs : kEtape2DelayMs);
-      return;
-    }
-    if (std::strcmp(step->id, "STEP_WAIT_UNLOCK") == 0) {
-      // Contract: any short or long press from lock screen jumps to LA detector.
+  if (step != nullptr && step->id != nullptr && std::strcmp(step->id, "STEP_WAIT_UNLOCK") == 0) {
+    // Contract: any single press (short or long) from lock screen jumps to LA detector.
+    if (key >= 1U && key <= 5U) {
       if (dispatchEvent(StoryEventType::kSerial, "BTN_NEXT", now_ms, "btn_any_short")) {
         return;
       }
@@ -268,20 +228,47 @@ void ScenarioManager::notifyButton(uint8_t key, bool long_press, uint32_t now_ms
       return;
     }
   }
+
+  switch (key) {
+    case 1:
+      if (long_press) {
+        dispatchEvent(StoryEventType::kSerial, "FORCE_ETAPE2", now_ms, "btn1_long");
+      } else {
+        notifyUnlock(now_ms);
+      }
+      break;
+    case 2:
+      if (long_press) {
+        test_mode_ = !test_mode_;
+        Serial.printf("[SCENARIO] test_mode=%u\n", test_mode_ ? 1U : 0U);
+      }
+      break;
+    case 3:
+      if (long_press) {
+        dispatchEvent(StoryEventType::kSerial, "FORCE_ETAPE2", now_ms, "btn3_long");
+      }
+      break;
+    case 4:
+      if (long_press) {
+        dispatchEvent(StoryEventType::kSerial, "FORCE_DONE", now_ms, "btn4_long");
+      }
+      break;
+    case 5:
+      if (long_press) {
+        dispatchEvent(StoryEventType::kSerial, "FORCE_DONE", now_ms, "btn5_long");
+      } else {
+        if (!dispatchEvent(StoryEventType::kSerial, "BTN_NEXT", now_ms, "btn5_short")) {
+          dispatchEvent(StoryEventType::kSerial, "NEXT", now_ms, "btn5_short_legacy");
+        }
+      }
+      break;
+    default:
+      break;
+  }
 }
 
 void ScenarioManager::notifyAudioDone(uint32_t now_ms) {
   dispatchEvent(StoryEventType::kAudioDone, "AUDIO_DONE", now_ms, "audio_done");
-}
-
-bool ScenarioManager::notifyButtonEvent(const char* event_name, uint32_t now_ms) {
-  const char* name = (event_name != nullptr && event_name[0] != '\0') ? event_name : "ANY";
-  return dispatchEvent(StoryEventType::kButton, name, now_ms, "button_event");
-}
-
-bool ScenarioManager::notifyEspNowEvent(const char* event_name, uint32_t now_ms) {
-  const char* name = (event_name != nullptr && event_name[0] != '\0') ? event_name : "EVENT";
-  return dispatchEvent(StoryEventType::kEspNow, name, now_ms, "espnow_event");
 }
 
 bool ScenarioManager::notifySerialEvent(const char* event_name, uint32_t now_ms) {
@@ -299,40 +286,6 @@ bool ScenarioManager::notifyActionEvent(const char* event_name, uint32_t now_ms)
   return dispatchEvent(StoryEventType::kAction, name, now_ms, "action_event");
 }
 
-bool ScenarioManager::gotoScene(const char* scene_id, uint32_t now_ms, const char* source) {
-  if (scenario_ == nullptr || scene_id == nullptr || scene_id[0] == '\0') {
-    return false;
-  }
-  for (uint8_t index = 0U; index < scenario_->stepCount; ++index) {
-    const StepDef& step = scenario_->steps[index];
-    const char* screen_scene_id = step.resources.screenSceneId;
-    const char* audio_pack_id = step.resources.audioPackId;
-    applyStepResourceOverride(&step, &screen_scene_id, &audio_pack_id);
-    (void)audio_pack_id;
-    if (screen_scene_id == nullptr || std::strcmp(screen_scene_id, scene_id) != 0) {
-      continue;
-    }
-    const char* enter_source =
-        (source != nullptr && source[0] != '\0') ? source : "scene_goto";
-    enterStep(static_cast<int8_t>(index), now_ms, enter_source, "scene_goto");
-    runImmediateTransitions(now_ms, enter_source, "scene_goto");
-    return true;
-  }
-  const char* normalized_scene = storyNormalizeScreenSceneId(scene_id);
-  if (normalized_scene == nullptr) {
-    return false;
-  }
-  if (currentStep() == nullptr) {
-    return false;
-  }
-  forced_screen_scene_id_ = normalized_scene;
-  scene_changed_ = true;
-  Serial.printf("[SCENARIO] scene override via=%s id=%s\n",
-                (source != nullptr && source[0] != '\0') ? source : "scene_goto",
-                normalized_scene);
-  return true;
-}
-
 ScenarioSnapshot ScenarioManager::snapshot() const {
   ScenarioSnapshot out;
   out.scenario = scenario_;
@@ -344,9 +297,6 @@ ScenarioSnapshot ScenarioManager::snapshot() const {
     uint8_t action_count = out.step->resources.actionCount;
     applyStepResourceOverride(out.step, &screen_scene_id, &audio_pack_id, &action_ids, &action_count);
     out.screen_scene_id = screen_scene_id;
-    if (!forced_screen_scene_id_.isEmpty()) {
-      out.screen_scene_id = forced_screen_scene_id_.c_str();
-    }
     out.audio_pack_id = audio_pack_id;
     out.action_ids = action_ids;
     out.action_count = action_count;
@@ -420,17 +370,16 @@ bool ScenarioManager::dispatchEvent(StoryEventType type,
   if (selected == nullptr) {
     return false;
   }
-  if (!applyTransition(*selected, now_ms, source, event_name)) {
+  if (!applyTransition(*selected, now_ms, source)) {
     return false;
   }
-  runImmediateTransitions(now_ms, source, event_name);
+  runImmediateTransitions(now_ms, source);
   return true;
 }
 
 bool ScenarioManager::applyTransition(const TransitionDef& transition,
                                       uint32_t now_ms,
-                                      const char* source,
-                                      const char* event_name) {
+                                      const char* source) {
   if (scenario_ == nullptr || transition.targetStepId == nullptr) {
     return false;
   }
@@ -439,13 +388,12 @@ bool ScenarioManager::applyTransition(const TransitionDef& transition,
     Serial.printf("[SCENARIO] invalid transition target: %s\n", transition.targetStepId);
     return false;
   }
-  enterStep(target, now_ms, source, event_name);
+  enterStep(target, now_ms, source);
   return true;
 }
 
-bool ScenarioManager::runImmediateTransitions(uint32_t now_ms, const char* source, const char* parent_event_name) {
+bool ScenarioManager::runImmediateTransitions(uint32_t now_ms, const char* source) {
   bool moved = false;
-  uint8_t hop_count = 0U;
   for (uint8_t guard = 0; guard < 8U; ++guard) {
     const StepDef* step = currentStep();
     if (step == nullptr || step->transitionCount == 0U) {
@@ -464,17 +412,10 @@ bool ScenarioManager::runImmediateTransitions(uint32_t now_ms, const char* sourc
     if (selected == nullptr) {
       break;
     }
-    ++hop_count;
-    if (!applyTransition(*selected, now_ms, source, parent_event_name != nullptr ? parent_event_name : "immediate")) {
+    if (!applyTransition(*selected, now_ms, source)) {
       break;
     }
     moved = true;
-  }
-  if (hop_count > 1U) {
-    Serial.printf("[SCENARIO] immediate_chain hops=%u source=%s event=%s\n",
-                  static_cast<unsigned int>(hop_count),
-                  (source != nullptr && source[0] != '\0') ? source : "-",
-                  (parent_event_name != nullptr && parent_event_name[0] != '\0') ? parent_event_name : "-");
   }
   return moved;
 }
@@ -499,26 +440,15 @@ void ScenarioManager::evaluateAfterMsTransitions(uint32_t now_ms) {
     }
   }
   if (selected != nullptr) {
-    if (applyTransition(*selected, now_ms, "after_ms", "after_ms")) {
-      runImmediateTransitions(now_ms, "after_ms", "after_ms");
+    if (applyTransition(*selected, now_ms, "after_ms")) {
+      runImmediateTransitions(now_ms, "after_ms");
     }
   }
 }
 
-void ScenarioManager::enterStep(int8_t step_index, uint32_t now_ms, const char* source, const char* event_name) {
+void ScenarioManager::enterStep(int8_t step_index, uint32_t now_ms, const char* source) {
   if (scenario_ == nullptr || step_index < 0 || step_index >= static_cast<int8_t>(scenario_->stepCount)) {
     return;
-  }
-
-  const StepDef* previous_step = currentStep();
-  const char* from_step = (previous_step != nullptr && previous_step->id != nullptr) ? previous_step->id : "n/a";
-  const char* from_scene = (previous_step != nullptr) ? previous_step->resources.screenSceneId : nullptr;
-  const char* from_pack = (previous_step != nullptr) ? previous_step->resources.audioPackId : nullptr;
-  if (previous_step != nullptr) {
-    applyStepResourceOverride(previous_step, &from_scene, &from_pack);
-  }
-  if (!forced_screen_scene_id_.isEmpty()) {
-    from_scene = forced_screen_scene_id_.c_str();
   }
 
   current_step_index_ = step_index;
@@ -531,29 +461,13 @@ void ScenarioManager::enterStep(int8_t step_index, uint32_t now_ms, const char* 
   }
 
   pending_audio_pack_.remove(0);
-  forced_screen_scene_id_.remove(0);
   const char* screen_scene_id = step->resources.screenSceneId;
   const char* audio_pack_id = step->resources.audioPackId;
   applyStepResourceOverride(step, &screen_scene_id, &audio_pack_id);
   if (audio_pack_id != nullptr && audio_pack_id[0] != '\0') {
     pending_audio_pack_ = audio_pack_id;
   }
-  win_due_armed_ = false;
-  win_due_fired_ = false;
-  win_due_at_ms_ = 0U;
-  if (screen_scene_id != nullptr && std::strcmp(screen_scene_id, "SCENE_FINAL_WIN") == 0) {
-    win_due_armed_ = true;
-    win_due_fired_ = false;
-    win_due_at_ms_ = now_ms + kWinDueDelayMs;
-  }
-  Serial.printf("[SCENARIO] transition from_step=%s to_step=%s from_scene=%s to_scene=%s event=%s source=%s audio_pack=%s\n",
-                from_step,
-                step->id != nullptr ? step->id : "n/a",
-                (from_scene != nullptr && from_scene[0] != '\0') ? from_scene : "n/a",
-                (screen_scene_id != nullptr && screen_scene_id[0] != '\0') ? screen_scene_id : "n/a",
-                (event_name != nullptr && event_name[0] != '\0') ? event_name : "-",
-                (source != nullptr && source[0] != '\0') ? source : "-",
-                (audio_pack_id != nullptr && audio_pack_id[0] != '\0') ? audio_pack_id : "n/a");
+  Serial.printf("[SCENARIO] step=%s via=%s\n", step->id, source != nullptr ? source : "n/a");
 }
 
 const StepDef* ScenarioManager::currentStep() const {

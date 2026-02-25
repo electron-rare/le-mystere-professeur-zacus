@@ -1,0 +1,7 @@
+{
+  "id": "ACTION_QR_CODE_SCANNER_START",
+  "type": "qr_scanner_start",
+  "config": {
+    "enable": true
+  }
+}

@@ -48,6 +48,12 @@ StoryEventType parseEventType(const char* value) {
 	if (strcmp(value, "serial") == 0) {
 		return StoryEventType::kSerial;
 	}
+	if (strcmp(value, "button") == 0) {
+		return StoryEventType::kButton;
+	}
+	if (strcmp(value, "espnow") == 0 || strcmp(value, "esp_now") == 0) {
+		return StoryEventType::kEspNow;
+	}
 	if (strcmp(value, "action") == 0) {
 		return StoryEventType::kAction;
 	}

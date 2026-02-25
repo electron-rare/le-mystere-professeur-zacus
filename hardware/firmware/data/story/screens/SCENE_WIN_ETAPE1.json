@@ -1,0 +1,22 @@
+{
+  "id": "SCENE_WIN_ETAPE1",
+  "title": "WIN ETAPE 1",
+  "subtitle": "Validation distante",
+  "symbol": "WIN",
+  "effect": "celebrate",
+  "visual": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "effect_speed_ms": 360
+  },
+  "theme": {
+    "bg": "#1E0F32",
+    "accent": "#F5C64A",
+    "text": "#FFF8E4"
+  },
+  "transition": {
+    "effect": "zoom",
+    "duration_ms": 280
+  }
+}

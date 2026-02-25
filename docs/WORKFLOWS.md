@@ -6,3 +6,5 @@
 3. **Exporter les briefings Markdown** via `tools/scenario/export_md.py` pour mettre à jour `kit-maitre-du-jeu/_generated/` et `docs/_generated/SCENARIO_BRIEF.md`.
 4. **Valider l’audio** avec `tools/audio/validate_manifest.py audio/manifests/zacus_v1_audio.yaml` afin que chaque piste corresponde à un fichier de `game/prompts/audio/`.
 5. **Valider les printables** avec `tools/printables/validate_manifest.py printables/manifests/zacus_v1_printables.yaml` pour s’assurer que chaque ID a un prompt accessible.
+
+6. **Valider le conversation bundle** avec `tools/scenario/validate_runtime_bundle.py` pour vérifier la cohérence `scenario_runtime.json` / `scenario_canonical.yaml` / `scenario_promptable_template.yaml`.

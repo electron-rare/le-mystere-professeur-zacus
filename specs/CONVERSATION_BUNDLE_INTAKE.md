@@ -1,7 +1,7 @@
-# ZIP intake — statut après réception bundle (G0 Spec Freeze)
+# Conversation bundle intake — statut courant (G0 Spec Freeze)
 
 ## Contexte
-Le bundle annoncé par l'utilisateur est désormais disponible sous :
+Le bundle conversationnel est maintenu dans :
 `scenario-ai-coherence/zacus_conversation_bundle_v3/`.
 
 ## Critères d'acceptation (AC)
@@ -21,7 +21,8 @@ Le bundle annoncé par l'utilisateur est désormais disponible sous :
 - Les formats `scenario_runtime.json`/templates peuvent nécessiter une validation dédiée ultérieure.
 
 ## Prochaine étape proposée
-- Ajouter un validateur dédié pour `scenario-ai-coherence/zacus_conversation_bundle_v3/scenario_runtime.json` et son template promptable, puis l'inclure dans les gates G3.
+- Validateur dédié implémenté: `tools/scenario/validate_runtime_bundle.py` (cohérence runtime/canonical/template).
+- Étape suivante: brancher ce validateur dans l'automatisation CI (gate G3 systématique).
 
 ## Statut Gates
 - G0 Spec Freeze : **satisfait** pour l'import brut du bundle.

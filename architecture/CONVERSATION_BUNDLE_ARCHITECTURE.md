@@ -1,4 +1,4 @@
-# Architecture d'intégration ZIP — implémentation minimale (G1)
+# Architecture d'intégration du conversation bundle — baseline (G1)
 
 ## Entrée / sortie
 - **Entrée**: bundle conversationnel `scenario-ai-coherence/zacus_conversation_bundle_v3/*`.
@@ -15,7 +15,8 @@
 - Bootstrap dépendances validateurs: `tools/setup/install_validators.sh`.
 
 ## Prochaine évolution proposée
-- Ajouter `tools/scenario/validate_runtime_bundle.py` pour vérifier la cohérence entre `scenario_runtime.json`, `scenario_canonical.yaml` et `scenario_promptable_template.yaml`.
+- Validateur ajouté: `tools/scenario/validate_runtime_bundle.py` (cohérence entre `scenario_runtime.json`, `scenario_canonical.yaml` et `scenario_promptable_template.yaml`).
+- Prochaine itération: intégration CI de ce contrôle dans la gate G3.
 
 ## Statut Gates
 - G1 Arch Freeze : **satisfait** pour ce lot d'import documentaire/data.

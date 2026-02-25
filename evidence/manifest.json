@@ -1,16 +1,15 @@
 {
   "date": "2026-02-25",
-  "agent": "qa-test",
+  "agent": "pm-spec",
   "changes": [
+    "specs/CONVERSATION_BUNDLE_INTAKE.md",
+    "architecture/CONVERSATION_BUNDLE_ARCHITECTURE.md",
     "tools/requirements/validators.txt",
     "tools/setup/install_validators.sh",
-    "docs/WORKFLOWS.md",
-    "specs/ZIP_PR_INTAKE_TODO.md",
-    "architecture/ZIP_PR_ARCH_TODO.md"
+    "docs/WORKFLOWS.md"
   ],
   "artifacts": [
-    "artifacts/pm-spec/2026-02-25/zip-intake-note.md",
-    "artifacts/pm-spec/2026-02-25/zip-intake-imported.md",
+    "artifacts/pm-spec/2026-02-25/conversation-bundle-intake.md",
     "artifacts/qa-test/2026-02-25/validator-bootstrap.md"
   ],
   "gates": {
@@ -21,5 +20,5 @@
     "G4": "pending",
     "G5": "partial"
   },
-  "note": "Bootstrap reproductible des validateurs ajouté; gates scénario/audio/printables exécutés avec succès."
+  "note": "Terminologie harmonisée autour du conversation bundle; validateurs installables et exécutés."
 }

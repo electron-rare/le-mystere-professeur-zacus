@@ -7,7 +7,13 @@
   "visual": {
     "show_title": true,
     "show_symbol": false,
-    "effect_speed_ms": 90
+    "effect_speed_ms": 90,
+    "waveform": {
+      "enabled": true,
+      "sample_count": 16,
+      "amplitude_pct": 100,
+      "jitter": true
+    }
   },
   "theme": {
     "bg": "#06060E",

@@ -1,35 +1,17 @@
 meta:
   purpose: Edit LVGL/FX/audio mapping scene by scene, then sync to screen JSON.
   source_runtime_scenario: game/scenarios/default_unlock_win_etape2.yaml
-  review:
-    status: coherent
-    scope: runtime_scenes_only
-    checks:
-    - screen_json_exists
-    - runtime_step_ids_match_default_scenario
-    - effect_tokens_supported_by_ui_manager
-    - transition_tokens_supported_by_ui_manager
-    - unused_scenes_pruned
   scope: runtime_only
-  scene_order_source: game/scenarios/default_unlock_win_etape2.yaml#steps
   used_scene_count: 9
-  removed_unused_scene_count: 15
-  removed_unused_scene_ids:
-  - SCENE_BROKEN
-  - SCENE_CAMERA_SCAN
-  - SCENE_FIREWORKS
-  - SCENE_LA_DETECT
+  exported_scene_count: 9
+  unused_scene_ids:
   - SCENE_LOCKED
-  - SCENE_MEDIA_ARCHIVE
   - SCENE_MP3_PLAYER
   - SCENE_PHOTO_MANAGER
   - SCENE_READY
   - SCENE_REWARD
   - SCENE_SEARCH
-  - SCENE_SIGNAL_SPIKE
-  - SCENE_WIN
-  - SCENE_WINNER
-  - SCENE_WIN_ETAPE
+  missing_screen_ids: []
 scenes:
 - scene_id: SCENE_U_SON_PROTO
   screen_json: hardware/firmware/data/story/screens/SCENE_U_SON_PROTO.json

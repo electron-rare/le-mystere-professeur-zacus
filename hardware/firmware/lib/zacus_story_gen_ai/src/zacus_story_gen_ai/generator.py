@@ -64,6 +64,12 @@ APP_CPP = {
     "QR_UNLOCK_APP": "StoryAppType::kQrUnlockApp",
 }
 
+ACTION_FILE_ALIASES = {
+    # Keep long action IDs in YAML/runtime while allowing short LittleFS filenames.
+    "ACTION_QR_CODE_SCANNER_START": "ACTION_QR_SCAN_START",
+    "ACTION_SET_BOOT_MEDIA_MANAGER": "ACTION_BOOT_MEDIA_MGR",
+}
+
 DEFAULT_SCENE_PROFILE: dict[str, Any] = {
     "title": "MISSION",
     "subtitle": "",
@@ -966,6 +972,13 @@ def _classify_game_yaml(file_path: Path) -> str:
     has_runtime = bool(doc.get("initial_step")) and isinstance(doc.get("steps"), list)
     has_narrative = bool(doc.get("title")) and isinstance(doc.get("stations"), list)
     has_template = isinstance(doc.get("prompt_input"), dict)
+    has_workbench = isinstance(doc.get("meta"), dict) and isinstance(doc.get("scenes"), list)
+    if has_workbench and not has_runtime and not has_narrative and not has_template:
+        return "workbench"
+    if has_workbench and (has_runtime or has_narrative or has_template):
+        raise StoryGenerationError(
+            f"Ambiguous game scenario type in {file_path}: workbench mixed with runtime/narrative/template keys detected"
+        )
     if has_template and not has_runtime and not has_narrative:
         return "template"
     if has_runtime and has_narrative:
@@ -1145,6 +1158,11 @@ def _resource_candidates(resource_root: Path, resource_type: str, resource_id: s
     elif resource_type == "audio":
         slug = _resource_slug(resource_id, "PACK_")
         candidates.append(base / f"{slug}.json")
+    elif resource_type == "actions":
+        alias = ACTION_FILE_ALIASES.get(resource_id)
+        if alias:
+            candidates.append(base / f"{alias}.json")
+            candidates.append(base / f"{alias.lower()}.json")
 
     # de-duplicate while preserving order
     dedup: list[Path] = []
@@ -1629,6 +1647,8 @@ def load_and_validate(paths: StoryPaths, spec_dir: Path | None = None, game_dir:
             narrative_game_files.append(file_path)
         elif category == "template":
             template_files.append(file_path)
+        elif category == "workbench":
+            continue
 
     _validate_yamale(_schema_path("story_spec_schema.yamale"), spec_files)
     if runtime_game_files:

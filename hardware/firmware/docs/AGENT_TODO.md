@@ -1,3 +1,105 @@
+## [2026-02-25] Clean ecrans - reduction du catalogue LittleFS (phase 1)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260225_202801_wip.patch`
+  - `/tmp/zacus_checkpoint/20260225_202801_status.txt`
+- Scope:
+  - `data/story/screens/*.json`
+  - `game/scenarios/scene_editor_all.yaml`
+  - `game/scenarios/scenario_reel_template.yaml`
+- Actions:
+  - suppression de 9 ecrans non utilises par le runtime principal:
+    - `SCENE_BROKEN`, `SCENE_CAMERA_SCAN`, `SCENE_FIREWORKS`, `SCENE_LA_DETECT`,
+      `SCENE_MEDIA_ARCHIVE`, `SCENE_SIGNAL_SPIKE`, `SCENE_WIN`, `SCENE_WINNER`, `SCENE_WIN_ETAPE`.
+  - regeneration workbench scenes:
+    - `python3 tools/dev/export_scene_editor_workbench.py`
+  - suppression des references YAML `screen_json` obsoletes dans `scenario_reel_template.yaml` (catalogues ecrans + triggers scenes).
+- Resultat:
+  - `data/story/screens`: 24 -> 15 fichiers.
+  - `scene_editor_all.yaml`: `unused_scene_ids` reduit de 15 -> 6.
+- Gates/evidence:
+  - `./tools/dev/story-gen validate` ✅
+  - parse JSON `data/story/screens/*.json` ✅ (`json_screens_ok 15`)
+  - check refs `screen_json` YAML manquants ✅ (`missing_screen_json_refs 0`)
+  - `python3 ../../tools/scenario/validate_scenario.py ../../game/scenarios/zacus_v1.yaml` ✅
+  - `python3 ../../tools/scenario/export_md.py ../../game/scenarios/zacus_v1.yaml` ✅
+  - `python3 ../../tools/audio/validate_manifest.py ../../audio/manifests/zacus_v1_audio.yaml` ✅
+  - `python3 ../../tools/printables/validate_manifest.py ../../printables/manifests/zacus_v1_printables.yaml` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅
+
+## [2026-02-25] Clean ecrans (screens) - sync workbench + gates
+
+- Scope:
+  - `game/scenarios/scene_editor_all.yaml`
+  - `data/story/screens/*.json`
+  - `data/screens/*.json`
+- Actions:
+  - regeneration du workbench ecrans depuis les JSON canoniques:
+    - `python3 tools/dev/export_scene_editor_workbench.py`
+  - controle coherence tokens UI (`effect`, `timeline.keyframes[].effect`, `transition.effect`) contre le parseur runtime `ui_manager.cpp`: aucun token invalide detecte.
+  - controle JSON des ecrans (`data/story/screens` + `data/screens`): parse OK.
+- Resultat:
+  - `game/scenarios/scene_editor_all.yaml` resynchronise avec l'etat reel des ecrans runtime.
+  - aucune derive restante detectee sur les 6 mirrors legacy `data/screens/*.json` (alignes avec `data/story/screens/SCENE_*.json` correspondants).
+- Gates/evidence:
+  - `./tools/dev/story-gen validate` ✅
+  - `jq empty` sur `data/story/screens/*.json` et `data/screens/*.json` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅
+
+## [2026-02-25] Clean global scenario/scene (YAML + code + assets)
+
+- Skills utilises (ordre):
+  - `firmware-story-stack`
+  - `firmware-littlefs-stack`
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260225_200958_wip.patch`
+  - `/tmp/zacus_checkpoint/20260225_200958_status.txt`
+- Clean applique:
+  - `lib/zacus_story_gen_ai/src/zacus_story_gen_ai/generator.py`
+    - classification `workbench` ajoutee pour ignorer les YAML d'edition scene (`meta` + `scenes`) dans `story-gen validate`.
+    - resolution alias actions ajoutee pour les noms courts LittleFS:
+      - `ACTION_QR_CODE_SCANNER_START` -> `ACTION_QR_SCAN_START`
+      - `ACTION_SET_BOOT_MEDIA_MANAGER` -> `ACTION_BOOT_MEDIA_MGR`
+  - runtime Freenove:
+    - `ui_freenove_allinone/src/app/main.cpp`
+    - `ui_freenove_allinone/src/main.cpp`
+    - `executeStoryAction` charge maintenant d'abord `ACTION_ID.json`, puis fallback alias fichier court si absent.
+- Gates/evidence:
+  - `./tools/dev/story-gen validate` ✅ (`scenarios=5`, `game_scenarios=2`)
+  - `./tools/dev/story-gen generate-cpp` ✅ (`spec_hash=aa9658456a0d`)
+  - `./tools/dev/story-gen generate-bundle --out-dir /tmp/zacus_story_bundle_clean_20260225_201347` ✅
+    - verification assets actions generes:
+      - `/tmp/zacus_story_bundle_clean_20260225_201347/story/actions/ACTION_QR_CODE_SCANNER_START.json` (type/config presents)
+      - `/tmp/zacus_story_bundle_clean_20260225_201347/story/actions/ACTION_SET_BOOT_MEDIA_MANAGER.json` (type/config presents)
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅
+
+## [2026-02-25] Audit + clean dossier data (story/littlefs)
+
+- Skills utilises (ordre):
+  - `firmware-story-stack`
+  - `firmware-littlefs-stack`
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260225_195727_wip.patch`
+  - `/tmp/zacus_checkpoint/20260225_195727_status.txt`
+- Audit `data/`:
+  - 89 fichiers, 16 dossiers, aucun fichier temporaire suspect detecte.
+  - derive detectee entre fallback legacy `/screens/*` et canonique `/story/screens/*` pour:
+    - `data/screens/la_detector.json`
+    - `data/screens/locked.json`
+  - fichier legacy non reference detecte:
+    - `data/scenarios/data/default_scenario.json`
+- Clean applique:
+  - synchronisation fallback `/screens` avec les JSON canoniques:
+    - `data/screens/la_detector.json` -> aligne sur `data/story/screens/SCENE_LA_DETECTOR.json`
+    - `data/screens/locked.json` -> aligne sur `data/story/screens/SCENE_LOCKED.json`
+  - suppression du legacy non reference:
+    - `data/scenarios/data/default_scenario.json`
+- Gates/evidence:
+  - parse JSON complet `data/**/*.json` via `jq empty` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅
+  - note: `./tools/dev/story-gen validate` echoue sur `../../game/scenarios/scene_editor_all.yaml` (format workbench non reconnu), anomalie preexistante hors clean `data/`.
+
 ## [2026-02-25] Preparation test utilisateur reel (runbook)
 
 - Carte preparee pour test terrain:
@@ -2106,3 +2208,26 @@
   - `~/.codex/skills/scene-verificator/scripts/run_scene_verification.sh /dev/cu.usbmodem5AB90753301 115200` ✅
   - `~/.codex/skills/fx-verificator/scripts/run_fx_verification.sh /dev/cu.usbmodem5AB90753301 115200` ✅
   - `~/.codex/skills/hal-verificator-status/scripts/run_hal_verification.sh /dev/cu.usbmodem5AB90753301 115200` ✅
+
+## Correction SDMMC - diagnostic carte/FS/lecteur (2026-02-25)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260225-194217_wip.patch`
+  - `/tmp/zacus_checkpoint/20260225-194217_status.txt`
+  - scan artefacts trackes (`.pio/.platformio/logs/dist/build/node_modules/.venv`) -> aucun tracke.
+- Cause identifiee:
+  - les lectures `/story/*` passaient par SD en priorite (`readTextFileWithOrigin`), ce qui exposait le runtime aux erreurs `diskio_sdmmc` en cas de carte instable, meme quand LittleFS contenait deja les assets.
+- Correctif applique (`ui_freenove_allinone/src/storage/storage_manager.cpp`):
+  - fallback runtime passe en **LittleFS d'abord**, SD ensuite (sauf chemin force `/sd/...`),
+  - surveillance `errno` sur `SD_MMC.exists/open/read`,
+  - compteur d'echecs SD (`sd_failure_streak_`) + coupure SD auto apres erreurs I/O repetees,
+  - remount SD explicite tente dans `syncStoryFileFromSd`/`syncStoryTreeFromSd` quand SD etait degrade.
+- Interface mise a jour:
+  - `ui_freenove_allinone/include/storage/storage_manager.h` (etat SD mutable + helpers de diagnostic).
+- Build/upload:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- Validation live:
+  - log diagnostic: `logs/sdmmc_diag_20260225-195139.log`
+  - resultat: `SUMMARY sd_errors=0 panic_markers=0 ack_next_ok=10 ack_next_fail=0`
+  - gate smoke: `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 10 --wait-port 20` ✅

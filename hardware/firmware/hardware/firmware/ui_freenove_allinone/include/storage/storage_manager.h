@@ -40,6 +40,9 @@ class StorageManager {
   bool copyFileFromSdToLittleFs(const char* src_path, const char* dst_path) const;
   bool copyStoryDirectoryFromSd(const char* relative_dir);
   String resolveReadableAssetPath(const String& absolute_path) const;
+  void noteSdAccessFailure(const char* operation, const char* path, int error_code) const;
+  void noteSdAccessSuccess() const;
 
-  bool sd_ready_ = false;
+  mutable bool sd_ready_ = false;
+  mutable uint8_t sd_failure_streak_ = 0U;
 };

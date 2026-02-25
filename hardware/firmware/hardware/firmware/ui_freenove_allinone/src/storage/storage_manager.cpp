@@ -15,6 +15,7 @@
 
 #include <cstring>
 #include <cctype>
+#include <cerrno>
 
 #include "resources/screen_scene_registry.h"
 #include "scenarios/default_scenario_v2.h"
@@ -48,6 +49,8 @@ constexpr EmbeddedStoryAsset kEmbeddedStoryAssets[] = {
     {"/story/apps/APP_WIFI.json", R"JSON({"id":"APP_WIFI","app":"WIFI_STACK","config":{"hostname":"zacus-freenove","ap_policy":"if_no_known_wifi","pause_local_retry_when_ap_client":true,"local_retry_ms":15000,"ap_default_ssid":"Freenove-Setup"}})JSON"},
     {"/story/scenarios/DEFAULT.json", R"JSON({"scenario":"DEFAULT","source":"embedded_minimal"})JSON"},
 };
+
+constexpr uint8_t kSdFailureDisableThreshold = 3U;
 
 
 uint32_t fnv1aUpdate(uint32_t hash, uint8_t value) {
@@ -182,6 +185,7 @@ bool StorageManager::mountSdCard() {
   }
   Serial.printf("[FS] SD_MMC mounted size=%lluMB\n",
                 static_cast<unsigned long long>(SD_MMC.cardSize() / (1024ULL * 1024ULL)));
+  sd_failure_streak_ = 0U;
   return true;
 #else
   return false;
@@ -249,7 +253,17 @@ bool StorageManager::pathExistsOnSdCard(const char* path) const {
   if (sd_path.isEmpty()) {
     return false;
   }
-  return SD_MMC.exists(sd_path.c_str());
+  errno = 0;
+  const bool exists = SD_MMC.exists(sd_path.c_str());
+  const int error_code = errno;
+  if (exists) {
+    noteSdAccessSuccess();
+    return true;
+  }
+  if (error_code != 0 && error_code != ENOENT) {
+    noteSdAccessFailure("exists", sd_path.c_str(), error_code);
+  }
+  return false;
 #else
   (void)path;
   return false;
@@ -285,22 +299,39 @@ bool StorageManager::readTextFromLittleFs(const char* path, String* out_payload)
 }
 
 bool StorageManager::readTextFromSdCard(const char* path, String* out_payload) const {
-  if (out_payload == nullptr || !pathExistsOnSdCard(path)) {
+  if (out_payload == nullptr || !sd_ready_) {
     return false;
   }
 #if ZACUS_HAS_SD_MMC
   const String sd_path = stripSdPrefix(path);
+  if (sd_path.isEmpty()) {
+    return false;
+  }
+  errno = 0;
   File file = SD_MMC.open(sd_path.c_str(), "r");
-  if (!file) {
-    RuntimeMetrics::instance().noteSdError();
+  const int open_error = errno;
+  if (!file || file.isDirectory()) {
+    if (file) {
+      file.close();
+    }
+    if (open_error != 0 && open_error != ENOENT) {
+      noteSdAccessFailure("open", sd_path.c_str(), open_error);
+    }
     return false;
   }
   out_payload->remove(0);
   out_payload->reserve(static_cast<size_t>(file.size()) + 1U);
   while (file.available()) {
-    *out_payload += static_cast<char>(file.read());
+    const int value = file.read();
+    if (value < 0) {
+      file.close();
+      noteSdAccessFailure("read", sd_path.c_str(), EIO);
+      return false;
+    }
+    *out_payload += static_cast<char>(value);
   }
   file.close();
+  noteSdAccessSuccess();
   return !out_payload->isEmpty();
 #else
   (void)path;
@@ -317,7 +348,6 @@ bool StorageManager::readTextFileWithOrigin(const char* path, String* out_payloa
     return false;
   }
   const bool force_sd = startsWithIgnoreCase(normalized.c_str(), "/sd/");
-  const bool prefer_sd = !force_sd && startsWithIgnoreCase(normalized.c_str(), "/story/");
 
   String payload;
   if (force_sd) {
@@ -332,13 +362,6 @@ bool StorageManager::readTextFileWithOrigin(const char* path, String* out_payloa
     return true;
   }
 
-  if (prefer_sd && readTextFromSdCard(normalized.c_str(), &payload)) {
-    *out_payload = payload;
-    if (out_origin != nullptr) {
-      *out_origin = "/sd" + stripSdPrefix(normalized.c_str());
-    }
-    return true;
-  }
   if (readTextFromLittleFs(normalized.c_str(), &payload)) {
     *out_payload = payload;
     if (out_origin != nullptr) {
@@ -576,13 +599,16 @@ bool StorageManager::copyFileFromSdToLittleFs(const char* src_path, const char* 
   }
 #if ZACUS_HAS_SD_MMC
   if (!pathExistsOnSdCard(src_path)) {
-    RuntimeMetrics::instance().noteSdError();
     return false;
   }
   const String sd_path = stripSdPrefix(src_path);
+  errno = 0;
   File src = SD_MMC.open(sd_path.c_str(), "r");
+  const int open_error = errno;
   if (!src) {
-    RuntimeMetrics::instance().noteSdError();
+    if (open_error != 0 && open_error != ENOENT) {
+      noteSdAccessFailure("open", sd_path.c_str(), open_error);
+    }
     return false;
   }
   if (!ensureParentDirectoriesOnLittleFs(dst_path)) {
@@ -592,24 +618,26 @@ bool StorageManager::copyFileFromSdToLittleFs(const char* src_path, const char* 
   File dst = LittleFS.open(dst_path, "w");
   if (!dst) {
     src.close();
-    RuntimeMetrics::instance().noteSdError();
     return false;
   }
   uint8_t buffer[512];
   while (src.available()) {
     const size_t read_bytes = src.read(buffer, sizeof(buffer));
     if (read_bytes == 0U) {
-      break;
+      src.close();
+      dst.close();
+      noteSdAccessFailure("read", sd_path.c_str(), EIO);
+      return false;
     }
     if (dst.write(buffer, read_bytes) != read_bytes) {
       dst.close();
       src.close();
-      RuntimeMetrics::instance().noteSdError();
       return false;
     }
   }
   dst.close();
   src.close();
+  noteSdAccessSuccess();
   return true;
 #else
   (void)src_path;
@@ -619,7 +647,10 @@ bool StorageManager::copyFileFromSdToLittleFs(const char* src_path, const char* 
 }
 
 bool StorageManager::syncStoryFileFromSd(const char* story_path) {
-  if (!sd_ready_ || story_path == nullptr || story_path[0] == '\0') {
+  if (story_path == nullptr || story_path[0] == '\0') {
+    return false;
+  }
+  if (!sd_ready_ && !mountSdCard()) {
     return false;
   }
   const String normalized = normalizeAbsolutePath(story_path);
@@ -634,7 +665,10 @@ bool StorageManager::syncStoryFileFromSd(const char* story_path) {
 }
 
 bool StorageManager::copyStoryDirectoryFromSd(const char* relative_dir) {
-  if (!sd_ready_ || relative_dir == nullptr || relative_dir[0] == '\0') {
+  if (relative_dir == nullptr || relative_dir[0] == '\0') {
+    return false;
+  }
+  if (!sd_ready_ && !mountSdCard()) {
     return false;
   }
 #if ZACUS_HAS_SD_MMC
@@ -692,7 +726,7 @@ bool StorageManager::provisionEmbeddedAsset(const char* path,
 }
 
 bool StorageManager::syncStoryTreeFromSd() {
-  if (!sd_ready_) {
+  if (!sd_ready_ && !mountSdCard()) {
     return false;
   }
   const char* story_dirs[] = {"scenarios", "screens", "audio", "apps", "actions"};
@@ -758,6 +792,38 @@ bool StorageManager::ensureDefaultScenarioFile(const char* path) {
 
 bool StorageManager::hasSdCard() const {
   return sd_ready_;
+}
+
+void StorageManager::noteSdAccessFailure(const char* operation, const char* path, int error_code) const {
+#if ZACUS_HAS_SD_MMC
+  RuntimeMetrics::instance().noteSdError();
+  if (error_code == 0 || error_code == ENOENT) {
+    return;
+  }
+
+  if (sd_failure_streak_ < 255U) {
+    ++sd_failure_streak_;
+  }
+  Serial.printf("[FS] SD_MMC %s failed path=%s errno=%d streak=%u\n",
+                operation != nullptr ? operation : "op",
+                path != nullptr ? path : "-",
+                error_code,
+                static_cast<unsigned int>(sd_failure_streak_));
+
+  if (sd_failure_streak_ >= kSdFailureDisableThreshold && sd_ready_) {
+    SD_MMC.end();
+    sd_ready_ = false;
+    Serial.println("[FS] SD_MMC disabled after repeated I/O failures; fallback=LittleFS");
+  }
+#else
+  (void)operation;
+  (void)path;
+  (void)error_code;
+#endif
+}
+
+void StorageManager::noteSdAccessSuccess() const {
+  sd_failure_streak_ = 0U;
 }
 
 uint32_t StorageManager::checksum(const char* path) const {

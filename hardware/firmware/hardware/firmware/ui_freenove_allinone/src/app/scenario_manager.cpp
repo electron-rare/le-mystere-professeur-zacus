@@ -636,6 +636,12 @@ void ScenarioManager::loadStepResourceOverrides(const char* scenario_file_path) 
     JsonObjectConst step_obj = variant.as<JsonObjectConst>();
     const char* step_id = stringOrNull(step_obj["id"]);
     if (step_id == nullptr) {
+      step_id = stringOrNull(step_obj["step_id"]);
+    }
+    if (step_id == nullptr) {
+      step_id = stringOrNull(step_obj["stepId"]);
+    }
+    if (step_id == nullptr) {
       continue;
     }
 
@@ -659,6 +665,9 @@ void ScenarioManager::loadStepResourceOverrides(const char* scenario_file_path) 
     JsonArrayConst action_ids = step_obj["action_ids"].as<JsonArrayConst>();
     if (action_ids.isNull()) {
       action_ids = step_obj["actionIds"].as<JsonArrayConst>();
+    }
+    if (action_ids.isNull()) {
+      action_ids = step_obj["actions"].as<JsonArrayConst>();
     }
     if (action_ids.isNull()) {
       action_ids = step_obj["resources"]["action_ids"].as<JsonArrayConst>();

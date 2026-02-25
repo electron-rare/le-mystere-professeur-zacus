@@ -1534,7 +1534,22 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
     return false;
   }
   const String action_path = String("/story/actions/") + action_id + ".json";
-  const String payload = g_storage.loadTextFile(action_path.c_str());
+  String payload = g_storage.loadTextFile(action_path.c_str());
+  if (payload.isEmpty()) {
+    const char* alias_id = nullptr;
+    if (std::strcmp(action_id, "ACTION_QR_CODE_SCANNER_START") == 0) {
+      alias_id = "ACTION_QR_SCAN_START";
+    } else if (std::strcmp(action_id, "ACTION_SET_BOOT_MEDIA_MANAGER") == 0) {
+      alias_id = "ACTION_BOOT_MEDIA_MGR";
+    }
+    if (alias_id != nullptr) {
+      const String alias_path = String("/story/actions/") + alias_id + ".json";
+      payload = g_storage.loadTextFile(alias_path.c_str());
+      if (!payload.isEmpty()) {
+        Serial.printf("[ACTION] payload alias id=%s file=%s\n", action_id, alias_id);
+      }
+    }
+  }
   StaticJsonDocument<512> action_doc;
   if (!payload.isEmpty()) {
     deserializeJson(action_doc, payload);

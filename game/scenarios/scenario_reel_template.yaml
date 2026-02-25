@@ -134,26 +134,6 @@ prompt_input:
       screen_json: "data/story/screens/SCENE_LOCKED.json"
       default_audio_pack_id: ""
       runtime_step_ids: []
-    - scene_id: "SCENE_WIN_ETAPE"
-      screen_json: "data/story/screens/SCENE_WIN_ETAPE.json"
-      default_audio_pack_id: "PACK_WIN"
-      runtime_step_ids: []
-    - scene_id: "SCENE_WINNER"
-      screen_json: "data/story/screens/SCENE_WINNER.json"
-      default_audio_pack_id: "PACK_WIN"
-      runtime_step_ids: []
-    - scene_id: "SCENE_FIREWORKS"
-      screen_json: "data/story/screens/SCENE_FIREWORKS.json"
-      default_audio_pack_id: ""
-      runtime_step_ids: []
-    - scene_id: "SCENE_BROKEN"
-      screen_json: "data/story/screens/SCENE_BROKEN.json"
-      default_audio_pack_id: ""
-      runtime_step_ids: []
-    - scene_id: "SCENE_WIN"
-      screen_json: "data/story/screens/SCENE_WIN.json"
-      default_audio_pack_id: "PACK_WIN"
-      runtime_step_ids: []
     - scene_id: "SCENE_REWARD"
       screen_json: "data/story/screens/SCENE_REWARD.json"
       default_audio_pack_id: ""
@@ -161,22 +141,6 @@ prompt_input:
     - scene_id: "SCENE_SEARCH"
       screen_json: "data/story/screens/SCENE_SEARCH.json"
       default_audio_pack_id: ""
-      runtime_step_ids: []
-    - scene_id: "SCENE_SIGNAL_SPIKE"
-      screen_json: "data/story/screens/SCENE_SIGNAL_SPIKE.json"
-      default_audio_pack_id: "PACK_MORSE_HINT"
-      runtime_step_ids: []
-    - scene_id: "SCENE_MEDIA_ARCHIVE"
-      screen_json: "data/story/screens/SCENE_MEDIA_ARCHIVE.json"
-      default_audio_pack_id: ""
-      runtime_step_ids: []
-    - scene_id: "SCENE_CAMERA_SCAN"
-      screen_json: "data/story/screens/SCENE_CAMERA_SCAN.json"
-      default_audio_pack_id: ""
-      runtime_step_ids: []
-    - scene_id: "SCENE_LA_DETECT"
-      screen_json: "data/story/screens/SCENE_LA_DETECT.json"
-      default_audio_pack_id: "PACK_SONAR_HINT"
       runtime_step_ids: []
 
   audio_pack_catalog_all:
@@ -274,31 +238,6 @@ prompt_input:
       default_entry_triggers: ["SCENE_GOTO SCENE_LOCKED", "scenario_reset"]
       default_exit_triggers: ["UNLOCK", "NEXT", "SC_EVENT button ANY"]
       runtime_step_ids: []
-    - scene_id: "SCENE_WIN_ETAPE"
-      default_actions: []
-      default_entry_triggers: ["SCENE_GOTO SCENE_WIN_ETAPE"]
-      default_exit_triggers: ["SCENE_GOTO SCENE_READY", "SCENE_GOTO SCENE_LOCKED"]
-      runtime_step_ids: []
-    - scene_id: "SCENE_WINNER"
-      default_actions: []
-      default_entry_triggers: ["SCENE_GOTO SCENE_WINNER"]
-      default_exit_triggers: ["SCENE_GOTO SCENE_READY", "SCENE_GOTO SCENE_MEDIA_MANAGER"]
-      runtime_step_ids: []
-    - scene_id: "SCENE_FIREWORKS"
-      default_actions: []
-      default_entry_triggers: ["SCENE_GOTO SCENE_FIREWORKS"]
-      default_exit_triggers: ["SCENE_GOTO SCENE_READY", "SCENE_GOTO SCENE_MEDIA_MANAGER"]
-      runtime_step_ids: []
-    - scene_id: "SCENE_BROKEN"
-      default_actions: []
-      default_entry_triggers: ["SCENE_GOTO SCENE_BROKEN"]
-      default_exit_triggers: ["SCENE_GOTO SCENE_READY", "SCENE_GOTO SCENE_LOCKED"]
-      runtime_step_ids: []
-    - scene_id: "SCENE_WIN"
-      default_actions: []
-      default_entry_triggers: ["SCENE_GOTO SCENE_WIN"]
-      default_exit_triggers: ["SCENE_GOTO SCENE_READY"]
-      runtime_step_ids: []
     - scene_id: "SCENE_REWARD"
       default_actions: []
       default_entry_triggers: ["SCENE_GOTO SCENE_REWARD"]
@@ -308,26 +247,6 @@ prompt_input:
       default_actions: []
       default_entry_triggers: ["SCENE_GOTO SCENE_SEARCH"]
       default_exit_triggers: ["SCENE_GOTO SCENE_READY"]
-      runtime_step_ids: []
-    - scene_id: "SCENE_SIGNAL_SPIKE"
-      default_actions: []
-      default_entry_triggers: ["SCENE_GOTO SCENE_SIGNAL_SPIKE"]
-      default_exit_triggers: ["SCENE_GOTO SCENE_READY"]
-      runtime_step_ids: []
-    - scene_id: "SCENE_MEDIA_ARCHIVE"
-      default_actions: []
-      default_entry_triggers: ["SCENE_GOTO SCENE_MEDIA_ARCHIVE"]
-      default_exit_triggers: ["SCENE_GOTO SCENE_MEDIA_MANAGER", "SCENE_GOTO SCENE_READY"]
-      runtime_step_ids: []
-    - scene_id: "SCENE_CAMERA_SCAN"
-      default_actions: []
-      default_entry_triggers: ["SCENE_GOTO SCENE_CAMERA_SCAN"]
-      default_exit_triggers: ["SCENE_GOTO SCENE_READY", "SCENE_GOTO SCENE_MEDIA_MANAGER"]
-      runtime_step_ids: []
-    - scene_id: "SCENE_LA_DETECT"
-      default_actions: []
-      default_entry_triggers: ["SCENE_GOTO SCENE_LA_DETECT"]
-      default_exit_triggers: ["SCENE_GOTO SCENE_READY", "SCENE_GOTO SCENE_LA_DETECTOR"]
       runtime_step_ids: []
 
   scenario:

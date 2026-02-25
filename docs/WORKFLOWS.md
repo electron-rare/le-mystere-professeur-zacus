@@ -1,5 +1,6 @@
 # Workflows
 
+0. **Installer les validateurs** avec `bash tools/setup/install_validators.sh` (installe les dépendances Python requises, ex: PyYAML).
 1. **Mettre à jour le YAML canon** (`game/scenarios/zacus_v1.yaml` ou nouvel ID). Les stations/puzzles/solution sont la source des prompts audio et printables.
 2. **Valider le scénario** avec `tools/scenario/validate_scenario.py` pour garantir structure, plages 6–14 enfants et `solution_unique`.
 3. **Exporter les briefings Markdown** via `tools/scenario/export_md.py` pour mettre à jour `kit-maitre-du-jeu/_generated/` et `docs/_generated/SCENARIO_BRIEF.md`.

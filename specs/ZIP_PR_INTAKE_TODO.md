@@ -9,6 +9,7 @@ Le bundle annoncé par l'utilisateur est désormais disponible sous :
 - Le contenu est importé tel quel (pas de transformation fonctionnelle).
 - La traçabilité est mise à jour (`artifacts/...` + `evidence/manifest.json`).
 - Les validateurs scénario/audio/printables existants passent après import.
+- L'installation des validateurs est reproductible par script versionné.
 
 ## Non-goals
 - Aucune promotion automatique de `zacus_v2.yaml` vers `game/scenarios/*.yaml`.
@@ -18,6 +19,9 @@ Le bundle annoncé par l'utilisateur est désormais disponible sous :
 ## Risques
 - Le bundle peut diverger du scénario canonique `game/scenarios/zacus_v1.yaml`.
 - Les formats `scenario_runtime.json`/templates peuvent nécessiter une validation dédiée ultérieure.
+
+## Prochaine étape proposée
+- Ajouter un validateur dédié pour `scenario-ai-coherence/zacus_conversation_bundle_v3/scenario_runtime.json` et son template promptable, puis l'inclure dans les gates G3.
 
 ## Statut Gates
 - G0 Spec Freeze : **satisfait** pour l'import brut du bundle.

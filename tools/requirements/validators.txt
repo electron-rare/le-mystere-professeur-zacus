@@ -1,0 +1,2 @@
+# Dependencies required by repository validators
+PyYAML>=6.0,<7

@@ -1,3 +1,32 @@
+## [2026-02-25] Clean ecrans - phase 2 (runtime strict 9)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260225_203828_wip.patch`
+  - `/tmp/zacus_checkpoint/20260225_203828_status.txt`
+- Scope:
+  - `data/story/screens/*.json`
+  - `game/scenarios/scene_editor_all.yaml`
+  - `game/scenarios/scenario_reel_template.yaml`
+- Actions:
+  - suppression de 6 ecrans restants hors runtime principal:
+    - `SCENE_LOCKED`, `SCENE_MP3_PLAYER`, `SCENE_PHOTO_MANAGER`,
+      `SCENE_READY`, `SCENE_REWARD`, `SCENE_SEARCH`.
+  - regeneration du workbench runtime:
+    - `python3 tools/dev/export_scene_editor_workbench.py`
+  - nettoyage template scenario reel pour supprimer les references ecrans retirees:
+    - `prompt_input.media_hub.entries: []`
+    - retrait des scenes retirees dans les catalogues `scene_screen_audio_catalog_all` et `scene_action_trigger_catalog_all`.
+- Resultat:
+  - `data/story/screens`: 15 -> 9 fichiers (runtime strict).
+  - `scene_editor_all.yaml`: `unused_scene_ids: []`.
+- Gates/evidence:
+  - `./tools/dev/story-gen validate` ✅
+  - parse JSON `data/story/screens/*.json` ✅ (`json_screens_ok 9`)
+  - check refs `screen_json` YAML manquants ✅ (`missing_screen_json_refs 0`)
+  - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅
+- Limitation:
+  - `./tools/dev/story-gen generate-bundle` ❌ (`Missing required screens resource 'SCENE_LOCKED'`) car les scenarios legacy (hors runtime strict) referencent encore des scenes retirees.
+
 ## [2026-02-25] Clean ecrans - reduction du catalogue LittleFS (phase 1)
 
 - Checkpoint securite:

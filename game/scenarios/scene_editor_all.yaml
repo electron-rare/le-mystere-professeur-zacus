@@ -4,13 +4,7 @@ meta:
   scope: runtime_only
   used_scene_count: 9
   exported_scene_count: 9
-  unused_scene_ids:
-  - SCENE_LOCKED
-  - SCENE_MP3_PLAYER
-  - SCENE_PHOTO_MANAGER
-  - SCENE_READY
-  - SCENE_REWARD
-  - SCENE_SEARCH
+  unused_scene_ids: []
   missing_screen_ids: []
 scenes:
 - scene_id: SCENE_U_SON_PROTO

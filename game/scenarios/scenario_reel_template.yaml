@@ -33,10 +33,7 @@ prompt_input:
     enabled: true
     hub_step_id: "STEP_MEDIA_MANAGER"
     hub_scene_id: "SCENE_MEDIA_MANAGER"
-    entries:
-      - "SCENE_PHOTO_MANAGER"
-      - "SCENE_MP3_PLAYER"
-      - "SCENE_READY"
+    entries: []
 
   led_policy:
     strict_rgb: true
@@ -118,30 +115,6 @@ prompt_input:
       screen_json: "data/story/screens/SCENE_MEDIA_MANAGER.json"
       default_audio_pack_id: ""
       runtime_step_ids: ["STEP_MEDIA_MANAGER"]
-    - scene_id: "SCENE_PHOTO_MANAGER"
-      screen_json: "data/story/screens/SCENE_PHOTO_MANAGER.json"
-      default_audio_pack_id: ""
-      runtime_step_ids: []
-    - scene_id: "SCENE_MP3_PLAYER"
-      screen_json: "data/story/screens/SCENE_MP3_PLAYER.json"
-      default_audio_pack_id: ""
-      runtime_step_ids: []
-    - scene_id: "SCENE_READY"
-      screen_json: "data/story/screens/SCENE_READY.json"
-      default_audio_pack_id: ""
-      runtime_step_ids: []
-    - scene_id: "SCENE_LOCKED"
-      screen_json: "data/story/screens/SCENE_LOCKED.json"
-      default_audio_pack_id: ""
-      runtime_step_ids: []
-    - scene_id: "SCENE_REWARD"
-      screen_json: "data/story/screens/SCENE_REWARD.json"
-      default_audio_pack_id: ""
-      runtime_step_ids: []
-    - scene_id: "SCENE_SEARCH"
-      screen_json: "data/story/screens/SCENE_SEARCH.json"
-      default_audio_pack_id: ""
-      runtime_step_ids: []
 
   audio_pack_catalog_all:
     - pack_id: "PACK_BOOT_RADIO"
@@ -216,38 +189,8 @@ prompt_input:
     - scene_id: "SCENE_MEDIA_MANAGER"
       default_actions: ["ACTION_TRACE_STEP", "ACTION_SET_BOOT_MEDIA_MANAGER"]
       default_entry_triggers: ["timer:WIN_DUE", "serial:BTN_NEXT", "unlock:UNLOCK", "action:FORCE_WIN_ETAPE2", "serial:FORCE_WIN_ETAPE2", "boot_mode:media_manager"]
-      default_exit_triggers: ["SCENE_GOTO SCENE_PHOTO_MANAGER", "SCENE_GOTO SCENE_MP3_PLAYER", "SCENE_GOTO SCENE_READY"]
+      default_exit_triggers: []
       runtime_step_ids: ["STEP_MEDIA_MANAGER"]
-    - scene_id: "SCENE_PHOTO_MANAGER"
-      default_actions: []
-      default_entry_triggers: ["SCENE_GOTO SCENE_PHOTO_MANAGER"]
-      default_exit_triggers: ["SCENE_GOTO SCENE_MEDIA_MANAGER", "SCENE_GOTO SCENE_MP3_PLAYER", "SCENE_GOTO SCENE_READY"]
-      runtime_step_ids: []
-    - scene_id: "SCENE_MP3_PLAYER"
-      default_actions: []
-      default_entry_triggers: ["SCENE_GOTO SCENE_MP3_PLAYER"]
-      default_exit_triggers: ["SCENE_GOTO SCENE_MEDIA_MANAGER", "SCENE_GOTO SCENE_READY"]
-      runtime_step_ids: []
-    - scene_id: "SCENE_READY"
-      default_actions: []
-      default_entry_triggers: ["SCENE_GOTO SCENE_READY"]
-      default_exit_triggers: ["SCENE_GOTO SCENE_MEDIA_MANAGER", "SCENE_GOTO SCENE_LOCKED"]
-      runtime_step_ids: []
-    - scene_id: "SCENE_LOCKED"
-      default_actions: []
-      default_entry_triggers: ["SCENE_GOTO SCENE_LOCKED", "scenario_reset"]
-      default_exit_triggers: ["UNLOCK", "NEXT", "SC_EVENT button ANY"]
-      runtime_step_ids: []
-    - scene_id: "SCENE_REWARD"
-      default_actions: []
-      default_entry_triggers: ["SCENE_GOTO SCENE_REWARD"]
-      default_exit_triggers: ["SCENE_GOTO SCENE_READY"]
-      runtime_step_ids: []
-    - scene_id: "SCENE_SEARCH"
-      default_actions: []
-      default_entry_triggers: ["SCENE_GOTO SCENE_SEARCH"]
-      default_exit_triggers: ["SCENE_GOTO SCENE_READY"]
-      runtime_step_ids: []
 
   scenario:
     id: "DEFAULT"

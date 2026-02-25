@@ -1,0 +1,27 @@
+{
+  "date": "2026-02-25",
+  "agent": "pm-spec",
+  "changes": [
+    "specs/ZIP_PR_INTAKE_TODO.md",
+    "architecture/ZIP_PR_ARCH_TODO.md",
+    "scenario-ai-coherence/zacus_conversation_bundle_v3/CODEX_PROMPT.md",
+    "scenario-ai-coherence/zacus_conversation_bundle_v3/CONVERSATION_SUMMARY.md",
+    "scenario-ai-coherence/zacus_conversation_bundle_v3/README.md",
+    "scenario-ai-coherence/zacus_conversation_bundle_v3/fsm_mermaid.md",
+    "scenario-ai-coherence/zacus_conversation_bundle_v3/scenario_canonical.yaml",
+    "scenario-ai-coherence/zacus_conversation_bundle_v3/scenario_promptable_template.yaml",
+    "scenario-ai-coherence/zacus_conversation_bundle_v3/scenario_runtime.json",
+    "scenario-ai-coherence/zacus_conversation_bundle_v3/zacus_v2.yaml"
+  ],
+  "artifacts": [
+    "artifacts/pm-spec/2026-02-25/zip-intake-note.md",
+    "artifacts/pm-spec/2026-02-25/zip-intake-imported.md"
+  ],
+  "gates": {
+    "G0": "satisfied",
+    "G1": "satisfied",
+    "G2": "docs_data_only",
+    "G3": "validated"
+  },
+  "note": "Bundle fourni et importé sans transformation; validateurs projet exécutés en non-régression."
+}

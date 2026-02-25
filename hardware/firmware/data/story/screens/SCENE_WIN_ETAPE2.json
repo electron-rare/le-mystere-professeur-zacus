@@ -1,22 +1,23 @@
 {
   "id": "SCENE_WIN_ETAPE2",
   "title": "WIN ETAPE 2",
-  "subtitle": "ACK en attente",
-  "symbol": "WIN",
+  "subtitle": "Validation finale distante",
+  "symbol": "W2",
   "effect": "celebrate",
   "visual": {
     "show_title": true,
     "show_subtitle": true,
     "show_symbol": true,
-    "effect_speed_ms": 340
+    "effect_speed_ms": 300
   },
   "theme": {
-    "bg": "#220F3A",
-    "accent": "#FFCE62",
-    "text": "#FFF8EA"
+    "bg": "#24142E",
+    "accent": "#FFD37A",
+    "text": "#FFF8E6"
   },
   "transition": {
     "effect": "zoom",
-    "duration_ms": 280
-  }
+    "duration_ms": 260
+  },
+  "timeline": {}
 }

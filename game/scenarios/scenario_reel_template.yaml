@@ -21,9 +21,9 @@ prompt_input:
   qr_rule:
     enabled: true
     scene_id: "SCENE_QR_DETECTOR"
-    expected_payload: "A_COMPLETER"
+    expected_payload: "DETECTION CODE QR comportant WIN avec la camera"
     match_mode: "exact"        # exact | prefix | contains
-    case_insensitive: false
+    case_insensitive: true
     success_events:
       - "serial:QR_OK"
       - "unlock:UNLOCK_QR"
@@ -77,6 +77,258 @@ prompt_input:
   notes:
     - "Decrire ici contraintes gameplay reelles."
     - "Ajouter exceptions/aliases scene si necessaire."
+
+  scene_screen_audio_catalog_all:
+    # Catalogue complet pour avancer scene par scene (ecran + son).
+    # `default_audio_pack_id` peut etre vide si scene muette.
+    # `runtime_step_ids` reference les steps qui utilisent cette scene dans DEFAULT.
+    - scene_id: "SCENE_U_SON_PROTO"
+      screen_json: "data/story/screens/SCENE_U_SON_PROTO.json"
+      default_audio_pack_id: "PACK_BOOT_RADIO"
+      runtime_step_ids: ["SCENE_U_SON_PROTO"]
+    - scene_id: "SCENE_LA_DETECTOR"
+      screen_json: "data/story/screens/SCENE_LA_DETECTOR.json"
+      default_audio_pack_id: "PACK_SONAR_HINT"
+      runtime_step_ids: ["SCENE_LA_DETECTOR"]
+    - scene_id: "SCENE_WIN_ETAPE1"
+      screen_json: "data/story/screens/SCENE_WIN_ETAPE1.json"
+      default_audio_pack_id: "PACK_CONFIRM_WIN_ETAPE1"
+      runtime_step_ids: ["RTC_ESP_ETAPE1", "WIN_ETAPE1"]
+    - scene_id: "SCENE_WARNING"
+      screen_json: "data/story/screens/SCENE_WARNING.json"
+      default_audio_pack_id: "PACK_BOOT_RADIO"
+      runtime_step_ids: ["STEP_WARNING"]
+    - scene_id: "SCENE_LEFOU_DETECTOR"
+      screen_json: "data/story/screens/SCENE_LEFOU_DETECTOR.json"
+      default_audio_pack_id: "PACK_SONAR_HINT"
+      runtime_step_ids: ["SCENE_LEFOU_DETECTOR"]
+    - scene_id: "SCENE_WIN_ETAPE2"
+      screen_json: "data/story/screens/SCENE_WIN_ETAPE2.json"
+      default_audio_pack_id: "PACK_CONFIRM_WIN_ETAPE2"
+      runtime_step_ids: ["RTC_ESP_ETAPE2"]
+    - scene_id: "SCENE_QR_DETECTOR"
+      screen_json: "data/story/screens/SCENE_QR_DETECTOR.json"
+      default_audio_pack_id: ""
+      runtime_step_ids: ["SCENE_QR_DETECTOR"]
+    - scene_id: "SCENE_FINAL_WIN"
+      screen_json: "data/story/screens/SCENE_FINAL_WIN.json"
+      default_audio_pack_id: ""
+      runtime_step_ids: ["SCENE_FINAL_WIN"]
+    - scene_id: "SCENE_MEDIA_MANAGER"
+      screen_json: "data/story/screens/SCENE_MEDIA_MANAGER.json"
+      default_audio_pack_id: ""
+      runtime_step_ids: ["STEP_MEDIA_MANAGER"]
+    - scene_id: "SCENE_PHOTO_MANAGER"
+      screen_json: "data/story/screens/SCENE_PHOTO_MANAGER.json"
+      default_audio_pack_id: ""
+      runtime_step_ids: []
+    - scene_id: "SCENE_MP3_PLAYER"
+      screen_json: "data/story/screens/SCENE_MP3_PLAYER.json"
+      default_audio_pack_id: ""
+      runtime_step_ids: []
+    - scene_id: "SCENE_READY"
+      screen_json: "data/story/screens/SCENE_READY.json"
+      default_audio_pack_id: ""
+      runtime_step_ids: []
+    - scene_id: "SCENE_LOCKED"
+      screen_json: "data/story/screens/SCENE_LOCKED.json"
+      default_audio_pack_id: ""
+      runtime_step_ids: []
+    - scene_id: "SCENE_WIN_ETAPE"
+      screen_json: "data/story/screens/SCENE_WIN_ETAPE.json"
+      default_audio_pack_id: "PACK_WIN"
+      runtime_step_ids: []
+    - scene_id: "SCENE_WINNER"
+      screen_json: "data/story/screens/SCENE_WINNER.json"
+      default_audio_pack_id: "PACK_WIN"
+      runtime_step_ids: []
+    - scene_id: "SCENE_FIREWORKS"
+      screen_json: "data/story/screens/SCENE_FIREWORKS.json"
+      default_audio_pack_id: ""
+      runtime_step_ids: []
+    - scene_id: "SCENE_BROKEN"
+      screen_json: "data/story/screens/SCENE_BROKEN.json"
+      default_audio_pack_id: ""
+      runtime_step_ids: []
+    - scene_id: "SCENE_WIN"
+      screen_json: "data/story/screens/SCENE_WIN.json"
+      default_audio_pack_id: "PACK_WIN"
+      runtime_step_ids: []
+    - scene_id: "SCENE_REWARD"
+      screen_json: "data/story/screens/SCENE_REWARD.json"
+      default_audio_pack_id: ""
+      runtime_step_ids: []
+    - scene_id: "SCENE_SEARCH"
+      screen_json: "data/story/screens/SCENE_SEARCH.json"
+      default_audio_pack_id: ""
+      runtime_step_ids: []
+    - scene_id: "SCENE_SIGNAL_SPIKE"
+      screen_json: "data/story/screens/SCENE_SIGNAL_SPIKE.json"
+      default_audio_pack_id: "PACK_MORSE_HINT"
+      runtime_step_ids: []
+    - scene_id: "SCENE_MEDIA_ARCHIVE"
+      screen_json: "data/story/screens/SCENE_MEDIA_ARCHIVE.json"
+      default_audio_pack_id: ""
+      runtime_step_ids: []
+    - scene_id: "SCENE_CAMERA_SCAN"
+      screen_json: "data/story/screens/SCENE_CAMERA_SCAN.json"
+      default_audio_pack_id: ""
+      runtime_step_ids: []
+    - scene_id: "SCENE_LA_DETECT"
+      screen_json: "data/story/screens/SCENE_LA_DETECT.json"
+      default_audio_pack_id: "PACK_SONAR_HINT"
+      runtime_step_ids: []
+
+  audio_pack_catalog_all:
+    - pack_id: "PACK_BOOT_RADIO"
+      json: "data/story/audio/PACK_BOOT_RADIO.json"
+      default_file: "/music/boot_radio.mp3"
+      used_by_steps: ["SCENE_U_SON_PROTO", "STEP_WARNING"]
+    - pack_id: "PACK_SONAR_HINT"
+      json: "data/story/audio/PACK_SONAR_HINT.json"
+      default_file: "/music/sonar_hint.mp3"
+      used_by_steps: ["SCENE_LA_DETECTOR", "SCENE_LEFOU_DETECTOR"]
+    - pack_id: "PACK_CONFIRM_WIN_ETAPE1"
+      json: "data/story/audio/PACK_CONFIRM_WIN_ETAPE1.json"
+      default_file: "/music/win.mp3"
+      used_by_steps: ["RTC_ESP_ETAPE1"]
+    - pack_id: "PACK_CONFIRM_WIN_ETAPE2"
+      json: "data/story/audio/PACK_CONFIRM_WIN_ETAPE2.json"
+      default_file: "/music/win.mp3"
+      used_by_steps: ["RTC_ESP_ETAPE2"]
+    - pack_id: "PACK_WIN"
+      json: "data/story/audio/PACK_WIN.json"
+      default_file: "/music/win.mp3"
+      used_by_steps: ["WIN_ETAPE1"]
+    - pack_id: "PACK_MORSE_HINT"
+      json: "data/story/audio/PACK_MORSE_HINT.json"
+      default_file: "/music/morse_hint.mp3"
+      used_by_steps: []
+
+  scene_action_trigger_catalog_all:
+    # Catalogue complet actions + triggers par scene.
+    # `default_entry_triggers` = evenements qui menent a la scene.
+    # `default_exit_triggers` = evenements qui quittent la scene.
+    - scene_id: "SCENE_U_SON_PROTO"
+      default_actions: ["ACTION_TRACE_STEP", "ACTION_HW_LED_ALERT"]
+      default_entry_triggers: ["on_boot", "audio_done:AUDIO_DONE"]
+      default_exit_triggers: ["button:ANY", "serial:FORCE_ETAPE2"]
+      runtime_step_ids: ["SCENE_U_SON_PROTO"]
+    - scene_id: "SCENE_LA_DETECTOR"
+      default_actions: ["ACTION_TRACE_STEP", "ACTION_QUEUE_SONAR"]
+      default_entry_triggers: ["button:ANY", "serial:FORCE_ETAPE2"]
+      default_exit_triggers: ["serial:BTN_NEXT", "unlock:UNLOCK", "action:ACTION_FORCE_ETAPE2", "serial:FORCE_WIN_ETAPE1", "timer:ETAPE2_DUE"]
+      runtime_step_ids: ["SCENE_LA_DETECTOR"]
+    - scene_id: "SCENE_WIN_ETAPE1"
+      default_actions: ["ACTION_TRACE_STEP", "ACTION_HW_LED_ALERT", "ACTION_ESP_NOW_SEND_ETAPE1", "ACTION_QUEUE_SONAR"]
+      default_entry_triggers: ["serial:BTN_NEXT", "unlock:UNLOCK", "action:ACTION_FORCE_ETAPE2", "serial:FORCE_WIN_ETAPE1", "espnow:ACK_WIN1", "serial:FORCE_DONE"]
+      default_exit_triggers: ["serial:BTN_NEXT", "serial:FORCE_DONE", "espnow:ACK_WARNING"]
+      runtime_step_ids: ["RTC_ESP_ETAPE1", "WIN_ETAPE1"]
+    - scene_id: "SCENE_WARNING"
+      default_actions: ["ACTION_TRACE_STEP", "ACTION_HW_LED_ALERT"]
+      default_entry_triggers: ["serial:BTN_NEXT", "serial:FORCE_DONE", "espnow:ACK_WARNING"]
+      default_exit_triggers: ["button:ANY", "serial:FORCE_ETAPE2", "audio_done:AUDIO_DONE"]
+      runtime_step_ids: ["STEP_WARNING"]
+    - scene_id: "SCENE_LEFOU_DETECTOR"
+      default_actions: ["ACTION_TRACE_STEP", "ACTION_QUEUE_SONAR"]
+      default_entry_triggers: ["button:ANY", "serial:FORCE_ETAPE2"]
+      default_exit_triggers: ["serial:BTN_NEXT", "unlock:UNLOCK", "action:ACTION_FORCE_ETAPE2", "serial:FORCE_WIN_ETAPE2", "timer:ETAPE2_DUE"]
+      runtime_step_ids: ["SCENE_LEFOU_DETECTOR"]
+    - scene_id: "SCENE_WIN_ETAPE2"
+      default_actions: ["ACTION_TRACE_STEP", "ACTION_HW_LED_ALERT", "ACTION_ESP_NOW_SEND_ETAPE2", "ACTION_QUEUE_SONAR"]
+      default_entry_triggers: ["serial:BTN_NEXT", "unlock:UNLOCK", "action:ACTION_FORCE_ETAPE2", "serial:FORCE_WIN_ETAPE2"]
+      default_exit_triggers: ["espnow:ACK_WIN2", "serial:FORCE_DONE"]
+      runtime_step_ids: ["RTC_ESP_ETAPE2"]
+    - scene_id: "SCENE_QR_DETECTOR"
+      default_actions: ["ACTION_TRACE_STEP", "ACTION_QR_CODE_SCANNER_START"]
+      default_entry_triggers: ["espnow:ACK_WIN2", "serial:FORCE_DONE"]
+      default_exit_triggers: ["serial:QR_OK", "unlock:UNLOCK_QR", "serial:BTN_NEXT", "action:ACTION_FORCE_ETAPE2", "serial:FORCE_WIN_ETAPE2"]
+      runtime_step_ids: ["SCENE_QR_DETECTOR"]
+    - scene_id: "SCENE_FINAL_WIN"
+      default_actions: ["ACTION_TRACE_STEP", "ACTION_WINNER"]
+      default_entry_triggers: ["serial:QR_OK", "unlock:UNLOCK_QR", "serial:BTN_NEXT", "action:ACTION_FORCE_ETAPE2", "serial:FORCE_WIN_ETAPE2"]
+      default_exit_triggers: ["timer:WIN_DUE", "serial:BTN_NEXT", "unlock:UNLOCK", "action:FORCE_WIN_ETAPE2", "serial:FORCE_WIN_ETAPE2"]
+      runtime_step_ids: ["SCENE_FINAL_WIN"]
+    - scene_id: "SCENE_MEDIA_MANAGER"
+      default_actions: ["ACTION_TRACE_STEP", "ACTION_SET_BOOT_MEDIA_MANAGER"]
+      default_entry_triggers: ["timer:WIN_DUE", "serial:BTN_NEXT", "unlock:UNLOCK", "action:FORCE_WIN_ETAPE2", "serial:FORCE_WIN_ETAPE2", "boot_mode:media_manager"]
+      default_exit_triggers: ["SCENE_GOTO SCENE_PHOTO_MANAGER", "SCENE_GOTO SCENE_MP3_PLAYER", "SCENE_GOTO SCENE_READY"]
+      runtime_step_ids: ["STEP_MEDIA_MANAGER"]
+    - scene_id: "SCENE_PHOTO_MANAGER"
+      default_actions: []
+      default_entry_triggers: ["SCENE_GOTO SCENE_PHOTO_MANAGER"]
+      default_exit_triggers: ["SCENE_GOTO SCENE_MEDIA_MANAGER", "SCENE_GOTO SCENE_MP3_PLAYER", "SCENE_GOTO SCENE_READY"]
+      runtime_step_ids: []
+    - scene_id: "SCENE_MP3_PLAYER"
+      default_actions: []
+      default_entry_triggers: ["SCENE_GOTO SCENE_MP3_PLAYER"]
+      default_exit_triggers: ["SCENE_GOTO SCENE_MEDIA_MANAGER", "SCENE_GOTO SCENE_READY"]
+      runtime_step_ids: []
+    - scene_id: "SCENE_READY"
+      default_actions: []
+      default_entry_triggers: ["SCENE_GOTO SCENE_READY"]
+      default_exit_triggers: ["SCENE_GOTO SCENE_MEDIA_MANAGER", "SCENE_GOTO SCENE_LOCKED"]
+      runtime_step_ids: []
+    - scene_id: "SCENE_LOCKED"
+      default_actions: []
+      default_entry_triggers: ["SCENE_GOTO SCENE_LOCKED", "scenario_reset"]
+      default_exit_triggers: ["UNLOCK", "NEXT", "SC_EVENT button ANY"]
+      runtime_step_ids: []
+    - scene_id: "SCENE_WIN_ETAPE"
+      default_actions: []
+      default_entry_triggers: ["SCENE_GOTO SCENE_WIN_ETAPE"]
+      default_exit_triggers: ["SCENE_GOTO SCENE_READY", "SCENE_GOTO SCENE_LOCKED"]
+      runtime_step_ids: []
+    - scene_id: "SCENE_WINNER"
+      default_actions: []
+      default_entry_triggers: ["SCENE_GOTO SCENE_WINNER"]
+      default_exit_triggers: ["SCENE_GOTO SCENE_READY", "SCENE_GOTO SCENE_MEDIA_MANAGER"]
+      runtime_step_ids: []
+    - scene_id: "SCENE_FIREWORKS"
+      default_actions: []
+      default_entry_triggers: ["SCENE_GOTO SCENE_FIREWORKS"]
+      default_exit_triggers: ["SCENE_GOTO SCENE_READY", "SCENE_GOTO SCENE_MEDIA_MANAGER"]
+      runtime_step_ids: []
+    - scene_id: "SCENE_BROKEN"
+      default_actions: []
+      default_entry_triggers: ["SCENE_GOTO SCENE_BROKEN"]
+      default_exit_triggers: ["SCENE_GOTO SCENE_READY", "SCENE_GOTO SCENE_LOCKED"]
+      runtime_step_ids: []
+    - scene_id: "SCENE_WIN"
+      default_actions: []
+      default_entry_triggers: ["SCENE_GOTO SCENE_WIN"]
+      default_exit_triggers: ["SCENE_GOTO SCENE_READY"]
+      runtime_step_ids: []
+    - scene_id: "SCENE_REWARD"
+      default_actions: []
+      default_entry_triggers: ["SCENE_GOTO SCENE_REWARD"]
+      default_exit_triggers: ["SCENE_GOTO SCENE_READY"]
+      runtime_step_ids: []
+    - scene_id: "SCENE_SEARCH"
+      default_actions: []
+      default_entry_triggers: ["SCENE_GOTO SCENE_SEARCH"]
+      default_exit_triggers: ["SCENE_GOTO SCENE_READY"]
+      runtime_step_ids: []
+    - scene_id: "SCENE_SIGNAL_SPIKE"
+      default_actions: []
+      default_entry_triggers: ["SCENE_GOTO SCENE_SIGNAL_SPIKE"]
+      default_exit_triggers: ["SCENE_GOTO SCENE_READY"]
+      runtime_step_ids: []
+    - scene_id: "SCENE_MEDIA_ARCHIVE"
+      default_actions: []
+      default_entry_triggers: ["SCENE_GOTO SCENE_MEDIA_ARCHIVE"]
+      default_exit_triggers: ["SCENE_GOTO SCENE_MEDIA_MANAGER", "SCENE_GOTO SCENE_READY"]
+      runtime_step_ids: []
+    - scene_id: "SCENE_CAMERA_SCAN"
+      default_actions: []
+      default_entry_triggers: ["SCENE_GOTO SCENE_CAMERA_SCAN"]
+      default_exit_triggers: ["SCENE_GOTO SCENE_READY", "SCENE_GOTO SCENE_MEDIA_MANAGER"]
+      runtime_step_ids: []
+    - scene_id: "SCENE_LA_DETECT"
+      default_actions: []
+      default_entry_triggers: ["SCENE_GOTO SCENE_LA_DETECT"]
+      default_exit_triggers: ["SCENE_GOTO SCENE_READY", "SCENE_GOTO SCENE_LA_DETECTOR"]
+      runtime_step_ids: []
 
   scenario:
     id: "DEFAULT"

@@ -1,22 +1,23 @@
 {
   "id": "SCENE_U_SON_PROTO",
-  "title": "PROTO U-SON",
-  "subtitle": "Signal brouille",
-  "symbol": "ALERT",
-  "effect": "blink",
+  "title": "U-SON PROTO",
+  "subtitle": "Calibration signal en cours",
+  "symbol": "U1",
+  "effect": "pulse",
   "visual": {
     "show_title": true,
     "show_subtitle": true,
     "show_symbol": true,
-    "effect_speed_ms": 180
+    "effect_speed_ms": 540
   },
   "theme": {
-    "bg": "#2A0508",
-    "accent": "#FF4A45",
-    "text": "#FFF1F1"
+    "bg": "#0F162A",
+    "accent": "#6FE6FF",
+    "text": "#EAFBFF"
   },
   "transition": {
-    "effect": "glitch",
-    "duration_ms": 160
-  }
+    "effect": "fade",
+    "duration_ms": 200
+  },
+  "timeline": {}
 }

@@ -2591,6 +2591,25 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
   if (action_id == nullptr || action_id[0] == '\0') {
     return false;
   }
+
+  if (std::strcmp(action_id, "ACTION_TRACE_STEP") == 0) {
+    Serial.printf("[ACTION] TRACE scenario=%s step=%s screen=%s audio=%s\n",
+                  scenarioIdFromSnapshot(snapshot),
+                  stepIdFromSnapshot(snapshot),
+                  snapshot.screen_scene_id != nullptr ? snapshot.screen_scene_id : "n/a",
+                  snapshot.audio_pack_id != nullptr ? snapshot.audio_pack_id : "n/a");
+    return true;
+  }
+
+  if (std::strcmp(action_id, "ACTION_QUEUE_SONAR") == 0) {
+    constexpr const char* kBuiltinSonarPath = "/music/sonar_hint.mp3";
+    const bool ok = g_audio.play(kBuiltinSonarPath);
+    Serial.printf("[ACTION] QUEUE_AUDIO_PACK pack=PACK_SONAR_HINT path=%s ok=%u source=builtin\n",
+                  kBuiltinSonarPath,
+                  ok ? 1U : 0U);
+    return ok;
+  }
+
   const String action_path = String("/story/actions/") + action_id + ".json";
   const String payload = g_storage.loadTextFile(action_path.c_str());
   StaticJsonDocument<512> action_doc;
@@ -2599,7 +2618,7 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
   }
   const char* action_type = action_doc["type"] | "";
 
-  if (std::strcmp(action_id, "ACTION_TRACE_STEP") == 0 || std::strcmp(action_type, "trace_step") == 0) {
+  if (std::strcmp(action_type, "trace_step") == 0) {
     Serial.printf("[ACTION] TRACE scenario=%s step=%s screen=%s audio=%s\n",
                   scenarioIdFromSnapshot(snapshot),
                   stepIdFromSnapshot(snapshot),
@@ -2647,7 +2666,7 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
     return ok;
   }
 
-  if (std::strcmp(action_id, "ACTION_QUEUE_SONAR") == 0 || std::strcmp(action_type, "queue_audio_pack") == 0) {
+  if (std::strcmp(action_type, "queue_audio_pack") == 0) {
     const char* pack_id = action_doc["config"]["pack_id"] | action_doc["config"]["pack"] | "";
     String audio_path = g_storage.resolveAudioPathByPackId(pack_id);
     if (audio_path.isEmpty()) {

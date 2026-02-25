@@ -1,0 +1,298 @@
+meta:
+  purpose: Edit LVGL/FX/audio mapping scene by scene, then sync to screen JSON.
+  source_runtime_scenario: game/scenarios/default_unlock_win_etape2.yaml
+  review:
+    status: coherent
+    scope: runtime_scenes_only
+    checks:
+    - screen_json_exists
+    - runtime_step_ids_match_default_scenario
+    - effect_tokens_supported_by_ui_manager
+    - transition_tokens_supported_by_ui_manager
+    - unused_scenes_pruned
+  scope: runtime_only
+  scene_order_source: game/scenarios/default_unlock_win_etape2.yaml#steps
+  used_scene_count: 9
+  removed_unused_scene_count: 15
+  removed_unused_scene_ids:
+  - SCENE_BROKEN
+  - SCENE_CAMERA_SCAN
+  - SCENE_FIREWORKS
+  - SCENE_LA_DETECT
+  - SCENE_LOCKED
+  - SCENE_MEDIA_ARCHIVE
+  - SCENE_MP3_PLAYER
+  - SCENE_PHOTO_MANAGER
+  - SCENE_READY
+  - SCENE_REWARD
+  - SCENE_SEARCH
+  - SCENE_SIGNAL_SPIKE
+  - SCENE_WIN
+  - SCENE_WINNER
+  - SCENE_WIN_ETAPE
+scenes:
+- scene_id: SCENE_U_SON_PROTO
+  screen_json: hardware/firmware/data/story/screens/SCENE_U_SON_PROTO.json
+  default_audio_pack_id: PACK_BOOT_RADIO
+  runtime_step_ids:
+  - SCENE_U_SON_PROTO
+  lvgl:
+    title: U-SON PROTO
+    subtitle: Calibration signal en cours
+    symbol: U1
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 540
+    theme:
+      bg: '#0F162A'
+      accent: '#6FE6FF'
+      text: '#EAFBFF'
+    transition:
+      effect: fade
+      duration_ms: 200
+  fx:
+    effect: pulse
+    timeline: {}
+- scene_id: SCENE_LA_DETECTOR
+  screen_json: hardware/firmware/data/story/screens/SCENE_LA_DETECTOR.json
+  default_audio_pack_id: ''
+  runtime_step_ids:
+  - SCENE_LA_DETECTOR
+  lvgl:
+    title: LA DETECTOR
+    subtitle: Trouve la bonne resonance
+    symbol: LA
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 460
+    theme:
+      bg: '#111B20'
+      accent: '#86FFD2'
+      text: '#ECFFF6'
+    transition:
+      effect: fade
+      duration_ms: 180
+  fx:
+    effect: radar
+    timeline:
+      loop: true
+      duration_ms: 2400
+      keyframes:
+      - at_ms: 0
+        effect: wave
+        speed_ms: 480
+        theme:
+          bg: '#000000'
+          accent: '#49D9FF'
+          text: '#E8F6FF'
+      - at_ms: 800
+        effect: radar
+        speed_ms: 620
+        theme:
+          bg: '#000000'
+          accent: '#7EE8FF'
+          text: '#F2FAFF'
+      - at_ms: 1600
+        effect: wave
+        speed_ms: 340
+        theme:
+          bg: '#000000'
+          accent: '#D8FF6B'
+          text: '#F9FFD8'
+      - at_ms: 2400
+        effect: radar
+        speed_ms: 700
+        theme:
+          bg: '#000000'
+          accent: '#49D9FF'
+          text: '#E8F6FF'
+- scene_id: SCENE_WIN_ETAPE1
+  screen_json: hardware/firmware/data/story/screens/SCENE_WIN_ETAPE1.json
+  default_audio_pack_id: PACK_CONFIRM_WIN_ETAPE1
+  runtime_step_ids:
+  - RTC_ESP_ETAPE1
+  - WIN_ETAPE1
+  lvgl:
+    title: WIN ETAPE 1
+    subtitle: ACK distant valide
+    symbol: W1
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 320
+    theme:
+      bg: '#1F142C'
+      accent: '#F3C86A'
+      text: '#FFF7E2'
+    transition:
+      effect: zoom
+      duration_ms: 260
+  fx:
+    effect: celebrate
+    timeline: {}
+- scene_id: SCENE_WARNING
+  screen_json: hardware/firmware/data/story/screens/SCENE_WARNING.json
+  default_audio_pack_id: PACK_BOOT_RADIO
+  runtime_step_ids:
+  - STEP_WARNING
+  lvgl:
+    title: WARNING
+    subtitle: Nouvelle phase etape 2
+    symbol: '!'
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 380
+    theme:
+      bg: '#2B140E'
+      accent: '#FF9D57'
+      text: '#FFF0E8'
+    transition:
+      effect: fade
+      duration_ms: 180
+  fx:
+    effect: blink
+    timeline: {}
+- scene_id: SCENE_LEFOU_DETECTOR
+  screen_json: hardware/firmware/data/story/screens/SCENE_LEFOU_DETECTOR.json
+  default_audio_pack_id: ''
+  runtime_step_ids:
+  - SCENE_LEFOU_DETECTOR
+  lvgl:
+    title: LEFOU DETECTOR
+    subtitle: Analyse secondaire active
+    symbol: LF
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 470
+    theme:
+      bg: '#111722'
+      accent: '#9AC4FF'
+      text: '#EAF2FF'
+    transition:
+      effect: fade
+      duration_ms: 180
+  fx:
+    effect: radar
+    timeline: {}
+- scene_id: SCENE_WIN_ETAPE2
+  screen_json: hardware/firmware/data/story/screens/SCENE_WIN_ETAPE2.json
+  default_audio_pack_id: PACK_CONFIRM_WIN_ETAPE2
+  runtime_step_ids:
+  - RTC_ESP_ETAPE2
+  lvgl:
+    title: WIN ETAPE 2
+    subtitle: Validation finale distante
+    symbol: W2
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 300
+    theme:
+      bg: '#24142E'
+      accent: '#FFD37A'
+      text: '#FFF8E6'
+    transition:
+      effect: zoom
+      duration_ms: 260
+  fx:
+    effect: celebrate
+    timeline: {}
+- scene_id: SCENE_QR_DETECTOR
+  screen_json: hardware/firmware/data/story/screens/SCENE_QR_DETECTOR.json
+  default_audio_pack_id: ''
+  runtime_step_ids:
+  - SCENE_QR_DETECTOR
+  lvgl:
+    title: QR FINAL
+    subtitle: Scanne le QR de validation
+    symbol: QR
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 0
+    theme:
+      bg: '#102040'
+      accent: '#66AFFF'
+      text: '#F2F8FF'
+    transition:
+      effect: fade
+      duration_ms: 180
+  fx:
+    effect: none
+    timeline: {}
+- scene_id: SCENE_FINAL_WIN
+  screen_json: hardware/firmware/data/story/screens/SCENE_FINAL_WIN.json
+  default_audio_pack_id: ''
+  runtime_step_ids:
+  - SCENE_FINAL_WIN
+  lvgl:
+    title: FINAL WIN
+    subtitle: Mission accomplie
+    symbol: WIN
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 300
+    theme:
+      bg: '#1A0F2A'
+      accent: '#FFD45E'
+      text: '#FFF7E0'
+    transition:
+      effect: fade
+      duration_ms: 240
+  fx:
+    effect: celebrate
+    timeline: {}
+- scene_id: SCENE_MEDIA_MANAGER
+  screen_json: hardware/firmware/data/story/screens/SCENE_MEDIA_MANAGER.json
+  default_audio_pack_id: ''
+  runtime_step_ids:
+  - STEP_MEDIA_MANAGER
+  lvgl:
+    title: MEDIA MANAGER
+    subtitle: Photo / MP3 / Story
+    symbol: MEDIA
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 560
+    theme:
+      bg: '#081A34'
+      accent: '#9BCBFF'
+      text: '#EDF7FF'
+    transition:
+      effect: fade
+      duration_ms: 220
+  fx:
+    effect: radar
+    timeline:
+      loop: true
+      duration_ms: 2200
+      keyframes:
+      - at_ms: 0
+        effect: radar
+        speed_ms: 560
+        theme:
+          bg: '#081A34'
+          accent: '#9BCBFF'
+          text: '#EDF7FF'
+      - at_ms: 1100
+        effect: pulse
+        speed_ms: 480
+        theme:
+          bg: '#0D264A'
+          accent: '#B8DDFF'
+          text: '#F7FBFF'

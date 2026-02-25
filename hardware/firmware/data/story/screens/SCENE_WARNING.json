@@ -1,22 +1,23 @@
 {
   "id": "SCENE_WARNING",
-  "title": "ALERTE",
-  "subtitle": "Signal anormal",
-  "symbol": "WARN",
+  "title": "WARNING",
+  "subtitle": "Nouvelle phase etape 2",
+  "symbol": "!",
   "effect": "blink",
   "visual": {
     "show_title": true,
     "show_subtitle": true,
     "show_symbol": true,
-    "effect_speed_ms": 240
+    "effect_speed_ms": 380
   },
   "theme": {
-    "bg": "#261209",
-    "accent": "#FF9A4A",
-    "text": "#FFF2E6"
+    "bg": "#2B140E",
+    "accent": "#FF9D57",
+    "text": "#FFF0E8"
   },
   "transition": {
     "effect": "fade",
-    "duration_ms": 200
-  }
+    "duration_ms": 180
+  },
+  "timeline": {}
 }

@@ -8,15 +8,16 @@
     "show_title": true,
     "show_subtitle": true,
     "show_symbol": true,
-    "effect_speed_ms": 320
+    "effect_speed_ms": 300
   },
   "theme": {
-    "bg": "#1C0C2E",
-    "accent": "#FFCC5C",
-    "text": "#FFF7E4"
+    "bg": "#1A0F2A",
+    "accent": "#FFD45E",
+    "text": "#FFF7E0"
   },
   "transition": {
     "effect": "fade",
     "duration_ms": 240
-  }
+  },
+  "timeline": {}
 }

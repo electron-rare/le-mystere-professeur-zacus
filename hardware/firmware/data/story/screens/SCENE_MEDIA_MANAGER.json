@@ -1,42 +1,42 @@
 {
   "id": "SCENE_MEDIA_MANAGER",
   "title": "MEDIA MANAGER",
-  "subtitle": "PHOTO / MP3 / STORY",
+  "subtitle": "Photo / MP3 / Story",
   "symbol": "MEDIA",
   "effect": "radar",
   "visual": {
     "show_title": true,
     "show_subtitle": true,
     "show_symbol": true,
-    "effect_speed_ms": 620
+    "effect_speed_ms": 560
   },
   "theme": {
     "bg": "#081A34",
-    "accent": "#8BC4FF",
-    "text": "#EAF6FF"
+    "accent": "#9BCBFF",
+    "text": "#EDF7FF"
   },
   "timeline": {
     "loop": true,
-    "duration_ms": 1800,
+    "duration_ms": 2200,
     "keyframes": [
       {
         "at_ms": 0,
         "effect": "radar",
-        "speed_ms": 620,
+        "speed_ms": 560,
         "theme": {
           "bg": "#081A34",
-          "accent": "#8BC4FF",
-          "text": "#EAF6FF"
+          "accent": "#9BCBFF",
+          "text": "#EDF7FF"
         }
       },
       {
-        "at_ms": 900,
+        "at_ms": 1100,
         "effect": "pulse",
-        "speed_ms": 520,
+        "speed_ms": 480,
         "theme": {
-          "bg": "#0C2448",
-          "accent": "#A6D4FF",
-          "text": "#F5FAFF"
+          "bg": "#0D264A",
+          "accent": "#B8DDFF",
+          "text": "#F7FBFF"
         }
       }
     ]

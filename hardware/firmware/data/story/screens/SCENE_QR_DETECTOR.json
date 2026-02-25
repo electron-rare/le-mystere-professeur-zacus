@@ -1,7 +1,7 @@
 {
   "id": "SCENE_QR_DETECTOR",
-  "title": "ZACUS QR VALIDATION",
-  "subtitle": "Scan du QR final",
+  "title": "QR FINAL",
+  "subtitle": "Scanne le QR de validation",
   "symbol": "QR",
   "effect": "none",
   "visual": {
@@ -12,11 +12,12 @@
   },
   "theme": {
     "bg": "#102040",
-    "accent": "#5CA3FF",
-    "text": "#F3F7FF"
+    "accent": "#66AFFF",
+    "text": "#F2F8FF"
   },
   "transition": {
     "effect": "fade",
     "duration_ms": 180
-  }
+  },
+  "timeline": {}
 }

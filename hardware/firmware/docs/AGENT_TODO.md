@@ -1,3 +1,155 @@
+## [2026-02-25] Preparation test utilisateur reel (runbook)
+
+- Carte preparee pour test terrain:
+  - `BOOT_MODE_CLEAR` applique, `SC_LOAD DEFAULT`, `RESET` executes.
+  - smoke post-reset valide (`serial_smoke.py` PASS).
+- Commande de capture log conseillee pendant test utilisateur:
+  - `python3 tools/dev/user_live_logger.py --port /dev/cu.usbmodem5AB90753301 --baud 115200 --duration 1200 --log logs/user_live_test_<timestamp>.log`
+- Point de vigilance:
+  - surveiller recurrence potentielle panic SDMMC observee une fois lors d'un run precedent `media-manager`.
+
+## [2026-02-25] FX verificator - scenes non direct-FX en NA + rerun gates
+
+- Objectif:
+  - supprimer les faux FAIL FX sur scenes runtime LVGL-only (pas de moteur direct-FX).
+- Correctif script global:
+  - `~/.codex/skills/fx-verificator/scripts/run_fx_verification.sh`
+  - nouveau parametre: `non_direct_policy` (`auto` par defaut, `strict` optionnel).
+  - mode `auto`: scene sans activite FX (`fx_fps=0`, `fx_frames=0`, `fx_blit=0`) => `NA` au lieu de FAIL.
+  - mode `strict`: comportement historique (`fx_fps > 0` obligatoire partout).
+- Miroir doc repo mis a jour:
+  - `docs/skills/fx-verificator.md`
+- Rerun verification:
+  - `run_fx_verification.sh ... \"SCENE_WIN_ETAPE1,SCENE_WIN_ETAPE2,SCENE_FINAL_WIN,SCENE_MEDIA_MANAGER\" 10 auto` ✅
+  - `run_fx_verification.sh ... \"SCENE_WINNER,SCENE_FIREWORKS\" 8 strict` ✅
+  - `serial_smoke.py` ✅
+  - `run_scene_verification.sh` (9 scenes runtime) ✅
+  - `run_hal_verification.sh` (9 scenes runtime) ✅
+  - `run_media_manager_verification.sh` ✅
+- Note:
+  - une execution intermediaire `media-manager` a logue un panic SDMMC puis reboot; rerun immediat apres smoke => PASS.
+  - a surveiller si reproduction frequente sous charge longue.
+
+## [2026-02-25] Upload Freenove + smoke + verifs scenes/FX/HAL/media
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260225_182057_wip.patch`
+  - `/tmp/zacus_checkpoint/20260225_182057_status.txt`
+- Upload effectues:
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- Smoke:
+  - `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 8 --wait-port 10` ✅
+- Verification scenes runtime (ordre scenario):
+  - `run_scene_verification.sh ... "SCENE_U_SON_PROTO,...,SCENE_MEDIA_MANAGER"` ✅
+- Verification FX:
+  - runtime direct (`SCENE_WIN_ETAPE1,SCENE_WIN_ETAPE2,SCENE_FINAL_WIN,SCENE_MEDIA_MANAGER`) ❌
+    - `SCENE_FINAL_WIN` rapporte `fx_fps=0` (scene LVGL celebratory sans moteur direct-FX actif).
+  - fallback direct-FX (`SCENE_WINNER,SCENE_FIREWORKS`) ✅
+- Verification HAL runtime (9 scenes):
+  - `run_hal_verification.sh ...` ✅ (cam=0, amp=0, ws2812=1, led_auto=1 sur les scenes runtime)
+- Verification media-manager:
+  - `run_media_manager_verification.sh ...` ✅
+  - QR -> FINAL_WIN -> MEDIA_MANAGER + persistance boot + rollback verifies.
+
+## [2026-02-25] Apply workbench runtime -> JSON ecrans (pass simplification)
+
+- Action demandee executee:
+  - `python3 tools/dev/export_scene_editor_workbench.py --apply`
+- JSON ecrans mis a jour (9 scenes runtime):
+  - `data/story/screens/SCENE_U_SON_PROTO.json`
+  - `data/story/screens/SCENE_LA_DETECTOR.json`
+  - `data/story/screens/SCENE_WIN_ETAPE1.json`
+  - `data/story/screens/SCENE_WARNING.json`
+  - `data/story/screens/SCENE_LEFOU_DETECTOR.json`
+  - `data/story/screens/SCENE_WIN_ETAPE2.json`
+  - `data/story/screens/SCENE_QR_DETECTOR.json`
+  - `data/story/screens/SCENE_FINAL_WIN.json`
+  - `data/story/screens/SCENE_MEDIA_MANAGER.json`
+- Verification:
+  - parse JSON sur les 9 fichiers: OK
+  - gate FS: `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅
+
+## [2026-02-25] Simplification workbench scenes (utilisees uniquement + ordre runtime)
+
+- Skills utilises:
+  - `firmware-story-stack`
+  - `firmware-scene-ui-editor`
+- Fichier cible:
+  - `game/scenarios/scene_editor_all.yaml`
+- Actions:
+  - verification scenes utilisees/non utilisees via `game/scenarios/default_unlock_win_etape2.yaml`,
+  - suppression des scenes non utilisees dans le workbench (15 retirees),
+  - re-ordonnancement des scenes selon l'ordre runtime des steps.
+- Ordre final conserve:
+  - `SCENE_U_SON_PROTO`
+  - `SCENE_LA_DETECTOR`
+  - `SCENE_WIN_ETAPE1`
+  - `SCENE_WARNING`
+  - `SCENE_LEFOU_DETECTOR`
+  - `SCENE_WIN_ETAPE2`
+  - `SCENE_QR_DETECTOR`
+  - `SCENE_FINAL_WIN`
+  - `SCENE_MEDIA_MANAGER`
+- Script outille egalement ce besoin:
+  - `tools/dev/export_scene_editor_workbench.py` exporte desormais par defaut en `runtime_only` (ordre scenario),
+    avec option `--include-unused` pour reintroduire les scenes hors runtime.
+
+## [2026-02-25] Revue complete scene_editor_all (coherence LVGL/FX/audio)
+
+- Skills utilises (ordre):
+  - `freenove-firmware-orchestrator`
+  - `firmware-story-stack`
+  - `firmware-graphics-stack`
+  - `firmware-fx-overlay-lovyangfx`
+  - `firmware-scene-ui-editor`
+- Fichier revu/mis a jour:
+  - `game/scenarios/scene_editor_all.yaml`
+- Verifications effectuees:
+  - existence `screen_json` pour les 24 scenes,
+  - coherence `runtime_step_ids` + `default_audio_pack_id` contre `game/scenarios/default_unlock_win_etape2.yaml`,
+  - validite tokens FX/transition supportes par `ui_manager.cpp`.
+- Corrections appliquees:
+  - `SCENE_WIN_ETAPE1` et `SCENE_WIN_ETAPE2`: `fx.effect` invalide `sparkle` -> `celebrate` (contrat runtime).
+  - scenes QR (`SCENE_CAMERA_SCAN`, `SCENE_QR_DETECTOR`): mode scan stabilise (`fx.effect=none`, timeline vide, `effect_speed_ms=0`).
+  - ajout bloc `meta.review` dans le workbench pour tracer l'etat de coherence.
+- Resultat:
+  - revue complete = `issue_count=0`.
+
+## [2026-02-25] Workbench ecrans LVGL/FX + audio (toutes scenes)
+
+- Objectif:
+  - accelerer l'edition de toutes les scenes (LVGL/FX + son associe) depuis un seul fichier.
+- Ajouts:
+  - script `tools/dev/export_scene_editor_workbench.py`:
+    - export JSON ecrans -> YAML editable (`scene_editor_all.yaml`),
+    - apply YAML -> JSON ecrans (`--apply`).
+  - fichier genere `game/scenarios/scene_editor_all.yaml` (24 scenes).
+- Commandes:
+  - export: `python3 hardware/firmware/tools/dev/export_scene_editor_workbench.py`
+  - apply: `python3 hardware/firmware/tools/dev/export_scene_editor_workbench.py --apply`
+- Passe proposition visuelle (runtime reel):
+  - `game/scenarios/scene_editor_all.yaml` ajuste pour scenes runtime:
+    `SCENE_U_SON_PROTO`, `SCENE_LA_DETECTOR`, `SCENE_WIN_ETAPE1`,
+    `SCENE_WARNING`, `SCENE_LEFOU_DETECTOR`, `SCENE_WIN_ETAPE2`,
+    `SCENE_QR_DETECTOR`, `SCENE_FINAL_WIN`, `SCENE_MEDIA_MANAGER`.
+  - coherence garde-fou:
+    - QR scene sans FX intrusif (`effect=none`),
+    - final win en celebratory,
+    - hub media en `radar/pulse` boucle lente.
+
+## [2026-02-25] Template scenario reel - catalogue complet scenes/ecrans/sons
+
+- Fichier mis a jour:
+  - `game/scenarios/scenario_reel_template.yaml`
+- Ajouts:
+  - `prompt_input.scene_screen_audio_catalog_all` avec les 24 scenes connues, lien JSON ecran, pack audio par defaut, steps runtime utilises.
+  - `prompt_input.audio_pack_catalog_all` avec les 6 packs audio actuels, chemin JSON, fichier audio cible et steps associes.
+- Validation:
+  - parse YAML OK (`yaml.safe_load`) avec compteurs:
+    - scenes catalogue = 24
+    - packs catalogue = 6
+
 ## [2026-02-25] Refonte scenario reel v2 + stabilisation verificators + upload/test Freenove
 
 - Skills utilises (ordre):
@@ -1926,3 +2078,31 @@
   - `~/.codex/skills/media-manager/scripts/run_media_manager_verification.sh ...` ✅
 - Limitation residuelle:
   - la transition `QR_OK -> STEP_MEDIA_MANAGER` n'est pas encore presente dans le scenario compile C++ (`scenarios_gen.cpp`) ; fallback runtime temporaire en place tant que la regeneration C++ canonique n'est pas complete.
+
+## Live reprise hardware + upload + recheck debuts de scenario (2026-02-25)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260225-191240_wip.patch`
+  - `/tmp/zacus_checkpoint/20260225-191240_status.txt`
+  - scan artefacts trackes (`.pio/.platformio/logs/dist/build/node_modules/.venv`) -> aucun tracke.
+- Upload effectif Freenove:
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- Evidence live:
+  - `logs/live_go_20260225-191323.log` (capture rapide)
+  - `logs/live_go_transition_20260225-191745.log` (diagnostic commandes serie)
+- Verification demarrage scenario (reel):
+  - `RESET` -> `scene=SCENE_U_SON_PROTO` confirme via `HW_STATUS`.
+  - `NEXT` depuis `SCENE_U_SON_PROTO` -> transition `SCENE_LA_DETECTOR` + `ACTION_QUEUE_SONAR ok=1`, sans panic.
+  - `NEXT` depuis `SCENE_LA_DETECTOR` peut retourner `ACK NEXT ok=0` par design (gate LA en attente de match).
+- Correction live "probleme des le debut":
+  - cause observee: `BOOT_MODE_STATUS mode=media_manager media_validated=1` (le reset revenait sur hub media).
+  - correction appliquee sur hardware connecte: `BOOT_MODE_SET STORY` puis `RESET`.
+  - verification post-correction: `scene=SCENE_U_SON_PROTO` puis `NEXT` => `SCENE_LA_DETECTOR` + `ACTION_QUEUE_SONAR ok=1`.
+- Risque residuel observe en live:
+  - erreurs intermittentes `diskio_sdmmc: sdmmc_read_blocks failed (257)` pendant `RESET` (pas de panic, mais a investiguer cote SD/carte/media).
+- Gates executes:
+  - `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 10 --wait-port 20` ✅
+  - `~/.codex/skills/scene-verificator/scripts/run_scene_verification.sh /dev/cu.usbmodem5AB90753301 115200` ✅
+  - `~/.codex/skills/fx-verificator/scripts/run_fx_verification.sh /dev/cu.usbmodem5AB90753301 115200` ✅
+  - `~/.codex/skills/hal-verificator-status/scripts/run_hal_verification.sh /dev/cu.usbmodem5AB90753301 115200` ✅

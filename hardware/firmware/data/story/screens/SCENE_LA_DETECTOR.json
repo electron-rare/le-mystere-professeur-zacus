@@ -1,24 +1,19 @@
 {
   "id": "SCENE_LA_DETECTOR",
-  "title": "DETECTEUR DE RESONNANCE",
-  "subtitle": "",
-  "symbol": "AUDIO",
-  "effect": "wave",
+  "title": "LA DETECTOR",
+  "subtitle": "Trouve la bonne resonance",
+  "symbol": "LA",
+  "effect": "radar",
   "visual": {
     "show_title": true,
+    "show_subtitle": true,
     "show_symbol": true,
-    "effect_speed_ms": 480,
-    "waveform": {
-      "enabled": true,
-      "sample_count": 16,
-      "amplitude_pct": 100,
-      "jitter": true
-    }
+    "effect_speed_ms": 460
   },
   "theme": {
-    "bg": "#000000",
-    "accent": "#49D9FF",
-    "text": "#E8F6FF"
+    "bg": "#111B20",
+    "accent": "#86FFD2",
+    "text": "#ECFFF6"
   },
   "timeline": {
     "loop": true,
@@ -67,7 +62,7 @@
     ]
   },
   "transition": {
-    "effect": "zoom",
-    "duration_ms": 260
+    "effect": "fade",
+    "duration_ms": 180
   }
 }

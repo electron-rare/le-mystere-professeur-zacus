@@ -12,7 +12,7 @@ Le bundle conversationnel est maintenu dans :
 - L'installation des validateurs est reproductible par script versionné.
 
 ## Non-goals
-- Aucune promotion automatique de `zacus_v2.yaml` vers `game/scenarios/*.yaml`.
+- Aucune promotion automatique de `zacus_v2.yaml` vers `game/scenarios/*.yaml` (promotion manuelle validée dans ce lot).
 - Aucune modification firmware/hardware.
 - Aucune refonte des manifests audio/printables.
 
@@ -22,7 +22,8 @@ Le bundle conversationnel est maintenu dans :
 
 ## Prochaine étape proposée
 - Validateur dédié implémenté: `tools/scenario/validate_runtime_bundle.py` (cohérence runtime/canonical/template).
-- Étape suivante: brancher ce validateur dans l'automatisation CI (gate G3 systématique).
+- Diff fonctionnel implémenté: `tools/scenario/diff_gameplay_scenarios.py` (rapport markdown QA).
+- Étape suivante: brancher le validateur runtime-bundle dans l'automatisation CI (gate G3 systématique).
 
 ## Statut Gates
 - G0 Spec Freeze : **satisfait** pour l'import brut du bundle.

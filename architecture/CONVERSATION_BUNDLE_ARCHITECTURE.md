@@ -16,7 +16,8 @@
 
 ## Prochaine évolution proposée
 - Validateur ajouté: `tools/scenario/validate_runtime_bundle.py` (cohérence entre `scenario_runtime.json`, `scenario_canonical.yaml` et `scenario_promptable_template.yaml`).
-- Prochaine itération: intégration CI de ce contrôle dans la gate G3.
+- Intégration CI de ce contrôle dans la gate G3 effectuée dans `.github/workflows/validate.yml`.
+- Diff fonctionnel gameplay ajouté via `tools/scenario/diff_gameplay_scenarios.py` (rapport artifact QA).
 
 ## Statut Gates
 - G1 Arch Freeze : **satisfait** pour ce lot d'import documentaire/data.

@@ -8,3 +8,5 @@
 5. **Valider les printables** avec `tools/printables/validate_manifest.py printables/manifests/zacus_v1_printables.yaml` pour s’assurer que chaque ID a un prompt accessible.
 
 6. **Valider le conversation bundle** avec `tools/scenario/validate_runtime_bundle.py` pour vérifier la cohérence `scenario_runtime.json` / `scenario_canonical.yaml` / `scenario_promptable_template.yaml`.
+
+7. **Générer le diff fonctionnel gameplay** avec `tools/scenario/diff_gameplay_scenarios.py` pour produire un rapport markdown dans `artifacts/qa-test/<date>/`.

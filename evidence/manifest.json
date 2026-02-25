@@ -2,26 +2,30 @@
   "date": "2026-02-25",
   "agent": "qa-test",
   "changes": [
-    "tools/scenario/validate_runtime_bundle.py",
-    "scenario-ai-coherence/zacus_conversation_bundle_v3/README.md",
+    "game/scenarios/zacus_v1.yaml",
+    "tools/scenario/diff_gameplay_scenarios.py",
+    ".github/workflows/validate.yml",
     "docs/WORKFLOWS.md",
     "specs/CONVERSATION_BUNDLE_INTAKE.md",
     "architecture/CONVERSATION_BUNDLE_ARCHITECTURE.md",
+    "tools/scenario/validate_runtime_bundle.py",
     "tools/requirements/validators.txt",
     "tools/setup/install_validators.sh"
   ],
   "artifacts": [
     "artifacts/pm-spec/2026-02-25/conversation-bundle-intake.md",
+    "artifacts/pm-spec/2026-02-25/gameplay-promotion-note.md",
     "artifacts/qa-test/2026-02-25/validator-bootstrap.md",
-    "artifacts/qa-test/2026-02-25/runtime-bundle-validator.md"
+    "artifacts/qa-test/2026-02-25/runtime-bundle-validator.md",
+    "artifacts/qa-test/2026-02-25/gameplay-functional-diff.md"
   ],
   "gates": {
     "G0": "satisfied",
     "G1": "satisfied",
-    "G2": "satisfied_docs_tooling",
-    "G3": "validated",
+    "G2": "implemented_gameplay_and_tooling",
+    "G3": "validated_and_ci_wired",
     "G4": "pending",
     "G5": "partial"
   },
-  "note": "Validateur runtime bundle ajouté + documentation mise à jour; contrôles projet exécutés."
+  "note": "Promotion gameplay effectuée + diff fonctionnel généré + validate_runtime_bundle branché en CI."
 }

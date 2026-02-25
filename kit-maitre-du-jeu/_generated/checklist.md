@@ -2,12 +2,12 @@
 
 ## Configurer
 
-- Scénario : Le mystère du Professeur Zacus
+- Scénario : Le mystère du Professeur Zacus — U-SON (promotion gameplay)
 - Fichier source : game/scenarios/zacus_v1.yaml
 - Participants : 6–14
 - Durée : 60–90 min
-- Stations prévues : 4
-- Puzzles : 4
+- Stations prévues : 3
+- Puzzles : 3
 - Preuves listées : 3
 
 ## Matériel recommandé

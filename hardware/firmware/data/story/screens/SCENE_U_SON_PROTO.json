@@ -3,7 +3,7 @@
   "title": "U-SON PROTO",
   "subtitle": "Calibration signal en cours",
   "symbol": "U1",
-  "effect": "pulse"+"glitch random H/V",
+  "effect": "glitch",
   "visual": {
     "show_title": true,
     "show_subtitle": true,

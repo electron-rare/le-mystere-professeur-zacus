@@ -3,7 +3,7 @@
   "title": "WIN ETAPE 1",
   "subtitle": "validé à la hotline",
   "symbol": "W1",
-  "effect": "celebrate"+"fireworks",
+  "effect": "celebrate",
   "visual": {
     "show_title": true,
     "show_subtitle": true,
@@ -16,7 +16,7 @@
     "text": "#FFF7E2"
   },
   "transition": {
-    "effect": "fireworks",
+    "effect": "fade",
     "duration_ms": 260
   },
   "timeline": {}

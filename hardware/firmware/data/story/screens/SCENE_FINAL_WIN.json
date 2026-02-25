@@ -3,7 +3,7 @@
   "title": "FINAL WIN",
   "subtitle": "Mission accomplie",
   "symbol": "WIN",
-  "effect": "celebrate"+fireworks,
+  "effect": "celebrate",
   "visual": {
     "show_title": true,
     "show_subtitle": true,

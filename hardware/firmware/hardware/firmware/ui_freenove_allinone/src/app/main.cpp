@@ -21,6 +21,9 @@
 #include "media_manager.h"
 #include "ui_freenove_config.h"
 #include "network_manager.h"
+#include "app/runtime_scene_service.h"
+#include "app/runtime_serial_service.h"
+#include "app/runtime_web_service.h"
 #include "runtime/app_coordinator.h"
 #include "runtime/la_trigger_service.h"
 #include "runtime/perf/perf_monitor.h"
@@ -117,6 +120,9 @@ RuntimeServices g_runtime_services;
 AppCoordinator g_app_coordinator;
 runtime::resource::ResourceCoordinator g_resource_coordinator;
 SceneFxOrchestrator g_scene_fx_orchestrator;
+RuntimeSerialService g_runtime_serial_service;
+RuntimeSceneService g_runtime_scene_service;
+RuntimeWebService g_runtime_web_service;
 #if defined(USE_AUDIO) && (USE_AUDIO != 0)
 ui::audio::AmigaAudioPlayer g_amp_player;
 bool g_amp_ready = false;
@@ -846,9 +852,11 @@ bool normalizeEspNowPayloadToScenarioEvent(const char* payload_text, char* out_e
 bool dispatchScenarioEventByType(StoryEventType type, const char* event_name, uint32_t now_ms);
 bool dispatchScenarioEventByName(const char* event_name, uint32_t now_ms);
 void handleSerialCommand(const char* command_line, uint32_t now_ms);
+void handleSerialCommandImpl(const char* command_line, uint32_t now_ms);
 void runtimeTickBridge(uint32_t now_ms, RuntimeServices* services);
 void serialDispatchBridge(const char* command_line, uint32_t now_ms, RuntimeServices* services);
 void refreshSceneIfNeeded(bool force_render);
+void refreshSceneIfNeededImpl(bool force_render);
 void startPendingAudioIfAny();
 #if defined(USE_AUDIO) && (USE_AUDIO != 0)
 bool isAmpSceneId(const char* scene_id);
@@ -880,6 +888,8 @@ void webSendProvisionStatus();
 bool webReconnectLocalWifi();
 bool refreshStoryFromSd();
 bool dispatchControlAction(const String& action_raw, uint32_t now_ms, String* out_error = nullptr);
+bool dispatchControlActionImpl(const String& action_raw, uint32_t now_ms, String* out_error = nullptr);
+void setupWebUiImpl();
 void clearRuntimeStaCredentials();
 void applyRuntimeStaCredentials(const char* ssid, const char* password);
 void updateAuthPolicy();
@@ -2801,7 +2811,7 @@ void executeStoryActionsForStep(const ScenarioSnapshot& snapshot, uint32_t now_m
   }
 }
 
-bool dispatchControlAction(const String& action_raw, uint32_t now_ms, String* out_error) {
+bool dispatchControlActionImpl(const String& action_raw, uint32_t now_ms, String* out_error) {
   if (out_error != nullptr) {
     out_error->remove(0);
   }
@@ -3479,7 +3489,7 @@ void webSendStatusSse() {
   g_web_server.sendContent("event: done\ndata: 1\n\n");
 }
 
-void setupWebUi() {
+void setupWebUiImpl() {
   const char* auth_headers[] = {kWebAuthHeaderName};
   g_web_server.collectHeaders(auth_headers, 1);
 
@@ -4166,6 +4176,22 @@ void runScenarioRevalidateAll(uint32_t now_ms) {
   Serial.println("SC_REVALIDATE_ALL_END");
 }
 
+bool dispatchControlAction(const String& action_raw, uint32_t now_ms, String* out_error) {
+  return g_runtime_serial_service.dispatchControlAction(action_raw, now_ms, out_error);
+}
+
+void setupWebUi() {
+  g_runtime_web_service.setupWebUi();
+}
+
+void refreshSceneIfNeeded(bool force_render) {
+  g_runtime_scene_service.refreshSceneIfNeeded(force_render);
+}
+
+void handleSerialCommand(const char* command_line, uint32_t now_ms) {
+  g_runtime_serial_service.handleSerialCommand(command_line, now_ms);
+}
+
 void runtimeTickBridge(uint32_t now_ms, RuntimeServices* services) {
   (void)services;
   ::runRuntimeIteration(now_ms);
@@ -4176,7 +4202,7 @@ void serialDispatchBridge(const char* command_line, uint32_t now_ms, RuntimeServ
   handleSerialCommand(command_line, now_ms);
 }
 
-void refreshSceneIfNeeded(bool force_render) {
+void refreshSceneIfNeededImpl(bool force_render) {
   const bool changed = g_scenario.consumeSceneChanged();
   const ScenarioSnapshot snapshot = g_scenario.snapshot();
   const SceneTransitionPlan transition =
@@ -4206,6 +4232,13 @@ void refreshSceneIfNeeded(bool force_render) {
 
   const char* step_id = (snapshot.step != nullptr && snapshot.step->id != nullptr) ? snapshot.step->id : "n/a";
   const String screen_payload = g_storage.loadScenePayloadById(snapshot.screen_scene_id);
+  if ((snapshot.screen_scene_id != nullptr) && snapshot.screen_scene_id[0] != '\0' && screen_payload.isEmpty()) {
+    ZACUS_RL_LOG_MS(6000U,
+                    "[UI] missing scene payload scenario=%s step=%s screen=%s\n",
+                    scenarioIdFromSnapshot(snapshot),
+                    step_id,
+                    snapshot.screen_scene_id);
+  }
   Serial.printf("[UI] render step=%s screen=%s pack=%s playing=%u\n",
                 step_id,
                 snapshot.screen_scene_id != nullptr ? snapshot.screen_scene_id : "n/a",
@@ -4304,7 +4337,7 @@ void startPendingAudioIfAny() {
   g_scenario.notifyAudioDone(millis());
 }
 
-void handleSerialCommand(const char* command_line, uint32_t now_ms) {
+void handleSerialCommandImpl(const char* command_line, uint32_t now_ms) {
   if (command_line == nullptr || command_line[0] == '\0') {
     return;
   }
@@ -5116,6 +5149,9 @@ void setup() {
   bootPrintReport(kFirmwareName, ZACUS_FW_VERSION);
   logBuildMemoryPolicy();
   logBootMemoryProfile();
+  g_runtime_serial_service.configure(handleSerialCommandImpl, dispatchControlActionImpl);
+  g_runtime_scene_service.configure(refreshSceneIfNeededImpl, startPendingAudioIfAny);
+  g_runtime_web_service.configure(setupWebUiImpl);
 
   if (!g_storage.begin()) {
     Serial.println("[MAIN] storage init failed");

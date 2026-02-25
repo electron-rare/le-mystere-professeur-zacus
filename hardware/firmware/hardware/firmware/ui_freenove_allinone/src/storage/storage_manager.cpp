@@ -420,6 +420,9 @@ String StorageManager::loadScenePayloadById(const char* scene_id) const {
 
   const String id = normalized_scene_id;
   const String raw_id = scene_id;
+  if (scene_cache_id_ == id && !scene_cache_payload_.isEmpty()) {
+    return scene_cache_payload_;
+  }
   String candidates[14];
   size_t candidate_count = 0U;
   auto add_candidate = [&candidate_count, &candidates](const String& value) {
@@ -461,10 +464,14 @@ String StorageManager::loadScenePayloadById(const char* scene_id) const {
       Serial.printf("[FS] scene payload loaded from legacy alias path: %s\n", candidate.c_str());
     }
     Serial.printf("[FS] scene %s -> %s (id=%s)\n", scene_id, origin.c_str(), normalized_scene_id);
+    scene_cache_id_ = id;
+    scene_cache_payload_ = payload;
     return payload;
   }
 
   Serial.printf("[FS] scene payload missing for id=%s (normalized=%s)\n", scene_id, normalized_scene_id);
+  scene_cache_id_.remove(0);
+  scene_cache_payload_.remove(0);
   return String();
 }
 
@@ -474,6 +481,9 @@ String StorageManager::resolveAudioPathByPackId(const char* pack_id) const {
   }
 
   const String id = pack_id;
+  if (audio_cache_pack_id_ == id && !audio_cache_path_.isEmpty()) {
+    return audio_cache_path_;
+  }
   const String slug = packIdToSlug(pack_id);
   const String json_candidates[] = {
       "/story/audio/" + id + ".json",
@@ -534,6 +544,8 @@ String StorageManager::resolveAudioPathByPackId(const char* pack_id) const {
                         pack_id,
                         resolved.c_str(),
                         origin.c_str());
+          audio_cache_pack_id_ = id;
+          audio_cache_path_ = resolved;
           return resolved;
         }
       }
@@ -548,6 +560,8 @@ String StorageManager::resolveAudioPathByPackId(const char* pack_id) const {
       continue;
     }
     Serial.printf("[FS] audio pack %s -> %s (%s)\n", pack_id, resolved.c_str(), origin.c_str());
+    audio_cache_pack_id_ = id;
+    audio_cache_path_ = resolved;
     return resolved;
   }
 
@@ -567,9 +581,13 @@ String StorageManager::resolveAudioPathByPackId(const char* pack_id) const {
       continue;
     }
     Serial.printf("[FS] audio pack %s fallback direct=%s\n", pack_id, resolved.c_str());
+    audio_cache_pack_id_ = id;
+    audio_cache_path_ = resolved;
     return resolved;
   }
 
+  audio_cache_pack_id_.remove(0);
+  audio_cache_path_.remove(0);
   return String();
 }
 
@@ -659,6 +677,7 @@ bool StorageManager::syncStoryFileFromSd(const char* story_path) {
   }
   const bool copied = copyFileFromSdToLittleFs(normalized.c_str(), normalized.c_str());
   if (copied) {
+    invalidateStoryCaches();
     Serial.printf("[FS] synced story file from SD: %s\n", normalized.c_str());
   }
   return copied;
@@ -725,6 +744,32 @@ bool StorageManager::provisionEmbeddedAsset(const char* path,
   return true;
 }
 
+void StorageManager::invalidateStoryCaches() const {
+  scene_cache_id_.remove(0);
+  scene_cache_payload_.remove(0);
+  audio_cache_pack_id_.remove(0);
+  audio_cache_path_.remove(0);
+}
+
+bool StorageManager::isStoryScreenPayloadPresent() const {
+  const ScenarioDef* runtime_default = storyScenarioV2Default();
+  if (runtime_default == nullptr || runtime_default->steps == nullptr || runtime_default->stepCount == 0U) {
+    return false;
+  }
+  for (uint8_t index = 0U; index < runtime_default->stepCount; ++index) {
+    const StepDef& step = runtime_default->steps[index];
+    const char* screen_id = step.resources.screenSceneId;
+    if (screen_id == nullptr || screen_id[0] == '\0') {
+      continue;
+    }
+    const String path = String("/story/screens/") + screen_id + ".json";
+    if (pathExistsOnLittleFs(path.c_str())) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool StorageManager::syncStoryTreeFromSd() {
   if (!sd_ready_ && !mountSdCard()) {
     return false;
@@ -735,6 +780,7 @@ bool StorageManager::syncStoryTreeFromSd() {
     copied_any = copyStoryDirectoryFromSd(relative_dir) || copied_any;
   }
   if (copied_any) {
+    invalidateStoryCaches();
     Serial.println("[FS] story tree refreshed from SD");
   }
   return copied_any;
@@ -749,8 +795,9 @@ bool StorageManager::ensureDefaultStoryBundle() {
     }
   }
   if (written_count > 0U) {
+    invalidateStoryCaches();
     Serial.printf("[FS] provisioned embedded story assets: %u\n", written_count);
-  } else if (!pathExistsOnLittleFs("/story/screens/SCENE_LOCKED.json")) {
+  } else if (!isStoryScreenPayloadPresent()) {
     Serial.println("[FS] story bundle not embedded; run buildfs/uploadfs for full content");
   }
   return true;

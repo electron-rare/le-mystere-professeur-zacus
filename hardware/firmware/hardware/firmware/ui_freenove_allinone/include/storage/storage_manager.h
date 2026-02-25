@@ -40,9 +40,15 @@ class StorageManager {
   bool copyFileFromSdToLittleFs(const char* src_path, const char* dst_path) const;
   bool copyStoryDirectoryFromSd(const char* relative_dir);
   String resolveReadableAssetPath(const String& absolute_path) const;
+  void invalidateStoryCaches() const;
+  bool isStoryScreenPayloadPresent() const;
   void noteSdAccessFailure(const char* operation, const char* path, int error_code) const;
   void noteSdAccessSuccess() const;
 
   mutable bool sd_ready_ = false;
   mutable uint8_t sd_failure_streak_ = 0U;
+  mutable String scene_cache_id_;
+  mutable String scene_cache_payload_;
+  mutable String audio_cache_pack_id_;
+  mutable String audio_cache_path_;
 };

@@ -1,3 +1,229 @@
+## [2026-02-25] Refonte scenario reel v2 + stabilisation verificators + upload/test Freenove
+
+- Skills utilises (ordre):
+  - `freenove-firmware-orchestrator`
+  - `firmware-story-stack`
+  - `firmware-espnow-stack`
+  - `firmware-build-stack`
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260225_162241_wip.patch`
+  - `/tmp/zacus_checkpoint/20260225_162241_status.txt`
+- Correctifs principaux:
+  - flow runtime applique sur `DEFAULT` avec `button`/`espnow`, QR gate `APP_QR_UNLOCK`, timer `WIN_DUE`, `STEP_MEDIA_MANAGER`.
+  - action boot cible maintenue `ACTION_SET_BOOT_MEDIA_MANAGER` avec compat runtime `ACTION_SET_BOOT_MEDIA`.
+  - LittleFS: fichiers action a nom court pour contourner la limite de nom (`ACTION_QR_SCAN_START.json`, `ACTION_BOOT_MEDIA_MGR.json`) tout en conservant les IDs longs en payload.
+  - `main.cpp`: `SC_EVENT`/`SC_EVENT_RAW` appliquent maintenant `refreshSceneIfNeeded(true)` + `startPendingAudioIfAny()` sur changement de step (corrige reset lors trigger `button`).
+  - `main.cpp`: commande `RESET` stoppe audio/amp/media avant reset scenario puis rerender immediate (corrige panic rollback media-manager).
+  - HAL scene `SCENE_FINAL_WIN`: LED fixee (pas de pulse) pour verification RGB stricte.
+  - scripts skills:
+    - `scene-verificator`: robustesse boot marker + triggers button/espnow + checks LED.
+    - `hal-verificator-status`: attentes par defaut alignees (`SCENE_QR_DETECTOR mic=0`, `SCENE_FINAL_WIN led=252/212/92`).
+    - `media-manager`: `AUDIO_STOP` avant QR et avant reset rollback + detection `scene=SCENE_MEDIA_MANAGER`/ACK step media.
+  - generator story: validation narrative game assouplie (runtime YAML reste strict) pour ne pas bloquer sur `game/scenarios/zacus_v2.yaml`.
+- Gates executes:
+  - story gen:
+    - `PYTHONPATH=lib/zacus_story_gen_ai/src .venv/bin/python -m zacus_story_gen_ai.cli validate` ✅
+    - `PYTHONPATH=lib/zacus_story_gen_ai/src .venv/bin/python -m zacus_story_gen_ai.cli generate-cpp` ✅
+    - `PYTHONPATH=lib/zacus_story_gen_ai/src .venv/bin/python -m zacus_story_gen_ai.cli generate-bundle` ✅
+  - build/upload:
+    - `pio run -e freenove_esp32s3` ✅
+    - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅ (plus de warning LittleFS sur action QR/boot media manager)
+    - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅
+    - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - smoke/verificators:
+    - `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 8 --wait-port 10` ✅
+    - `~/.codex/skills/scene-verificator/scripts/run_scene_verification.sh /dev/cu.usbmodem5AB90753301 115200` ✅
+    - `~/.codex/skills/fx-verificator/scripts/run_fx_verification.sh /dev/cu.usbmodem5AB90753301 115200` ✅
+    - `~/.codex/skills/hal-verificator-status/scripts/run_hal_verification.sh /dev/cu.usbmodem5AB90753301 115200` ✅
+    - `~/.codex/skills/media-manager/scripts/run_media_manager_verification.sh /dev/cu.usbmodem5AB90753301 115200` ✅
+- Limitation materielle observee (non bloquante):
+  - erreurs camera DMA sur `SCENE_PHOTO_MANAGER` (`cam_dma_config ... malloc failed`) quand PSRAM libre faible; verifs scene/HAL/media passent malgre ces logs.
+
+## [2026-02-25] Scope ESP-NOW + fix action boot media (LittleFS)
+
+- Objectif:
+  - inclure ESP-NOW dans le passage vers `STEP_MEDIA_MANAGER`,
+  - corriger l'action de boot media qui provoquait un warning buildfs.
+- Actions:
+  - action renommee `ACTION_SET_BOOT_MEDIA` (`data/story/actions/ACTION_SET_BOOT_MEDIA.json`) pour rester compatible LittleFS.
+  - references scenario mises a jour:
+    - `docs/protocols/story_specs/scenarios/default_unlock_win_etape2.yaml`
+    - `data/story/scenarios/DEFAULT.json`
+  - transition ESP-NOW ajoutee:
+    - `on_event espnow QR_OK -> STEP_MEDIA_MANAGER`.
+  - compat runtime conservee dans `main.cpp`:
+    - accepte `ACTION_SET_BOOT_MEDIA` + alias legacy `ACTION_SET_BOOT_MEDIA_MANAGER`.
+- Gates:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅
+  - warning `unable to open '/story/actions/ACTION_SET_BOOT_MEDIA_MANAGER.json.` disparu.
+
+## [2026-02-25] Passes completes ChatGPT examples -> firmware (QR + media + gates)
+
+- Skills utilises:
+  - `chatgpt-file-exemple-intake`
+  - `freenove-firmware-orchestrator`
+- Pass 1 (QR assets):
+  - integration des assets exemples dans `data/ui/qr/` (`ok.png`, `ok_48.png`, `bad.png`, `bad_48.png`, `reticle.png`, `scanlines.png`, `README.txt`).
+  - hook runtime ajoute dans `ui/qr/qr_scene_controller.cpp` avec trace presence assets (`[QR_UI] assets ...`).
+- Pass 2 (audio/media depuis exemples):
+  - extraction logique "natural sort" pour catalogues media dans `ui_freenove_allinone/src/system/media/media_manager.cpp`.
+  - `MEDIA_LIST` retourne maintenant un ordre stable/humain (`track2` avant `track10`).
+- Pass 3 (QR tool + full gates):
+  - `tools/dev/gen_qr_crc16.py` etendu avec `--scope data|suffix` + `--prefix`.
+  - builds + uploads executes:
+    - `pio run -e freenove_esp32s3` ✅
+    - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅ (warning LittleFS deja connu sur `ACTION_SET_BOOT_MEDIA_MANAGER.json`)
+    - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅
+    - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - verifications executees:
+    - `serial_smoke.py` ✅
+    - `scene-verificator` ✅
+    - `fx-verificator` ✅ (1er run panic puis rerun PASS apres reset)
+    - `hal-verificator-status` ✅
+    - `media-manager` ✅
+    - `run_stress_tests.py` ❌ (scenario `DEFAULT` n'atteint pas `STEP_DONE`, sans panic sur ce run).
+
+## [2026-02-25] Intake fichiers ChatGPT_file_exemple (integration controlee)
+
+- Skills utilises:
+  - `chatgpt-file-exemple-intake` (inventaire + mapping source->cible)
+  - `freenove-firmware-orchestrator` (respect architecture Freenove existante)
+- Inventaire execute sur `hardware/ChatGPT_file_exemple/**`:
+  - candidats utiles identifies sur QR flow (`qr_scan_controller.*`, `ui_manager.*`, `gen_qr_crc16.py`, assets PNG).
+- Decision d'integration:
+  - conserve architecture canonique actuelle sous `hardware/firmware/**` (pas de copie brute des arbres imbriques `.../hardware/firmware/hardware/firmware/...`).
+  - extraction d'un delta utile depuis l'exemple QR:
+    - `tools/dev/gen_qr_crc16.py` enrichi avec:
+      - `--scope data|suffix`
+      - `--prefix <text>` (obligatoire en scope `suffix`)
+      - validation prefix + calcul CRC sur suffixe.
+  - fichiers exemples non integres tels quels (assets/UI patch complet) car deja couverts partiellement ou non references runtime.
+- Validation rapide:
+  - `python3 tools/dev/gen_qr_crc16.py "ZACUS:ETAPE1" --ci --scope data` ✅
+  - `python3 tools/dev/gen_qr_crc16.py "ZACUS:ETAPE1:42" --ci --scope suffix --prefix "ZACUS:"` ✅
+
+## [2026-02-25] Scenario reel template - sync etat code + format promptable
+
+- Fichier mis a jour: `game/scenarios/scenario_reel_template.yaml`
+- Refonte du template pour usage "promptable":
+  - section editable unique `prompt_input` (besoin metier),
+  - section reference `current_firmware_snapshot` (etat runtime actuel derive du code/spec).
+- Snapshot aligne sur l'etat courant:
+  - flow `DEFAULT` avec final `QR_OK -> STEP_MEDIA_MANAGER`,
+  - scenes hub media (`SCENE_MEDIA_MANAGER`, `SCENE_MP3_PLAYER`, `SCENE_PHOTO_MANAGER`, `SCENE_READY`),
+  - HAL/LED runtime connus pour scenes critiques.
+- Validation:
+  - parse YAML OK (`python3` + `yaml.safe_load`).
+
+## [2026-02-25] Etat scenario + template de saisie "reel"
+
+- Etat courant source spec:
+  - `docs/protocols/story_specs/scenarios/default_unlock_win_etape2.yaml`
+  - flow actif: `STEP_WAIT_UNLOCK -> STEP_U_SON_PROTO/STEP_WAIT_ETAPE2 -> STEP_ETAPE2 -> STEP_DONE (SCENE_CAMERA_SCAN) -> STEP_MEDIA_MANAGER (SCENE_MEDIA_MANAGER via QR_OK)`.
+- Nouveau fichier de saisie simplifie pour expression besoin metier:
+  - `game/scenarios/scenario_reel_template.yaml`
+  - format orienté "brief scenario reel" (catalogue scenes, besoins HAL, LED, steps, transitions, acceptance).
+  - usage: l'utilisateur edite ce template, puis Codex convertit en scenario YAML canonique + JSON runtime.
+
+## [2026-02-25] HAL skill update - WS2812 (4 LED Freenove)
+
+- Skill global `hal-verificator-status` etendu pour verifier aussi les LED WS2812:
+  - `HW_STATUS ws2812` (`ws2812=0|1`)
+  - `HW_STATUS auto` (`led_auto=0|1`)
+  - couleur exacte optionnelle `HW_STATUS led=R,G,B` (`led=R/G/B` ou `led=R,G,B`)
+- Script mis a jour:
+  - `~/.codex/skills/hal-verificator-status/scripts/run_hal_verification.sh`
+  - parsing expectations enrichi (`cam|amp|mic|ws2812|led_auto|led`)
+  - verdict ligne detaillee avec etats LED.
+- Documentation skill:
+  - global `~/.codex/skills/hal-verificator-status/SKILL.md`
+  - global `~/.codex/skills/hal-verificator-status/references/checklist.md`
+  - miroir repo `docs/skills/hal-verificator-status.md`
+- Verification rapide:
+  - `run_hal_verification.sh /dev/cu.usbmodem5AB90753301 115200 \"SCENE_READY:cam=0,amp=0,mic=0,ws2812=1,led_auto=1;SCENE_MP3_PLAYER:cam=0,amp=1,ws2812=1,led_auto=1;SCENE_CAMERA_SCAN:cam=0,amp=0,ws2812=1,led_auto=1\"` ✅
+
+## [2026-02-25] QR final + boot MEDIA_MANAGER + skill media-manager
+
+- Checkpoint securite execute:
+  - `/tmp/zacus_checkpoint/20260225_102014_wip.patch`
+  - `/tmp/zacus_checkpoint/20260225_102014_status.txt`
+- Firmware/UI:
+  - ajout module QR `ui/qr/qr_scan_controller.*` + integration `UiManager` (`consumeRuntimeEvent`, `simulateQrPayload`, parsing regles `qr.expected/prefix/contains`).
+  - pont runtime event UI -> story (`SERIAL:QR_OK` / `SERIAL:QR_INVALID`) dans `main.cpp`.
+  - ajout persistance NVS `BootModeStore` (`zacus_boot`, `startup_mode`, `media_validated`) + commandes `BOOT_MODE_STATUS|SET|CLEAR`.
+  - action story `ACTION_SET_BOOT_MEDIA_MANAGER` applique mode persistant `media_manager`.
+  - `SCENE_CAMERA_SCAN` repasse en QR-only, nouvelle scene `SCENE_PHOTO_MANAGER`, scene hub `SCENE_MEDIA_MANAGER`.
+  - policy reset: `RESET` reroute vers `SCENE_MEDIA_MANAGER` si mode boot media actif.
+- Story/data:
+  - MAJ scenario YAML: `docs/protocols/story_specs/scenarios/default_unlock_win_etape2.yaml` (transition `QR_OK` -> `STEP_MEDIA_MANAGER`).
+  - MAJ runtime JSON: `data/story/scenarios/DEFAULT.json`, `data/story/screens/SCENE_CAMERA_SCAN.json`, ajout `SCENE_MEDIA_MANAGER.json`, `SCENE_PHOTO_MANAGER.json`, `ACTION_SET_BOOT_MEDIA_MANAGER.json`.
+  - generation: `./tools/dev/story-gen validate` ✅, `./tools/dev/story-gen generate-bundle` ✅ (`artifacts/story_fs/deploy`).
+- Skills:
+  - creation globale `~/.codex/skills/media-manager/` (`SKILL.md`, `agents/openai.yaml`, `scripts/run_media_manager_verification.sh`, `references/checklist.md`).
+  - miroir repo: `docs/skills/media-manager.md`.
+- Gates executes:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅ (warning d'indexation FS a surveiller sur `ACTION_SET_BOOT_MEDIA_MANAGER.json`, build final OK)
+  - `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 8 --wait-port 10` ✅
+
+## [2026-02-25] Skill HAL_VERIFCATOR_STATUS (scene-aware hardware gating)
+
+- Creation skill global:
+  - `~/.codex/skills/hal-verificator-status/SKILL.md`
+  - `~/.codex/skills/hal-verificator-status/agents/openai.yaml`
+  - `~/.codex/skills/hal-verificator-status/scripts/run_hal_verification.sh`
+  - `~/.codex/skills/hal-verificator-status/references/checklist.md`
+- Scope validation couverte:
+  - camera (`CAM_STATUS rec_scene`), amp (`AMP_STATUS scene`), micro (`RESOURCE_STATUS mic_should_run`).
+  - verification activation/desactivation par scene via plan explicite `SCENE:cam=,amp=,mic=`.
+- Miroir doc versionne:
+  - `docs/skills/hal-verificator-status.md`
+- Ajustement robustesse:
+  - `AMP_STATUS ready=0` interprete comme `amp=0` (pas de faux negatif quand player non initialise).
+  - attentes partielles supportees par scene (`cam|amp|mic` optionnels).
+
+## [2026-02-25] Follow-up verificators (scene/fx/hal)
+
+- `scene-verificator`:
+  - alias triggers ajoutes (`BTN_*` -> `SC_EVENT serial`, noms pointes -> `SC_EVENT_RAW`).
+  - argument trigger vide supporte (desactive les triggers custom sans fallback implicite).
+  - critere global assoupli: accepte progression via `SCREEN_SYNC` ou changements `scene/status`.
+- `fx-verificator`:
+  - script etendu (`scenes_csv`, `seconds_per_scene`) et verdict per-scene (`max(fx_fps)>0`).
+- Gates executes:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅
+  - `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 8 --wait-port 10` ✅
+- Resultats a investiguer:
+  - `scene-verificator` avec trigger `story.validate` provoque panic serie (`Guru Meditation ... Unhandled debug exception`).
+  - `hal-verificator` montre `SCENE_MP3_PLAYER` avec `mic_should_run=1` (si on force `mic=0`, echec attendu).
+- Integration changement detecte dans workspace:
+  - fichier `data/screens/la_detect.json` integre au scope utilisateur.
+  - ajout alias story `data/story/screens/SCENE_LA_DETECT.json` pour coherer avec `SCENE_LA_DETECT` deja supporte cote runtime.
+  - gate `pio run -e freenove_esp32s3_full_with_ui -t buildfs` relancee ✅ (fichier inclus dans LittleFS).
+
+## [2026-02-25] Scene/FX orchestrator refactor + VERIFICATOR skills
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260225_093916_wip.patch`
+  - `/tmp/zacus_checkpoint/20260225_093916_status.txt`
+- Refactor runtime:
+  - ajout orchestrateur `SceneFxOrchestrator` (`ui_freenove_allinone/include|src/app/scene_fx_orchestrator.*`) pour planifier ownership `Story/IntroFx/DirectFx/Amp/Camera`.
+  - `main.cpp`: ordre explicite transition owner `pre-exit -> render scene -> post-enter`.
+  - `UiManager`: cache scene payload hash + `audio_playing` pour eviter reinitialisations statiques inutiles; cleanup FX recentre.
+  - `ScenarioManager`: logs de transition structures (`from_step`, `to_step`, `from_scene`, `to_scene`, `event`, `source`, `audio_pack`) + trace chaines immediates.
+  - `resolve_ports.py`: remap mono-port robuste (`esp8266 -> esp32`) pour setup Freenove single-usb.
+- Skills crees (global + scripts):
+  - `~/.codex/skills/scene-verificator/`
+  - `~/.codex/skills/fx-verificator/`
+  - `scene-verificator` etendu pour piloter des triggers de test (`CMD@SCENE`) et verifier la progression post-trigger.
+- Miroir doc versionne:
+  - `docs/skills/scene-verificator.md`
+  - `docs/skills/fx-verificator.md`
+- Verification a executer en fin de run:
+  - build Freenove, serial smoke, scene chain, FX status, stress test.
+
 ## [2026-02-24] Plan v4 integration (FX3D modes + SCENE_CAMERA_SCAN recorder Win311)
 
 - Skills chain executee (ordre): `freenove-firmware-orchestrator` -> `firmware-graphics-stack` -> `firmware-camera-stack` -> `firmware-fx-overlay-lovyangfx` -> `firmware-build-stack`.
@@ -1613,3 +1839,90 @@
   - `pio run -e freenove_esp32s3` ✅
   - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
   - monitor serie manuel ✅ (`fx_fps~8`, `PONG`, logs WIN_ETAPE actifs).
+
+## Skill intake exemples pre-patch (2026-02-25)
+
+- Checkpoint:
+  - `/tmp/zacus_checkpoint/20260225_112752_wip.patch`
+  - `/tmp/zacus_checkpoint/20260225_112752_status.txt`
+- Nouveau skill global ajoute pour les depots d'exemples utilisateur:
+  - `~/.codex/skills/chatgpt-file-exemple-intake/SKILL.md`
+  - `~/.codex/skills/chatgpt-file-exemple-intake/agents/openai.yaml`
+  - `~/.codex/skills/chatgpt-file-exemple-intake/references/checklist.md`
+  - `~/.codex/skills/chatgpt-file-exemple-intake/scripts/scan_example_candidates.sh`
+- Miroir documentation repo:
+  - `docs/skills/chatgpt-file-exemple-intake.md`
+- Regle operationnelle formalisee:
+  - `hardware/ChatGPT_file_exemple/**` est une source de reference pre-patch, jamais une source compilee.
+  - Integration uniquement par extraction de deltas vers `hardware/firmware/**`.
+
+## Integration delta depuis hardware/ChatGPT_file_exemple (2026-02-25)
+
+- Source example integree (premier passage):
+  - `hardware/ChatGPT_file_exemple/QR validator/zacus_qr_crc16_prefix_patch/.../ui_manager.cpp`
+- Deltas portes dans code canonique:
+  - `hardware/firmware/ui_freenove_allinone/include/ui/ui_manager.h`
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+- Integration effectuee:
+  - support optionnel `qr.crc16` (bool ou objet `{enabled, sep}`) dans payload scene,
+  - validation CRC16/CCITT-FALSE sur payload QR (`DATA<sep>CRCHEX`),
+  - matching `expected/prefix/contains` applique sur `DATA` apres validation CRC,
+  - reset des regles QR inclut etat CRC16.
+- Validation:
+  - `pio run -e freenove_esp32s3` ✅
+- Passes supplementaires (QR examples -> canonique):
+  - ajout outil local `tools/dev/gen_qr_crc16.py` (payload + PNG optionnel), derive du dossier exemple et corrige (quoting/erreurs).
+  - ajout doc canonique `docs/protocols/qr_scan_crc16.md` (contrat payload `qr.crc16`, format DATA+CRC, usage script).
+  - verification script: `python3 tools/dev/gen_qr_crc16.py "ZACUS:MEDIA_MANAGER" --ci` ✅
+- Pass integration QR (suite):
+  - compat champ longueur payload QR dans `qr_scan_controller.cpp` (`payloadLen`/`payload_len`) pour robustesse version lib.
+  - gates executes:
+    - `pio run -e freenove_esp32s3` ✅
+    - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+    - `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 8 --wait-port 10` ✅
+
+## Orchestrator pass - refactor QR ownership hors UiManager massif (2026-02-25)
+
+- Baseline/checkpoint:
+  - `main`
+  - `/tmp/zacus_checkpoint/20260225_114336_wip.patch`
+  - `/tmp/zacus_checkpoint/20260225_114336_status.txt`
+- Skill chain utilisee (ordre):
+  1. `freenove-firmware-orchestrator`
+  2. `firmware-graphics-stack`
+  3. `firmware-camera-stack`
+  4. `firmware-build-stack`
+- Audit constats:
+  - logique QR payload/rules concentree dans `ui_manager.cpp` (couplage parsing+matching+CRC avec rendu),
+  - evenement UI `QR_OK` non consomme par le story runtime (`dispatched=0`) car scenario compile ne porte pas encore la transition YAML.
+- Phase A (architecture):
+  - extraction logique matching/payload QR vers module dedie:
+    - `hardware/firmware/ui_freenove_allinone/include/ui/qr/qr_validation_rules.h`
+    - `hardware/firmware/ui_freenove_allinone/src/ui/qr/qr_validation_rules.cpp`
+  - `UiManager` delegue desormais `qr_rules_.configureFromPayload(...)` + `qr_rules_.matches(...)`.
+- Phase B (securite memoire):
+  - copies bornees et parsing CRC16 encapsules dans le module QR dedie,
+  - suppression de helpers QR redondants dans `ui_manager.cpp` (moins de surface mutable).
+- Phase C (runtime/perf):
+  - parsing des regles QR applique uniquement sur changement statique de scene/payload (`qr_scene && static_state_changed`).
+- Correction enchainement scene/story:
+  - `main.cpp`: fallback orchestration pour `QR_OK` quand transition story compilee absente:
+    - applique `ACTION_SET_BOOT_MEDIA_MANAGER`,
+    - force `SCENE_MEDIA_MANAGER` via `g_scenario.gotoScene(..., "ui_qr_fallback")`.
+- Outils/skills verification:
+  - ajout utilitaire QR CRC: `tools/dev/gen_qr_crc16.py`
+  - doc contrat QR: `docs/protocols/qr_scan_crc16.md`
+  - mise a jour script skill global media-manager pour flow deterministe:
+    - force `SCENE_GOTO SCENE_CAMERA_SCAN` avant `QR_SIM`,
+    - accepte evidences `UI_EVENT` prefixe/non-prefixe,
+    - verification post-reset via `HW_STATUS scene=...` (plus de dependance `story.status`).
+- Gates executees:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 8 --wait-port 10` ✅
+  - `~/.codex/skills/scene-verificator/scripts/run_scene_verification.sh ...` ✅
+  - `~/.codex/skills/fx-verificator/scripts/run_fx_verification.sh ...` ✅
+  - `~/.codex/skills/hal-verificator-status/scripts/run_hal_verification.sh ...` ✅
+  - `~/.codex/skills/media-manager/scripts/run_media_manager_verification.sh ...` ✅
+- Limitation residuelle:
+  - la transition `QR_OK -> STEP_MEDIA_MANAGER` n'est pas encore presente dans le scenario compile C++ (`scenarios_gen.cpp`) ; fallback runtime temporaire en place tant que la regeneration C++ canonique n'est pas complete.

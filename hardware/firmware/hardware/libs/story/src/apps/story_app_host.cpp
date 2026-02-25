@@ -31,7 +31,8 @@ bool StoryAppHost::begin(const StoryAppContext& context) {
   context_ = context;
   initialized_ = laDetectorApp_.begin(context_) && audioPackApp_.begin(context_) &&
                  screenSceneApp_.begin(context_) && mp3GateApp_.begin(context_) &&
-                 wifiStackApp_.begin(context_) && espNowStackApp_.begin(context_);
+                 wifiStackApp_.begin(context_) && espNowStackApp_.begin(context_) &&
+                 qrUnlockApp_.begin(context_);
   activeCount_ = 0U;
   safeCopy(lastError_, sizeof(lastError_), initialized_ ? "OK" : "APP_BEGIN_FAIL");
   lastDetail_[0] = '\0';
@@ -147,7 +148,8 @@ bool StoryAppHost::validateScenario(const ScenarioDef& scenario, StoryAppValidat
       const bool supportedType =
           (binding->type == StoryAppType::kLaDetector || binding->type == StoryAppType::kAudioPack ||
            binding->type == StoryAppType::kScreenScene || binding->type == StoryAppType::kMp3Gate ||
-           binding->type == StoryAppType::kWifiStack || binding->type == StoryAppType::kEspNowStack);
+           binding->type == StoryAppType::kWifiStack || binding->type == StoryAppType::kEspNowStack ||
+           binding->type == StoryAppType::kQrUnlockApp);
       if (!supportedType) {
         local.ok = false;
         local.code = "APP_BINDING_UNSUPPORTED";
@@ -205,6 +207,8 @@ StoryApp* StoryAppHost::appForType(StoryAppType type) {
       return &wifiStackApp_;
     case StoryAppType::kEspNowStack:
       return &espNowStackApp_;
+    case StoryAppType::kQrUnlockApp:
+      return &qrUnlockApp_;
     case StoryAppType::kNone:
     default:
       return nullptr;

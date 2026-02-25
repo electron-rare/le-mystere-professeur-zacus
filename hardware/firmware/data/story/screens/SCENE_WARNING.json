@@ -1,0 +1,22 @@
+{
+  "id": "SCENE_WARNING",
+  "title": "ALERTE",
+  "subtitle": "Signal anormal",
+  "symbol": "WARN",
+  "effect": "blink",
+  "visual": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "effect_speed_ms": 240
+  },
+  "theme": {
+    "bg": "#261209",
+    "accent": "#FF9A4A",
+    "text": "#FFF2E6"
+  },
+  "transition": {
+    "effect": "fade",
+    "duration_ms": 200
+  }
+}

@@ -1,38 +1,39 @@
 {
   "id": "DEFAULT",
   "scenario": "DEFAULT",
-  "initial_step": "STEP_WAIT_UNLOCK",
+  "initial_step": "SCENE_U_SON_PROTO",
   "steps": [
     {
-      "id": "STEP_WAIT_UNLOCK",
-      "screen_scene_id": "SCENE_LOCKED",
-      "action_ids": [
-        "ACTION_TRACE_STEP",
-        "ACTION_HW_LED_READY"
-      ]
-    },
-    {
-      "id": "STEP_U_SON_PROTO",
-      "screen_scene_id": "SCENE_BROKEN",
+      "id": "SCENE_U_SON_PROTO",
+      "screen_scene_id": "SCENE_U_SON_PROTO",
       "audio_pack_id": "PACK_BOOT_RADIO",
       "action_ids": [
         "ACTION_TRACE_STEP",
-        "ACTION_HW_LED_ALERT",
-        "ACTION_MEDIA_PLAY_FILE"
+        "ACTION_HW_LED_ALERT"
       ]
     },
     {
-      "id": "STEP_WAIT_ETAPE2",
-      "screen_scene_id": "SCENE_CAMERA_SCAN",
+      "id": "SCENE_LA_DETECTOR",
+      "screen_scene_id": "SCENE_LA_DETECTOR",
       "action_ids": [
         "ACTION_TRACE_STEP",
-        "ACTION_CAMERA_SNAPSHOT",
-        "ACTION_REC_START"
+        "ACTION_QUEUE_SONAR"
       ]
     },
     {
-      "id": "STEP_ETAPE2",
-      "screen_scene_id": "SCENE_SIGNAL_SPIKE",
+      "id": "RTC_ESP_ETAPE1",
+      "screen_scene_id": "SCENE_WIN_ETAPE1",
+      "audio_pack_id": "PACK_CONFIRM_WIN_ETAPE1",
+      "action_ids": [
+        "ACTION_TRACE_STEP",
+        "ACTION_HW_LED_ALERT",
+        "ACTION_ESP_NOW_SEND_ETAPE1",
+        "ACTION_QUEUE_SONAR"
+      ]
+    },
+    {
+      "id": "WIN_ETAPE1",
+      "screen_scene_id": "SCENE_WIN_ETAPE1",
       "audio_pack_id": "PACK_WIN",
       "action_ids": [
         "ACTION_TRACE_STEP",
@@ -40,14 +41,57 @@
       ]
     },
     {
-      "id": "STEP_DONE",
-      "screen_scene_id": "SCENE_MEDIA_ARCHIVE",
+      "id": "STEP_WARNING",
+      "screen_scene_id": "SCENE_WARNING",
+      "audio_pack_id": "PACK_BOOT_RADIO",
       "action_ids": [
         "ACTION_TRACE_STEP",
-        "ACTION_REC_STOP",
-        "ACTION_HW_LED_READY",
-        "ACTION_REFRESH_SD"
+        "ACTION_HW_LED_ALERT"
       ]
+    },
+    {
+      "id": "SCENE_LEFOU_DETECTOR",
+      "screen_scene_id": "SCENE_LEFOU_DETECTOR",
+      "action_ids": [
+        "ACTION_TRACE_STEP",
+        "ACTION_QUEUE_SONAR"
+      ]
+    },
+    {
+      "id": "RTC_ESP_ETAPE2",
+      "screen_scene_id": "SCENE_WIN_ETAPE2",
+      "audio_pack_id": "PACK_CONFIRM_WIN_ETAPE2",
+      "action_ids": [
+        "ACTION_TRACE_STEP",
+        "ACTION_HW_LED_ALERT",
+        "ACTION_ESP_NOW_SEND_ETAPE2",
+        "ACTION_QUEUE_SONAR"
+      ]
+    },
+    {
+      "id": "SCENE_QR_DETECTOR",
+      "screen_scene_id": "SCENE_QR_DETECTOR",
+      "action_ids": [
+        "ACTION_TRACE_STEP",
+        "ACTION_QR_CODE_SCANNER_START"
+      ]
+    },
+    {
+      "id": "SCENE_FINAL_WIN",
+      "screen_scene_id": "SCENE_FINAL_WIN",
+      "action_ids": [
+        "ACTION_TRACE_STEP",
+        "ACTION_WINNER"
+      ]
+    },
+    {
+      "id": "STEP_MEDIA_MANAGER",
+      "screen_scene_id": "SCENE_MEDIA_MANAGER",
+      "action_ids": [
+        "ACTION_TRACE_STEP",
+        "ACTION_SET_BOOT_MEDIA_MANAGER"
+      ],
+      "mp3_gate_open": true
     }
   ],
   "source": "littlefs-default-options"

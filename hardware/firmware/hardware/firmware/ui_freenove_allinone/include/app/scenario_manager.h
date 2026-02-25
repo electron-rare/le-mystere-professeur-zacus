@@ -30,6 +30,8 @@ class ScenarioManager {
   void notifyUnlock(uint32_t now_ms);
   void notifyButton(uint8_t key, bool long_press, uint32_t now_ms);
   void notifyAudioDone(uint32_t now_ms);
+  bool notifyButtonEvent(const char* event_name, uint32_t now_ms);
+  bool notifyEspNowEvent(const char* event_name, uint32_t now_ms);
   bool notifySerialEvent(const char* event_name, uint32_t now_ms);
   bool notifyTimerEvent(const char* event_name, uint32_t now_ms);
   bool notifyActionEvent(const char* event_name, uint32_t now_ms);
@@ -63,10 +65,10 @@ class ScenarioManager {
                                  uint8_t* out_action_count = nullptr) const;
 
   bool dispatchEvent(StoryEventType type, const char* event_name, uint32_t now_ms, const char* source);
-  bool applyTransition(const TransitionDef& transition, uint32_t now_ms, const char* source);
-  bool runImmediateTransitions(uint32_t now_ms, const char* source);
+  bool applyTransition(const TransitionDef& transition, uint32_t now_ms, const char* source, const char* event_name);
+  bool runImmediateTransitions(uint32_t now_ms, const char* source, const char* parent_event_name);
   void evaluateAfterMsTransitions(uint32_t now_ms);
-  void enterStep(int8_t step_index, uint32_t now_ms, const char* source);
+  void enterStep(int8_t step_index, uint32_t now_ms, const char* source, const char* event_name = nullptr);
   const StepDef* currentStep() const;
   bool transitionMatches(const TransitionDef& transition, StoryEventType type, const char* event_name) const;
 
@@ -78,6 +80,9 @@ class ScenarioManager {
   bool timer_armed_ = false;
   bool timer_fired_ = false;
   uint32_t etape2_due_at_ms_ = 0U;
+  bool win_due_armed_ = false;
+  bool win_due_fired_ = false;
+  uint32_t win_due_at_ms_ = 0U;
   String pending_audio_pack_;
   String forced_screen_scene_id_;
   String initial_step_override_;

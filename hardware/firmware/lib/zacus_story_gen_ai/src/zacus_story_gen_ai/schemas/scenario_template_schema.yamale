@@ -1,0 +1,2 @@
+prompt_input: any()
+current_firmware_snapshot: any(required=False)

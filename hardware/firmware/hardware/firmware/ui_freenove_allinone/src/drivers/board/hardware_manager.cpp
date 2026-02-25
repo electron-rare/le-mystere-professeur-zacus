@@ -38,14 +38,25 @@ constexpr uint16_t kMicAgcMaxGainStepDown = 16U;
 constexpr HardwareManager::LedPaletteEntry kLedPalette[] = {
     {"SCENE_LOCKED", 255U, 96U, 22U, 88U, true},
     {"SCENE_BROKEN", 255U, 40U, 18U, 86U, true},
+    {"SCENE_U_SON_PROTO", 255U, 40U, 18U, 86U, true},
+    {"SCENE_WARNING", 255U, 154U, 74U, 78U, true},
     {"SCENE_SIGNAL_SPIKE", 255U, 40U, 18U, 86U, true},
     {"SCENE_LA_DETECTOR", 32U, 224U, 170U, 56U, true},
+    {"SCENE_LEFOU_DETECTOR", 70U, 230U, 200U, 56U, true},
     {"SCENE_SEARCH", 32U, 224U, 170U, 56U, true},
     {"SCENE_WIN", 245U, 205U, 62U, 80U, true},
     {"SCENE_WIN_ETAPE", 245U, 205U, 62U, 80U, true},
+    {"SCENE_WIN_ETAPE1", 244U, 203U, 74U, 80U, true},
+    {"SCENE_WIN_ETAPE2", 244U, 203U, 74U, 80U, true},
+    {"SCENE_FINAL_WIN", 252U, 212U, 92U, 76U, false},
     {"SCENE_REWARD", 245U, 205U, 62U, 80U, true},
-    {"SCENE_READY", 88U, 214U, 92U, 52U, true},
-    {"__DEFAULT__", 50U, 122U, 255U, 50U, true},
+    {"SCENE_READY", 18U, 45U, 95U, 52U, false},
+    {"SCENE_MP3_PLAYER", 18U, 45U, 95U, 52U, false},
+    {"SCENE_MEDIA_MANAGER", 18U, 45U, 95U, 52U, false},
+    {"SCENE_PHOTO_MANAGER", 18U, 45U, 95U, 52U, false},
+    {"SCENE_CAMERA_SCAN", 18U, 45U, 95U, 52U, false},
+    {"SCENE_QR_DETECTOR", 18U, 45U, 95U, 52U, false},
+    {"__DEFAULT__", 18U, 45U, 95U, 52U, false},
 };
 uint8_t clampU8(int value) {
   if (value < 0) {

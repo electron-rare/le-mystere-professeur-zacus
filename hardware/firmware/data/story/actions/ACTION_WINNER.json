@@ -1,0 +1,7 @@
+{
+  "id": "ACTION_WINNER",
+  "type": "winner_fx",
+  "config": {
+    "mode": "final_win"
+  }
+}

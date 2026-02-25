@@ -24,8 +24,10 @@
 #include "runtime/app_coordinator.h"
 #include "runtime/la_trigger_service.h"
 #include "runtime/perf/perf_monitor.h"
+#include "runtime/provisioning/boot_mode_store.h"
 #include "runtime/provisioning/credential_store.h"
 #include "runtime/resource/resource_coordinator.h"
+#include "runtime/scene_fx_orchestrator.h"
 #include "runtime/simd/simd_accel.h"
 #include "runtime/simd/simd_accel_bench.h"
 #include "runtime/runtime_config_service.h"
@@ -56,7 +58,7 @@ constexpr const char* kDiagAudioFile = "/music/boot_radio.mp3";
 constexpr size_t kSerialLineCapacity = 192U;
 constexpr bool kBootDiagnosticTone = true;
 constexpr const char* kEspNowBroadcastTarget = "broadcast";
-constexpr const char* kStepWinEtape = "STEP_ETAPE2";
+constexpr const char* kStepWinEtape = "WIN_ETAPE1";
 constexpr const char* kPackWin = "PACK_WIN";
 constexpr const char* kWebAuthHeaderName = "Authorization";
 constexpr const char* kWebAuthBearerPrefix = "Bearer ";
@@ -69,7 +71,8 @@ constexpr const char* kAmpMusicPathPrimary = "/music";
 constexpr const char* kAmpMusicPathFallback1 = "/audio/music";
 constexpr const char* kAmpMusicPathFallback2 = "/audio";
 #endif
-constexpr const char* kCameraSceneId = "SCENE_CAMERA_SCAN";
+constexpr const char* kCameraSceneId = "SCENE_PHOTO_MANAGER";
+constexpr const char* kMediaManagerSceneId = "SCENE_MEDIA_MANAGER";
 
 AudioManager g_audio;
 ScenarioManager g_scenario;
@@ -82,6 +85,7 @@ HardwareManager g_hardware;
 CameraManager g_camera;
 MediaManager g_media;
 CredentialStore g_credential_store;
+BootModeStore g_boot_mode_store;
 RuntimeNetworkConfig g_network_cfg;
 RuntimeHardwareConfig g_hardware_cfg;
 CameraManager::Config g_camera_cfg;
@@ -101,6 +105,7 @@ LaTriggerRuntimeState g_la_trigger;
 bool g_la_dispatch_in_progress = false;
 bool g_has_ring_sent_for_win_etape = false;
 bool g_win_etape_ui_refresh_pending = false;
+bool g_boot_media_manager_mode = false;
 bool g_setup_mode = true;
 bool g_web_auth_required = false;
 bool g_resource_profile_auto = true;
@@ -111,6 +116,7 @@ size_t g_serial_line_len = 0U;
 RuntimeServices g_runtime_services;
 AppCoordinator g_app_coordinator;
 runtime::resource::ResourceCoordinator g_resource_coordinator;
+SceneFxOrchestrator g_scene_fx_orchestrator;
 #if defined(USE_AUDIO) && (USE_AUDIO != 0)
 ui::audio::AmigaAudioPlayer g_amp_player;
 bool g_amp_ready = false;
@@ -139,6 +145,12 @@ const char* audioPackToFile(const char* pack_id) {
   }
   if (std::strcmp(pack_id, "PACK_WIN") == 0) {
     return "/music/win.mp3";
+  }
+  if (std::strcmp(pack_id, "PACK_CONFIRM_WIN_ETAPE1") == 0) {
+    return "/music/confirm_win_etape1.mp3";
+  }
+  if (std::strcmp(pack_id, "PACK_CONFIRM_WIN_ETAPE2") == 0) {
+    return "/music/confirm_win_etape2.mp3";
   }
   return "/music/placeholder.mp3";
 }
@@ -236,6 +248,36 @@ void copyText(char* out, size_t out_size, const char* text) {
   }
   std::strncpy(out, text, out_size - 1U);
   out[out_size - 1U] = '\0';
+}
+
+BootModeStore::StartupMode currentStartupMode() {
+  return g_boot_media_manager_mode ? BootModeStore::StartupMode::kMediaManager : BootModeStore::StartupMode::kStory;
+}
+
+void applyStartupMode(BootModeStore::StartupMode mode) {
+  g_boot_media_manager_mode = (mode == BootModeStore::StartupMode::kMediaManager);
+}
+
+void printBootModeStatus() {
+  const BootModeStore::StartupMode mode = currentStartupMode();
+  Serial.printf("BOOT_MODE_STATUS mode=%s media_validated=%u\n",
+                BootModeStore::modeLabel(mode),
+                g_boot_mode_store.isMediaValidated() ? 1U : 0U);
+}
+
+bool parseBootModeToken(const char* token, BootModeStore::StartupMode* out_mode) {
+  if (token == nullptr || out_mode == nullptr) {
+    return false;
+  }
+  if (std::strcmp(token, "STORY") == 0) {
+    *out_mode = BootModeStore::StartupMode::kStory;
+    return true;
+  }
+  if (std::strcmp(token, "MEDIA_MANAGER") == 0 || std::strcmp(token, "MEDIA") == 0) {
+    *out_mode = BootModeStore::StartupMode::kMediaManager;
+    return true;
+  }
+  return false;
 }
 
 void applySceneResourcePolicy(const ScenarioSnapshot& snapshot) {
@@ -489,6 +531,10 @@ const char* eventTypeName(StoryEventType type) {
       return "timer";
     case StoryEventType::kSerial:
       return "serial";
+    case StoryEventType::kButton:
+      return "button";
+    case StoryEventType::kEspNow:
+      return "espnow";
     case StoryEventType::kAction:
       return "action";
     default:
@@ -519,6 +565,14 @@ bool parseEventType(const char* text, StoryEventType* out_type) {
     *out_type = StoryEventType::kSerial;
     return true;
   }
+  if (std::strcmp(normalized, "button") == 0 || std::strcmp(normalized, "btn") == 0) {
+    *out_type = StoryEventType::kButton;
+    return true;
+  }
+  if (std::strcmp(normalized, "espnow") == 0 || std::strcmp(normalized, "esp_now") == 0) {
+    *out_type = StoryEventType::kEspNow;
+    return true;
+  }
   if (std::strcmp(normalized, "action") == 0) {
     *out_type = StoryEventType::kAction;
     return true;
@@ -536,6 +590,10 @@ const char* defaultEventNameForType(StoryEventType type) {
       return "ETAPE2_DUE";
     case StoryEventType::kSerial:
       return "BTN_NEXT";
+    case StoryEventType::kButton:
+      return "ANY";
+    case StoryEventType::kEspNow:
+      return "EVENT";
     case StoryEventType::kAction:
       return "ACTION_FORCE_ETAPE2";
     default:
@@ -568,6 +626,12 @@ bool buildEventTokenFromTypeName(StoryEventType type,
       return true;
     case StoryEventType::kSerial:
       snprintf(out_event, out_capacity, "SERIAL:%s", normalized_name[0] != '\0' ? normalized_name : "BTN_NEXT");
+      return true;
+    case StoryEventType::kButton:
+      snprintf(out_event, out_capacity, "BUTTON:%s", normalized_name[0] != '\0' ? normalized_name : "ANY");
+      return true;
+    case StoryEventType::kEspNow:
+      snprintf(out_event, out_capacity, "ESPNOW:%s", normalized_name[0] != '\0' ? normalized_name : "EVENT");
       return true;
     case StoryEventType::kAction:
       snprintf(out_event,
@@ -635,6 +699,20 @@ bool normalizeEventTokenFromText(const char* raw_text, char* out_event, size_t o
     trimAsciiInPlace(name);
     toUpperAsciiInPlace(name);
     snprintf(out_event, out_capacity, "SERIAL:%s", name[0] != '\0' ? name : "BTN_NEXT");
+    return true;
+  }
+  if (startsWithIgnoreCase(event, "BUTTON ")) {
+    char* name = event + 7;
+    trimAsciiInPlace(name);
+    toUpperAsciiInPlace(name);
+    snprintf(out_event, out_capacity, "BUTTON:%s", name[0] != '\0' ? name : "ANY");
+    return true;
+  }
+  if (startsWithIgnoreCase(event, "ESPNOW ")) {
+    char* name = event + 7;
+    trimAsciiInPlace(name);
+    toUpperAsciiInPlace(name);
+    snprintf(out_event, out_capacity, "ESPNOW:%s", name[0] != '\0' ? name : "EVENT");
     return true;
   }
   if (startsWithIgnoreCase(event, "TIMER ")) {
@@ -751,7 +829,18 @@ bool normalizeEspNowPayloadToScenarioEvent(const char* payload_text, char* out_e
     }
   }
 
-  return normalizeEventTokenFromText(normalized, out_event, out_capacity);
+  char normalized_event[kSerialLineCapacity] = {0};
+  if (!normalizeEventTokenFromText(normalized, normalized_event, sizeof(normalized_event))) {
+    return false;
+  }
+  if (std::strchr(normalized_event, ':') == nullptr &&
+      std::strcmp(normalized_event, "UNLOCK") != 0 &&
+      std::strcmp(normalized_event, "AUDIO_DONE") != 0) {
+    std::snprintf(out_event, out_capacity, "ESPNOW:%s", normalized_event);
+    return true;
+  }
+  copyText(out_event, out_capacity, normalized_event);
+  return true;
 }
 
 bool dispatchScenarioEventByType(StoryEventType type, const char* event_name, uint32_t now_ms);
@@ -765,11 +854,13 @@ void startPendingAudioIfAny();
 bool isAmpSceneId(const char* scene_id);
 bool ensureAmpInitialized();
 size_t scanAmpPlaylistWithFallback();
+void setAmpSceneActive(bool active);
 void syncAmpSceneState(const ScenarioSnapshot& snapshot);
 void printAmpStatus();
 #endif
 bool isCameraSceneId(const char* scene_id);
 bool ensureCameraUiInitialized();
+void setCameraSceneActive(bool active);
 void syncCameraSceneState(const ScenarioSnapshot& snapshot);
 bool dispatchCameraSceneButton(uint8_t key, bool long_press);
 void printCameraRecorderStatus();
@@ -1433,10 +1524,14 @@ size_t scanAmpPlaylistWithFallback() {
 
 void syncAmpSceneState(const ScenarioSnapshot& snapshot) {
   const bool want_amp_scene = isAmpSceneId(snapshot.screen_scene_id);
-  if (want_amp_scene == g_amp_scene_active) {
+  setAmpSceneActive(want_amp_scene);
+}
+
+void setAmpSceneActive(bool active) {
+  if (active == g_amp_scene_active) {
     return;
   }
-  g_amp_scene_active = want_amp_scene;
+  g_amp_scene_active = active;
   if (g_amp_scene_active) {
     g_audio.stop();
     if (ensureAmpInitialized()) {
@@ -1507,10 +1602,14 @@ bool ensureCameraUiInitialized() {
 
 void syncCameraSceneState(const ScenarioSnapshot& snapshot) {
   const bool want_camera_scene = isCameraSceneId(snapshot.screen_scene_id);
-  if (want_camera_scene == g_camera_scene_active) {
+  setCameraSceneActive(want_camera_scene);
+}
+
+void setCameraSceneActive(bool active) {
+  if (active == g_camera_scene_active) {
     return;
   }
-  g_camera_scene_active = want_camera_scene;
+  g_camera_scene_active = active;
   if (g_camera_scene_active) {
     if (!ensureCameraUiInitialized()) {
       g_camera_scene_active = false;
@@ -2585,6 +2684,49 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
     return g_media.stopRecording();
   }
 
+  if (std::strcmp(action_id, "ACTION_ESP_NOW_SEND_ETAPE1") == 0 ||
+      std::strcmp(action_id, "ACTION_ESP_NOW_SEND_ETAPE2") == 0 ||
+      std::strcmp(action_type, "espnow_send") == 0) {
+    const char* target = action_doc["config"]["target"] | action_doc["config"]["peer"] | "broadcast";
+    const char* payload = action_doc["config"]["payload"] | "";
+    String fallback_payload;
+    if (payload[0] == '\0') {
+      const char* inferred = std::strstr(action_id, "ETAPE2") != nullptr ? "ACK_WIN2" : "ACK_WIN1";
+      fallback_payload = inferred;
+      payload = fallback_payload.c_str();
+    }
+    const bool ok = g_network.sendEspNowTarget(target, payload);
+    Serial.printf("[ACTION] ESPNOW_SEND id=%s target=%s payload=%s ok=%u\n",
+                  action_id,
+                  target,
+                  payload,
+                  ok ? 1U : 0U);
+    return ok;
+  }
+
+  if (std::strcmp(action_id, "ACTION_QR_CODE_SCANNER_START") == 0 ||
+      std::strcmp(action_type, "qr_scanner_start") == 0) {
+    Serial.println("[ACTION] QR scanner gate active");
+    return true;
+  }
+
+  if (std::strcmp(action_id, "ACTION_WINNER") == 0 ||
+      std::strcmp(action_type, "winner_fx") == 0) {
+    Serial.println("[ACTION] WINNER effect armed");
+    return true;
+  }
+
+  if (std::strcmp(action_id, "ACTION_SET_BOOT_MEDIA") == 0 ||
+      std::strcmp(action_id, "ACTION_SET_BOOT_MEDIA_MANAGER") == 0) {
+    const bool mode_ok = g_boot_mode_store.saveMode(BootModeStore::StartupMode::kMediaManager);
+    const bool flag_ok = g_boot_mode_store.setMediaValidated(true);
+    applyStartupMode(BootModeStore::StartupMode::kMediaManager);
+    Serial.printf("[ACTION] SET_BOOT_MEDIA_MANAGER mode_ok=%u validated_ok=%u\n",
+                  mode_ok ? 1U : 0U,
+                  flag_ok ? 1U : 0U);
+    return mode_ok && flag_ok;
+  }
+
   return false;
 }
 
@@ -2936,6 +3078,49 @@ bool dispatchControlAction(const String& action_raw, uint32_t now_ms, String* ou
   if (action.equalsIgnoreCase("REC_STATUS")) {
     printMediaStatus();
     return true;
+  }
+  if (action.equalsIgnoreCase("BOOT_MODE_STATUS")) {
+    printBootModeStatus();
+    return true;
+  }
+  if (action.equalsIgnoreCase("BOOT_MODE_CLEAR")) {
+    const bool ok = g_boot_mode_store.clearMode();
+    applyStartupMode(BootModeStore::StartupMode::kStory);
+    if (!ok && out_error != nullptr) {
+      *out_error = "boot_mode_clear_failed";
+    }
+    return ok;
+  }
+  if (startsWithIgnoreCase(action.c_str(), "BOOT_MODE_SET ")) {
+    String mode_text = action.substring(static_cast<unsigned int>(std::strlen("BOOT_MODE_SET ")));
+    mode_text.trim();
+    mode_text.toUpperCase();
+    BootModeStore::StartupMode mode = BootModeStore::StartupMode::kStory;
+    if (!parseBootModeToken(mode_text.c_str(), &mode)) {
+      if (out_error != nullptr) {
+        *out_error = "boot_mode_set_arg";
+      }
+      return false;
+    }
+    const bool ok = g_boot_mode_store.saveMode(mode);
+    if (!ok) {
+      if (out_error != nullptr) {
+        *out_error = "boot_mode_set_failed";
+      }
+      return false;
+    }
+    applyStartupMode(mode);
+    (void)g_boot_mode_store.setMediaValidated(mode == BootModeStore::StartupMode::kMediaManager);
+    return true;
+  }
+  if (startsWithIgnoreCase(action.c_str(), "QR_SIM ")) {
+    String payload = action.substring(static_cast<unsigned int>(std::strlen("QR_SIM ")));
+    payload.trim();
+    const bool ok = !payload.isEmpty() && g_ui.simulateQrPayload(payload.c_str());
+    if (!ok && out_error != nullptr) {
+      *out_error = "qr_sim_arg";
+    }
+    return ok;
   }
 
   if (startsWithIgnoreCase(action.c_str(), "WIFI_CONNECT ")) {
@@ -3727,13 +3912,17 @@ void printScenarioCoverage() {
   const uint8_t audio_done = (mask & (1UL << static_cast<uint8_t>(StoryEventType::kAudioDone))) ? 1U : 0U;
   const uint8_t timer = (mask & (1UL << static_cast<uint8_t>(StoryEventType::kTimer))) ? 1U : 0U;
   const uint8_t serial = (mask & (1UL << static_cast<uint8_t>(StoryEventType::kSerial))) ? 1U : 0U;
+  const uint8_t button = (mask & (1UL << static_cast<uint8_t>(StoryEventType::kButton))) ? 1U : 0U;
+  const uint8_t espnow = (mask & (1UL << static_cast<uint8_t>(StoryEventType::kEspNow))) ? 1U : 0U;
   const uint8_t action = (mask & (1UL << static_cast<uint8_t>(StoryEventType::kAction))) ? 1U : 0U;
-  Serial.printf("SC_COVERAGE scenario=%s unlock=%u audio_done=%u timer=%u serial=%u action=%u\n",
+  Serial.printf("SC_COVERAGE scenario=%s unlock=%u audio_done=%u timer=%u serial=%u button=%u espnow=%u action=%u\n",
                 scenarioIdFromSnapshot(snapshot),
                 unlock,
                 audio_done,
                 timer,
                 serial,
+                button,
+                espnow,
                 action);
 }
 
@@ -3755,6 +3944,13 @@ bool dispatchScenarioEventByType(StoryEventType type, const char* event_name, ui
       return g_scenario.notifyTimerEvent(event_name, now_ms);
     case StoryEventType::kSerial:
       return g_scenario.notifySerialEvent(event_name, now_ms);
+    case StoryEventType::kButton:
+      return g_scenario.notifyButtonEvent(event_name, now_ms);
+    case StoryEventType::kEspNow: {
+      const bool dispatched_espnow = g_scenario.notifyEspNowEvent(event_name, now_ms);
+      const bool dispatched_serial = g_scenario.notifySerialEvent(event_name, now_ms);
+      return dispatched_espnow || dispatched_serial;
+    }
     case StoryEventType::kAction:
       return g_scenario.notifyActionEvent(event_name, now_ms);
     default:
@@ -3805,6 +4001,14 @@ bool dispatchScenarioEventByName(const char* event_name, uint32_t now_ms) {
     if (head_len == 6U && std::strncmp(normalized, "SERIAL", 6U) == 0) {
       return g_scenario.notifySerialEvent(tail, now_ms);
     }
+    if (head_len == 6U && std::strncmp(normalized, "BUTTON", 6U) == 0) {
+      return g_scenario.notifyButtonEvent(tail, now_ms);
+    }
+    if (head_len == 6U && std::strncmp(normalized, "ESPNOW", 6U) == 0) {
+      const bool dispatched_espnow = g_scenario.notifyEspNowEvent(tail, now_ms);
+      const bool dispatched_serial = g_scenario.notifySerialEvent(tail, now_ms);
+      return dispatched_espnow || dispatched_serial;
+    }
   }
 
   return g_scenario.notifySerialEvent(normalized, now_ms);
@@ -3826,6 +4030,8 @@ void runScenarioRevalidate(uint32_t now_ms) {
       {StoryEventType::kAudioDone, "AUDIO_DONE"},
       {StoryEventType::kTimer, "ETAPE2_DUE"},
       {StoryEventType::kSerial, "FORCE_DONE"},
+      {StoryEventType::kButton, "ANY"},
+      {StoryEventType::kEspNow, "ACK_WIN1"},
       {StoryEventType::kAction, "ACTION_FORCE_ETAPE2"},
   };
   const HardwareProbe hardware_probes[] = {
@@ -3938,20 +4144,31 @@ void serialDispatchBridge(const char* command_line, uint32_t now_ms, RuntimeServ
 
 void refreshSceneIfNeeded(bool force_render) {
   const bool changed = g_scenario.consumeSceneChanged();
-  if (!force_render && !changed) {
+  const ScenarioSnapshot snapshot = g_scenario.snapshot();
+  const SceneTransitionPlan transition =
+      g_scene_fx_orchestrator.planTransition(snapshot.screen_scene_id, changed, force_render);
+  if (!transition.should_apply) {
     return;
   }
 
-  const ScenarioSnapshot snapshot = g_scenario.snapshot();
   const uint32_t now_ms = millis();
+
+  // Explicit transition ordering: pre-exit -> release old owner resources.
+  if (transition.owner_changed) {
+#if defined(USE_AUDIO) && (USE_AUDIO != 0)
+    if (transition.from_owner == SceneRuntimeOwner::kAmp) {
+      setAmpSceneActive(false);
+    }
+#endif
+    if (transition.from_owner == SceneRuntimeOwner::kCamera) {
+      setCameraSceneActive(false);
+    }
+  }
+
   if (g_hardware_started && g_hardware_cfg.led_auto_from_scene && snapshot.screen_scene_id != nullptr) {
     g_hardware.setSceneHint(snapshot.screen_scene_id);
   }
   executeStoryActionsForStep(snapshot, now_ms);
-#if defined(USE_AUDIO) && (USE_AUDIO != 0)
-  syncAmpSceneState(snapshot);
-#endif
-  syncCameraSceneState(snapshot);
 
   const char* step_id = (snapshot.step != nullptr && snapshot.step->id != nullptr) ? snapshot.step->id : "n/a";
   const String screen_payload = g_storage.loadScenePayloadById(snapshot.screen_scene_id);
@@ -3969,6 +4186,19 @@ void refreshSceneIfNeeded(bool force_render) {
   frame.audio_playing = g_audio.isPlaying();
   frame.screen_payload_json = screen_payload.isEmpty() ? nullptr : screen_payload.c_str();
   g_ui.submitSceneFrame(frame);
+
+  // Apply new owner resources after scene config is committed in UI.
+  if (transition.owner_changed) {
+#if defined(USE_AUDIO) && (USE_AUDIO != 0)
+    if (transition.to_owner == SceneRuntimeOwner::kAmp) {
+      setAmpSceneActive(true);
+    }
+#endif
+    if (transition.to_owner == SceneRuntimeOwner::kCamera) {
+      setCameraSceneActive(true);
+    }
+  }
+  g_scene_fx_orchestrator.applyTransition(transition);
 }
 
 void startPendingAudioIfAny() {
@@ -4078,7 +4308,9 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
         "MIC_TUNER_STATUS [ON|OFF|<period_ms>] "
         "CAM_STATUS CAM_ON CAM_OFF CAM_SNAPSHOT [filename] "
         "CAM_UI_SHOW CAM_UI_HIDE CAM_UI_TOGGLE CAM_REC_SNAP CAM_REC_SAVE [auto|bmp|jpg|raw] CAM_REC_GALLERY CAM_REC_NEXT CAM_REC_DELETE CAM_REC_STATUS "
+        "QR_SIM <payload> "
         "MEDIA_LIST <picture|music|recorder> MEDIA_PLAY <path> MEDIA_STOP REC_START [seconds] [filename] REC_STOP REC_STATUS "
+        "BOOT_MODE_STATUS BOOT_MODE_SET <STORY|MEDIA_MANAGER> BOOT_MODE_CLEAR "
         "NET_STATUS WIFI_STATUS WIFI_TEST WIFI_STA <ssid> <pass> WIFI_CONNECT <ssid> <pass> WIFI_PROVISION <ssid> <pass> WIFI_FORGET WIFI_DISCONNECT "
         "AUTH_STATUS AUTH_TOKEN_ROTATE [token] "
         "WIFI_AP_ON [ssid] [pass] WIFI_AP_OFF "
@@ -4307,8 +4539,20 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
     return;
   }
   if (std::strcmp(command, "RESET") == 0) {
+    g_audio.stop();
+#if defined(USE_AUDIO) && (USE_AUDIO != 0)
+    if (g_amp_ready) {
+      g_amp_player.service().stop();
+    }
+#endif
+    (void)g_media.stop(&g_audio);
     g_scenario.reset();
+    if (g_boot_media_manager_mode) {
+      (void)g_scenario.gotoScene(kMediaManagerSceneId, now_ms, "boot_mode_media_manager_reset");
+    }
     g_last_action_step_key[0] = '\0';
+    refreshSceneIfNeeded(true);
+    startPendingAudioIfAny();
     Serial.println("ACK RESET");
     return;
   }
@@ -4435,7 +4679,9 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
       std::strcmp(command, "CAM_REC_DELETE") == 0 || std::strcmp(command, "MEDIA_LIST") == 0 ||
       std::strcmp(command, "MEDIA_PLAY") == 0 || std::strcmp(command, "MEDIA_STOP") == 0 ||
       std::strcmp(command, "REC_START") == 0 || std::strcmp(command, "REC_STOP") == 0 ||
-      std::strcmp(command, "SCENE_GOTO") == 0) {
+      std::strcmp(command, "SCENE_GOTO") == 0 || std::strcmp(command, "QR_SIM") == 0 ||
+      std::strcmp(command, "BOOT_MODE_STATUS") == 0 || std::strcmp(command, "BOOT_MODE_SET") == 0 ||
+      std::strcmp(command, "BOOT_MODE_CLEAR") == 0) {
     String action = command;
     if (argument != nullptr && argument[0] != '\0') {
       action += " ";
@@ -4494,6 +4740,11 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
     const bool dispatched = dispatchScenarioEventByType(event_type, event_name, now_ms);
     const ScenarioSnapshot after = g_scenario.snapshot();
     const bool changed = std::strcmp(stepIdFromSnapshot(before), stepIdFromSnapshot(after)) != 0;
+    if (dispatched && changed) {
+      g_last_action_step_key[0] = '\0';
+      refreshSceneIfNeeded(true);
+      startPendingAudioIfAny();
+    }
     Serial.printf("ACK SC_EVENT type=%s name=%s dispatched=%u changed=%u step=%s\n",
                   eventTypeName(event_type),
                   event_name,
@@ -4511,6 +4762,11 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
     const bool dispatched = dispatchScenarioEventByName(argument, now_ms);
     const ScenarioSnapshot after = g_scenario.snapshot();
     const bool changed = std::strcmp(stepIdFromSnapshot(before), stepIdFromSnapshot(after)) != 0;
+    if (dispatched && changed) {
+      g_last_action_step_key[0] = '\0';
+      refreshSceneIfNeeded(true);
+      startPendingAudioIfAny();
+    }
     Serial.printf("ACK SC_EVENT_RAW name=%s dispatched=%u changed=%u step=%s\n",
                   argument,
                   dispatched ? 1U : 0U,
@@ -4854,6 +5110,17 @@ void setup() {
   }
   RuntimeConfigService::load(g_storage, &g_network_cfg, &g_hardware_cfg, &g_camera_cfg, &g_media_cfg);
   loadBootProvisioningState();
+  {
+    BootModeStore::StartupMode startup_mode = BootModeStore::StartupMode::kStory;
+    if (g_boot_mode_store.loadMode(&startup_mode)) {
+      applyStartupMode(startup_mode);
+    } else {
+      applyStartupMode(BootModeStore::StartupMode::kStory);
+    }
+    Serial.printf("[BOOT] startup_mode=%s media_validated=%u\n",
+                  BootModeStore::modeLabel(currentStartupMode()),
+                  g_boot_mode_store.isMediaValidated() ? 1U : 0U);
+  }
   g_resource_coordinator.begin();
   Serial.printf("[MAIN] default scenario checksum=%lu\n",
                 static_cast<unsigned long>(g_storage.checksum(kDefaultScenarioFile)));
@@ -4930,6 +5197,10 @@ void setup() {
 
   if (!g_scenario.begin(kDefaultScenarioFile)) {
     Serial.println("[MAIN] scenario init failed");
+  }
+  if (g_boot_media_manager_mode) {
+    const bool routed = g_scenario.gotoScene(kMediaManagerSceneId, millis(), "boot_mode_media_manager");
+    Serial.printf("[BOOT] route media_manager scene=%s ok=%u\n", kMediaManagerSceneId, routed ? 1U : 0U);
   }
   g_last_action_step_key[0] = '\0';
 
@@ -5133,6 +5404,24 @@ void runRuntimeIteration(uint32_t now_ms) {
   refreshSceneIfNeeded(false);
   const uint32_t ui_started_us = perfMonitor().beginSample();
   g_ui.tick(now_ms);
+  char runtime_event[24] = {0};
+  while (g_ui.consumeRuntimeEvent(runtime_event, sizeof(runtime_event))) {
+    char event_token[40] = "SERIAL:";
+    std::strncat(event_token, runtime_event, sizeof(event_token) - std::strlen(event_token) - 1U);
+    bool dispatched = dispatchScenarioEventByName(event_token, now_ms);
+    if (!dispatched) {
+      dispatched = dispatchScenarioEventByName(runtime_event, now_ms);
+      if (dispatched) {
+        std::strncpy(event_token, runtime_event, sizeof(event_token) - 1U);
+        event_token[sizeof(event_token) - 1U] = '\0';
+      }
+    }
+    Serial.printf("[UI_EVENT] event=%s dispatched=%u\n", event_token, dispatched ? 1U : 0U);
+    if (dispatched) {
+      refreshSceneIfNeeded(true);
+    }
+    runtime_event[0] = '\0';
+  }
 #if defined(USE_AUDIO) && (USE_AUDIO != 0)
   if (g_amp_ready) {
     g_amp_player.tick(now_ms);

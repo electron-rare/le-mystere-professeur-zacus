@@ -1,0 +1,38 @@
+{
+  "id": "SCENE_PHOTO_MANAGER",
+  "title": "PHOTO MANAGER",
+  "subtitle": "Capture / sauvegarde JPEG",
+  "symbol": "PHOTO",
+  "effect": "none",
+  "visual": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "effect_speed_ms": 0
+  },
+  "theme": {
+    "bg": "#0B1A2E",
+    "accent": "#86CCFF",
+    "text": "#EEF6FF"
+  },
+  "timeline": {
+    "loop": true,
+    "duration_ms": 1200,
+    "keyframes": [
+      {
+        "at_ms": 0,
+        "effect": "none",
+        "speed_ms": 0,
+        "theme": {
+          "bg": "#0B1A2E",
+          "accent": "#86CCFF",
+          "text": "#EEF6FF"
+        }
+      }
+    ]
+  },
+  "transition": {
+    "effect": "fade",
+    "duration_ms": 200
+  }
+}

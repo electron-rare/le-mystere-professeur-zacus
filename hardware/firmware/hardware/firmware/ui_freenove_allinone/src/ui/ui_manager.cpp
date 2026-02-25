@@ -141,6 +141,18 @@ int16_t activeDisplayHeight() {
   return ((FREENOVE_LCD_ROTATION & 0x1U) != 0U) ? FREENOVE_LCD_WIDTH : FREENOVE_LCD_HEIGHT;
 }
 
+void copyTextSafe(char* out, size_t out_size, const char* value) {
+  if (out == nullptr || out_size == 0U) {
+    return;
+  }
+  if (value == nullptr) {
+    out[0] = '\0';
+    return;
+  }
+  std::strncpy(out, value, out_size - 1U);
+  out[out_size - 1U] = '\0';
+}
+
 uint32_t pseudoRandom32(uint32_t value) {
   value ^= (value << 13U);
   value ^= (value >> 17U);
@@ -856,6 +868,14 @@ void UiManager::submitInputEvent(const UiInputEvent& event) {
   handleButton(event.key, event.long_press);
 }
 
+bool UiManager::consumeRuntimeEvent(char* out_event, size_t capacity) {
+  return qr_scene_controller_.consumeRuntimeEvent(out_event, capacity);
+}
+
+bool UiManager::simulateQrPayload(const char* payload) {
+  return qr_scene_controller_.queueSimulatedPayload(payload);
+}
+
 void UiManager::dumpStatus(UiStatusTopic topic) const {
   if (topic == UiStatusTopic::kMemory) {
     dumpMemoryStatus();
@@ -917,6 +937,7 @@ void UiManager::update() {
     updatePageLine();
   }
   renderMicrophoneWaveform();
+  qr_scene_controller_.tick(now_ms, &qr_scan_, qr_rules_, scene_subtitle_label_, scene_symbol_label_);
   pollAsyncFlush();
   const bool flush_busy =
       isDisplayOutputBusy();
@@ -4910,6 +4931,53 @@ void UiManager::renderMicrophoneWaveform() {
                   stability_pct);
 }
 
+uint32_t UiManager::hashScenePayload(const char* payload) {
+  // FNV-1a 32-bit keeps payload-delta checks deterministic and cheap on MCU.
+  uint32_t hash = 2166136261UL;
+  if (payload == nullptr) {
+    return hash;
+  }
+  for (size_t index = 0U; payload[index] != '\0'; ++index) {
+    hash ^= static_cast<uint8_t>(payload[index]);
+    hash *= 16777619UL;
+  }
+  return hash;
+}
+
+bool UiManager::shouldApplySceneStaticState(const char* scene_id,
+                                            const char* payload_json,
+                                            bool scene_changed) const {
+  const uint32_t payload_hash = hashScenePayload(payload_json);
+  if (scene_changed) {
+    return true;
+  }
+  if (std::strcmp(last_scene_id_, scene_id) != 0) {
+    return true;
+  }
+  return payload_hash != last_payload_crc_;
+}
+
+void UiManager::applySceneDynamicState(const String& subtitle,
+                                       bool show_subtitle,
+                                       bool audio_playing,
+                                       uint32_t text_rgb) {
+  if (scene_subtitle_label_ != nullptr) {
+    const String subtitle_ui = asciiFallbackForUiText(subtitle.c_str());
+    lv_label_set_text(scene_subtitle_label_, subtitle_ui.c_str());
+    if (show_subtitle && subtitle.length() > 0U) {
+      lv_obj_clear_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_move_foreground(scene_subtitle_label_);
+      lv_obj_set_style_text_color(scene_subtitle_label_, lv_color_hex(text_rgb), LV_PART_MAIN);
+    } else {
+      lv_obj_add_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
+    }
+  }
+  if (scene_core_ != nullptr) {
+    lv_obj_set_style_bg_opa(scene_core_, audio_playing ? LV_OPA_COVER : LV_OPA_80, LV_PART_MAIN);
+  }
+  last_audio_playing_ = audio_playing;
+}
+
 void UiManager::renderScene(const ScenarioDef* scenario,
                             const char* screen_scene_id,
                             const char* step_id,
@@ -4939,21 +5007,24 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   }
   const char* scene_id = normalized_scene_id;
   const bool scene_changed = (std::strcmp(last_scene_id_, scene_id) != 0);
+  const uint32_t payload_crc = hashScenePayload(screen_payload_json);
+  const bool static_state_changed = shouldApplySceneStaticState(scene_id, screen_payload_json, scene_changed);
   const bool has_previous_scene = (last_scene_id_[0] != '\0');
-  const bool win_etape_intro_scene = (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0);
+  const bool win_etape_intro_scene = (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0 ||
+                                      std::strcmp(scene_id, "SCENE_WIN_ETAPE1") == 0 ||
+                                      std::strcmp(scene_id, "SCENE_WIN_ETAPE2") == 0);
   const bool direct_fx_scene = isDirectFxSceneId(scene_id);
   const bool is_locked_scene = (std::strcmp(scene_id, "SCENE_LOCKED") == 0);
-  if (scene_changed && has_previous_scene) {
+  const bool qr_scene = (std::strcmp(scene_id, "SCENE_CAMERA_SCAN") == 0 ||
+                         std::strcmp(scene_id, "SCENE_QR_DETECTOR") == 0);
+  if (static_state_changed && scene_changed && has_previous_scene) {
     cleanupSceneTransitionAssets(last_scene_id_, scene_id);
   }
 
-  if (!win_etape_intro_scene && intro_active_) {
+  if (static_state_changed && !win_etape_intro_scene && intro_active_) {
     stopIntroAndCleanup();
   }
-  if (win_etape_intro_scene && intro_active_ && !scene_changed) {
-    return;
-  }
-  if (!direct_fx_scene) {
+  if (static_state_changed && !direct_fx_scene) {
     direct_fx_scene_active_ = false;
   }
 
@@ -5126,7 +5197,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     bg_rgb = 0x07070FUL;
     accent_rgb = 0xFFB74EUL;
     text_rgb = 0xF6FBFFUL;
-  } else if (std::strcmp(scene_id, "SCENE_BROKEN") == 0) {
+  } else if (std::strcmp(scene_id, "SCENE_BROKEN") == 0 || std::strcmp(scene_id, "SCENE_U_SON_PROTO") == 0) {
     title = "PROTO U-SON";
     subtitle = "Signal brouille";
     symbol = "ALERT";
@@ -5134,9 +5205,15 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     bg_rgb = 0x2A0508UL;
     accent_rgb = 0xFF4A45UL;
     text_rgb = 0xFFD5D1UL;
-  } else if (std::strcmp(scene_id, "SCENE_LA_DETECTOR") == 0 ||
-             std::strcmp(scene_id, "SCENE_SEARCH") == 0 ||
-             std::strcmp(scene_id, "SCENE_CAMERA_SCAN") == 0) {
+  } else if (std::strcmp(scene_id, "SCENE_WARNING") == 0) {
+    title = "ALERTE";
+    subtitle = "Signal anormal";
+    symbol = "WARN";
+    effect = SceneEffect::kBlink;
+    bg_rgb = 0x261209UL;
+    accent_rgb = 0xFF9A4AUL;
+    text_rgb = 0xFFF2E6UL;
+  } else if (std::strcmp(scene_id, "SCENE_LA_DETECTOR") == 0 || std::strcmp(scene_id, "SCENE_SEARCH") == 0) {
     title = "DETECTEUR DE RESONNANCE";
     subtitle = "";
     symbol = "AUDIO";
@@ -5154,6 +5231,53 @@ void UiManager::renderScene(const ScenarioDef* scenario,
       frame_split_layout = true;
       frame_dy = 8;
     }
+  } else if (std::strcmp(scene_id, "SCENE_LEFOU_DETECTOR") == 0) {
+    title = "DETECTEUR LEFOU";
+    subtitle = "Analyse en cours";
+    symbol = "AUDIO";
+    effect = SceneEffect::kWave;
+    bg_rgb = 0x071B1AUL;
+    accent_rgb = 0x46E6C8UL;
+    text_rgb = 0xE9FFF9UL;
+    show_title = true;
+    show_subtitle = true;
+    show_symbol = true;
+  } else if (std::strcmp(scene_id, "SCENE_CAMERA_SCAN") == 0 || std::strcmp(scene_id, "SCENE_QR_DETECTOR") == 0) {
+    title = "ZACUS QR VALIDATION";
+    subtitle = "Scan du QR final";
+    symbol = "QR";
+    effect = SceneEffect::kNone;
+    transition = SceneTransition::kFade;
+    transition_ms = 180U;
+    bg_rgb = 0x102040UL;
+    accent_rgb = 0x5CA3FFUL;
+    text_rgb = 0xF3F7FFUL;
+    show_title = true;
+    show_subtitle = true;
+    show_symbol = true;
+    waveform_enabled = false;
+  } else if (std::strcmp(scene_id, "SCENE_MEDIA_MANAGER") == 0) {
+    title = "MEDIA MANAGER";
+    subtitle = "PHOTO / MP3 / STORY";
+    symbol = "MEDIA";
+    effect = SceneEffect::kRadar;
+    bg_rgb = 0x081A34UL;
+    accent_rgb = 0x8BC4FFUL;
+    text_rgb = 0xEAF6FFUL;
+    show_title = true;
+    show_subtitle = true;
+    show_symbol = true;
+  } else if (std::strcmp(scene_id, "SCENE_PHOTO_MANAGER") == 0) {
+    title = "PHOTO MANAGER";
+    subtitle = "Capture JPEG";
+    symbol = "PHOTO";
+    effect = SceneEffect::kNone;
+    bg_rgb = 0x0B1A2EUL;
+    accent_rgb = 0x86CCFFUL;
+    text_rgb = 0xEEF6FFUL;
+    show_title = true;
+    show_subtitle = true;
+    show_symbol = true;
   } else if (std::strcmp(scene_id, "SCENE_SIGNAL_SPIKE") == 0) {
     title = "PIC DE SIGNAL";
     subtitle = "Interference detectee";
@@ -5190,7 +5314,9 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     accent_rgb = 0x66B4FFUL;
     text_rgb = 0xF3F9FFUL;
     show_symbol = false;
-  } else if (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0) {
+  } else if (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0 ||
+             std::strcmp(scene_id, "SCENE_WIN_ETAPE1") == 0 ||
+             std::strcmp(scene_id, "SCENE_WIN_ETAPE2") == 0) {
     title = "BRAVO!";
     subtitle = audio_playing ? "Validation en cours..." : kWinEtapeWaitingSubtitle;
     symbol = "WIN";
@@ -5206,6 +5332,17 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     win_etape_bravo_mode = true;
     win_etape_fireworks = false;
     subtitle_scroll_mode = SceneScrollMode::kNone;
+  } else if (std::strcmp(scene_id, "SCENE_FINAL_WIN") == 0) {
+    title = "FINAL WIN";
+    subtitle = "Mission accomplie";
+    symbol = "WIN";
+    effect = SceneEffect::kCelebrate;
+    bg_rgb = 0x1C0C2EUL;
+    accent_rgb = 0xFFCC5CUL;
+    text_rgb = 0xFFF7E4UL;
+    show_title = true;
+    show_subtitle = true;
+    show_symbol = true;
   } else if (std::strcmp(scene_id, "SCENE_READY") == 0 || std::strcmp(scene_id, "SCENE_MEDIA_ARCHIVE") == 0) {
     title = "PRET";
     subtitle = "Scenario termine";
@@ -5216,12 +5353,21 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     text_rgb = 0xE8FFE7UL;
   }
 
-  resetSceneTimeline();
+  if (static_state_changed) {
+    resetSceneTimeline();
+  }
+
+  if (static_state_changed) {
+    qr_rules_.clear();
+  }
 
   if (screen_payload_json != nullptr && screen_payload_json[0] != '\0') {
     DynamicJsonDocument document(4096);
     const DeserializationError error = deserializeJson(document, screen_payload_json);
     if (!error) {
+      if (qr_scene && static_state_changed) {
+        qr_rules_.configureFromPayload(document.as<JsonVariantConst>());
+      }
       const char* payload_title = document["title"] | document["content"]["title"] | document["visual"]["title"] | "";
       const char* payload_subtitle =
           document["subtitle"] | document["content"]["subtitle"] | document["visual"]["subtitle"] | "";
@@ -5545,7 +5691,9 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     transition_ms = 220U;
     subtitle_scroll_mode = SceneScrollMode::kNone;
     win_etape_fireworks = false;
-    resetSceneTimeline();
+    if (static_state_changed) {
+      resetSceneTimeline();
+    }
   }
   if (win_etape_bravo_mode) {
     title = "BRAVO!";
@@ -5556,7 +5704,9 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     subtitle = "VERIFICATION EN COURS";
   }
   if (is_locked_scene) {
-    resetSceneTimeline();
+    if (static_state_changed) {
+      resetSceneTimeline();
+    }
   }
   if (win_etape_bravo_mode && timeline_keyframe_count_ > 1U) {
     timeline_keyframe_count_ = 1U;
@@ -5564,7 +5714,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     timeline_loop_ = true;
     timeline_effect_index_ = -1;
   }
-  if (direct_fx_scene) {
+  if (static_state_changed && direct_fx_scene) {
     direct_fx_scene_active_ = fx_engine_.config().lgfx_backend;
     if (direct_fx_scene_active_) {
       direct_fx_scene_preset_ =
@@ -5581,113 +5731,115 @@ void UiManager::renderScene(const ScenarioDef* scenario,
         fx_engine_.setScrollText(nullptr);
       }
     }
-  } else if (!win_etape_intro_scene) {
+  } else if (static_state_changed && !win_etape_intro_scene) {
     direct_fx_scene_active_ = false;
     if (!intro_active_) {
       fx_engine_.setEnabled(false);
     }
   }
 
-  stopSceneAnimations();
-  demo_particle_count_ = demo_particle_count;
-  demo_strobe_level_ = demo_strobe_level;
-  if (demo_mode == "cinematic") {
-    if (demo_particle_count_ > 2U) {
-      demo_particle_count_ = 2U;
+  if (static_state_changed) {
+    stopSceneAnimations();
+    demo_particle_count_ = demo_particle_count;
+    demo_strobe_level_ = demo_strobe_level;
+    if (demo_mode == "cinematic") {
+      if (demo_particle_count_ > 2U) {
+        demo_particle_count_ = 2U;
+      }
+      if (transition_ms < 300U) {
+        transition_ms = 300U;
+      }
+    } else if (demo_mode == "arcade") {
+      if (transition_ms < 140U) {
+        transition_ms = 140U;
+      }
+      if (effect_speed_ms < 240U && effect_speed_ms != 0U) {
+        effect_speed_ms = 240U;
+      }
+    } else if (demo_mode == "fireworks") {
+      if (demo_particle_count_ < 3U) {
+        demo_particle_count_ = 3U;
+      }
+      if (demo_strobe_level_ < 82U) {
+        demo_strobe_level_ = 82U;
+      }
+      if (effect_speed_ms == 0U || effect_speed_ms > 460U) {
+        effect_speed_ms = 300U;
+      }
+      if (transition_ms < 200U) {
+        transition_ms = 200U;
+      }
     }
-    if (transition_ms < 300U) {
-      transition_ms = 300U;
+    current_effect_ = effect;
+    effect_speed_ms_ = effect_speed_ms;
+    if (effect_speed_ms_ == 0U && demo_mode == "arcade") {
+      effect_speed_ms_ = 240U;
     }
-  } else if (demo_mode == "arcade") {
-    if (transition_ms < 140U) {
-      transition_ms = 140U;
+    win_etape_fireworks_mode_ = win_etape_fireworks;
+    applyThemeColors(bg_rgb, accent_rgb, text_rgb);
+    const String title_ui = asciiFallbackForUiText(title.c_str());
+    const String subtitle_ui = asciiFallbackForUiText(subtitle.c_str());
+    lv_label_set_text(scene_title_label_, title_ui.c_str());
+    lv_label_set_text(scene_subtitle_label_, subtitle_ui.c_str());
+    const char* symbol_glyph = mapSymbolToken(symbol.c_str());
+    lv_label_set_text(scene_symbol_label_, (symbol_glyph != nullptr) ? symbol_glyph : LV_SYMBOL_PLAY);
+    if (win_etape_bravo_mode) {
+      show_title = true;
     }
-    if (effect_speed_ms < 240U && effect_speed_ms != 0U) {
-      effect_speed_ms = 240U;
+    if (show_title) {
+      lv_obj_clear_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_add_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
     }
-  } else if (demo_mode == "fireworks") {
-    if (demo_particle_count_ < 3U) {
-      demo_particle_count_ = 3U;
+    if (show_symbol) {
+      lv_obj_clear_flag(scene_symbol_label_, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_add_flag(scene_symbol_label_, LV_OBJ_FLAG_HIDDEN);
     }
-    if (demo_strobe_level_ < 82U) {
-      demo_strobe_level_ = 82U;
+    if (show_subtitle && subtitle.length() > 0U) {
+      lv_obj_clear_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
+    } else {
+      lv_obj_add_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
     }
-    if (effect_speed_ms == 0U || effect_speed_ms > 460U) {
-      effect_speed_ms = 300U;
+    applyTextLayout(title_align, subtitle_align);
+    if (scene_title_label_ != nullptr && !lv_obj_has_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN)) {
+      lv_obj_move_foreground(scene_title_label_);
+      lv_obj_set_style_opa(scene_title_label_, LV_OPA_COVER, LV_PART_MAIN);
+      lv_obj_set_style_transform_angle(scene_title_label_, 0, LV_PART_MAIN);
     }
-    if (transition_ms < 200U) {
-      transition_ms = 200U;
+    if (scene_subtitle_label_ != nullptr && !lv_obj_has_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN)) {
+      lv_obj_move_foreground(scene_subtitle_label_);
+      lv_obj_set_style_opa(scene_subtitle_label_, LV_OPA_COVER, LV_PART_MAIN);
+      lv_obj_set_style_transform_angle(scene_subtitle_label_, 0, LV_PART_MAIN);
     }
-  }
-  current_effect_ = effect;
-  effect_speed_ms_ = effect_speed_ms;
-  if (effect_speed_ms_ == 0U && demo_mode == "arcade") {
-    effect_speed_ms_ = 240U;
-  }
-  win_etape_fireworks_mode_ = win_etape_fireworks;
-  applyThemeColors(bg_rgb, accent_rgb, text_rgb);
-  const String title_ui = asciiFallbackForUiText(title.c_str());
-  const String subtitle_ui = asciiFallbackForUiText(subtitle.c_str());
-  lv_label_set_text(scene_title_label_, title_ui.c_str());
-  lv_label_set_text(scene_subtitle_label_, subtitle_ui.c_str());
-  const char* symbol_glyph = mapSymbolToken(symbol.c_str());
-  lv_label_set_text(scene_symbol_label_, (symbol_glyph != nullptr) ? symbol_glyph : LV_SYMBOL_PLAY);
-  if (win_etape_bravo_mode) {
-    show_title = true;
-  }
-  if (show_title) {
-    lv_obj_clear_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
-  } else {
-    lv_obj_add_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
-  }
-  if (show_symbol) {
-    lv_obj_clear_flag(scene_symbol_label_, LV_OBJ_FLAG_HIDDEN);
-  } else {
-    lv_obj_add_flag(scene_symbol_label_, LV_OBJ_FLAG_HIDDEN);
-  }
-  if (show_subtitle && subtitle.length() > 0U) {
-    lv_obj_clear_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
-  } else {
-    lv_obj_add_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
-  }
-  applyTextLayout(title_align, subtitle_align);
-  if (scene_title_label_ != nullptr && !lv_obj_has_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN)) {
-    lv_obj_move_foreground(scene_title_label_);
-    lv_obj_set_style_opa(scene_title_label_, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_transform_angle(scene_title_label_, 0, LV_PART_MAIN);
-  }
-  if (scene_subtitle_label_ != nullptr && !lv_obj_has_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN)) {
-    lv_obj_move_foreground(scene_subtitle_label_);
-    lv_obj_set_style_opa(scene_subtitle_label_, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_transform_angle(scene_subtitle_label_, 0, LV_PART_MAIN);
-  }
-  applySceneFraming(frame_dx, frame_dy, frame_scale_pct, frame_split_layout);
-  applySubtitleScroll(subtitle_scroll_mode, subtitle_scroll_speed_ms, subtitle_scroll_pause_ms, subtitle_scroll_loop);
-  for (lv_obj_t* particle : scene_particles_) {
-    lv_obj_set_style_bg_color(particle, lv_color_hex(text_rgb), LV_PART_MAIN);
+    applySceneFraming(frame_dx, frame_dy, frame_scale_pct, frame_split_layout);
+    applySubtitleScroll(subtitle_scroll_mode, subtitle_scroll_speed_ms, subtitle_scroll_pause_ms, subtitle_scroll_loop);
+    for (lv_obj_t* particle : scene_particles_) {
+      lv_obj_set_style_bg_color(particle, lv_color_hex(text_rgb), LV_PART_MAIN);
+    }
+
+    if (timeline_keyframe_count_ > 1U && timeline_duration_ms_ > 0U) {
+      timeline_effect_index_ = -1;
+      onTimelineTick(0U);
+
+      lv_anim_t timeline_anim;
+      lv_anim_init(&timeline_anim);
+      lv_anim_set_var(&timeline_anim, scene_root_);
+      lv_anim_set_exec_cb(&timeline_anim, animTimelineTickCb);
+      lv_anim_set_values(&timeline_anim, 0, timeline_duration_ms_);
+      lv_anim_set_time(&timeline_anim, timeline_duration_ms_);
+      lv_anim_set_repeat_count(&timeline_anim, timeline_loop_ ? LV_ANIM_REPEAT_INFINITE : 0U);
+      lv_anim_set_playback_time(&timeline_anim, 0);
+      lv_anim_start(&timeline_anim);
+    } else {
+      applySceneEffect(effect);
+    }
+    if (scene_changed && has_previous_scene) {
+      applySceneTransition(transition, transition_ms);
+    }
   }
 
-  lv_obj_set_style_bg_opa(scene_core_, audio_playing ? LV_OPA_COVER : LV_OPA_80, LV_PART_MAIN);
-  if (timeline_keyframe_count_ > 1U && timeline_duration_ms_ > 0U) {
-    timeline_effect_index_ = -1;
-    onTimelineTick(0U);
-
-    lv_anim_t timeline_anim;
-    lv_anim_init(&timeline_anim);
-    lv_anim_set_var(&timeline_anim, scene_root_);
-    lv_anim_set_exec_cb(&timeline_anim, animTimelineTickCb);
-    lv_anim_set_values(&timeline_anim, 0, timeline_duration_ms_);
-    lv_anim_set_time(&timeline_anim, timeline_duration_ms_);
-    lv_anim_set_repeat_count(&timeline_anim, timeline_loop_ ? LV_ANIM_REPEAT_INFINITE : 0U);
-    lv_anim_set_playback_time(&timeline_anim, 0);
-    lv_anim_start(&timeline_anim);
-  } else {
-    applySceneEffect(effect);
-  }
-  if (scene_changed && has_previous_scene) {
-    applySceneTransition(transition, transition_ms);
-  }
-  if (is_locked_scene && scene_title_label_ != nullptr) {
+  if (static_state_changed && is_locked_scene && scene_title_label_ != nullptr) {
     lv_obj_clear_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(scene_title_label_);
     const bool title_bounce_inverted =
@@ -5714,7 +5866,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     lv_obj_set_style_transform_angle(scene_title_label_, 0, LV_PART_MAIN);
     lv_obj_set_style_text_color(scene_title_label_, lv_color_hex(0xFFFFFFUL), LV_PART_MAIN);
   }
-  if (is_locked_scene && scene_subtitle_label_ != nullptr) {
+  if (static_state_changed && is_locked_scene && scene_subtitle_label_ != nullptr) {
     lv_obj_clear_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(scene_subtitle_label_);
     lv_anim_t subtitle_lock_jitter_x;
@@ -5747,26 +5899,39 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     lv_obj_set_style_transform_angle(scene_subtitle_label_, 0, LV_PART_MAIN);
     lv_obj_set_style_text_color(scene_subtitle_label_, lv_color_hex(0xFFFFFFUL), LV_PART_MAIN);
   }
-  if (is_locked_scene && scene_symbol_label_ != nullptr) {
+  if (static_state_changed && is_locked_scene && scene_symbol_label_ != nullptr) {
     lv_obj_add_flag(scene_symbol_label_, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(scene_symbol_label_, "");
   }
+
+  if (static_state_changed) {
+    if (qr_scene) {
+      qr_scene_controller_.onSceneEnter(&qr_scan_, scene_subtitle_label_);
+    } else {
+      qr_scene_controller_.onSceneExit(&qr_scan_);
+    }
+  }
+
+  applySceneDynamicState(subtitle, show_subtitle, audio_playing, text_rgb);
   std::strncpy(last_scene_id_, scene_id, sizeof(last_scene_id_) - 1U);
   last_scene_id_[sizeof(last_scene_id_) - 1U] = '\0';
-  updatePageLine();
-  UI_LOGI("scene=%s effect=%u speed=%u title=%u symbol=%u scenario=%s audio=%u timeline=%u transition=%u:%u",
-          scene_id,
-          static_cast<unsigned int>(effect),
-          static_cast<unsigned int>(effect_speed_ms_),
-          show_title ? 1U : 0U,
-          show_symbol ? 1U : 0U,
-          scenario_id,
-          audio_playing ? 1U : 0U,
-          static_cast<unsigned int>(timeline_keyframe_count_),
-          static_cast<unsigned int>(transition),
-          static_cast<unsigned int>(transition_ms));
-  if (win_etape_intro_scene) {
-    startIntroIfNeeded(scene_changed);
+  last_payload_crc_ = payload_crc;
+  if (static_state_changed) {
+    updatePageLine();
+    UI_LOGI("scene=%s effect=%u speed=%u title=%u symbol=%u scenario=%s audio=%u timeline=%u transition=%u:%u",
+            scene_id,
+            static_cast<unsigned int>(effect),
+            static_cast<unsigned int>(effect_speed_ms_),
+            show_title ? 1U : 0U,
+            show_symbol ? 1U : 0U,
+            scenario_id,
+            audio_playing ? 1U : 0U,
+            static_cast<unsigned int>(timeline_keyframe_count_),
+            static_cast<unsigned int>(transition),
+            static_cast<unsigned int>(transition_ms));
+    if (win_etape_intro_scene) {
+      startIntroIfNeeded(static_state_changed);
+    }
   }
 }
 
@@ -6005,17 +6170,15 @@ void UiManager::cleanupSceneTransitionAssets(const char* from_scene_id, const ch
   const bool from_direct_fx = isDirectFxSceneId(from_scene_id);
   const bool to_direct_fx = isDirectFxSceneId(to_scene_id);
   UI_LOGI("cleanup scene assets transition %s -> %s", from_scene_id, to_scene_id);
-  if (from_win_etape || to_win_etape || from_direct_fx || to_direct_fx) {
-    if (intro_active_) {
-      stopIntroAndCleanup();
-    }
-    direct_fx_scene_active_ = false;
-    fx_engine_.setEnabled(false);
-    fx_engine_.reset();
+  const bool touches_fx_owner = from_win_etape || to_win_etape || from_direct_fx || to_direct_fx;
+  direct_fx_scene_active_ = false;
+  if (!touches_fx_owner) {
     return;
   }
-
-  direct_fx_scene_active_ = false;
+  if (intro_active_) {
+    stopIntroAndCleanup();
+    return;
+  }
   fx_engine_.setEnabled(false);
   fx_engine_.reset();
 }

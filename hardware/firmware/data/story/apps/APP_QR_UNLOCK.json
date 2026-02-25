@@ -1,0 +1,7 @@
+{
+  "id": "APP_QR_UNLOCK",
+  "app": "QR_UNLOCK_APP",
+  "config": {
+    "mode": "strict_qr_gate"
+  }
+}

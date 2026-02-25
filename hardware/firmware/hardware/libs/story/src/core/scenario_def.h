@@ -8,6 +8,8 @@ enum class StoryEventType : uint8_t {
   kAudioDone,
   kTimer,
   kSerial,
+  kButton,
+  kEspNow,
   kAction,
 };
 
@@ -37,6 +39,7 @@ enum class StoryAppType : uint8_t {
   kMp3Gate,
   kWifiStack,
   kEspNowStack,
+  kQrUnlockApp,
 };
 
 struct AppBindingDef {

@@ -1,0 +1,393 @@
+id: zacus_v2
+version: 3
+title: "Le mystère du Professeur Zacus — Version Réelle (U-SON, piano LEFOU, QR WIN)"
+theme: "Enquête scientifique + stabilisation audio + épreuve Zone 4 + déverrouillage final"
+
+players:
+  min: 6
+  max: 14
+
+ages: "6–14 ans (9–11 recommandés)"
+
+duration:
+  act_1_minutes: 45
+  act_2_minutes: 60
+  total_minutes: 105
+
+# ============================================================
+# RÉALITÉ FIRMWARE (aligné pack zip / runtime DEFAULT)
+# ============================================================
+firmware:
+  board_target: freenove_esp32s3
+  engine: story_engine_v2
+  runtime_scenario_id: "DEFAULT"
+
+  boot_policy:
+    startup_mode: story
+    persist_after_validation: true
+    rollback_command_required: true
+    after_success_boot: media_manager
+
+  qr_rule:
+    enabled: true
+    scene_id: "SCENE_QR_DETECTOR"
+    expected_payload: "WIN"
+    match_mode: exact
+    case_insensitive: true
+    success_event: "UNLOCK_QR"
+    failure_event: "QR_INVALID"
+    timeout_seconds: 30
+    timeout_event: "QR_TIMEOUT"
+
+  media_hub:
+    enabled: true
+    hub_scene_id: "SCENE_MEDIA_MANAGER"
+    entries:
+      - "SCENE_PHOTO_MANAGER"
+      - "SCENE_MP3_PLAYER"
+      - "SCENE_READY"
+
+  steps_reference_order:
+    - STEP_U_SON_PROTO
+    - STEP_LA_DETECTOR
+    - STEP_RTC_ESP_ETAPE1
+    - STEP_WIN_ETAPE1
+    - STEP_WARNING
+    - STEP_LEFOU_DETECTOR
+    - STEP_RTC_ESP_ETAPE2
+    - STEP_QR_DETECTOR
+    - STEP_FINAL_WIN
+
+# ============================================================
+# CANON NARRATIF (réalité terrain)
+# ============================================================
+canon:
+  introduction: >
+    Le Professeur Zacus a disparu après avoir déclenché une alerte cryptée.
+    Le prototype U-SON (un module sonore expérimental) a commencé à “dériver” :
+    ses signaux deviennent instables, comme si quelque chose perturbait le Campus.
+    Pour protéger U-SON, l’équipe doit prouver deux choses :
+    (1) stabiliser une référence scientifique (LA 440 Hz),
+    (2) respecter la règle de Zone 4 — l’installation personnelle de l’Électron Fou —
+    avant de récupérer la clé finale (QR “WIN”) cachée aux Archives.
+
+  stakes: >
+    Si l’équipe échoue, le Campus reste en mode sécurité et U-SON demeure instable.
+    Le vrai test n’est pas la vitesse : c’est la coopération, la précision et le calme.
+
+  lore_truths:
+    - "U-SON est le prototype à protéger (pas Auréole)."
+    - "Zone 4 : les générateurs de fréquence appartiennent à l’Électron Fou (installation personnelle)."
+    - "La règle de Zone 4 se valide par un code musical sur piano-alphabet."
+
+  reveal_finale: >
+    Zacus réapparaît : ce n’était pas une punition mais un test d’éthique.
+    U-SON ne doit pas devenir un objet de panique.
+    L’équipe gagne parce qu’elle a fait juste : stabilité, règle, entraide.
+
+# ============================================================
+# STRUCTURE EN 2 ACTES (45’ + 60’)
+# ============================================================
+acts:
+  - act: 1
+    title: "Acte 1 — Stabiliser U-SON (LA 440) (≈45 min)"
+    goal: "Valider Étape 1 via la référence LA 440 Hz."
+    runtime_steps:
+      - STEP_U_SON_PROTO
+      - STEP_LA_DETECTOR
+      - STEP_RTC_ESP_ETAPE1
+      - STEP_WIN_ETAPE1
+
+  - act: 2
+    title: "Acte 2 — Zone 4 (piano LEFOU) + Archives (QR WIN) (≈60 min)"
+    goal: "Valider Étape 2 via piano-alphabet (LEFOU), puis scanner QR WIN derrière le portrait."
+    runtime_steps:
+      - STEP_WARNING
+      - STEP_LEFOU_DETECTOR
+      - STEP_RTC_ESP_ETAPE2
+      - STEP_QR_DETECTOR
+      - STEP_FINAL_WIN
+
+# ============================================================
+# STATIONS (terrain)
+# ============================================================
+stations:
+  - id: STATION_ONDES
+    act: 1
+    name: "Atelier des Ondes"
+    focus: "Stabiliser la référence LA 440 Hz pour recaler U-SON."
+    firmware_anchor_step: "STEP_LA_DETECTOR"
+    clue: "La force ne sert à rien. Seule la stabilité ouvre le premier verrou."
+
+  - id: STATION_ZONE4_PIANO
+    act: 2
+    name: "Zone 4 — Studio de Résonance (Piano Alphabet)"
+    focus: "Jouer 5 lettres sur le piano-alphabet pour valider l’accès."
+    firmware_anchor_step: "STEP_LEFOU_DETECTOR"
+    clue: "Le Fou ne valide pas la force. Il valide son nom."
+    piano_rule_summary: "Jouer L-E-F-O-U (5 notes)."
+
+  - id: STATION_ARCHIVES_QR
+    act: 2
+    name: "Salle des Archives"
+    focus: "Trouver et scanner la clé finale."
+    firmware_anchor_step: "STEP_QR_DETECTOR"
+    qr_location_real: "Derrière le portrait (cadre) dans la Salle des Archives."
+    clue: "Regarde là où Zacus surveille toujours."
+
+# ============================================================
+# PUZZLES (réels)
+# ============================================================
+puzzles:
+  - id: PUZZLE_LA_440
+    act: 1
+    type: "audio / stabilisation"
+    objective: "Produire un LA 440 Hz stable."
+    firmware_step: "STEP_LA_DETECTOR"
+    success_condition: >
+      Le son doit rester stable quelques secondes ; l’écran/LED confirme l’alignement.
+      Ensuite, la transmission Étape 1 peut être validée (ACK_WIN1).
+
+  - id: PUZZLE_PIANO_ALPHABET_5
+    act: 2
+    type: "piano / code lettres"
+    objective: "Jouer 5 lettres sur le piano-alphabet."
+    firmware_step: "STEP_LEFOU_DETECTOR"
+    rule_real: >
+      Les 26 lettres (A à Z) sont indiquées sur les touches blanches (stickers).
+      On joue la séquence de 5 lettres dans l’ordre.
+    code_word_5_letters: "LEFOU"
+    sequence_letters: ["L","E","F","O","U"]
+    hint_logic: >
+      La clé de Zone 4 est le nom du propriétaire : l’Électron Fou.
+      “Son nom” = LEFOU.
+    validation_mode: >
+      Validation “réelle terrain” : le MJ écoute/observe la séquence,
+      puis déclenche la transition (unlock / BTN_NEXT / serial) vers la confirmation Étape 2.
+
+  - id: PUZZLE_QR_WIN
+    act: 2
+    type: "recherche / scan"
+    objective: "Scanner le QR final."
+    firmware_step: "STEP_QR_DETECTOR"
+    qr_payload: "WIN"
+    location: "Derrière le portrait aux Archives"
+    fail_safe: "Timeout 30s → QR_TIMEOUT → retour étape précédente + backup MJ."
+
+# ============================================================
+# DÉROULÉ PAR STEP (narratif aligné runtime)
+# ============================================================
+steps_narrative:
+  - step_id: STEP_U_SON_PROTO
+    scene: SCENE_U_SON_PROTO
+    act: 1
+    timebox_minutes: "5–8"
+    narrative: >
+      Boot radio. Transmission tronquée.
+      Zacus annonce que U-SON dérive et qu’il faut une référence stable pour recaler le système.
+
+  - step_id: STEP_LA_DETECTOR
+    scene: SCENE_LA_DETECTOR
+    act: 1
+    timebox_minutes: "30–35"
+    narrative: >
+      Atelier des Ondes. Objectif : produire un LA 440 stable.
+      Le groupe s’organise : une personne fait le son, d’autres surveillent le feedback.
+
+  - step_id: STEP_RTC_ESP_ETAPE1
+    scene: SCENE_WIN_ETAPE1
+    act: 1
+    timebox_minutes: "2–4"
+    narrative: >
+      Transmission distante (ESP-NOW). L’ACK confirme la validation Étape 1.
+
+  - step_id: STEP_WIN_ETAPE1
+    scene: SCENE_WIN_ETAPE1
+    act: 1
+    timebox_minutes: "5–8"
+    narrative: >
+      Victoire 1. Puis le campus bascule en WARNING : direction Zone 4.
+
+  - step_id: STEP_WARNING
+    scene: SCENE_WARNING
+    act: 2
+    timebox_minutes: "5–10"
+    narrative: >
+      Alerte rouge. Message clair : Zone 4, l’installation de l’Électron Fou.
+      Le système annonce qu’un code musical (5 lettres) sera requis.
+
+  - step_id: STEP_LEFOU_DETECTOR
+    scene: SCENE_LEFOU_DETECTOR
+    act: 2
+    timebox_minutes: "25–35"
+    narrative: >
+      Zone 4. Piano-alphabet : les lettres sont sur les touches blanches.
+      L’équipe doit jouer LEFOU (L-E-F-O-U) pour prouver qu’elle a compris la règle.
+
+  - step_id: STEP_RTC_ESP_ETAPE2
+    scene: SCENE_WIN_ETAPE2
+    act: 2
+    timebox_minutes: "2–4"
+    narrative: >
+      Confirmation Étape 2. Le système donne la destination finale : les Archives,
+      et révèle que la clé est derrière le portrait.
+
+  - step_id: STEP_QR_DETECTOR
+    scene: SCENE_QR_DETECTOR
+    act: 2
+    timebox_minutes: "10–15"
+    narrative: >
+      Aux Archives : chercher derrière le portrait, récupérer le QR, et le scanner.
+      QR “WIN” valide l’accès final.
+
+  - step_id: STEP_FINAL_WIN
+    scene: SCENE_FINAL_WIN
+    act: 2
+    timebox_minutes: "5–8"
+    narrative: >
+      Victoire + révélation.
+      Récompense : bascule vers le Media Hub, et boot persistant après QR validé.
+
+# ============================================================
+# AUDIO (textes exacts + prompts TTS + FX)
+# ============================================================
+audio:
+  global_style:
+    audience: "enfants 9–11 (compréhensible 6–14)"
+    rules: ["phrases courtes", "rassurant", "pas anxiogène", "consignes claires"]
+    fx_profiles:
+      radio: "bandpass + souffle léger + bip"
+      system: "neutre + bip OK"
+      alarm: "bips rapides + voix urgente mais calme"
+
+  packs:
+    - pack_id: PACK_BOOT_RADIO
+      voice: "Professeur Zacus (calme, scientifique, rassurant)"
+      fx: [radio]
+      tracks:
+        - track_id: boot_intro
+          script_fr: >
+            Équipe Zacus… ici le Professeur Zacus.
+            Le prototype U-SON dérive. Les capteurs ne sont plus fiables.
+            Pour stabiliser U-SON, il vous faut une référence : le LA, quatre-cent-quarante hertz.
+            Rendez-vous à l’Atelier des Ondes.
+            Gardez votre calme.
+          tts_prompt_excerpt: >
+            Voix adulte calme, rassurante, scientifique. Phrases courtes.
+            Effets: bip début + souffle léger + bandpass radio.
+        - track_id: warning_to_zone4
+          script_fr: >
+            Alerte.
+            Prochaine étape : Zone 4.
+            L’installation de l’Électron Fou ne valide pas la force.
+            Elle valide une règle… au piano.
+            Cinq lettres. Cinq notes.
+          tts_prompt_excerpt: >
+            Voix plus urgente mais pas anxiogène.
+            Effets: bips rapides d’alarme, puis radio léger.
+      step_map:
+        STEP_U_SON_PROTO: boot_intro
+        STEP_WARNING: warning_to_zone4
+
+    - pack_id: PACK_CONFIRM_WIN_ETAPE1
+      voice: "Système (neutre, clair)"
+      fx: [system]
+      tracks:
+        - track_id: confirm_win1
+          script_fr: >
+            Signal stabilisé.
+            Étape un validée.
+            Liaison confirmée.
+          tts_prompt_excerpt: "Voix neutre, très intelligible. Ajouter bip OK."
+      step_map:
+        STEP_RTC_ESP_ETAPE1: confirm_win1
+
+    - pack_id: PACK_WIN
+      voice: "Système positif (court)"
+      fx: [system]
+      tracks:
+        - track_id: win1_jingle
+          script_fr: >
+            Bravo équipe Zacus.
+            Première barrière franchie.
+          tts_prompt_excerpt: "Positif mais sobre. Mini jingle rétro discret."
+      step_map:
+        STEP_WIN_ETAPE1: win1_jingle
+
+    - pack_id: PACK_ZONE4_PIANO_HINT
+      optional: true
+      voice: "Système (didactique)"
+      fx: [system]
+      tracks:
+        - track_id: zone4_rule_soft
+          script_fr: >
+            Règle Zone 4 :
+            Les lettres sont sur les touches blanches.
+            Le code, c’est le nom du propriétaire.
+            Cinq lettres.
+          tts_prompt_excerpt: "Très clair, pas trop long. Bip OK."
+        - track_id: zone4_rule_hard
+          script_fr: >
+            Indice :
+            Jouez… L. E. F. O. U.
+          tts_prompt_excerpt: "Indice secours (hard). Très lent, très clair."
+      note: "Optionnel : utilisable si le groupe bloque."
+
+    - pack_id: PACK_CONFIRM_WIN_ETAPE2
+      voice: "Système (neutre + indice final)"
+      fx: [system]
+      tracks:
+        - track_id: confirm_win2_archives
+          script_fr: >
+            Étape deux validée.
+            Rendez-vous aux Archives.
+            La clé finale est derrière le portrait.
+          tts_prompt_excerpt: "Neutre, très clair sur l’indice. Ajouter bip OK."
+      step_map:
+        STEP_RTC_ESP_ETAPE2: confirm_win2_archives
+
+    - pack_id: PACK_FINAL_REVEAL
+      optional: true
+      voice: "Professeur Zacus (chaleureux, fier)"
+      fx: [radio]
+      tracks:
+        - track_id: final_reveal
+          script_fr: >
+            Ici Zacus.
+            Vous avez tenu la ligne.
+            U-SON ne demande pas la force…
+            mais la stabilité, le calme, et le bon sens.
+            Merci. Vous avez protégé le prototype.
+          tts_prompt_excerpt: "Chaleureux, fier, rassurant. Radio léger + fade-out."
+      step_map:
+        STEP_FINAL_WIN: final_reveal
+
+# ============================================================
+# QR (réalité + backup)
+# ============================================================
+qr:
+  payload: "WIN"
+  location: "Derrière le portrait dans la Salle des Archives"
+  lead_in_clue: "Regarde là où Zacus surveille toujours."
+  backups:
+    - "Second QR WIN dans la boîte MJ"
+    - "Commande MJ: QR_SIM WIN (si caméra capricieuse)"
+
+# ============================================================
+# PROPS / SETUP
+# ============================================================
+props_and_assets:
+  piano_alphabet:
+    description: "26 lettres A–Z étiquetées sur les touches blanches (stickers)."
+    placement_note: >
+      Utiliser 26 touches blanches consécutives (gauche→droite) et coller A→Z.
+      L’ordre physique est celui des stickers, pas celui de la musique.
+    required_word: "LEFOU"
+  portrait_archives:
+    description: "Portrait (cadre) dans la Salle des Archives."
+    behind_portrait: "QR WIN imprimé (et scotch repositionnable)."
+
+notes: >
+  Cette version est 100% alignée avec la réalité “2 étapes + QR + Media Hub”.
+  Si tu veux, je peux aussi te générer la fiche MJ (indices soft/hard, cadence, placements)
+  et une version “short 90 min” sans casser le runtime.

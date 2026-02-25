@@ -7,7 +7,7 @@
   "visual": {
     "show_title": true,
     "show_subtitle": true,
-    "show_symbol": true,
+    "show_symbol": false,
     "effect_speed_ms": 0
   },
   "theme": {

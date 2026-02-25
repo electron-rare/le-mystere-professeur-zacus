@@ -2,7 +2,7 @@
   "id": "SCENE_LA_DETECTOR",
   "title": "LA DETECTOR",
   "subtitle": "Trouve la bonne resonance",
-  "symbol": "LA",
+  "symbol": "",
   "effect": "radar",
   "visual": {
     "show_title": true,

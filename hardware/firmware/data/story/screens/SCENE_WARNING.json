@@ -1,8 +1,8 @@
 {
   "id": "SCENE_WARNING",
   "title": "WARNING",
-  "subtitle": "Nouvelle phase etape 2",
-  "symbol": "!",
+  "subtitle": "Le coupable est malin",
+  "symbol": "!!!!!",
   "effect": "blink",
   "visual": {
     "show_title": true,

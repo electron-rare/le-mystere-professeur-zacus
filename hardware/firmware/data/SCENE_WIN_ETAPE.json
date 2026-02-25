@@ -8,8 +8,8 @@
   "FX_MODE_A": "starfield3d",
   "FX_MODE_B": "dotsphere3d",
   "FX_MODE_C": "raycorridor",
-  "FX_SCROLL_TEXT_A": "DEMO MODE - BRAVO BRIGADE Z - LE MYSTERE DU PROFESSEUR ZACUS - ",
-  "FX_SCROLL_TEXT_B": "WINNER MODE - STAGE B - KEEP THE BEAT - ",
+  "FX_SCROLL_TEXT_A": "- BRAVO BRIGADE Z  - ",
+  "FX_SCROLL_TEXT_B": "Vous avez la frequence - KEEP THE BEAT - ",
   "FX_SCROLL_TEXT_C": "BOINGBALL MODE - SCENE WIN ETAPE - ",
   "FX_SCROLL_FONT": "italic",
   "FX_BPM": 125

@@ -1,9 +1,9 @@
 {
   "id": "SCENE_WIN_ETAPE1",
   "title": "WIN ETAPE 1",
-  "subtitle": "ACK distant valide",
+  "subtitle": "validé à la hotline",
   "symbol": "W1",
-  "effect": "celebrate",
+  "effect": "celebrate"+"fireworks",
   "visual": {
     "show_title": true,
     "show_subtitle": true,
@@ -16,7 +16,7 @@
     "text": "#FFF7E2"
   },
   "transition": {
-    "effect": "zoom",
+    "effect": "fireworks",
     "duration_ms": 260
   },
   "timeline": {}

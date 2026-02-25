@@ -16,9 +16,13 @@ jobs:
         with:
           python-version: '3.x'
       - name: Install dependencies
-        run: python -m pip install --upgrade pip pyyaml
+        run: python -m pip install --upgrade pip -r tools/requirements/validators.txt
+      - name: Validate runtime bundle coherence
+        run: python tools/scenario/validate_runtime_bundle.py
       - name: Validate scenario
         run: python tools/scenario/validate_scenario.py game/scenarios/zacus_v1.yaml
+      - name: Export scenario markdown briefs
+        run: python tools/scenario/export_md.py game/scenarios/zacus_v1.yaml
       - name: Validate audio manifest
         run: python tools/audio/validate_manifest.py audio/manifests/zacus_v1_audio.yaml
       - name: Validate printables manifest

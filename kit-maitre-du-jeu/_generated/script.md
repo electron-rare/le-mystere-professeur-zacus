@@ -1,38 +1,36 @@
-# Script — Le mystère du Professeur Zacus
+# Script — Le mystère du Professeur Zacus — U-SON (promotion gameplay)
 
 ## Introduction
 
-Le professeur Zacus a lancé une dernière transmission avant de disparaître : un message tronqué, un avertissement crypté, puis le silence.
+Le professeur Zacus a disparu après avoir lancé une alerte cryptée : le prototype U-SON dérive. L'équipe doit stabiliser la référence LA 440 Hz, résoudre la règle Zone 4 et déclencher la clé finale.
 
 ## Chronologie canon
 
-- **17h45** — Message audio : 'Préparez-vous à l'Auréole, je viens de repérer un comportement anormal dans les capteurs 3A.'
-- **18h05** — Les caméras montrent un passage vers la salle des prototypes, puis plus rien. Une température monte à 48 °C dans l'atelier et les portes se verrouillent automatiquement.
-- **18h20** — Un code, une goutte d'un fluide lumineux et une note griffonnée sont les seuls indices restants.
+- **Acte 1 (~45 min)** — Atelier des Ondes : stabiliser LA 440 pour recaler U-SON.
+- **Acte 2 (~60 min)** — Zone 4 : décoder et jouer LEFOU sur le piano alphabet (A ancré sur LA 440).
+- **Finale** — Archives : scanner le QR payload WIN derrière le portrait.
 
 ## Stations
 
-- **Atelier des ondes** — stabiliser les lecteurs de fréquences et retrouver le code sonore.
-- **Salle des archives** — comparer les relevés de sécurité.
-- **Bureau du Professeur** — décrypter la note effacée sur le tableau blanc.
-- **Carnet du labo secret** — remettre en ordre les données de l’expérience « Auréole ». Un code couleur et une goutte de liquide indiquent la cible.
+- **Atelier des ondes** — stabiliser un LA 440 Hz propre et constant.
+- **Zone 4 — Studio de Résonance** — jouer le code LEFOU via un piano-alphabet brouillé.
+- **Salle des archives** — localiser la clé finale et valider le déverrouillage.
 
 ## Puzzles
 
-- code-sonore (logique) — Réassembler la partition inversée permet de déverrouiller un coffre numérique et révèle la première syllabe du mot-clé.
-- log-verifie (observation) — Les dates du journal calment tous les alibis sauf celui de Lila Caron. La note parle d'un rendez-vous à 18h15 dans la salle des prototypes.
-- empreinte (tactile) — Une empreinte de gants marque une pression sur le handle de la baie de transfert (haut à gauche). Lila est la seule à porter ce format de gants.
-- mobile (narration) — Le parchemin évoque un message : 'Je ne veux pas que l’Auréole devienne un jouet des contrats militaires alors que les cobayes humains sont encore instables.'
+- la-440 (audio) — produire un LA 440 stable déclenche la validation de l'étape 1.
+- piano-lefou (logique) — retrouver puis jouer L-E-F-O-U sur le piano à lettres brouillées, en utilisant l'ancre A=LA 440.
+- qr-win (observation) — scanner le QR avec payload WIN derrière le portrait de la salle des Archives.
 
 ## Solution canon
 
-- Coupable : Lila Caron, l’assistante en chef chargée des capteurs et du prototype.
-- Mobile : Lila a saboté les protocoles pour isoler le prototype et protéger les cobayes humains qu’elle connaissait mieux que quiconque. Elle craignait que la direction confie l’Auréole à un consortium de sécurité sans restrictions éthiques.
-- Méthode : Elle a envoyé le message tronqué du professeur, puis ouvert la baie de transfert pour simuler une fuite d’énergie (température, code 1-4-3) et a verrouillé les accès. Elle a laissé une note partielle sur le tableau pour que les enfants la trouvent en dernier, concentrant toute attention sur son geste de protectrice.
+- Coupable : Aucun coupable unique, il s'agit d'une épreuve orchestrée par Zacus.
+- Mobile : Vérifier la capacité des équipes à coopérer sous contrainte, sans céder à la panique ni aux fausses pistes.
+- Méthode : Progression en 3 validations séquentielles : LA 440, LEFOU en Zone 4, puis QR WIN aux Archives.
 - Preuves :
-  - L’empreinte de gants est celle qu’elle porte toujours.
-  - Les logs la placent dans la salle des prototypes à 18h15, soit juste après le message du professeur.
-  - Le mobile devient clair dans la note : elle cherche à empêcher un usage militaire.
+  - Le signal LA 440 stabilise U-SON et valide l'étape 1.
+  - La séquence LEFOU correctement jouée valide l'étape 2.
+  - Le QR payload WIN finalise le parcours et ouvre la conclusion.
 
 ## Notes pratiques
 

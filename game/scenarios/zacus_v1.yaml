@@ -1,73 +1,62 @@
 id: zacus_v1
-version: 1
-title: Le mystère du Professeur Zacus
-theme: Absence mystérieuse au centre de recherches du Campus Zacus
+version: 2
+title: Le mystère du Professeur Zacus — U-SON (promotion gameplay)
+theme: Disparition de Zacus, stabilisation U-SON (LA 440), code piano LEFOU, QR final WIN
 players:
   min: 6
   max: 14
-ages: "6–14 ans (9–11 recommandés pour les variantes les plus proches du canon)"
+ages: "6–14 ans (9–11 recommandés)"
 duration_minutes:
   min: 60
   max: 90
 canon:
   introduction: >-
-    Le professeur Zacus a lancé une dernière transmission avant de disparaître : un message tronqué, un avertissement crypté, puis le silence.
+    Le professeur Zacus a disparu après avoir lancé une alerte cryptée : le prototype U-SON dérive.
+    L'équipe doit stabiliser la référence LA 440 Hz, résoudre la règle Zone 4 et déclencher la clé finale.
   timeline:
-    - label: "17h45"
-      note: "Message audio : 'Préparez-vous à l'Auréole, je viens de repérer un comportement anormal dans les capteurs 3A.'"
-    - label: "18h05"
-      note: "Les caméras montrent un passage vers la salle des prototypes, puis plus rien.
-      Une température monte à 48 °C dans l'atelier et les portes se verrouillent automatiquement."
-    - label: "18h20"
-      note: "Un code, une goutte d'un fluide lumineux et une note griffonnée sont les seuls indices restants."
+    - label: "Acte 1 (~45 min)"
+      note: "Atelier des Ondes : stabiliser LA 440 pour recaler U-SON."
+    - label: "Acte 2 (~60 min)"
+      note: "Zone 4 : décoder et jouer LEFOU sur le piano alphabet (A ancré sur LA 440)."
+    - label: "Finale"
+      note: "Archives : scanner le QR payload WIN derrière le portrait."
   stakes: >-
-    Si l'équipe accuse la mauvaise personne, le prototype s'activant en dehors des protocoles déclenchera la procédure d'urgence.
+    Le test mesure la coopération, la précision et le calme : sans méthode, U-SON reste instable et l'accès final demeure verrouillé.
 stations:
   - name: Atelier des ondes
-    focus: stabiliser les lecteurs de fréquences et retrouver le code sonore.
-    clue: une partition inversée incruste les chiffres 1-4-3, renversés par le Professeur pour protéger un secret.
+    focus: stabiliser un LA 440 Hz propre et constant.
+    clue: une consigne rappelle que la référence audio juste est la seule ancre fiable pour la suite.
+  - name: Zone 4 — Studio de Résonance
+    focus: jouer le code LEFOU via un piano-alphabet brouillé.
+    clue: les lettres sont collées en ordre aléatoire sur les touches blanches, avec A placé sur la touche du LA 440.
   - name: Salle des archives
-    focus: comparer les relevés de sécurité.
-    clue: un enregistrement supprimé portant la signature de Lila Caron laisse entrevoir une dispute privée et un déplacement imprévu.
-  - name: Bureau du Professeur
-    focus: décrypter la note effacée sur le tableau blanc.
-    clue: l’empreinte digitale non professorale sur le stylo, plus une formule incomplète reliant tension et loyauté.
-  - name: Carnet du labo secret
-    focus: remettre en ordre les données de l’expérience « Auréole ». Un code couleur et une goutte de liquide indiquent la cible.
-    clue: "Le carnet confirme que « Auréole » génère un signal ‘au-dessus du sol’. La goutte + code couleur pointent vers le Hangar du Droïde (Zone 5) où se cache la table Morse; le décodage indiquera ensuite la direction du Studio de Résonance (Zone 4)."
+    focus: localiser la clé finale et valider le déverrouillage.
+    clue: le QR final WIN est caché derrière le portrait.
 puzzles:
-  - id: code-sonore
+  - id: la-440
+    type: audio
+    clue: produire un LA 440 stable déclenche la validation de l'étape 1.
+    effect: confirmation audio et ouverture de l'étape Zone 4.
+  - id: piano-lefou
     type: logique
-    clue: "Réassembler la partition inversée permet de déverrouiller un coffre numérique et révèle la première syllabe du mot-clé."
-    effect: "Déclenche le message audio de la station suivante."
-  - id: log-verifie
+    clue: retrouver puis jouer L-E-F-O-U sur le piano à lettres brouillées, en utilisant l'ancre A=LA 440.
+    effect: validation de l'étape 2 et indice explicite vers les Archives.
+  - id: qr-win
     type: observation
-    clue: "Les dates du journal calment tous les alibis sauf celui de Lila Caron.
-    La note parle d'un rendez-vous à 18h15 dans la salle des prototypes."
-    effect: "Révèle l’emplacement du prototype caché."
-  - id: empreinte
-    type: tactile
-    clue: "Une empreinte de gants marque une pression sur le handle de la baie de transfert (haut à gauche).
-    Lila est la seule à porter ce format de gants."
-    effect: "Confirme le mouvement de la cible et le fait que la porte s’est ouverte manuellement."
-  - id: mobile
-    type: narration
-    clue: "Le parchemin évoque un message : 'Je ne veux pas que l’Auréole devienne un jouet des contrats militaires alors que les cobayes humains sont encore instables.'"
-    effect: "Donne le mobile moral unique et pousse vers l’accusation finale."
+    clue: scanner le QR avec payload WIN derrière le portrait de la salle des Archives.
+    effect: déverrouille le media manager et la conclusion narrative.
 solution:
-  culprit: Lila Caron, l’assistante en chef chargée des capteurs et du prototype.
+  culprit: Aucun coupable unique, il s'agit d'une épreuve orchestrée par Zacus.
   motive: >-
-    Lila a saboté les protocoles pour isoler le prototype et protéger les cobayes humains qu’elle connaissait mieux que quiconque.
-    Elle craignait que la direction confie l’Auréole à un consortium de sécurité sans restrictions éthiques.
+    Vérifier la capacité des équipes à coopérer sous contrainte, sans céder à la panique ni aux fausses pistes.
   method: >-
-    Elle a envoyé le message tronqué du professeur, puis ouvert la baie de transfert pour simuler une fuite d’énergie (température, code 1-4-3) et a verrouillé les accès.
-    Elle a laissé une note partielle sur le tableau pour que les enfants la trouvent en dernier, concentrant toute attention sur son geste de protectrice.
+    Progression en 3 validations séquentielles : LA 440, LEFOU en Zone 4, puis QR WIN aux Archives.
   proof:
-    - "L’empreinte de gants est celle qu’elle porte toujours."
-    - "Les logs la placent dans la salle des prototypes à 18h15, soit juste après le message du professeur."
-    - "Le mobile devient clair dans la note : elle cherche à empêcher un usage militaire."
+    - "Le signal LA 440 stabilise U-SON et valide l'étape 1."
+    - "La séquence LEFOU correctement jouée valide l'étape 2."
+    - "Le QR payload WIN finalise le parcours et ouvre la conclusion."
 solution_unique: true
 finale_statement: >-
-  Zacus réapparaît, caché dans la salle des archives pendant que l’équipe accuse Lila. Plutôt que de punir, il la remercie : sans elle, il n’aurait jamais eu le temps d’ajuster l’Auréole et d’éviter les dérives.
+  Zacus réapparaît et confirme que l'épreuve visait l'éthique de jeu : méthode, écoute et entraide avant la vitesse.
 notes: >-
-  En version facile, centre-toi sur le code sonore et la note du tableau ; en version longue, demande aux enfants de rédiger une lettre où ils décrivent pourquoi la protection de l’Auréole était essentielle.
+  Cette promotion gameplay aligne le canon sur le bundle conversationnel v3, tout en conservant `game/scenarios/*.yaml` comme source de vérité.

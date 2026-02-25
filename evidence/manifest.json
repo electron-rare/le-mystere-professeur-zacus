@@ -1,0 +1,23 @@
+{
+  "date": "2026-02-25",
+  "agent": "pm-spec",
+  "changes": [
+    "docs/repo-deep-analysis-2026-02-25.md",
+    "specs/CONVERSATION_BUNDLE_INTAKE.md",
+    "architecture/CONVERSATION_BUNDLE_ARCHITECTURE.md"
+  ],
+  "artifacts": [
+    "artifacts/pm-spec/2026-02-25/repo-deep-analysis.md",
+    "artifacts/pm-spec/2026-02-25/gameplay-promotion-note.md",
+    "artifacts/qa-test/2026-02-25/gameplay-functional-diff.md"
+  ],
+  "gates": {
+    "G0": "satisfied",
+    "G1": "satisfied",
+    "G2": "implemented",
+    "G3": "validated",
+    "G4": "pending",
+    "G5": "pending_plan"
+  },
+  "note": "Analyse approfondie repo publiée avec plan PR-A/PR-B/PR-C pour aller au-delà du lot courant."
+}

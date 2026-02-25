@@ -2190,6 +2190,17 @@ void UiManager::applyThemeColors(uint32_t bg_rgb, uint32_t accent_rgb, uint32_t 
   const lv_color_t bg = quantize565ToTheme256(lv_color_hex(bg_rgb));
   const lv_color_t accent = quantize565ToTheme256(lv_color_hex(accent_rgb));
   const lv_color_t text = quantize565ToTheme256(lv_color_hex(text_rgb));
+  const uint32_t bg_key = static_cast<uint32_t>(bg.full);
+  const uint32_t accent_key = static_cast<uint32_t>(accent.full);
+  const uint32_t text_key = static_cast<uint32_t>(text.full);
+
+  if (theme_cache_valid_ && theme_cache_bg_ == bg_key && theme_cache_accent_ == accent_key && theme_cache_text_ == text_key) {
+    return;
+  }
+  theme_cache_valid_ = true;
+  theme_cache_bg_ = bg_key;
+  theme_cache_accent_ = accent_key;
+  theme_cache_text_ = text_key;
 
   lv_obj_set_style_bg_color(scene_root_, bg, LV_PART_MAIN);
   lv_obj_set_style_bg_color(scene_core_, accent, LV_PART_MAIN);
@@ -2237,6 +2248,9 @@ void UiManager::resetSceneTimeline() {
   timeline_duration_ms_ = 0U;
   timeline_loop_ = true;
   timeline_effect_index_ = -1;
+  timeline_segment_cache_index_ = -1;
+  timeline_segment_cache_elapsed_ms_ = 0U;
+  theme_cache_valid_ = false;
 }
 
 void UiManager::onTimelineTick(uint16_t elapsed_ms) {
@@ -2262,16 +2276,33 @@ void UiManager::onTimelineTick(uint16_t elapsed_ms) {
   }
 
   uint8_t segment_index = 0U;
-  for (uint8_t index = 0U; (index + 1U) < timeline_keyframe_count_; ++index) {
-    if (elapsed_ms < timeline_keyframes_[index + 1U].at_ms) {
-      segment_index = index;
-      break;
+  if (timeline_segment_cache_index_ >= 0 &&
+      static_cast<uint8_t>(timeline_segment_cache_index_) < timeline_keyframe_count_) {
+    segment_index = static_cast<uint8_t>(timeline_segment_cache_index_);
+    if (elapsed_ms < timeline_segment_cache_elapsed_ms_) {
+      segment_index = 0U;
     }
-    segment_index = index + 1U;
+    while ((segment_index + 1U) < timeline_keyframe_count_ &&
+           elapsed_ms >= timeline_keyframes_[segment_index + 1U].at_ms) {
+      ++segment_index;
+    }
+    while (segment_index > 0U && elapsed_ms < timeline_keyframes_[segment_index].at_ms) {
+      --segment_index;
+    }
+  } else {
+    for (uint8_t index = 0U; (index + 1U) < timeline_keyframe_count_; ++index) {
+      if (elapsed_ms < timeline_keyframes_[index + 1U].at_ms) {
+        segment_index = index;
+        break;
+      }
+      segment_index = index + 1U;
+    }
   }
   if (segment_index >= timeline_keyframe_count_) {
     segment_index = timeline_keyframe_count_ - 1U;
   }
+  timeline_segment_cache_index_ = static_cast<int8_t>(segment_index);
+  timeline_segment_cache_elapsed_ms_ = elapsed_ms;
 
   const SceneTimelineKeyframe& from = timeline_keyframes_[segment_index];
   const SceneTimelineKeyframe& to =

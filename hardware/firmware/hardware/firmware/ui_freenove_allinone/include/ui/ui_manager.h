@@ -510,10 +510,16 @@ class UiManager {
   uint16_t timeline_duration_ms_ = 0U;
   bool timeline_loop_ = true;
   int8_t timeline_effect_index_ = -1;
+  int8_t timeline_segment_cache_index_ = -1;
+  uint16_t timeline_segment_cache_elapsed_ms_ = 0U;
   uint8_t particleIndexForObj(const lv_obj_t* target) const;
   char last_scene_id_[40] = {0};
   uint32_t last_payload_crc_ = 0U;
   bool last_audio_playing_ = false;
+  bool theme_cache_valid_ = false;
+  uint32_t theme_cache_bg_ = 0U;
+  uint32_t theme_cache_accent_ = 0U;
+  uint32_t theme_cache_text_ = 0U;
   uint8_t demo_particle_count_ = 4U;
   uint8_t demo_strobe_level_ = 65U;
   bool win_etape_fireworks_mode_ = false;

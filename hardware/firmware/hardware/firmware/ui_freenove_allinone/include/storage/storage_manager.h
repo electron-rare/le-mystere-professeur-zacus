@@ -47,8 +47,12 @@ class StorageManager {
 
   mutable bool sd_ready_ = false;
   mutable uint8_t sd_failure_streak_ = 0U;
-  mutable String scene_cache_id_;
-  mutable String scene_cache_payload_;
-  mutable String audio_cache_pack_id_;
-  mutable String audio_cache_path_;
+  static constexpr uint8_t kSceneCacheSlots = 3U;
+  static constexpr uint8_t kAudioCacheSlots = 3U;
+  mutable String scene_cache_ids_[kSceneCacheSlots];
+  mutable String scene_cache_payloads_[kSceneCacheSlots];
+  mutable uint8_t scene_cache_next_slot_ = 0U;
+  mutable String audio_cache_pack_ids_[kAudioCacheSlots];
+  mutable String audio_cache_paths_[kAudioCacheSlots];
+  mutable uint8_t audio_cache_next_slot_ = 0U;
 };

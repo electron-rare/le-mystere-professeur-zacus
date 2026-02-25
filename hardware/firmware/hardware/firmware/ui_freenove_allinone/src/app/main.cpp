@@ -622,7 +622,11 @@ bool buildEventTokenFromTypeName(StoryEventType type,
 
   switch (type) {
     case StoryEventType::kUnlock:
-      copyText(out_event, out_capacity, "UNLOCK");
+      if (normalized_name[0] == '\0' || std::strcmp(normalized_name, "UNLOCK") == 0) {
+        copyText(out_event, out_capacity, "UNLOCK");
+      } else {
+        snprintf(out_event, out_capacity, "UNLOCK:%s", normalized_name);
+      }
       return true;
     case StoryEventType::kAudioDone:
       copyText(out_event, out_capacity, "AUDIO_DONE");
@@ -3204,30 +3208,43 @@ bool dispatchControlActionImpl(const String& action_raw, uint32_t now_ms, String
   }
 
   if (startsWithIgnoreCase(action.c_str(), "SC_EVENT_RAW ")) {
-    String event_name = action.substring(static_cast<unsigned int>(std::strlen("SC_EVENT_RAW ")));
-    event_name.trim();
-    if (event_name.isEmpty()) {
+    char event_name[kSerialLineCapacity] = {0};
+    copyText(event_name, sizeof(event_name), action.c_str() + std::strlen("SC_EVENT_RAW "));
+    trimAsciiInPlace(event_name);
+    if (event_name[0] == '\0') {
       return false;
     }
-    return dispatchScenarioEventByName(event_name.c_str(), now_ms);
+    return dispatchScenarioEventByName(event_name, now_ms);
   }
 
   if (startsWithIgnoreCase(action.c_str(), "SC_EVENT ")) {
-    String args = action.substring(static_cast<unsigned int>(std::strlen("SC_EVENT ")));
-    args.trim();
-    if (args.isEmpty()) {
+    char args[kSerialLineCapacity] = {0};
+    copyText(args, sizeof(args), action.c_str() + std::strlen("SC_EVENT "));
+    trimAsciiInPlace(args);
+    if (args[0] == '\0') {
       return false;
     }
-    const int sep = args.indexOf(' ');
-    String type_text = (sep < 0) ? args : args.substring(0, static_cast<unsigned int>(sep));
-    String event_name = (sep < 0) ? String("") : args.substring(static_cast<unsigned int>(sep + 1));
-    type_text.trim();
-    event_name.trim();
+    char* type_text = args;
+    char* event_name = nullptr;
+    for (size_t index = 0U; args[index] != '\0'; ++index) {
+      if (args[index] != ' ') {
+        continue;
+      }
+      args[index] = '\0';
+      event_name = &args[index + 1U];
+      break;
+    }
+    if (event_name != nullptr) {
+      trimAsciiInPlace(event_name);
+      if (event_name[0] == '\0') {
+        event_name = nullptr;
+      }
+    }
     StoryEventType event_type = StoryEventType::kNone;
-    if (!parseEventType(type_text.c_str(), &event_type)) {
+    if (!parseEventType(type_text, &event_type)) {
       return false;
     }
-    return dispatchScenarioEventByType(event_type, event_name.isEmpty() ? nullptr : event_name.c_str(), now_ms);
+    return dispatchScenarioEventByType(event_type, event_name, now_ms);
   }
 
   if (startsWithIgnoreCase(action.c_str(), "SCENE_GOTO ")) {
@@ -3972,12 +3989,25 @@ void printScenarioCoverage() {
 
 bool dispatchScenarioEventByType(StoryEventType type, const char* event_name, uint32_t now_ms) {
   switch (type) {
-    case StoryEventType::kUnlock:
-      if (event_name != nullptr && event_name[0] != '\0' && std::strcmp(event_name, "UNLOCK") != 0) {
-        return false;
+    case StoryEventType::kUnlock: {
+      char unlock_name[64] = {0};
+      if (event_name != nullptr && event_name[0] != '\0') {
+        copyText(unlock_name, sizeof(unlock_name), event_name);
+        trimAsciiInPlace(unlock_name);
+        toUpperAsciiInPlace(unlock_name);
       }
-      g_scenario.notifyUnlock(now_ms);
-      return true;
+      const char* selected_name = (unlock_name[0] != '\0') ? unlock_name : "UNLOCK";
+      const bool dispatched_named = g_scenario.notifyUnlockEvent(selected_name, now_ms);
+      if (std::strcmp(selected_name, "UNLOCK") == 0) {
+        // Preserve legacy compatibility: unlock command is considered accepted
+        // even when no transition consumes it in the current step.
+        return true;
+      }
+      if (dispatched_named) {
+        return true;
+      }
+      return g_scenario.notifyUnlockEvent("UNLOCK", now_ms);
+    }
     case StoryEventType::kAudioDone:
       if (event_name != nullptr && event_name[0] != '\0' && std::strcmp(event_name, "AUDIO_DONE") != 0) {
         return false;
@@ -4038,6 +4068,13 @@ bool dispatchScenarioEventByName(const char* event_name, uint32_t now_ms) {
     }
     if (head_len == 5U && std::strncmp(normalized, "TIMER", 5U) == 0) {
       return g_scenario.notifyTimerEvent(tail, now_ms);
+    }
+    if (head_len == 6U && std::strncmp(normalized, "UNLOCK", 6U) == 0) {
+      const bool dispatched_named = g_scenario.notifyUnlockEvent(tail, now_ms);
+      if (dispatched_named) {
+        return true;
+      }
+      return g_scenario.notifyUnlockEvent("UNLOCK", now_ms);
     }
     if (head_len == 6U && std::strncmp(normalized, "ACTION", 6U) == 0) {
       return g_scenario.notifyActionEvent(tail, now_ms);

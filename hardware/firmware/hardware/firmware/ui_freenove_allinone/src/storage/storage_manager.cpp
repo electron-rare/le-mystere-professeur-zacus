@@ -420,9 +420,26 @@ String StorageManager::loadScenePayloadById(const char* scene_id) const {
 
   const String id = normalized_scene_id;
   const String raw_id = scene_id;
-  if (scene_cache_id_ == id && !scene_cache_payload_.isEmpty()) {
-    return scene_cache_payload_;
+  for (uint8_t slot = 0U; slot < kSceneCacheSlots; ++slot) {
+    if (scene_cache_ids_[slot] == id && !scene_cache_payloads_[slot].isEmpty()) {
+      return scene_cache_payloads_[slot];
+    }
   }
+  auto cache_scene_payload = [this, &id](const String& payload) {
+    uint8_t slot = kSceneCacheSlots;
+    for (uint8_t index = 0U; index < kSceneCacheSlots; ++index) {
+      if (scene_cache_ids_[index] == id) {
+        slot = index;
+        break;
+      }
+    }
+    if (slot >= kSceneCacheSlots) {
+      slot = scene_cache_next_slot_;
+      scene_cache_next_slot_ = static_cast<uint8_t>((scene_cache_next_slot_ + 1U) % kSceneCacheSlots);
+    }
+    scene_cache_ids_[slot] = id;
+    scene_cache_payloads_[slot] = payload;
+  };
   String candidates[14];
   size_t candidate_count = 0U;
   auto add_candidate = [&candidate_count, &candidates](const String& value) {
@@ -464,14 +481,18 @@ String StorageManager::loadScenePayloadById(const char* scene_id) const {
       Serial.printf("[FS] scene payload loaded from legacy alias path: %s\n", candidate.c_str());
     }
     Serial.printf("[FS] scene %s -> %s (id=%s)\n", scene_id, origin.c_str(), normalized_scene_id);
-    scene_cache_id_ = id;
-    scene_cache_payload_ = payload;
+    cache_scene_payload(payload);
     return payload;
   }
 
   Serial.printf("[FS] scene payload missing for id=%s (normalized=%s)\n", scene_id, normalized_scene_id);
-  scene_cache_id_.remove(0);
-  scene_cache_payload_.remove(0);
+  for (uint8_t slot = 0U; slot < kSceneCacheSlots; ++slot) {
+    if (scene_cache_ids_[slot] == id) {
+      scene_cache_ids_[slot].remove(0);
+      scene_cache_payloads_[slot].remove(0);
+      break;
+    }
+  }
   return String();
 }
 
@@ -481,9 +502,26 @@ String StorageManager::resolveAudioPathByPackId(const char* pack_id) const {
   }
 
   const String id = pack_id;
-  if (audio_cache_pack_id_ == id && !audio_cache_path_.isEmpty()) {
-    return audio_cache_path_;
+  for (uint8_t slot = 0U; slot < kAudioCacheSlots; ++slot) {
+    if (audio_cache_pack_ids_[slot] == id && !audio_cache_paths_[slot].isEmpty()) {
+      return audio_cache_paths_[slot];
+    }
   }
+  auto cache_audio_path = [this, &id](const String& path) {
+    uint8_t slot = kAudioCacheSlots;
+    for (uint8_t index = 0U; index < kAudioCacheSlots; ++index) {
+      if (audio_cache_pack_ids_[index] == id) {
+        slot = index;
+        break;
+      }
+    }
+    if (slot >= kAudioCacheSlots) {
+      slot = audio_cache_next_slot_;
+      audio_cache_next_slot_ = static_cast<uint8_t>((audio_cache_next_slot_ + 1U) % kAudioCacheSlots);
+    }
+    audio_cache_pack_ids_[slot] = id;
+    audio_cache_paths_[slot] = path;
+  };
   const String slug = packIdToSlug(pack_id);
   const String json_candidates[] = {
       "/story/audio/" + id + ".json",
@@ -544,8 +582,7 @@ String StorageManager::resolveAudioPathByPackId(const char* pack_id) const {
                         pack_id,
                         resolved.c_str(),
                         origin.c_str());
-          audio_cache_pack_id_ = id;
-          audio_cache_path_ = resolved;
+          cache_audio_path(resolved);
           return resolved;
         }
       }
@@ -560,8 +597,7 @@ String StorageManager::resolveAudioPathByPackId(const char* pack_id) const {
       continue;
     }
     Serial.printf("[FS] audio pack %s -> %s (%s)\n", pack_id, resolved.c_str(), origin.c_str());
-    audio_cache_pack_id_ = id;
-    audio_cache_path_ = resolved;
+    cache_audio_path(resolved);
     return resolved;
   }
 
@@ -581,13 +617,17 @@ String StorageManager::resolveAudioPathByPackId(const char* pack_id) const {
       continue;
     }
     Serial.printf("[FS] audio pack %s fallback direct=%s\n", pack_id, resolved.c_str());
-    audio_cache_pack_id_ = id;
-    audio_cache_path_ = resolved;
+    cache_audio_path(resolved);
     return resolved;
   }
 
-  audio_cache_pack_id_.remove(0);
-  audio_cache_path_.remove(0);
+  for (uint8_t slot = 0U; slot < kAudioCacheSlots; ++slot) {
+    if (audio_cache_pack_ids_[slot] == id) {
+      audio_cache_pack_ids_[slot].remove(0);
+      audio_cache_paths_[slot].remove(0);
+      break;
+    }
+  }
   return String();
 }
 
@@ -745,10 +785,16 @@ bool StorageManager::provisionEmbeddedAsset(const char* path,
 }
 
 void StorageManager::invalidateStoryCaches() const {
-  scene_cache_id_.remove(0);
-  scene_cache_payload_.remove(0);
-  audio_cache_pack_id_.remove(0);
-  audio_cache_path_.remove(0);
+  for (uint8_t index = 0U; index < kSceneCacheSlots; ++index) {
+    scene_cache_ids_[index].remove(0);
+    scene_cache_payloads_[index].remove(0);
+  }
+  for (uint8_t index = 0U; index < kAudioCacheSlots; ++index) {
+    audio_cache_pack_ids_[index].remove(0);
+    audio_cache_paths_[index].remove(0);
+  }
+  scene_cache_next_slot_ = 0U;
+  audio_cache_next_slot_ = 0U;
 }
 
 bool StorageManager::isStoryScreenPayloadPresent() const {

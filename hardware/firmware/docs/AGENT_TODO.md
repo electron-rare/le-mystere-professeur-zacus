@@ -1,3 +1,53 @@
+## [2026-02-25] Lots 3→4→5 Freenove (stabilite unlock + perf cache + validation USB modem)
+
+- Skills chain active (ordre):
+  - `freenove-firmware-orchestrator`
+  - `firmware-story-stack`
+  - `firmware-littlefs-stack`
+  - `firmware-graphics-stack`
+  - `firmware-build-stack`
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260225-224120_wip.patch`
+  - `/tmp/zacus_checkpoint/20260225-224120_status.txt`
+- Lot 3 (stabilite/compat transitions):
+  - support `SC_EVENT unlock <name>` sans casser `SC_EVENT unlock` (fallback `UNLOCK`) :
+    - `hardware/firmware/ui_freenove_allinone/src/app/main.cpp`
+    - `hardware/firmware/ui_freenove_allinone/include/app/scenario_manager.h`
+    - `hardware/firmware/ui_freenove_allinone/src/app/scenario_manager.cpp`
+  - ajout du validateur exhaustif runtime:
+    - `tools/dev/verify_story_transitions_deep.py`
+  - preuve correction defect `TR_SCENE_QR_DETECTOR_2`:
+    - log deep verify: `artifacts/rc_live/deep_transition_verify_20260225-225305.log` (51/51 pass, 0 fail)
+- Lot 4 (optimisations perf):
+  - `ui_manager_effects`: cache couleurs theme + cache segment timeline (evite updates/recalculs inutiles)
+    - `hardware/firmware/ui_freenove_allinone/include/ui/ui_manager.h`
+    - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager_effects.cpp`
+  - reduction allocations `String` hotpath dispatch `SC_EVENT`/`SC_EVENT_RAW`
+    - `hardware/firmware/ui_freenove_allinone/src/app/main.cpp`
+  - extension cache storage scene/audio de single-entry a cache borne (3 slots) + invalidation preservee
+    - `hardware/firmware/ui_freenove_allinone/include/storage/storage_manager.h`
+    - `hardware/firmware/ui_freenove_allinone/src/storage/storage_manager.cpp`
+  - campagne perf USB modem (150s):
+    - `artifacts/rc_live/perf_campaign_20260225-230640.log`
+    - final `PERF_STATUS`: loop avg=139404us, ui_tick avg=86478us, ui_flush avg=2078us (dma=5672 sync=0)
+- Lot 5 (validation finale USB modem + tooling):
+  - flash firmware: `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - smoke/tests:
+    - `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 8 --wait-port 10` ✅
+    - `python3 tools/dev/verify_story_default_flow.py --port /dev/cu.usbmodem5AB90753301 --baud 115200` ✅
+    - `python3 tools/dev/test_story_4scenarios.py --port /dev/cu.usbmodem5AB90753301 --baud 115200` ✅ (log: `artifacts/rc_live/test_4scenarios_20260225-225245.log`)
+    - `python3 tools/dev/verify_story_transitions_deep.py --port /dev/cu.usbmodem5AB90753301 --baud 115200` ✅ (51 pass / 0 fail)
+  - tooling/build gates finales:
+    - `./tools/dev/story-gen validate` ✅
+    - `./tools/dev/story-gen generate-cpp` ✅
+    - `./tools/dev/story-gen generate-bundle --out-dir /tmp/zacus_bundle_final` ✅
+    - `pio run -e freenove_esp32s3` ✅ (RAM 74.6%, Flash 32.9%)
+    - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅
+- Notes:
+  - verification compat explicite:
+    - `SC_EVENT unlock UNLOCK_QR` -> `dispatched=1 changed=1 step=SCENE_FINAL_WIN`
+    - `SC_EVENT unlock` conserve fallback `UNLOCK` (compat legacy preservee)
+
 ## [2026-02-25] Split lourd ui_manager.cpp (effects/display/intro)
 
 - Skills utilises (ordre):

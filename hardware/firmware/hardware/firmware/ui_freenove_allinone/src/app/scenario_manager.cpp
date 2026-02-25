@@ -221,10 +221,15 @@ void ScenarioManager::tick(uint32_t now_ms) {
 }
 
 void ScenarioManager::notifyUnlock(uint32_t now_ms) {
+  (void)notifyUnlockEvent("UNLOCK", now_ms);
+}
+
+bool ScenarioManager::notifyUnlockEvent(const char* event_name, uint32_t now_ms) {
   timer_armed_ = true;
   timer_fired_ = false;
   etape2_due_at_ms_ = now_ms + (test_mode_ ? kEtape2TestDelayMs : kEtape2DelayMs);
-  dispatchEvent(StoryEventType::kUnlock, "UNLOCK", now_ms, "button_unlock");
+  const char* name = (event_name != nullptr && event_name[0] != '\0') ? event_name : "UNLOCK";
+  return dispatchEvent(StoryEventType::kUnlock, name, now_ms, "unlock_event");
 }
 
 void ScenarioManager::notifyButton(uint8_t key, bool long_press, uint32_t now_ms) {

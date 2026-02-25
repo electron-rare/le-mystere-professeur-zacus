@@ -1,3 +1,22 @@
+## [2026-02-25] Split lourd ui_manager.cpp (effects/display/intro)
+
+- Skills utilises (ordre):
+  - `freenove-firmware-orchestrator`
+  - `firmware-graphics-stack`
+  - `firmware-build-stack`
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260225-222145_wip.patch`
+  - `/tmp/zacus_checkpoint/20260225-222145_status.txt`
+- Actions:
+  - scission des implementations `UiManager` en 3 unites dediees:
+    - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager_display.cpp`
+    - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager_intro.cpp`
+    - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager_effects.cpp`
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp` conserve l'orchestration + helpers internes et inclut les 3 unites split via `UI_MANAGER_SPLIT_IMPL` (pas de changement API publique).
+- Gates/evidence:
+  - `pio run -e freenove_esp32s3` ✅ (RAM 74.6%, Flash 32.8%)
+  - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅
+
 ## [2026-02-25] USB modem - correction scripts smoke story + rerun
 
 - Checkpoint securite:

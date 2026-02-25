@@ -1,0 +1,48 @@
+{
+  "id": "SCENE_MEDIA_MANAGER",
+  "title": "MEDIA MANAGER",
+  "subtitle": "PHOTO / MP3 / STORY",
+  "symbol": "MEDIA",
+  "effect": "radar",
+  "visual": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "effect_speed_ms": 620
+  },
+  "theme": {
+    "bg": "#081A34",
+    "accent": "#8BC4FF",
+    "text": "#EAF6FF"
+  },
+  "timeline": {
+    "loop": true,
+    "duration_ms": 1800,
+    "keyframes": [
+      {
+        "at_ms": 0,
+        "effect": "radar",
+        "speed_ms": 620,
+        "theme": {
+          "bg": "#081A34",
+          "accent": "#8BC4FF",
+          "text": "#EAF6FF"
+        }
+      },
+      {
+        "at_ms": 900,
+        "effect": "pulse",
+        "speed_ms": 520,
+        "theme": {
+          "bg": "#0C2448",
+          "accent": "#A6D4FF",
+          "text": "#F5FAFF"
+        }
+      }
+    ]
+  },
+  "transition": {
+    "effect": "fade",
+    "duration_ms": 220
+  }
+}

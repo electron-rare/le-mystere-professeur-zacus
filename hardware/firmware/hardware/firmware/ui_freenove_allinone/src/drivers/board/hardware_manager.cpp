@@ -44,8 +44,12 @@ constexpr HardwareManager::LedPaletteEntry kLedPalette[] = {
     {"SCENE_WIN", 245U, 205U, 62U, 80U, true},
     {"SCENE_WIN_ETAPE", 245U, 205U, 62U, 80U, true},
     {"SCENE_REWARD", 245U, 205U, 62U, 80U, true},
-    {"SCENE_READY", 88U, 214U, 92U, 52U, true},
-    {"__DEFAULT__", 50U, 122U, 255U, 50U, true},
+    {"SCENE_READY", 18U, 45U, 95U, 52U, false},
+    {"SCENE_MP3_PLAYER", 18U, 45U, 95U, 52U, false},
+    {"SCENE_MEDIA_MANAGER", 18U, 45U, 95U, 52U, false},
+    {"SCENE_PHOTO_MANAGER", 18U, 45U, 95U, 52U, false},
+    {"SCENE_CAMERA_SCAN", 18U, 45U, 95U, 52U, false},
+    {"__DEFAULT__", 18U, 45U, 95U, 52U, false},
 };
 uint8_t clampU8(int value) {
   if (value < 0) {

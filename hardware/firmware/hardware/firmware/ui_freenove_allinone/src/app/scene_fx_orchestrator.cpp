@@ -14,7 +14,7 @@ bool isAmpSceneId(const char* scene_id) {
 }
 
 bool isCameraSceneId(const char* scene_id) {
-  return (scene_id != nullptr && std::strcmp(scene_id, "SCENE_CAMERA_SCAN") == 0);
+  return (scene_id != nullptr && std::strcmp(scene_id, "SCENE_PHOTO_MANAGER") == 0);
 }
 
 bool isIntroSceneId(const char* scene_id) {
@@ -86,4 +86,3 @@ bool SceneFxOrchestrator::sameText(const char* lhs, const char* rhs) {
   }
   return std::strcmp(lhs, rhs) == 0;
 }
-

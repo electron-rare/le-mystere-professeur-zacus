@@ -141,6 +141,18 @@ int16_t activeDisplayHeight() {
   return ((FREENOVE_LCD_ROTATION & 0x1U) != 0U) ? FREENOVE_LCD_WIDTH : FREENOVE_LCD_HEIGHT;
 }
 
+void copyTextSafe(char* out, size_t out_size, const char* value) {
+  if (out == nullptr || out_size == 0U) {
+    return;
+  }
+  if (value == nullptr) {
+    out[0] = '\0';
+    return;
+  }
+  std::strncpy(out, value, out_size - 1U);
+  out[out_size - 1U] = '\0';
+}
+
 uint32_t pseudoRandom32(uint32_t value) {
   value ^= (value << 13U);
   value ^= (value >> 17U);
@@ -856,6 +868,14 @@ void UiManager::submitInputEvent(const UiInputEvent& event) {
   handleButton(event.key, event.long_press);
 }
 
+bool UiManager::consumeRuntimeEvent(char* out_event, size_t capacity) {
+  return qr_scene_controller_.consumeRuntimeEvent(out_event, capacity);
+}
+
+bool UiManager::simulateQrPayload(const char* payload) {
+  return qr_scene_controller_.queueSimulatedPayload(payload);
+}
+
 void UiManager::dumpStatus(UiStatusTopic topic) const {
   if (topic == UiStatusTopic::kMemory) {
     dumpMemoryStatus();
@@ -917,6 +937,7 @@ void UiManager::update() {
     updatePageLine();
   }
   renderMicrophoneWaveform();
+  qr_scene_controller_.tick(now_ms, &qr_scan_, qr_rules_, scene_subtitle_label_, scene_symbol_label_);
   pollAsyncFlush();
   const bool flush_busy =
       isDisplayOutputBusy();
@@ -4992,6 +5013,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   const bool win_etape_intro_scene = (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0);
   const bool direct_fx_scene = isDirectFxSceneId(scene_id);
   const bool is_locked_scene = (std::strcmp(scene_id, "SCENE_LOCKED") == 0);
+  const bool qr_scene = (std::strcmp(scene_id, "SCENE_CAMERA_SCAN") == 0);
   if (static_state_changed && scene_changed && has_previous_scene) {
     cleanupSceneTransitionAssets(last_scene_id_, scene_id);
   }
@@ -5180,9 +5202,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     bg_rgb = 0x2A0508UL;
     accent_rgb = 0xFF4A45UL;
     text_rgb = 0xFFD5D1UL;
-  } else if (std::strcmp(scene_id, "SCENE_LA_DETECTOR") == 0 ||
-             std::strcmp(scene_id, "SCENE_SEARCH") == 0 ||
-             std::strcmp(scene_id, "SCENE_CAMERA_SCAN") == 0) {
+  } else if (std::strcmp(scene_id, "SCENE_LA_DETECTOR") == 0 || std::strcmp(scene_id, "SCENE_SEARCH") == 0) {
     title = "DETECTEUR DE RESONNANCE";
     subtitle = "";
     symbol = "AUDIO";
@@ -5200,6 +5220,42 @@ void UiManager::renderScene(const ScenarioDef* scenario,
       frame_split_layout = true;
       frame_dy = 8;
     }
+  } else if (std::strcmp(scene_id, "SCENE_CAMERA_SCAN") == 0) {
+    title = "ZACUS QR VALIDATION";
+    subtitle = "Scan du QR final";
+    symbol = "QR";
+    effect = SceneEffect::kNone;
+    transition = SceneTransition::kFade;
+    transition_ms = 180U;
+    bg_rgb = 0x102040UL;
+    accent_rgb = 0x5CA3FFUL;
+    text_rgb = 0xF3F7FFUL;
+    show_title = true;
+    show_subtitle = true;
+    show_symbol = true;
+    waveform_enabled = false;
+  } else if (std::strcmp(scene_id, "SCENE_MEDIA_MANAGER") == 0) {
+    title = "MEDIA MANAGER";
+    subtitle = "PHOTO / MP3 / STORY";
+    symbol = "MEDIA";
+    effect = SceneEffect::kRadar;
+    bg_rgb = 0x081A34UL;
+    accent_rgb = 0x8BC4FFUL;
+    text_rgb = 0xEAF6FFUL;
+    show_title = true;
+    show_subtitle = true;
+    show_symbol = true;
+  } else if (std::strcmp(scene_id, "SCENE_PHOTO_MANAGER") == 0) {
+    title = "PHOTO MANAGER";
+    subtitle = "Capture JPEG";
+    symbol = "PHOTO";
+    effect = SceneEffect::kNone;
+    bg_rgb = 0x0B1A2EUL;
+    accent_rgb = 0x86CCFFUL;
+    text_rgb = 0xEEF6FFUL;
+    show_title = true;
+    show_subtitle = true;
+    show_symbol = true;
   } else if (std::strcmp(scene_id, "SCENE_SIGNAL_SPIKE") == 0) {
     title = "PIC DE SIGNAL";
     subtitle = "Interference detectee";
@@ -5266,10 +5322,17 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     resetSceneTimeline();
   }
 
+  if (static_state_changed) {
+    qr_rules_.clear();
+  }
+
   if (screen_payload_json != nullptr && screen_payload_json[0] != '\0') {
     DynamicJsonDocument document(4096);
     const DeserializationError error = deserializeJson(document, screen_payload_json);
     if (!error) {
+      if (qr_scene && static_state_changed) {
+        qr_rules_.configureFromPayload(document.as<JsonVariantConst>());
+      }
       const char* payload_title = document["title"] | document["content"]["title"] | document["visual"]["title"] | "";
       const char* payload_subtitle =
           document["subtitle"] | document["content"]["subtitle"] | document["visual"]["subtitle"] | "";
@@ -5804,6 +5867,14 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   if (static_state_changed && is_locked_scene && scene_symbol_label_ != nullptr) {
     lv_obj_add_flag(scene_symbol_label_, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(scene_symbol_label_, "");
+  }
+
+  if (static_state_changed) {
+    if (qr_scene) {
+      qr_scene_controller_.onSceneEnter(&qr_scan_, scene_subtitle_label_);
+    } else {
+      qr_scene_controller_.onSceneExit(&qr_scan_);
+    }
   }
 
   applySceneDynamicState(subtitle, show_subtitle, audio_playing, text_rgb);

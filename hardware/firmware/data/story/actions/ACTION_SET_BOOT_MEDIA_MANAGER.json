@@ -1,0 +1,8 @@
+{
+  "id": "ACTION_SET_BOOT_MEDIA_MANAGER",
+  "type": "set_boot_mode",
+  "config": {
+    "mode": "media_manager",
+    "persist_nvs": true
+  }
+}

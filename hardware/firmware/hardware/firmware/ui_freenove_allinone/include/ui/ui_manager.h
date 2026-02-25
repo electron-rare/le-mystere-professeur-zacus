@@ -8,6 +8,9 @@
 #include "hardware_manager.h"
 #include "ui/fx/fx_engine.h"
 #include "ui/player_ui_model.h"
+#include "ui/qr/qr_scene_controller.h"
+#include "ui/qr/qr_scan_controller.h"
+#include "ui/qr/qr_validation_rules.h"
 
 struct UiSceneFrame {
   const ScenarioDef* scenario = nullptr;
@@ -104,6 +107,8 @@ class UiManager {
   void setLaMetrics(const UiLaMetrics& metrics);
   void submitSceneFrame(const UiSceneFrame& frame);
   void submitInputEvent(const UiInputEvent& event);
+  bool consumeRuntimeEvent(char* out_event, size_t capacity);
+  bool simulateQrPayload(const char* payload);
   void dumpStatus(UiStatusTopic topic) const;
   UiMemorySnapshot memorySnapshot() const;
 
@@ -607,4 +612,7 @@ class UiManager {
   int16_t touch_y_ = 0;
   bool touch_pressed_ = false;
   ui::fx::FxEngine fx_engine_;
+  ui::QrScanController qr_scan_;
+  ui::QrValidationRules qr_rules_;
+  ui::QrSceneController qr_scene_controller_;
 };

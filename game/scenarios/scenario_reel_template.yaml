@@ -1,0 +1,174 @@
+# Scenario reel - template lisible + promptable.
+#
+# Comment l'utiliser:
+# 1) Edite uniquement la section `prompt_input`.
+# 2) Laisse `current_firmware_snapshot` comme reference de l'etat actuel code.
+# 3) Envoie ce fichier a Codex: je convertis ensuite vers le YAML canonique + JSON runtime.
+
+prompt_input:
+  meta:
+    request_name: "A_COMPLETER"
+    owner: "A_COMPLETER"
+    board_target: "freenove_esp32s3"
+    objective: "A_COMPLETER"
+
+  boot_policy:
+    startup_mode: "story"      # story | media_manager
+    persist_after_validation: true
+    rollback_command_required: true
+
+  qr_rule:
+    enabled: true
+    scene_id: "SCENE_CAMERA_SCAN"
+    expected_payload: "A_COMPLETER"
+    match_mode: "exact"        # exact | prefix | contains
+    case_insensitive: false
+    success_event: "QR_OK"
+    failure_event: "QR_INVALID"
+
+  media_hub:
+    enabled: true
+    hub_scene_id: "SCENE_MEDIA_MANAGER"
+    entries:
+      - "SCENE_PHOTO_MANAGER"
+      - "SCENE_MP3_PLAYER"
+      - "SCENE_READY"
+
+  led_policy:
+    strict_rgb: true
+    defaults:
+      ws2812: 1
+      led_auto: 1
+      rgb: "18/45/95"
+    scene_overrides:
+      - scene_id: "SCENE_LA_DETECTOR"
+        rgb: "dynamic_tuner_or_off"
+
+  custom_steps:
+    # Ajoute, retire, ou reordonne des steps ici.
+    # Format cible:
+    # - step_id: "STEP_X"
+    #   scene: "SCENE_X"
+    #   audio_pack: ""
+    #   actions: ["ACTION_TRACE_STEP"]
+    #   mp3_gate_open: false
+    #   transitions:
+    #     - "serial:BTN_NEXT->STEP_Y"
+    - "A_COMPLETER"
+
+  serial_test_plan:
+    - "SC_LOAD DEFAULT"
+    - "SCENE_GOTO SCENE_LOCKED"
+    - "SCENE_GOTO SCENE_CAMERA_SCAN"
+    - "QR_SIM A_COMPLETER"
+    - "BOOT_MODE_STATUS"
+    - "RESET"
+
+  acceptance_criteria:
+    - "Pas de PANIC|ASSERT|ABORT|REBOOT|rst:"
+    - "Transitions scene avec ACK ... ok=1"
+    - "Ownership camera/mic/amp coherent"
+    - "LED WS2812 conformes policy + RGB"
+    - "Boot mode media_manager persistant apres QR valide"
+
+  notes:
+    - "Contraintes gameplay reelles a decrire ici."
+    - "Ajouter ici les exceptions ou aliases scene."
+
+current_firmware_snapshot:
+  source_of_truth_files:
+    - "docs/protocols/story_specs/scenarios/default_unlock_win_etape2.yaml"
+    - "data/story/scenarios/DEFAULT.json"
+
+  scenario:
+    id: "DEFAULT"
+    version: 2
+    initial_step: "STEP_WAIT_UNLOCK"
+    app_bindings:
+      - "APP_AUDIO"
+      - "APP_SCREEN"
+      - "APP_GATE"
+      - "APP_WIFI"
+      - "APP_ESPNOW"
+
+  steps_runtime_order:
+    - step_id: "STEP_WAIT_UNLOCK"
+      screen_scene_id: "SCENE_LOCKED"
+      audio_pack_id: ""
+      actions:
+        - "ACTION_TRACE_STEP"
+        - "ACTION_HW_LED_READY"
+      transitions:
+        - "unlock:UNLOCK->STEP_U_SON_PROTO"
+        - "serial:BTN_NEXT->STEP_WAIT_ETAPE2"
+
+    - step_id: "STEP_U_SON_PROTO"
+      screen_scene_id: "SCENE_BROKEN"
+      audio_pack_id: "PACK_BOOT_RADIO"
+      actions:
+        - "ACTION_TRACE_STEP"
+        - "ACTION_HW_LED_ALERT"
+      transitions:
+        - "audio_done:AUDIO_DONE->STEP_WAIT_ETAPE2"
+        - "serial:BTN_NEXT->STEP_WAIT_ETAPE2"
+        - "serial:FORCE_ETAPE2->STEP_ETAPE2"
+
+    - step_id: "STEP_WAIT_ETAPE2"
+      screen_scene_id: "SCENE_LA_DETECTOR"
+      audio_pack_id: ""
+      actions:
+        - "ACTION_TRACE_STEP"
+        - "ACTION_QUEUE_SONAR"
+        - "ACTION_CAMERA_SNAPSHOT"
+        - "ACTION_REC_START"
+      transitions:
+        - "timer:ETAPE2_DUE->STEP_ETAPE2"
+        - "serial:BTN_NEXT->STEP_ETAPE2"
+        - "unlock:UNLOCK->STEP_ETAPE2"
+        - "action:ACTION_FORCE_ETAPE2->STEP_ETAPE2"
+        - "serial:FORCE_ETAPE2->STEP_ETAPE2"
+
+    - step_id: "STEP_ETAPE2"
+      screen_scene_id: "SCENE_WIN_ETAPE"
+      audio_pack_id: "PACK_WIN"
+      actions:
+        - "ACTION_TRACE_STEP"
+        - "ACTION_HW_LED_ALERT"
+      transitions:
+        - "serial:BTN_NEXT->STEP_DONE"
+        - "serial:FORCE_DONE->STEP_DONE"
+
+    - step_id: "STEP_DONE"
+      screen_scene_id: "SCENE_CAMERA_SCAN"
+      audio_pack_id: ""
+      actions:
+        - "ACTION_TRACE_STEP"
+        - "ACTION_REC_STOP"
+        - "ACTION_HW_LED_READY"
+        - "ACTION_REFRESH_SD"
+      transitions:
+        - "serial:QR_OK->STEP_MEDIA_MANAGER"
+
+    - step_id: "STEP_MEDIA_MANAGER"
+      screen_scene_id: "SCENE_MEDIA_MANAGER"
+      audio_pack_id: ""
+      actions:
+        - "ACTION_TRACE_STEP"
+        - "ACTION_SET_BOOT_MEDIA_MANAGER"
+        - "ACTION_HW_LED_READY"
+      mp3_gate_open: true
+      transitions: []
+
+  scene_catalog_runtime:
+    - scene_id: "SCENE_LOCKED"
+      hal: "camera=0 mic=0 amp=0 ws2812=1 led_auto=1"
+    - scene_id: "SCENE_LA_DETECTOR"
+      hal: "camera=0 mic=1 amp=0 ws2812=1 led_auto=1"
+    - scene_id: "SCENE_WIN_ETAPE"
+      hal: "camera=0 mic=0 amp=0 ws2812=1 led_auto=1"
+    - scene_id: "SCENE_MP3_PLAYER"
+      hal: "camera=0 mic=1 amp=1 ws2812=1 led_auto=1 rgb=18/45/95"
+    - scene_id: "SCENE_CAMERA_SCAN"
+      hal: "camera=0 mic=1 amp=0 ws2812=1 led_auto=1 rgb=18/45/95"
+    - scene_id: "SCENE_MEDIA_MANAGER"
+      hal: "camera=0 mic=0 amp=0 ws2812=1 led_auto=1 rgb=18/45/95"

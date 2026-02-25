@@ -25,6 +25,8 @@ constexpr ScreenSceneDef kScenes[] = {
     {"SCENE_FIREWORKS", 1U, 2U},
     {"SCENE_WIN_ETAPE", 1U, 2U},
     {"SCENE_MP3_PLAYER", 1U, 2U},
+    {"SCENE_MEDIA_MANAGER", 1U, 2U},
+    {"SCENE_PHOTO_MANAGER", 1U, 2U},
 };
 
 // Controlled legacy aliases used during the migration window.

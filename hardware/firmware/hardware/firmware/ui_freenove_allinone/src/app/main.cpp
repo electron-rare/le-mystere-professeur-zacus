@@ -24,6 +24,7 @@
 #include "runtime/app_coordinator.h"
 #include "runtime/la_trigger_service.h"
 #include "runtime/perf/perf_monitor.h"
+#include "runtime/provisioning/boot_mode_store.h"
 #include "runtime/provisioning/credential_store.h"
 #include "runtime/resource/resource_coordinator.h"
 #include "runtime/scene_fx_orchestrator.h"
@@ -70,7 +71,8 @@ constexpr const char* kAmpMusicPathPrimary = "/music";
 constexpr const char* kAmpMusicPathFallback1 = "/audio/music";
 constexpr const char* kAmpMusicPathFallback2 = "/audio";
 #endif
-constexpr const char* kCameraSceneId = "SCENE_CAMERA_SCAN";
+constexpr const char* kCameraSceneId = "SCENE_PHOTO_MANAGER";
+constexpr const char* kMediaManagerSceneId = "SCENE_MEDIA_MANAGER";
 
 AudioManager g_audio;
 ScenarioManager g_scenario;
@@ -83,6 +85,7 @@ HardwareManager g_hardware;
 CameraManager g_camera;
 MediaManager g_media;
 CredentialStore g_credential_store;
+BootModeStore g_boot_mode_store;
 RuntimeNetworkConfig g_network_cfg;
 RuntimeHardwareConfig g_hardware_cfg;
 CameraManager::Config g_camera_cfg;
@@ -102,6 +105,7 @@ LaTriggerRuntimeState g_la_trigger;
 bool g_la_dispatch_in_progress = false;
 bool g_has_ring_sent_for_win_etape = false;
 bool g_win_etape_ui_refresh_pending = false;
+bool g_boot_media_manager_mode = false;
 bool g_setup_mode = true;
 bool g_web_auth_required = false;
 bool g_resource_profile_auto = true;
@@ -238,6 +242,36 @@ void copyText(char* out, size_t out_size, const char* text) {
   }
   std::strncpy(out, text, out_size - 1U);
   out[out_size - 1U] = '\0';
+}
+
+BootModeStore::StartupMode currentStartupMode() {
+  return g_boot_media_manager_mode ? BootModeStore::StartupMode::kMediaManager : BootModeStore::StartupMode::kStory;
+}
+
+void applyStartupMode(BootModeStore::StartupMode mode) {
+  g_boot_media_manager_mode = (mode == BootModeStore::StartupMode::kMediaManager);
+}
+
+void printBootModeStatus() {
+  const BootModeStore::StartupMode mode = currentStartupMode();
+  Serial.printf("BOOT_MODE_STATUS mode=%s media_validated=%u\n",
+                BootModeStore::modeLabel(mode),
+                g_boot_mode_store.isMediaValidated() ? 1U : 0U);
+}
+
+bool parseBootModeToken(const char* token, BootModeStore::StartupMode* out_mode) {
+  if (token == nullptr || out_mode == nullptr) {
+    return false;
+  }
+  if (std::strcmp(token, "STORY") == 0) {
+    *out_mode = BootModeStore::StartupMode::kStory;
+    return true;
+  }
+  if (std::strcmp(token, "MEDIA_MANAGER") == 0 || std::strcmp(token, "MEDIA") == 0) {
+    *out_mode = BootModeStore::StartupMode::kMediaManager;
+    return true;
+  }
+  return false;
 }
 
 void applySceneResourcePolicy(const ScenarioSnapshot& snapshot) {
@@ -2597,6 +2631,16 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
     return g_media.stopRecording();
   }
 
+  if (std::strcmp(action_id, "ACTION_SET_BOOT_MEDIA_MANAGER") == 0) {
+    const bool mode_ok = g_boot_mode_store.saveMode(BootModeStore::StartupMode::kMediaManager);
+    const bool flag_ok = g_boot_mode_store.setMediaValidated(true);
+    applyStartupMode(BootModeStore::StartupMode::kMediaManager);
+    Serial.printf("[ACTION] SET_BOOT_MEDIA_MANAGER mode_ok=%u validated_ok=%u\n",
+                  mode_ok ? 1U : 0U,
+                  flag_ok ? 1U : 0U);
+    return mode_ok && flag_ok;
+  }
+
   return false;
 }
 
@@ -2948,6 +2992,49 @@ bool dispatchControlAction(const String& action_raw, uint32_t now_ms, String* ou
   if (action.equalsIgnoreCase("REC_STATUS")) {
     printMediaStatus();
     return true;
+  }
+  if (action.equalsIgnoreCase("BOOT_MODE_STATUS")) {
+    printBootModeStatus();
+    return true;
+  }
+  if (action.equalsIgnoreCase("BOOT_MODE_CLEAR")) {
+    const bool ok = g_boot_mode_store.clearMode();
+    applyStartupMode(BootModeStore::StartupMode::kStory);
+    if (!ok && out_error != nullptr) {
+      *out_error = "boot_mode_clear_failed";
+    }
+    return ok;
+  }
+  if (startsWithIgnoreCase(action.c_str(), "BOOT_MODE_SET ")) {
+    String mode_text = action.substring(static_cast<unsigned int>(std::strlen("BOOT_MODE_SET ")));
+    mode_text.trim();
+    mode_text.toUpperCase();
+    BootModeStore::StartupMode mode = BootModeStore::StartupMode::kStory;
+    if (!parseBootModeToken(mode_text.c_str(), &mode)) {
+      if (out_error != nullptr) {
+        *out_error = "boot_mode_set_arg";
+      }
+      return false;
+    }
+    const bool ok = g_boot_mode_store.saveMode(mode);
+    if (!ok) {
+      if (out_error != nullptr) {
+        *out_error = "boot_mode_set_failed";
+      }
+      return false;
+    }
+    applyStartupMode(mode);
+    (void)g_boot_mode_store.setMediaValidated(mode == BootModeStore::StartupMode::kMediaManager);
+    return true;
+  }
+  if (startsWithIgnoreCase(action.c_str(), "QR_SIM ")) {
+    String payload = action.substring(static_cast<unsigned int>(std::strlen("QR_SIM ")));
+    payload.trim();
+    const bool ok = !payload.isEmpty() && g_ui.simulateQrPayload(payload.c_str());
+    if (!ok && out_error != nullptr) {
+      *out_error = "qr_sim_arg";
+    }
+    return ok;
   }
 
   if (startsWithIgnoreCase(action.c_str(), "WIFI_CONNECT ")) {
@@ -4114,7 +4201,9 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
         "MIC_TUNER_STATUS [ON|OFF|<period_ms>] "
         "CAM_STATUS CAM_ON CAM_OFF CAM_SNAPSHOT [filename] "
         "CAM_UI_SHOW CAM_UI_HIDE CAM_UI_TOGGLE CAM_REC_SNAP CAM_REC_SAVE [auto|bmp|jpg|raw] CAM_REC_GALLERY CAM_REC_NEXT CAM_REC_DELETE CAM_REC_STATUS "
+        "QR_SIM <payload> "
         "MEDIA_LIST <picture|music|recorder> MEDIA_PLAY <path> MEDIA_STOP REC_START [seconds] [filename] REC_STOP REC_STATUS "
+        "BOOT_MODE_STATUS BOOT_MODE_SET <STORY|MEDIA_MANAGER> BOOT_MODE_CLEAR "
         "NET_STATUS WIFI_STATUS WIFI_TEST WIFI_STA <ssid> <pass> WIFI_CONNECT <ssid> <pass> WIFI_PROVISION <ssid> <pass> WIFI_FORGET WIFI_DISCONNECT "
         "AUTH_STATUS AUTH_TOKEN_ROTATE [token] "
         "WIFI_AP_ON [ssid] [pass] WIFI_AP_OFF "
@@ -4344,6 +4433,9 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
   }
   if (std::strcmp(command, "RESET") == 0) {
     g_scenario.reset();
+    if (g_boot_media_manager_mode) {
+      (void)g_scenario.gotoScene(kMediaManagerSceneId, now_ms, "boot_mode_media_manager_reset");
+    }
     g_last_action_step_key[0] = '\0';
     Serial.println("ACK RESET");
     return;
@@ -4471,7 +4563,9 @@ void handleSerialCommand(const char* command_line, uint32_t now_ms) {
       std::strcmp(command, "CAM_REC_DELETE") == 0 || std::strcmp(command, "MEDIA_LIST") == 0 ||
       std::strcmp(command, "MEDIA_PLAY") == 0 || std::strcmp(command, "MEDIA_STOP") == 0 ||
       std::strcmp(command, "REC_START") == 0 || std::strcmp(command, "REC_STOP") == 0 ||
-      std::strcmp(command, "SCENE_GOTO") == 0) {
+      std::strcmp(command, "SCENE_GOTO") == 0 || std::strcmp(command, "QR_SIM") == 0 ||
+      std::strcmp(command, "BOOT_MODE_STATUS") == 0 || std::strcmp(command, "BOOT_MODE_SET") == 0 ||
+      std::strcmp(command, "BOOT_MODE_CLEAR") == 0) {
     String action = command;
     if (argument != nullptr && argument[0] != '\0') {
       action += " ";
@@ -4890,6 +4984,17 @@ void setup() {
   }
   RuntimeConfigService::load(g_storage, &g_network_cfg, &g_hardware_cfg, &g_camera_cfg, &g_media_cfg);
   loadBootProvisioningState();
+  {
+    BootModeStore::StartupMode startup_mode = BootModeStore::StartupMode::kStory;
+    if (g_boot_mode_store.loadMode(&startup_mode)) {
+      applyStartupMode(startup_mode);
+    } else {
+      applyStartupMode(BootModeStore::StartupMode::kStory);
+    }
+    Serial.printf("[BOOT] startup_mode=%s media_validated=%u\n",
+                  BootModeStore::modeLabel(currentStartupMode()),
+                  g_boot_mode_store.isMediaValidated() ? 1U : 0U);
+  }
   g_resource_coordinator.begin();
   Serial.printf("[MAIN] default scenario checksum=%lu\n",
                 static_cast<unsigned long>(g_storage.checksum(kDefaultScenarioFile)));
@@ -4966,6 +5071,10 @@ void setup() {
 
   if (!g_scenario.begin(kDefaultScenarioFile)) {
     Serial.println("[MAIN] scenario init failed");
+  }
+  if (g_boot_media_manager_mode) {
+    const bool routed = g_scenario.gotoScene(kMediaManagerSceneId, millis(), "boot_mode_media_manager");
+    Serial.printf("[BOOT] route media_manager scene=%s ok=%u\n", kMediaManagerSceneId, routed ? 1U : 0U);
   }
   g_last_action_step_key[0] = '\0';
 
@@ -5169,6 +5278,37 @@ void runRuntimeIteration(uint32_t now_ms) {
   refreshSceneIfNeeded(false);
   const uint32_t ui_started_us = perfMonitor().beginSample();
   g_ui.tick(now_ms);
+  char runtime_event[24] = {0};
+  while (g_ui.consumeRuntimeEvent(runtime_event, sizeof(runtime_event))) {
+    char event_token[40] = "SERIAL:";
+    std::strncat(event_token, runtime_event, sizeof(event_token) - std::strlen(event_token) - 1U);
+    bool dispatched = dispatchScenarioEventByName(event_token, now_ms);
+    if (!dispatched) {
+      dispatched = dispatchScenarioEventByName(runtime_event, now_ms);
+      if (dispatched) {
+        std::strncpy(event_token, runtime_event, sizeof(event_token) - 1U);
+        event_token[sizeof(event_token) - 1U] = '\0';
+      }
+    }
+    if (!dispatched && std::strcmp(runtime_event, "QR_OK") == 0) {
+      const ScenarioSnapshot snapshot = g_scenario.snapshot();
+      const bool boot_mode_ok = executeStoryAction("ACTION_SET_BOOT_MEDIA_MANAGER", snapshot, now_ms);
+      const bool goto_ok = g_scenario.gotoScene("SCENE_MEDIA_MANAGER", now_ms, "ui_qr_fallback");
+      dispatched = goto_ok;
+      if (boot_mode_ok || goto_ok) {
+        std::strncpy(event_token, "QR_OK_FALLBACK", sizeof(event_token) - 1U);
+        event_token[sizeof(event_token) - 1U] = '\0';
+        Serial.printf("[UI_EVENT] qr fallback mode_ok=%u goto_ok=%u\n",
+                      boot_mode_ok ? 1U : 0U,
+                      goto_ok ? 1U : 0U);
+      }
+    }
+    Serial.printf("[UI_EVENT] event=%s dispatched=%u\n", event_token, dispatched ? 1U : 0U);
+    if (dispatched) {
+      refreshSceneIfNeeded(true);
+    }
+    runtime_event[0] = '\0';
+  }
 #if defined(USE_AUDIO) && (USE_AUDIO != 0)
   if (g_amp_ready) {
     g_amp_player.tick(now_ms);

@@ -1,0 +1,291 @@
+# Zacus Scenario — Canonical YAML (v3)
+# Generated: 2026-02-25
+#
+# Conventions:
+# - step_id = STEP_*, screen_scene_id = SCENE_*
+# - led_policy is a sibling of transitions (NOT nested inside)
+# - QR rule scene_id aligned to SCENE_QR_DETECTOR
+# - Final transitions go to SCENE_MEDIA_MANAGER (hub scene)
+#
+# Narrative anchors (conversation):
+# - Prototype: U-SON
+# - Acte 1 (~45min): LA 440 Hz (STEP_LA_DETECTOR)
+# - Acte 2 (~60min): Zone 4 piano-alphabet → jouer "LEFOU" (STEP_LEFOU_DETECTOR)
+#   * Lettres collées en ordre aléatoire sur touches blanches
+#   * A placé sur la touche correspondant au LA 440 Hz (ancre)
+# - QR final: payload "WIN", caché derrière le portrait dans la Salle des Archives
+
+prompt_input:
+  meta:
+    request_name: "DEFAULT_UNLOCK_WIN_ETAPE2"
+    owner: "clement"
+    board_target: "freenove_esp32s3"
+    objective: "U-SON: Acte1 LA440 (~45min) -> Acte2 piano 'LEFOU' (~60min) -> QR WIN -> Media Manager (persistant)"
+
+  boot_policy:
+    startup_mode: "story"      # story | media_manager
+    persist_after_validation: true
+    rollback_command_required: true
+
+  qr_rule:
+    enabled: true
+    scene_id: "SCENE_QR_DETECTOR"
+    expected_payload: "WIN"
+    match_mode: "exact"        # exact | prefix | contains
+    case_insensitive: true
+    success_event: "UNLOCK_QR"
+    failure_event: "QR_INVALID"
+
+  media_hub:
+    enabled: true
+    hub_scene_id: "SCENE_MEDIA_MANAGER"
+    entries:
+      - "SCENE_PHOTO_MANAGER"
+      - "SCENE_MP3_PLAYER"
+      - "SCENE_READY"
+
+  led_policy:
+    strict_rgb: true
+    defaults:
+      ws2812: 1
+      led_auto: 1
+      rgb: "18/45/95"
+    scene_overrides:
+      - scene_id: "SCENE_LA_DETECTOR"
+        rgb: "dynamic_tuner_or_off"
+
+  custom_steps: []
+
+  serial_test_plan:
+    - "SC_LOAD DEFAULT"
+    - "SCENE_GOTO SCENE_U_SON_PROTO"
+    - "QR_SIM WIN"
+    - "SC_EVENT UNLOCK_QR"
+    - "BOOT_MODE_STATUS"
+    - "RESET"
+
+  acceptance_criteria:
+    - "Pas de PANIC|ASSERT|ABORT|REBOOT|rst:"
+    - "Transitions scene avec ACK ... ok=1"
+    - "Ownership camera/mic/amp coherent"
+    - "LED WS2812 conformes policy + RGB"
+    - "Boot mode media_manager persistant apres QR valide"
+
+  notes:
+    - "Prototype: U-SON."
+    - "Etape1: LA 440 Hz stable (Acte1 ~45min)."
+    - "Etape2: piano-alphabet → jouer 'LEFOU' (Acte2 ~60min)."
+    - "QR WIN: caché derrière le portrait (Salle des Archives)."
+    - "SCENE_QR_DETECTOR a un timeout (QR_TIMEOUT) pour eviter le blocage."
+
+scenario:
+  id: "DEFAULT"
+  version: 2
+  initial_step: "STEP_U_SON_PROTO"
+  app_bindings:
+    - "APP_AUDIO"
+    - "APP_SCREEN"
+    - "APP_GATE"
+    - "APP_WIFI"
+    - "APP_ESPNOW"
+    - "APP_SONAR"
+    - "APP_SD"
+    - "APP_CAMERA"
+    - "APP_LED"
+    - "APP_SERIAL"
+    - "APP_TIMER"
+    - "APP_UNLOCK"
+    - "APP_QR"
+    - "APP_INPUT"
+    - "APP_LOG"
+    - "APP_ACTION"
+
+steps_runtime_order:
+
+  - step_id: "STEP_U_SON_PROTO"
+    screen_scene_id: "SCENE_U_SON_PROTO"
+    audio_pack_id: "PACK_BOOT_RADIO"
+    actions:
+      - "ACTION_TRACE_STEP"
+      - "ACTION_HW_LED_ALERT"
+    transitions:
+      - "audio_done:loop->STEP_U_SON_PROTO"
+      - "BTN:ANY->STEP_LA_DETECTOR"
+      - "serial:FORCE_ETAPE2->STEP_LA_DETECTOR"
+    led_policy:
+      ws2812_1: on
+      ws2812_2: on
+      ws2812_3: on
+      ws2812_4: on
+      animation: "random_one_blink"
+      brightness: "random_bright"
+      rgb: "random_color"
+
+  - step_id: "STEP_LA_DETECTOR"
+    screen_scene_id: "SCENE_LA_DETECTOR"
+    audio_pack_id: ""
+    actions:
+      - "ACTION_TRACE_STEP"
+      - "ACTION_QUEUE_SONAR"
+    transitions:
+      - "timer:ETAPE2_DUE->STEP_U_SON_PROTO"
+      - "serial:BTN_NEXT->STEP_RTC_ESP_ETAPE1"
+      - "unlock:UNLOCK->STEP_RTC_ESP_ETAPE1"
+      - "action:ACTION_FORCE_ETAPE2->STEP_RTC_ESP_ETAPE1"
+      - "serial:FORCE_WIN_ETAPE1->STEP_RTC_ESP_ETAPE1"
+    led_policy:
+      ws2812_1: on
+      ws2812_2: on
+      ws2812_3: on
+      ws2812_4: on
+      animation: "dynamic_tuner"
+      brightness: "100%"
+      rgb: "random_color"
+
+  - step_id: "STEP_RTC_ESP_ETAPE1"
+    screen_scene_id: "SCENE_WIN_ETAPE1"
+    audio_pack_id: "PACK_CONFIRM_WIN_ETAPE1"
+    actions:
+      - "ACTION_TRACE_STEP"
+      - "ACTION_HW_LED_ALERT"
+      - "ACTION_ESP_NOW_SEND_ETAPE1"
+      - "ACTION_QUEUE_SONAR"
+    transitions:
+      - "esp_now:ACK_WIN1->STEP_WIN_ETAPE1"
+      - "serial:FORCE_DONE->STEP_WIN_ETAPE1"
+    led_policy:
+      ws2812_1: on
+      ws2812_2: off
+      ws2812_3: off
+      ws2812_4: on
+      animation: "breathing"
+      brightness: "random_bright"
+      rgb: "random_color"
+
+  - step_id: "STEP_WIN_ETAPE1"
+    screen_scene_id: "SCENE_WIN_ETAPE1"
+    audio_pack_id: "PACK_WIN"
+    actions:
+      - "ACTION_TRACE_STEP"
+      - "ACTION_HW_LED_ALERT"
+    transitions:
+      - "serial:BTN_NEXT->STEP_WARNING"
+      - "serial:FORCE_DONE->STEP_WARNING"
+      - "esp_now:ACK_WARNING->STEP_WARNING"
+    led_policy:
+      ws2812_1: on
+      ws2812_2: off
+      ws2812_3: off
+      ws2812_4: on
+      animation: "K2000"
+      brightness: "K2000"
+      rgb: "red"
+
+  - step_id: "STEP_WARNING"
+    screen_scene_id: "SCENE_WARNING"
+    audio_pack_id: "PACK_BOOT_RADIO"
+    actions:
+      - "ACTION_TRACE_STEP"
+      - "ACTION_HW_LED_ALERT"
+    transitions:
+      - "audio_done:loop->STEP_WARNING"
+      - "BTN:ANY->STEP_LEFOU_DETECTOR"
+      - "serial:FORCE_ETAPE2->STEP_LEFOU_DETECTOR"
+    led_policy:
+      ws2812_1: on
+      ws2812_2: on
+      ws2812_3: on
+      ws2812_4: on
+      animation: "blink_all"
+      brightness: "100%"
+      rgb: "red"
+
+  - step_id: "STEP_LEFOU_DETECTOR"
+    screen_scene_id: "SCENE_LEFOU_DETECTOR"
+    audio_pack_id: ""
+    actions:
+      - "ACTION_TRACE_STEP"
+      - "ACTION_QUEUE_SONAR"
+    transitions:
+      - "timer:ETAPE2_DUE->STEP_WARNING"
+      - "serial:BTN_NEXT->STEP_RTC_ESP_ETAPE2"
+      - "unlock:UNLOCK->STEP_RTC_ESP_ETAPE2"
+      - "action:ACTION_FORCE_ETAPE2->STEP_RTC_ESP_ETAPE2"
+      - "serial:FORCE_WIN_ETAPE2->STEP_RTC_ESP_ETAPE2"
+    led_policy:
+      ws2812_1: on
+      ws2812_2: on
+      ws2812_3: on
+      ws2812_4: on
+      animation: "dynamic_tuner"
+      brightness: "100%"
+      rgb: "random_color"
+
+  - step_id: "STEP_RTC_ESP_ETAPE2"
+    screen_scene_id: "SCENE_WIN_ETAPE2"
+    audio_pack_id: "PACK_CONFIRM_WIN_ETAPE2"
+    actions:
+      - "ACTION_TRACE_STEP"
+      - "ACTION_HW_LED_ALERT"
+      - "ACTION_ESP_NOW_SEND_ETAPE2"
+      - "ACTION_QUEUE_SONAR"
+    transitions:
+      - "esp_now:ACK_WIN2->STEP_QR_DETECTOR"
+      - "serial:FORCE_DONE->STEP_QR_DETECTOR"
+    led_policy:
+      ws2812_1: on
+      ws2812_2: off
+      ws2812_3: off
+      ws2812_4: on
+      animation: "breathing"
+      brightness: "random_bright"
+      rgb: "random_color"
+
+  - step_id: "STEP_QR_DETECTOR"
+    screen_scene_id: "SCENE_QR_DETECTOR"
+    audio_pack_id: ""
+    actions:
+      - "ACTION_TRACE_STEP"
+      - "ACTION_QR_CODE_SCANNER_START"
+      - "ACTION_QR_TIMEOUT_30S"
+    transitions:
+      - "timer:ETAPE2_DUE->STEP_RTC_ESP_ETAPE2"
+      - "event:QR_TIMEOUT->STEP_RTC_ESP_ETAPE2"
+      - "serial:BTN_NEXT->STEP_FINAL_WIN"
+      - "unlock:UNLOCK_QR->STEP_FINAL_WIN"
+      - "action:ACTION_FORCE_ETAPE2->STEP_FINAL_WIN"
+      - "serial:FORCE_WIN_ETAPE2->STEP_FINAL_WIN"
+    led_policy:
+      ws2812_1: on
+      ws2812_2: on
+      ws2812_3: on
+      ws2812_4: on
+      animation: "bargraph_qr_trigger"
+      brightness: "bargraph"
+      rgb: "bargraph_red_to_green"
+
+  - step_id: "STEP_FINAL_WIN"
+    screen_scene_id: "SCENE_FINAL_WIN"
+    audio_pack_id: ""
+    actions:
+      - "ACTION_TRACE_STEP"
+      - "ACTION_WINNER"
+    transitions:
+      - "timer:WIN_DUE->SCENE_MEDIA_MANAGER"
+      - "serial:BTN_NEXT->SCENE_MEDIA_MANAGER"
+      - "unlock:UNLOCK->SCENE_MEDIA_MANAGER"
+      - "action:FORCE_WIN_ETAPE2->SCENE_MEDIA_MANAGER"
+      - "serial:FORCE_WIN_ETAPE2->SCENE_MEDIA_MANAGER"
+    led_policy:
+      ws2812_1: on
+      ws2812_2: on
+      ws2812_3: on
+      ws2812_4: on
+      animation: "blink_all_random"
+      brightness: "100%"
+      rgb: "random_color"
+
+current_firmware_snapshot:
+  source_to_update_files:
+    - "docs/protocols/story_specs/scenarios/default_unlock_win_etape2.yaml"
+    - "data/story/scenarios/DEFAULT.json"

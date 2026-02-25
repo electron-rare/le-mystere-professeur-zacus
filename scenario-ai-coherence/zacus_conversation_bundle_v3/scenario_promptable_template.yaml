@@ -1,0 +1,105 @@
+# Scenario reel - template lisible + promptable.
+#
+# Comment l'utiliser:
+# 1) Edite uniquement la section `prompt_input`.
+# 2) Laisse `current_firmware_snapshot` comme reference de l'etat actuel code.
+# 3) Envoie ce fichier a Codex: je convertis ensuite vers le YAML canonique + JSON runtime.
+#
+# NOTE (conversation):
+# - Prototype: U-SON
+# - Etape 1 (LA_DETECTOR): fréquence audio LA 440 Hz
+# - Etape 2 (LEFOU_DETECTOR): puzzle piano-alphabet → jouer "LEFOU"
+#   * Lettres collées en ordre aléatoire sur les touches blanches
+#   * A est placé sur la touche correspondant au LA 440 Hz (ancre)
+# - QR final: payload "WIN", caché derrière le portrait dans la Salle des Archives
+
+prompt_input:
+  meta:
+    request_name: "A_COMPLETER"
+    owner: "A_COMPLETER"
+    board_target: "freenove_esp32s3"
+    objective: "U-SON: Acte1 LA440 (~45min) -> Acte2 Zone4 piano 'LEFOU' (~60min) -> QR WIN -> Media Manager"
+
+  boot_policy:
+    startup_mode: "story"      # story | media_manager
+    persist_after_validation: true
+    rollback_command_required: true
+
+  qr_rule:
+    enabled: true
+    scene_id: "SCENE_QR_DETECTOR"
+    expected_payload: "WIN"
+    match_mode: "exact"        # exact | prefix | contains
+    case_insensitive: true
+    success_event: "UNLOCK_QR"
+    failure_event: "QR_INVALID"
+
+  media_hub:
+    enabled: true
+    hub_scene_id: "SCENE_MEDIA_MANAGER"
+    entries:
+      - "SCENE_PHOTO_MANAGER"
+      - "SCENE_MP3_PLAYER"
+      - "SCENE_READY"
+
+  led_policy:
+    strict_rgb: true
+    defaults:
+      ws2812: 1
+      led_auto: 1
+      rgb: "18/45/95"
+    scene_overrides:
+      - scene_id: "SCENE_LA_DETECTOR"
+        rgb: "dynamic_tuner_or_off"
+
+  custom_steps:
+    # Ajoute, retire, ou reordonne des steps ici.
+    - "A_COMPLETER"
+
+  serial_test_plan:
+    - "SC_LOAD DEFAULT"
+    - "SCENE_GOTO"
+    - "QR_SIM WIN"
+    - "SC_EVENT UNLOCK_QR"
+    - "BOOT_MODE_STATUS"
+    - "RESET"
+
+  acceptance_criteria:
+    - "Pas de PANIC|ASSERT|ABORT|REBOOT|rst:"
+    - "Transitions scene avec ACK ... ok=1"
+    - "Ownership camera/mic/amp coherent"
+    - "LED WS2812 conformes policy + RGB"
+    - "Boot mode media_manager persistant apres QR valide"
+
+  notes:
+    - "Acte 1: LA 440 Hz (stabilité) ~45 minutes."
+    - "Acte 2: Zone 4 piano-alphabet (LEFOU) + Archives (QR WIN derrière portrait) ~60 minutes."
+    - "Prototype: U-SON."
+    - "Ajouter ici les exceptions ou aliases scene."
+
+  scenario:
+    id: "DEFAULT"
+    version: 2
+    initial_step: "STEP_U_SON_PROTO"
+    app_bindings:
+      - "APP_AUDIO"
+      - "APP_SCREEN"
+      - "APP_GATE"
+      - "APP_WIFI"
+      - "APP_ESPNOW"
+      - "APP_SONAR"
+      - "APP_SD"
+      - "APP_CAMERA"
+      - "APP_LED"
+      - "APP_SERIAL"
+      - "APP_TIMER"
+      - "APP_UNLOCK"
+      - "APP_QR"
+      - "APP_INPUT"
+      - "APP_LOG"
+      - "APP_ACTION"
+
+current_firmware_snapshot:
+  source_to_update_files:
+    - "docs/protocols/story_specs/scenarios/default_unlock_win_etape2.yaml"
+    - "data/story/scenarios/DEFAULT.json"

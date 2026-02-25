@@ -27,9 +27,12 @@
   - extension cache storage scene/audio de single-entry a cache borne (3 slots) + invalidation preservee
     - `hardware/firmware/ui_freenove_allinone/include/storage/storage_manager.h`
     - `hardware/firmware/ui_freenove_allinone/src/storage/storage_manager.cpp`
-  - campagne perf USB modem (150s):
-    - `artifacts/rc_live/perf_campaign_20260225-230640.log`
-    - final `PERF_STATUS`: loop avg=139404us, ui_tick avg=86478us, ui_flush avg=2078us (dma=5672 sync=0)
+  - campagne perf USB modem (150s, sequence identique avant/apres):
+    - before (commit `c3efe94`): `artifacts/rc_live/perf_campaign_before_20260225-231633.log`
+      - `loop avg=136605us`, `ui_tick avg=97345us`, `ui_flush avg=2053us`
+    - after (commit `1787e9b`): `artifacts/rc_live/perf_campaign_after_20260225-232110.log`
+      - `loop avg=164980us`, `ui_tick avg=102288us`, `ui_flush avg=2068us`
+    - constat: variance elevee liee charge audio/SD; optimisation UI ne degrade pas la stabilite (panic/reboot non observes pendant campagne) mais gain net non concluant sur cette charge mixte.
 - Lot 5 (validation finale USB modem + tooling):
   - flash firmware: `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
   - smoke/tests:

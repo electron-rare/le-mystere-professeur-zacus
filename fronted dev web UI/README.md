@@ -1,64 +1,77 @@
-# Story V2 WebUI
+---
+# Zacus WebUI (Story V2)
+// TODO NO DEV FINISH (need KILL_LIFE ?)
 
 Frontend Mission Control pour les devices Zacus.
 
-## Nouveautes principales
+---
 
-- `Scenario Selector` revu: recherche, tri, mode legacy explicite, CTA adaptes aux capabilities.
-- `Live Orchestrator` revu: statut runtime lisible, recovery stream, filtre d'evenements, controles reseau legacy.
-- `Story Designer` nodal avec React Flow:
-  - import YAML -> graphe (Story V2 canonique + legacy simplifie),
-  - export graphe -> YAML canonique Story V2,
-  - edition guidee des `app_bindings`,
-  - edition node/edge, undo/redo, auto-layout.
-- UI globale harmonisee en style glass modern, labels FR et focus accessibilite.
+## 📝 Description
 
-## Modes API (dual mode)
+Interface web de pilotage, design et diagnostic pour les firmwares Zacus (Story V2 et legacy).
 
-Détection automatique du firmware connecté :
+---
 
-- `story_v2`: endpoints `/api/story/*` + stream WebSocket.
-- `freenove_legacy`: endpoints `/api/status`, `/api/scenario/*`, `/api/stream` (SSE).
+## 📦 Fonctionnalités principales
 
-Les actions non supportees en mode legacy sont desactivees avec message explicite.
+- Sélecteur de scénario avancé (recherche, tri, mode legacy, CTA adaptés)
+- Orchestrateur live (statut runtime, recovery, filtres, contrôles réseau)
+- Story Designer nodal (React Flow, import/export YAML, édition guidée, auto-layout)
+- UI harmonisée (glass modern, labels FR, accessibilité)
 
-## Diagnostics firmware
+---
 
-À la connexion, le front analyse aussi des endpoints firmware non intrusifs :
-
-- version firmware (`/api/version`, `/api/firmware`, `/api/system/info`, `/api/status`),
-- endpoints OTA (`/api/update`, `/api/ota*`, `/api/upgrade*`),
-- endpoints reboot (`/api/reboot`, `/api/reset`, `/api/system/reboot`, `/api/restart`).
-
-L'état est affiché dans le panneau "Firmware". En cas d'absence, le front affiche une alerte claire et les actions de mise à jour ne sont pas proposées.
-
-## Variables d'environnement
-
-- `VITE_API_BASE` cible prioritaire (ex: `http://192.168.0.91`)
-- `VITE_API_PROBE_PORTS` ordre de probe (defaut: `80,8080`)
-- `VITE_API_FLAVOR` override (`auto|story_v2|freenove_legacy`, defaut `auto`)
-
-## Run
+## 🚀 Installation & démarrage rapide
 
 ```bash
 npm install
 npm run dev
 ```
 
-Preset ESP cible `192.168.0.91`:
+Accès local : http://localhost:5173
+Accès LAN : http://<ip-machine>:5173
 
+Preset ESP :
 ```bash
 npm run dev:esp
 ```
 
-- Dev local: `http://localhost:5173`
-- Dev LAN: `http://<ip-machine>:5173`
+---
 
-Preview sur build existant:
+## 🛠️ Usage
 
-```bash
-npm run preview:esp
-```
+Détection automatique du firmware connecté :
+- `story_v2` : endpoints `/api/story/*` + WebSocket
+- `freenove_legacy` : endpoints `/api/status`, `/api/scenario/*`, `/api/stream` (SSE)
+
+Diagnostics firmware :
+- Version, OTA, reboot détectés automatiquement
+- État affiché dans le panneau "Firmware"
+
+Variables d'environnement :
+- `VITE_API_BASE` (ex: `http://192.168.0.91`)
+- `VITE_API_PROBE_PORTS` (défaut: `80,8080`)
+- `VITE_API_FLAVOR` (`auto|story_v2|freenove_legacy`, défaut `auto`)
+
+---
+
+## 🤝 Contribuer
+
+Les contributions sont bienvenues !
+Merci de lire [../../CONTRIBUTING.md](../../CONTRIBUTING.md) avant toute PR.
+
+---
+
+## 🧑‍🎓 Licence
+
+- **Code** : MIT (`../../LICENSE`)
+
+---
+
+## 👤 Contact
+
+Pour toute question ou suggestion, ouvre une issue GitHub ou contacte l’auteur principal :
+- Clément SAILLANT — [github.com/electron-rare](https://github.com/electron-rare)
 
 - Preview local: `http://localhost:4173`
 - Preview LAN: `http://<ip-machine>:4173`

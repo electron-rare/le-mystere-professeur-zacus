@@ -1,63 +1,58 @@
-# STORY portable (generation + runtime)
+---
+# Zacus Firmware – STORY portable (génération + runtime)
 
-## Objectif
+---
 
-Permettre d'ajouter/modifier un scenario STORY sans toucher au moteur C++:
+## 📝 Description
 
-1. ecrire un fichier `../docs/protocols/story_specs/scenarios/*.yaml`
-2. valider le spec
-3. generer le code C++
-4. compiler/flasher
+Permet d’ajouter ou modifier un scénario STORY sans toucher au moteur C++.
+// TODO NO DEV TESTING ? (need KILL_LIFE ?)
 
-Le flux par defaut migre est:
+---
 
+## 📦 Fonctionnement
+
+Étapes pour ajouter un scénario :
+1. Écrire un fichier `../docs/protocols/story_specs/scenarios/*.yaml`
+2. Valider le spec
+3. Générer le code C++
+4. Compiler/flasher
+
+Flux par défaut migré :
 ```
 UNLOCK → U_SON_PROTO → WAIT_ETAPE2 → ETAPE2 → DONE
 ```
+Tous les nouveaux scénarios doivent suivre ce flux (ou l’étendre, jamais le modifier).
 
-**Tous les nouveaux scénarios doivent suivre ce flux par défaut** (ou l'étendre, jamais le modifier).
+---
 
-## Source de verite
+## 🚀 Installation & usage
 
-- schema logique: `../docs/protocols/story_specs/schema/story_spec_v1.yaml`
-- template auteur: `../docs/protocols/story_specs/templates/scenario.template.yaml`
-- scenario migre PR1: `../docs/protocols/story_specs/scenarios/default_unlock_win_etape2.yaml`
-- scenario additionnel RC2: `../docs/protocols/story_specs/scenarios/spectre_radio_lab.yaml`
+Sources de vérité :
+- Schéma logique : `../docs/protocols/story_specs/schema/story_spec_v1.yaml`
+- Template auteur : `../docs/protocols/story_specs/templates/scenario.template.yaml`
+- Scénarios exemples : `../docs/protocols/story_specs/scenarios/`
 
-Le runtime portable charge le code genere et/ou LittleFS:
+Génération :
+- `tools/story_gen/story_gen.py`
+- Code généré : `src/story/generated/`
 
-- `src/story/generated/scenarios_gen.h`
-- `src/story/generated/scenarios_gen.cpp`
-- `src/story/generated/apps_gen.h`
-- `src/story/generated/apps_gen.cpp`
+Mini Apps FSM :
+- Interface commune : `src/story/apps/story_app.h`
+- Apps : `LaDetectorApp`, `AudioPackApp`, `ScreenSceneApp`, `Mp3GateApp`
 
-Le generateur expose aussi la config app LA:
+---
 
-- `LaDetectorAppConfigDef`
-- `generatedLaDetectorConfigByBindingId(const char* id)`
+## 🤝 Contribuer
 
-## Mini Apps FSM
+Merci de lire [../../../../../../CONTRIBUTING.md](../../../../../../CONTRIBUTING.md) avant toute PR.
 
-Interface commune:
+---
 
-- `src/story/apps/story_app.h`
-- `begin(context)`
-- `start(stepContext)`
-- `update(nowMs, eventSink)`
-- `stop(reason)`
-- `handleEvent(event, eventSink)`
-- `snapshot()`
+## 👤 Contact
 
-Apps PR1:
-
-- `LaDetectorApp`
-- `AudioPackApp`
-- `ScreenSceneApp`
-- `Mp3GateApp`
-
-Evolution RC2:
-
-- `LaDetectorApp` devient full-owned pour l'unlock V2 (hold + emission event).
+Pour toute question ou suggestion, ouvre une issue GitHub ou contacte l’auteur principal :
+- Clément SAILLANT — [github.com/electron-rare](https://github.com/electron-rare)
 - config par binding YAML via `app_bindings[].config` (LA uniquement):
   - `hold_ms`
   - `unlock_event`

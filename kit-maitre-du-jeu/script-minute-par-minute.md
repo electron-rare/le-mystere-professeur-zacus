@@ -1,33 +1,38 @@
-# Script minute-par-minute
+# Script minute-par-minute (scénario canon zacus_v2.yaml)
 
-> Version prête à jouer pour 6 à 14 enfants, 60–90 minutes.
+> ⚡ Le Media Kit ESP32 automatise les étapes, feedbacks et finale. Le MJ n’a plus qu’à jongler avec les ions et les blagues quantiques !
+## Avant l'accueil (10 min)
++ Vérifie que le Media Kit ESP32 est bien branché (sinon, menace-le de le remplacer par un tube à vide).
+> Astuce : si le temps manque, accélère la transition entre les actes et utilise les indices audio courts du YAML. Si un enfant demande « c’est quoi un ion ? », réponds « c’est un électron qui a trop fait la fête ! »
+
+# Script minute-par-minute (scénario canon zacus_v2.yaml)
+
+> Version prête à jouer pour 6 à 14 enfants, 105 minutes, 2 actes, 3 stations, QR WIN, finale éthique.
 
 ## Avant l'accueil (10 min)
-- Allume les lampes nommées « labo » et place visuellement le plateau central, les cartes de zones et les enveloppes de station.
-- Vérifie que les badges détective sont prêts, que les indices imprimés sont dans les enveloppes et que les cartes audio (QR ou lien) sont accessibles.
-- Lance une musique d’ambiance scientifique discrète (option portable) et ajuste la lumière pour laisser l’ombre sur les stations.
+- Allume les lampes « labo », place le plateau central, les enveloppes de station, le piano-alphabet (stickers A–Z), le portrait QR WIN.
+- Vérifie badges détective, indices imprimés, supports audio (QR ou lien), backup QR WIN MJ.
+- Lance une musique d’ambiance scientifique discrète.
 
 ## 00:00 – 00:10 : Accueil & immersion
-- Rassemble les enfants et présente la mission : « Professeur Zacus a disparu, il ne répond plus depuis son dernier message. Vous êtes l’équipe d’enquête du Campus.".
-- Donne les badges, répartis les rôles (chef de piste, expert matériel, mémoire) et lis l’intro audio/texte de `game/prompts/audio/intro.md`.
-- Explique les règles anti-chaos (voir `guide-anti-chaos.md`) : un leader parle à la fois, on partage les indices, on note tout dans la fiche d’enquête.
+- Présente la mission : « Le Professeur Zacus a disparu après une alerte cryptée. U-SON dérive. Vous devez stabiliser la référence LA 440 Hz, respecter la règle de Zone 4, puis trouver la clé finale. »
+- Donne les badges, répartis les rôles (voir distribution-des-roles.md), lis l’intro audio (voir YAML).
+- Explique les règles anti-chaos (voir guide-anti-chaos.md).
 
-## 00:10 – 00:35 : Exploration & indices
-- Les enfants circulent entre les stations : panneaux « Atelier chimie », « Salle des prototypes », « Bureau du Professeur », « Carnet de labo ». Chaque station présente un indice de type numérique, spatial, logique ou narratif (voir `plan-stations-et-mise-en-place.md`).
-- Supporte la recherche en donnant des « j’ai besoin d’un indice » quand ils tournent en rond, en prononçant une question fermée (« Le coupable était-il dans le bureau ? ») et en redirigeant la discussion.
-- Note les décisions sur la fiche d’enquête (printable). Encourage les échanges rapides : 5 minutes par station puis rotation libre selon énergie du groupe.
+## 00:10 – 00:45 : Acte 1 — Atelier des Ondes (LA 440)
+- Objectif : produire un LA 440 Hz stable (feedback visuel/audio, validation MJ).
+- Si réussite : passage à l’acte 2, audio de transition (voir YAML).
 
-## 00:35 – 00:65 : Synthèse & décodages
-- Regroupe tout le monde et relis les éléments clés. Relance l’audio `game/prompts/audio/incident.md` pour rappeler le déclencheur (perte de données, message effacé).
-- Ouvre la résolution du puzzle principal : les enfants doivent combiner codes, alibis et objets pour rendre cohérent un tableau suspect.
-- Si le groupe est rapide, distribue deux sous-pistes : (1) reconstituer la méthode (documents et appareils) et (2) déterminer le mobile (motivation). En cas de blocage, propose un « indice verrou » tiré du `canon` de `game/scenarios/zacus_v1.yaml`.
+## 00:45 – 01:20 : Acte 2 — Zone 4 (piano LEFOU)
+- Objectif : jouer la séquence L-E-F-O-U sur le piano-alphabet (validation MJ, indices audio si besoin).
+- Si réussite : révélation de la destination Archives, audio d’indice (voir YAML).
 
-## 00:65 – 00:80 : Mise en accusation et révélations
-- Invite chaque équipe à proposer une conclusion : qui, comment, pourquoi. Demande un argumentaire solide, puis joue l’audio `game/prompts/audio/accusation.md` pour simuler l’arrivée du professeur ou d’un témoin.
-- Si la conclusion ne colle pas, remobilise la piste clé (preuve unique). Sinon, confirme avec l’audio `game/prompts/audio/solution.md` et révèle la chronologie (voir `solution-complete.md`).
+## 01:20 – 01:35 : Salle des Archives (QR WIN)
+- Objectif : trouver et scanner le QR WIN caché derrière le portrait (validation finale, accès Media Hub).
+- Prévoir backup QR WIN MJ si besoin.
 
-## 00:80 – 00:90 : Debrief & récompenses
-- Lis la révélation finale et l’épilogue dans `solution-complete.md`. Remercie les enfants, remets leur badge spécial et partage l’anecdote du Professeur Zacus.
-- Propose un moment libre : dessiner la scène finale ou écrire une note pour l’équipe suivante.
+## 01:35 – 01:45 : Finale & débrief
+- Lis la révélation finale (voir solution-complete.md et YAML) : Zacus réapparaît, félicite l’équipe pour sa stabilité, son calme et son éthique.
+- Remercie les enfants, remets leur badge spécial, propose un moment libre (dessin, anecdote, feedback).
 
-> Astuce : tu peux couper le script à 60 minutes en accélérant l’étape de synthèse et en sautant l’audio d’introduction externe.
+> Astuce : si le temps manque, accélère la transition entre les actes et utilise les indices audio courts du YAML.

@@ -1,28 +1,52 @@
-# Checklist matériel
+# Checklist matériel (version canon Zacus v2)
 
-## Matériel de base (toujours prêt)
-- [ ] Cartes indices imprimées (au moins 3 exemplaires par station)
-- [ ] Badges détective + feutres effaçables
-- [ ] Fiche d’enquête pour chaque groupe et un bloc-notes central
-- [ ] Enveloppes ou pochettes numérotées (stations 1 à 4)
-- [ ] Chronomètre ou timer visible pour la progression
-- [ ] Feuilles de correction / marqueurs pour écrire les solutions intermédiaires
+> ⚡ Le Media Kit ESP32 fait le gros du boulot : feedbacks, transitions, QR, Media Hub… Le MJ n’a plus qu’à canaliser l’énergie ionique du groupe !
+## Matériel principal
+- [ ] Media Kit ESP32 (préconfiguré, voir hardware/firmware/)
+## Objets spécifiques scénario v2
+> Astuce : range chaque pièce avec son numéro de station. Prépare un backup QR WIN dans la boîte MJ (voir YAML). Si un électron s’excite trop, propose-lui de faire le tour du labo à la vitesse de la lumière (ou presque). Les enfants peuvent eux-mêmes remettre en ordre les enveloppes après la session pour entraîner leur mémoire.
+
+
+# Checklist matériel (version canon Zacus v2)
+
+- Scénario : voir `game/scenarios/zacus_v2.yaml` (source de vérité)
+- Participants : 6–14 enfants
+- Durée : 105 min (2 actes : 45 + 60)
+- Stations prévues : 3 (Atelier des Ondes, Zone 4 – Piano Alphabet, Archives QR)
+
+
+## Matériel principal
+- [ ] Enveloppes numérotées (1 par station)
+- [ ] Badges détective + fiches d’enquête (1/groupe)
+- [ ] Cartes indices imprimées (3 exemplaires/station)
+- [ ] Chronomètre ou timer visible
+- [ ] Bloc-notes central et stylos/feutres
+- [ ] Feuilles de correction / marqueurs
+
 
 ## Supports numériques & audio
-- [ ] Tablette ou téléphone pour lire les fichiers `game/prompts/audio/*.md`
-- [ ] Haut-parleur portable (niveau sonore modéré)
-- [ ] Liste des QR codes ou liens vers les fichiers audio
-- [ ] Sauvegarde des fichiers audio (clé USB ou dossier partagé)
+- [ ] Tablette ou téléphone pour lire les fichiers audio (`game/prompts/audio/*.md`)
+- [ ] Haut-parleur portable (volume modéré)
+- [ ] QR codes ou liens vers les fichiers audio (voir `audio/manifests/zacus_v2_audio.yaml`)
+- [ ] Sauvegarde des fichiers audio (clé USB ou cloud)
 
-## Matériel pour l’ambiance
-- [ ] Lumières tamisées (lampes de bureau, guirlandes à LED)
-- [ ] Accessoires laboratoire : éprouvettes, flacons colorés, filtres
-- [ ] Éléments visuels imprimés : plan de l’Auréole, affiche “Laboratoire Zacus”
-- [ ] Tableaux blancs ou feuilles pour afficher les hypothèses
 
-## Extensions modulaires (optionnelles)
-- [ ] Station bonus : puzzle magnétique ou mini-expérience chimique (peroxide + colorant)
-- [ ] Chroniqueur : caméra ou smartphone pour filmer la réaction finale
-- [ ] Récompenses (stickers, diplômes, décorations imprimées)
+## Ambiance & accessoires
+- [ ] Lumières tamisées (lampes, guirlandes LED)
+- [ ] Accessoires labo : éprouvettes, flacons, filtres
+- [ ] Visuels imprimés : plan du Campus, affiche “Laboratoire Zacus”
+- [ ] Tableaux blancs ou feuilles pour hypothèses
 
-> Astuce : range chaque pièce avec son numéro de station. Les enfants peuvent eux-mêmes remettre en ordre les enveloppes après la session pour entraîner leur mémoire.
+
+## Objets spécifiques scénario v2
+- [ ] Piano-alphabet (stickers A–Z sur 26 touches blanches, voir `props_and_assets` dans le YAML)
+- [ ] Portrait (cadre) pour cacher le QR WIN (voir Archives)
+- [ ] QR WIN imprimé (scotch repositionnable)
+
+## Extensions modulaires (option)
+- [ ] Station bonus (voir `stations/`)
+- [ ] Chroniqueur (caméra/smartphone)
+- [ ] Récompenses (stickers, diplômes, décorations)
+
+
+> Astuce : range chaque pièce avec son numéro de station. Prépare un backup QR WIN dans la boîte MJ (voir YAML). Les enfants peuvent eux-mêmes remettre en ordre les enveloppes après la session pour entraîner leur mémoire.

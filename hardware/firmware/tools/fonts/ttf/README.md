@@ -1,9 +1,41 @@
-Place the font sources used by `tools/fonts/scripts/generate_lvgl_fonts.sh` in this directory.
+---
+# Zacus Firmware – Fonts TTF
 
-Required files:
+---
+
+## 📝 Description
+
+Ce dossier contient les polices TTF nécessaires à la génération des polices LVGL pour l’UI Zacus.
+
+---
+
+## 📦 Fichiers requis
+
 - `Inter-Regular.ttf`
 - `Orbitron-Bold.ttf`
 - `IBMPlexMono-Regular.ttf`
-- `PressStart2P-Regular.ttf` (optional when `UI_FONT_PIXEL_ENABLE=1`)
+- `PressStart2P-Regular.ttf` (optionnel si `UI_FONT_PIXEL_ENABLE=1`)
 
-These files are not versioned in the repository to avoid shipping upstream font binaries.
+Ces fichiers ne sont pas versionnés dans le dépôt pour éviter d’inclure des binaires upstream.
+
+---
+
+## 🚀 Installation & usage
+
+Placer les fichiers TTF dans ce dossier, puis lancer le script :
+```sh
+tools/fonts/scripts/generate_lvgl_fonts.sh
+```
+
+---
+
+## 🤝 Contribuer
+
+Merci de ne pas ajouter de polices propriétaires sans licence libre.
+
+---
+
+## 👤 Contact
+
+Pour toute question ou suggestion, ouvre une issue GitHub ou contacte l’auteur principal :
+- Clément SAILLANT — [github.com/electron-rare](https://github.com/electron-rare)

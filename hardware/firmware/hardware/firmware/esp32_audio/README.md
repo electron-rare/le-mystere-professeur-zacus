@@ -1,6 +1,52 @@
 
 
-# Firmware ESP32
+
+---
+# Zacus Firmware – ESP32 Audio
+
+---
+
+## 📝 Description
+
+Firmware principal pour ESP32 Audio Kit V2.2 A252 : gestion audio, logique principale, radio, communication UI.
+
+---
+
+## 🚀 Installation & usage
+
+Tous les assets LittleFS (sons, scénarios, écrans, etc.) sont centralisés dans `hardware/firmware/data/` à la racine du projet.
+Ce dossier unique sert de source pour le flash LittleFS sur ESP32, ESP8266 et RP2040.
+
+Prérequis : PlatformIO, Python 3.14
+Cloner le repo, puis :
+```sh
+cd esp32
+pio run
+```
+Build : `pio run`
+Flash : `pio run -t upload`
+
+---
+
+## 📦 Structure & contenu
+
+- Logique principale, audio, radio, UI (RP2040)
+- Protocole UI, dépannage, mise à jour
+- Voir sections détaillées ci-dessous
+
+---
+
+## 🤝 Contribuer
+
+Merci de lire [../../../../../../../../CONTRIBUTING.md](../../../../../../../../CONTRIBUTING.md) avant toute PR.
+
+---
+
+## 👤 Contact
+
+Pour toute question ou suggestion, ouvre une issue GitHub ou contacte l’auteur principal :
+- Clément SAILLANT — [github.com/electron-rare](https://github.com/electron-rare)
+---
 
 > **[Mise à jour 2026]**
 >

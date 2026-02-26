@@ -68,9 +68,9 @@ class FreenoveLgfxDevice final : public lgfx::LGFX_Device {
 #endif
       cfg.rgb_order =
 #if defined(TFT_RGB_ORDER) && (TFT_RGB_ORDER == TFT_BGR)
-          true;
-#else
           false;
+#else
+          true;
 #endif
       cfg.dlen_16bit = false;
       cfg.bus_shared = true;

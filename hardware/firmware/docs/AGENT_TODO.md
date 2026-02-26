@@ -1,3 +1,51 @@
+## [2026-02-26] Correctif structurel PlatformIO (src_dir global firmware) + build/upload OK
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/1772088629_wip.patch`
+  - `/tmp/zacus_checkpoint/1772088629_status.txt`
+- Correctif structurel applique:
+  - `platformio.ini`:
+    - `[platformio].src_dir` passe de `hardware/firmware/esp32_audio/src` a `hardware/firmware`.
+    - recalage `build_src_filter` pour toutes les cibles afin de pointer explicitement les sous-arbres source:
+      - `esp32dev/esp32_release` -> `esp32_audio/src` + story libs (`../libs/story/...`)
+      - `freenove_esp32s3_full_with_ui` -> `ui_freenove_allinone/src` (+ exclusions legacy root)
+      - `ui_rp2040_ili9488` et `ui_rp2040_ili9486` -> `ui/rp2040_tft/src`
+      - `esp8266_oled` -> `ui/esp8266_oled/src`
+- Resultat:
+  - les objets Freenove sont maintenant generes dans `.pio/build/freenove_esp32s3_full_with_ui/src/ui_freenove_allinone/...` (plus de sortie parasite `.pio/build/ui_freenove_allinone/...`).
+  - echec `No such file or directory` sur `app_coordinator.cpp.o` resolu.
+- Validation:
+  - `pio run -e freenove_esp32s3_full_with_ui` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t upload` ✅
+  - port auto-detecte: `/dev/cu.usbmodem5AB90753301`
+
+## [2026-02-26] Triage build Freenove full_with_ui (legacy duplicate + variant dir PlatformIO)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/1772088629_wip.patch`
+  - `/tmp/zacus_checkpoint/1772088629_status.txt`
+- Analyse:
+  - echec initial sur mismatch API `AudioManager` entre:
+    - `hardware/firmware/ui_freenove_allinone/src/audio_manager.cpp` (legacy)
+    - `hardware/firmware/ui_freenove_allinone/include/audio/audio_manager.h` + `src/audio/audio_manager.cpp` (actuel)
+  - echec structurel additionnel PlatformIO: generation d'objets/deps dans `.pio/build/ui_freenove_allinone/src/...` avec erreur recurrente `No such file or directory` au moment d'ecriture (`app_coordinator.cpp.o`, `*.cpp.d`), y compris en `-j 1`.
+- Correctifs appliques:
+  - `platformio.ini` (`env:freenove_esp32s3_full_with_ui`):
+    - exclusion des unites legacy root migrees (`src/main.cpp`, `src/audio_manager.cpp`, `src/camera_manager.cpp`, `src/ui_manager.cpp`, etc.) pour ne compiler que l'arborescence moderne (`src/app`, `src/audio`, `src/camera`, `src/ui`, ...).
+    - ajout `build_unflags = -MMD` (reduction des erreurs sur fichiers `.d` hors variant dir).
+    - ajout `extra_scripts = pre:tools/dev/pio_prepare_variant_dirs.py`.
+  - ajout script `tools/dev/pio_prepare_variant_dirs.py` (creation pre-build de la hierarchie `.pio/build/ui_freenove_allinone/src/**`).
+- Resultat actuel:
+  - mismatch `AudioManager` corrige (erreurs symboles disparues).
+  - blocage persistant sur creation d'objets externes dans `.pio/build/ui_freenove_allinone/src/app/*.o` (build toujours FAIL).
+- Commandes executees:
+  - `pio run -e freenove_esp32s3_full_with_ui -t clean`
+  - `pio run -e freenove_esp32s3_full_with_ui`
+  - `pio run -e freenove_esp32s3_full_with_ui -j 1`
+  - tentative precreate dirs `.pio/build/ui_freenove_allinone/src/**` avant build
+- Limitation:
+  - upload non lance tant que le build ne passe pas.
+
 ## [2026-02-26] Calibration demandee "BGR565" (passe B compile-time)
 
 - Checkpoint securite:

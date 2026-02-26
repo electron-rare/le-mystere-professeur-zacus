@@ -1,47 +1,47 @@
 {
-  "title": "VICTOIRE",
-  "subtitle": "Etape validee",
-  "symbol": "WIN",
+  "title": "VALIDATION HOT-LINE",
+  "subtitle": "En attente de validation distante...",
+  "symbol": "RADIO",
   "effect": "celebrate",
-  "effect_speed_ms": 420,
+  "effect_speed_ms": 320,
   "theme": {
-    "bg": "#231038",
-    "accent": "#F4CB4A",
-    "text": "#FFF8E2"
+    "bg": "#150B27",
+    "accent": "#54E3FF",
+    "text": "#F4FBFF"
   },
   "transition": {
-    "effect": "zoom",
-    "duration_ms": 280
+    "effect": "fade",
+    "duration_ms": 220
   },
   "timeline": {
     "loop": true,
-    "duration_ms": 1000,
+    "duration_ms": 1200,
     "keyframes": [
       {
         "at_ms": 0,
         "effect": "celebrate",
-        "speed_ms": 420,
+        "speed_ms": 320,
         "theme": {
-          "bg": "#231038",
-          "accent": "#F4CB4A",
-          "text": "#FFF8E2"
+          "bg": "#150B27",
+          "accent": "#54E3FF",
+          "text": "#F4FBFF"
         }
       },
       {
-        "at_ms": 1000,
-        "effect": "blink",
-        "speed_ms": 240,
+        "at_ms": 1200,
+        "effect": "celebrate",
+        "speed_ms": 280,
         "theme": {
-          "bg": "#341A4D",
-          "accent": "#FFE083",
-          "text": "#FFFDF3"
+          "bg": "#1C0F32",
+          "accent": "#7CEEFF",
+          "text": "#FFFFFF"
         }
       }
     ]
   },
   "id": "SCENE_WIN_ETAPE",
   "text": {
-    "show_title": false,
+    "show_title": true,
     "show_subtitle": true,
     "show_symbol": true,
     "title_case": "upper",
@@ -50,10 +50,10 @@
     "subtitle_align": "bottom"
   },
   "visual": {
-    "show_title": false,
+    "show_title": true,
     "show_subtitle": true,
     "show_symbol": true,
-    "effect_speed_ms": 420
+    "effect_speed_ms": 320
   },
   "framing": {
     "preset": "center",
@@ -63,13 +63,13 @@
   },
   "scroll": {
     "mode": "none",
-    "speed_ms": 4200,
-    "pause_ms": 900,
-    "loop": true
+    "speed_ms": 0,
+    "pause_ms": 0,
+    "loop": false
   },
   "demo": {
-    "mode": "standard",
+    "mode": "fireworks",
     "particle_count": 4,
-    "strobe_level": 65
+    "strobe_level": 78
   }
 }

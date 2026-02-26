@@ -18,17 +18,19 @@ bool isCameraSceneId(const char* scene_id) {
 }
 
 bool isIntroSceneId(const char* scene_id) {
-  return (scene_id != nullptr &&
-          (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0 ||
-           std::strcmp(scene_id, "SCENE_WIN_ETAPE1") == 0 ||
-           std::strcmp(scene_id, "SCENE_WIN_ETAPE2") == 0));
+  (void)scene_id;
+  return false;
 }
 
 bool isDirectFxSceneId(const char* scene_id) {
   if (scene_id == nullptr || scene_id[0] == '\0') {
     return false;
   }
-  return std::strcmp(scene_id, "SCENE_WINNER") == 0 || std::strcmp(scene_id, "SCENE_FIREWORKS") == 0;
+  return std::strcmp(scene_id, "SCENE_WINNER") == 0 ||
+         std::strcmp(scene_id, "SCENE_FIREWORKS") == 0 ||
+         std::strcmp(scene_id, "SCENE_U_SON_PROTO") == 0 ||
+         std::strcmp(scene_id, "SCENE_LA_DETECTOR") == 0 ||
+         std::strcmp(scene_id, "SCENE_WIN_ETAPE1") == 0;
 }
 
 }  // namespace

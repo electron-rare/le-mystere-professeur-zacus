@@ -1,3 +1,32 @@
+## [2026-02-26] Freenove scenes lock (LA_DETECTOR / WIN_ETAPE / WIN_ETAPE1 / U_SON_PROTO) + anti-doublons uploadfs
+
+- Decision STOP: cleanup massif conserve (decision produit utilisateur) ; `docs/STOP_REQUIRED.md` garde la trace.
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226_175805_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226_175805_status.txt`
+- Anti-doublons:
+  - ajout `tools/dev/check_no_duplicate_payload_files.py` (scan `data/**` sur motifs `* 2.*`, `* 3.*`).
+  - ajout hook PlatformIO pre-uploadfs `tools/dev/pio_check_no_duplicate_payloads.py`.
+  - branchement env Freenove via `platformio.ini` (`extra_scripts`).
+  - export workbench renforce (`tools/dev/export_scene_editor_workbench.py`) pour ignorer les copies suffixees.
+- Scenes:
+  - `SCENE_U_SON_PROTO`: theme accent magenta, titre taille 100, backlight/WS2812 en `level_sync` avec bornes `<100`.
+  - `SCENE_WIN_ETAPE1`: `effect=tunnel3d` aligne YAML/JSON.
+  - `SCENE_LA_DETECTOR`: oscilloscope force en palette verte (lisibilite constante).
+- Runtime:
+  - `main.cpp`: ajout mode `level_sync` backlight + WS2812 (single random blink, brightness dynamique sur niveau micro).
+  - `ui_manager.cpp`: titre U_SON plus grand + zoom pulsé en overlay LGFX.
+
+## [2026-02-26] Desactivation mire TEST_LAB forcee
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/1772091501_wip.patch`
+  - `/tmp/zacus_checkpoint/1772091501_status.txt`
+- Correctif:
+  - `kForceTestLabSceneLock` passe a `false` dans `hardware/firmware/ui_freenove_allinone/src/app/main.cpp`.
+- Validation:
+  - `pio run -e freenove_esp32s3_full_with_ui` ✅
+
 ## [2026-02-26] Correctif structurel PlatformIO (src_dir global firmware) + build/upload OK
 
 - Checkpoint securite:
@@ -2900,3 +2929,332 @@
   - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
 - Verification:
   - `STATUS` apres reboot -> `step=SCENE_LA_DETECTOR screen=SCENE_LA_DETECTOR` ✅
+
+## [2026-02-26] Fix artefacts scene-change (effect=none) sur UiManager
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226_093612_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226_093612_status.txt`
+  - scan artefacts trackes (`.pio/.platformio/logs/dist/build/node_modules/.venv`) -> aucun tracke.
+- Correctif applique:
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager_effects.cpp`
+  - `hardware/firmware/ui_freenove_allinone/include/ui/ui_manager.h`
+  - ajout helper `setBaseSceneFxVisible(...)` + reset force des objets base (`core/rings/fx_bar`) a chaque `stopSceneAnimations()`.
+  - scene change: on reapplique ensuite explicitement la visibilite selon `effect` (none => cache force).
+  - `applySceneEffect(kNone)` masque explicitement les objets de base (protege timeline/segments intro-display).
+- Build/upload Freenove:
+  - `pio run -e freenove_esp32s3_full_with_ui` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- Smoke serie:
+  - `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 10 --wait-port 20` ✅ (`RESULT=PASS`)
+  - rerun apres `uploadfs`: `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 8 --wait-port 20` ✅ (`RESULT=PASS`)
+  - observations runtime: plus d'erreur `scene payload missing`; audio boot radio redevenu disponible via LittleFS.
+
+## [2026-02-26] Re-sync force LittleFS scene/audio boot radio
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226_094711_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226_094711_status.txt`
+- Presence fichiers source verifiee:
+  - `data/story/screens/SCENE_U_SON_PROTO.json` ✅
+  - `data/music/boot_radio.mp3` ✅
+- Flash LittleFS:
+  - `pio run -e freenove_esp32s3 -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ❌ (`.sconsign314.dblite` manquant sur cet alias env)
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- Verification runtime:
+  - log: `logs/scene_audio_check_20260226_094900.log`
+  - grep erreurs `scene payload missing|file missing fs=littlefs path=/music/boot_radio.mp3` => `MISSING_FOUND=0`
+  - smoke: `RESULT=PASS`
+
+## [2026-02-26] Fix texte scenes (visibles seulement sur TEST_LAB)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226_094711_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226_094711_status.txt`
+- Analyse:
+  - `UI_SCENE_STATUS` confirmait `show_title/show_subtitle=true` + payload `/story/screens/...` correct, donc la panne n'etait pas le JSON/story.
+  - point fragile identifie dans `ui_manager.cpp`: la branche `SCENE_TEST_LAB` faisait `lv_obj_remove_style_all(...)` sur title/subtitle, puis les scenes suivantes ne reappliquaient pas une baseline texte assez stricte (opa/font/padding/state), provoquant des labels invisibles selon l'etat LVGL.
+- Correctif applique:
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+    - suppression des `lv_obj_remove_style_all(...)` dans la branche TEST_LAB.
+    - ajout d'une baseline style texte reappliquee a chaque `static_state_changed` pour title/subtitle/symbol (font, color, text_opa, opa, padding, angle, align de base subtitle).
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager_effects.cpp`
+    - `stopSceneAnimations()` force aussi `text_opa=LV_OPA_COVER` pour title/subtitle/symbol.
+- Build/upload:
+  - `pio run -e freenove_esp32s3_full_with_ui` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- Verification runtime:
+  - scenes ciblees: `SCENE_LA_DETECTOR`, `SCENE_SEARCH`, `SCENE_WINNER` -> `ACK SCENE_GOTO ok=1` + `UI_SCENE_STATUS show_title=true show_subtitle=true payload_origin=/story/screens/...` ✅
+  - smoke: `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 8 --wait-port 20` ✅ (`RESULT=PASS`)
+- Note sur les FAIL observes pendant conformance:
+  - un run `verify_story_ui_conformance.py` intermediaire a genere des `ui_scene_mismatch` (ex `TR_WIN_ETAPE1_1`) car le runtime etait deja en flux d'evenements/audio non deterministe; ce n'etait pas un indicateur fiable de la regression texte elle-meme.
+
+## [2026-02-26] Ajout polices IBM Plex Mono bold/italic (12/24)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226_100645_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226_100645_status.txt`
+- Ajouts assets/fonts:
+  - `tools/fonts/ttf/IBMPlexMono-Bold.ttf`
+  - `tools/fonts/ttf/IBMPlexMono-Italic.ttf`
+  - nouveaux C LVGL generes: `lv_font_ibmplexmono_bold_12.c`, `lv_font_ibmplexmono_bold_24.c`, `lv_font_ibmplexmono_italic_12.c`, `lv_font_ibmplexmono_italic_24.c`.
+- Integration runtime API:
+  - `hardware/firmware/ui_freenove_allinone/include/ui/ui_fonts.h` -> `fontBold12/fontBold24/fontItalic12/fontItalic24`
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_fonts.cpp` -> declarations + getters relies aux nouvelles fontes.
+- Manifest/doc:
+  - `tools/fonts/scripts/font_manifest.json` maj (bold/italic tailles 12,24)
+  - `tools/fonts/ttf/README.md` + `docs/ui/fonts.md` + `docs/ui/fonts_fr.md` maj.
+- Build/upload Freenove (build dir temporaire pour contourner instabilite `.pio/build` locale):
+  - `PLATFORMIO_BUILD_DIR=/tmp/pio-build-zacus-1772097092 pio run -e freenove_esp32s3_full_with_ui` ✅
+  - `PLATFORMIO_BUILD_DIR=/tmp/pio-build-zacus-1772097092 pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - taille firmware: Flash `33.6%` (2115305/6291456), RAM `74.9%` (245316/327680).
+
+## [2026-02-26] In progress - mapping fonts titre/sous-titre (bold24/italic12)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226_102040_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226_102040_status.txt`
+- Demande utilisateur: appliquer globalement `title=Bold24` et `subtitle=Italic12` sur scenes UI.
+- Etapes prevues: patch `ui_manager.cpp` (baseline + refresh scene), build+upload Freenove full UI, verification serie rapide.
+- Realisation:
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+    - mapping global scene text: `title -> UiFonts::fontBold24()`, `subtitle -> UiFonts::fontItalic12()` (init widgets + render baseline).
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager_effects.cpp`
+    - mapping identique reappliquee dans `stopSceneAnimations()` et phases WinEtape (cracktro/clean) pour eviter les retours en `fontBodyS/M`.
+- Build/upload executes:
+  - `PLATFORMIO_BUILD_DIR=/tmp/pio-build-zacus-1772097092 pio run -e freenove_esp32s3_full_with_ui` ✅
+  - `PLATFORMIO_BUILD_DIR=/tmp/pio-build-zacus-1772097092 pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- Usage memoire apres mapping:
+  - Flash `34.3%` (2156785/6291456)
+  - RAM `74.9%` (245332/327680)
+
+## [2026-02-26] In progress - ajout API ESP-NOW v1
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226_102555_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226_102555_status.txt`
+- Demande utilisateur: ajouter la spec API ESP-NOW v1 fournie et la garder coherente avec `docs/espnow_contract.md`.
+- Etapes prevues:
+  1) verifier l'existant doc/firmware (contrat + commandes)
+  2) ajouter/mettre a jour doc API v1
+  3) aligner `docs/espnow_contract.md` si ecart
+- Realisation:
+  - `docs/espnow_api_v1.md` remplace par la spec ESP-NOW API v1 fournie (2026-02-23).
+  - `docs/espnow_contract.md` cree comme contrat canonique miroir pour garder la coherence demandee.
+- Extension suite demande utilisateur (broadcast+discovery + device name `U_SON`):
+  - firmware `app/main.cpp`:
+    - ajout commande `ESPNOW_DISCOVERY` (sweep broadcast + aggregation pairs caches),
+    - ajout `ESPNOW_DEVICE_NAME_GET/SET` avec persistance NVS (`zacus_net/esp_name`),
+    - default/fallback device name passe a `U_SON`,
+    - enrichissement status (`ESPNOW_STATUS`/`STATUS`/`NET_STATUS`) avec `device_name`, `send_mode`, `discovery`.
+  - docs mises a jour (`docs/espnow_api_v1.md`, `docs/espnow_contract.md`) pour `ESPNOW_DISCOVERY` et default `U_SON`.
+- Ajustement discovery suite retour utilisateur:
+  - ajout runtime discovery periodique (`15000ms`) + commandes `ESPNOW_DISCOVERY_RUNTIME [on|off]`.
+  - correction cache peers: ignore `FF:FF:FF:FF:FF:FF` pour eviter faux pair "broadcast".
+
+## [2026-02-26] Diagnostic texte scenes (TEST_LAB ok / autres scenes invisibles)
+
+- Verification terrain:
+  - Upload LittleFS execute pour aligner payloads ecran:
+    - `PLATFORMIO_BUILD_DIR=/tmp/pio-build-zacus-1772097092 pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - Sondage serie `SCENE_GOTO + UI_SCENE_STATUS` sur scenes canoniques:
+    - `payload_origin=/story/screens/...` present
+    - `show_title=true` sur toutes les scenes verifiees
+    - controle global 24 scenes -> `OK`.
+- Cause identifiee:
+  - `SCENE_TEST_LAB` force l'affichage du texte en dur dans `ui_manager.cpp`, alors que les autres scenes dependent des payloads + flags runtime.
+  - Si payload absent/stale, les scenes hors TEST_LAB pouvaient retomber sur un `show_title` defaut trop strict.
+- Correctif anti-regression applique:
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+    - `show_title` passe a `true` par defaut (fallback robuste si payload manquant).
+- Build/upload firmware apres patch:
+  - `PLATFORMIO_BUILD_DIR=/tmp/pio-build-zacus-1772097092 pio run -e freenove_esp32s3_full_with_ui` ✅
+  - `PLATFORMIO_BUILD_DIR=/tmp/pio-build-zacus-1772097092 pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+
+## [2026-02-26] In progress - skill scene/screen specialist
+
+- Demande utilisateur: travailler scene/ecran de facon coherente et creer un skill dedie.
+- Skill cree: `~/.codex/skills/zacus-scene-screen-specialist/`
+  - `SKILL.md` (workflow scene par scene YAML -> JSON -> runtime)
+  - `scripts/scene_screen_sync.py` (audit-scene, sync-scene, audit-all)
+  - `references/repo-scene-map.md`
+  - `agents/openai.yaml` (genere)
+- Validation skill: `quick_validate.py` -> `Skill is valid!`
+- Test script: `audit-scene --scene-id SCENE_SEARCH` -> `diff_count=0`.
+
+## [2026-02-26] In progress - manifest FX demoscene
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226_121419_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226_121419_status.txt`
+- Demande utilisateur: produire un manifest des FX type demoscene pour la stack Freenove.
+- Etapes prevues:
+  1) inventorier presets/timelines demoscene existants (`data/ui/fx/timelines/*.json`, `fx_engine`),
+  2) formaliser un manifest unique versionne (presets, families FX, tracks cibles, mapping scenes),
+  3) verifier JSON (parse + coherence chemins timeline).
+- Realisation:
+  - manifest ajoute: `data/ui/fx/demoscene_fx_manifest.v1.json`
+  - contenu: mapping presets->timelines, catalogue FX actifs, contrat tracks minimum, scene bindings, gates de validation.
+- Verification:
+  - `python3 -m json.tool data/ui/fx/demoscene_fx_manifest.v1.json` ✅
+
+## [2026-02-26] In progress - text glitch FX (glitch 0-100 + size 0-100)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226_122359_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226_122359_status.txt`
+- Demande utilisateur: ajouter un effet texte glitch parametre (`glitch` 0-100, `size` 0-100) et l'integrer au manifest demoscene.
+- Plan d'execution:
+  1) mini veille web sur references "text glitch" demoscene,
+  2) patch runtime UI (`ui_manager*`) pour parser/apply `text.glitch` + `text.size`,
+  3) mise a jour `data/ui/fx/demoscene_fx_manifest.v1.json`.
+
+## [2026-02-26] In progress - alias scene/registry + palette WS2812 dediee
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226_124256_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226_124256_status.txt`
+- Demande utilisateur: renforcer la coherence scene->LED WS2812 (alias/registry + palette dediee) et verifier l'alignement UI couleurs/effets/transitions.
+- Plan d'execution:
+  1) auditer mapping scene/alias dans `hardware_manager.cpp` et registre scenes,
+  2) ajouter alias palette dediee et fallback robuste,
+  3) verifier coherence UI (`ui_manager*`) et valider via scripts d'audit scene/screen.
+
+## [2026-02-26] In progress - SCENE_U_SON_PROTO audit + correction runtime-valid
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226_130032_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226_130032_status.txt`
+- Demande utilisateur: auditer la scene modifiee `SCENE_U_SON_PROTO`, corriger incoherences puis upload.
+- Correctif vise: garder un rendu glitch texte mais avec tokens runtime valides et alignement YAML<->JSON.
+
+## [2026-02-26] In progress - audit manifest FX vs implementation runtime
+
+- Demande utilisateur: verifier que tous les effets declares dans le manifest sont bien implementes dans le code.
+- Verification effectuee:
+  - `fx_types` (transition_flash, scrolltext, starfield, rasterbars, shadebobs, plasma, tunnel3d, rotozoom, wirecube) presents dans le registre v9 (`src/ui/fx/v9/effects/registry.cpp`) et engine (`src/ui/fx/v9/engine/engine.cpp`).
+  - `overlay_fx_types.text_glitch` present dans `ui_manager.cpp` (parsing) + `ui_manager_effects.cpp` (application).
+- Verdict: pas de manque d'implementation detecte pour les IDs declares dans `data/ui/fx/demoscene_fx_manifest.v1.json`.
+- Correctif build/FS anti-doublons applique dans `platformio.ini` (env `freenove_esp32s3_full_with_ui`):
+  - exclusion compile `* 2.c/.cpp` et `* 3.c/.cpp` via `build_src_filter`,
+  - exclusion LittleFS `* 2.*`, `* 3.*` et `/screens/*` via `data_filter`.
+
+## [2026-02-26] In progress - scene UI editor SCENE_U_SON_PROTO (verify + implement)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226_132200_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226_132200_status.txt`
+- Demande utilisateur: verifier puis implementer `data/story/screens/SCENE_U_SON_PROTO.json` avec le workflow scene editor.
+- Plan d'execution:
+  1) auditer le JSON scene (`text/visual/effects/theme`) et ses champs runtime,
+  2) aligner les champs incoherents avec le runtime UI (`ui_manager*`),
+  3) rebuild + upload firmware/FS pour validation device.
+- Actions realisees:
+  - audit runtime de `SCENE_U_SON_PROTO` (tokens valides/invalides pour align + glitch/size + waveform),
+  - correction de `data/story/screens/SCENE_U_SON_PROTO.json` (align tokens valides, params text_glitch/size, waveform coherent, transition glitch),
+  - validation JSON locale (`python3 -m json.tool`) + upload FS cible Freenove.
+- Evidence execution:
+  - commande: `PLATFORMIO_BUILD_DIR=/tmp/pio-build-zacus-u-son-json pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301`
+  - resultat: SUCCESS (flash LittleFS) a `2026-02-26`.
+
+## [2026-02-26] Completed - SCENE_U_SON_PROTO glitch layout + fx loop
+
+- Audit/patch: pushed `text.symbol_align` support, updated JSON + YAML + fallback storage entry + UI runtime alignment logic so title/subtitle/symbol glitched as requested and symbol can be pinned to top.
+- Validated with `pio run -e freenove_esp32s3_full_with_ui` (build only) and reflashed both firmware and FS assets (`PLATFORMIO_BUILD_DIR=/tmp/pio-build-zacus pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` + `-t uploadfs ...`).
+
+## [2026-02-26] Run SCENE_U_SON_PROTO (LGFX overlay + timeline 30s + backlight/WS2812 sync)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226_140931_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226_140931_status.txt`
+- Branche + diff stat captures avant mutation.
+- Artefacts trackes verifies: `.pio`, `.platformio`, `logs`, `dist`, `build`, `node_modules`, `.venv` => aucun tracke.
+- Scope prevu: `SCENE_U_SON_PROTO` + runtime UI/FX/HW associe (sans toucher conflit git hors scope).
+- Realisation:
+  - scene canonique alignee (`game/scenarios/scene_editor_all.yaml`, `data/story/screens/SCENE_U_SON_PROTO.json`, fallback `storage_manager.cpp`) avec `render.text_backend=lgfx_overlay`, `disable_lvgl_text=true`, timeline 30s, backlight glitch_sync et WS2812 single_random_blink.
+  - runtime UI: overlay texte LGFX foreground (symbol top, title center, subtitle bottom), preset FX dedie `kUsonProto`, scroller wave desactive pour cette scene.
+  - runtime hardware: backlight dynamique 0..125 synchronise glitch + mode LED one-led-at-a-time expose dans statuts.
+  - manifest/timeline outillage: ajout `data/ui/fx/timelines/u_son_proto_30s.json`, preset `uson_proto` dans `data/ui/fx/demoscene_fx_manifest.v1.json`, sync `render/hardware` dans `tools/dev/export_scene_editor_workbench.py`.
+- Gates executes:
+  - `PLATFORMIO_BUILD_DIR=/tmp/pio-build-zacus pio run -e freenove_esp32s3_full_with_ui -j 1` => SUCCESS.
+  - `PLATFORMIO_BUILD_DIR=/tmp/pio-build-zacus pio run -e esp32dev -e esp32_release -e esp8266_oled -e ui_rp2040_ili9488 -e ui_rp2040_ili9486 -j 1` =>
+    - SUCCESS: `esp32dev`, `esp32_release`, `esp8266_oled`
+    - FAIL: `ui_rp2040_ili9488`, `ui_rp2040_ili9486` (erreur preexistante: `input in flex scanner failed` sur generation `.pio.pio.h` depuis `.../esp32_audio/.pio`).
+- Flash device:
+  - code: `PLATFORMIO_BUILD_DIR=/tmp/pio-build-zacus pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` => SUCCESS.
+  - LittleFS: `PLATFORMIO_BUILD_DIR=/tmp/pio-build-zacus pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` => SUCCESS.
+- Verifications runtime:
+  - `python3 tools/dev/verify_story_ui_conformance.py --port /dev/cu.usbmodem5AB90753301 --baud 115200 --firmware-root .`
+    - resultat: `runtime_tested=51 pass=50 fail=1`
+    - fail observe: `DEFAULT:TR_SCENE_QR_DETECTOR_3 reason=path_step_mismatch:TR_RTC_ESP_ETAPE2_1:SCENE_U_SON_PROTO->SCENE_QR_DETECTOR`
+    - log: `artifacts/rc_live/ui_conformance_verify_20260226-145826.log`
+  - `python3 tools/dev/verify_scene_text_led_matrix.py --port /dev/cu.usbmodem5AB90753301 --baud 115200 --repo-root ../..`
+    - fail observe: `SCENE_LOCKED: tolerant LED expected non-black pattern got=(0, 0, 0)`
+- Note build path:
+  - dans ce workspace avec espaces, build direct sans `PLATFORMIO_BUILD_DIR` echoue preexistamment sur `.sconsign314.dblite` absent; contournement stable via build dir `/tmp`.
+
+## [2026-02-26] Run focus lock Freenove only
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226_170820_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226_170820_status.txt`
+- Demande utilisateur: verrouiller le focus agent/build sur la cible Freenove.
+- Plan: restreindre `default_envs` PlatformIO a `freenove_esp32s3_full_with_ui` pour eviter les gates multi-cibles hors scope.
+
+## [2026-02-26] Run disable SCENE_TEST_LAB on story boot
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226_171007_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226_171007_status.txt`
+- Demande utilisateur: desactiver `SCENE_TEST_LAB` au boot story/scenario.
+- Plan: retirer le routage boot explicite vers `SCENE_TEST_LAB` et conserver le scene initial du scenario.
+
+## [2026-02-26] Run SCENE_LA_DETECTOR en 100% GFX
+
+- Demande utilisateur: passer `SCENE_LA_DETECTOR` en rendu GFX (sans widgets LVGL de scene).
+- Realisation:
+  - scene payload: `render.text_backend=lgfx_overlay`, `disable_lvgl_text=true`, `wave=false`, `visual.waveform.enabled=false`.
+  - runtime: `SCENE_LA_DETECTOR` classee direct-FX (`ui_manager_effects.cpp` + `scene_fx_orchestrator.cpp`), preset demo et scroll texte coupe.
+  - garde-fou runtime: si LGFX-only sur LA detector, forcer `la_detection_scene_=false` et `waveform_enabled=false`.
+- Gate:
+  - `PLATFORMIO_BUILD_DIR=/tmp/pio-build-zacus pio run -e freenove_esp32s3_full_with_ui -j 1` => SUCCESS.
+
+## [2026-02-26] Run SCENE_LA_DETECTOR oscillo/VU/FFT A4 + WS2812 feedback
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226_171933_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226_171933_status.txt`
+- Demande utilisateur: afficher waveform circulaire + VU + bargraphe FFT focalise 400..480 Hz (A4) et reporter ce spectre sur les 4 WS2812.
+- Plan:
+  1) etendre snapshot micro avec bandes spectrales A4,
+  2) brancher rendu overlay detector sur ces bandes (lisible + glitch leger),
+  3) mapper WS2812 (400/440/480) avec intensite proportionnelle.
+- Realisation:
+  - ajout de bins spectre `400/420/440/460/480 Hz` dans `HardwareManager::Snapshot` + estimation Goertzel runtime.
+  - overlay LA: bargraph centre A4 base sur bins reels (fallback ancien profil si bins absents), VU + aiguille conserves.
+  - WS2812 tuner: mapping 4 LEDs par bande (bas=rouge, centre 440=vert blink, haut=bleu), intensite proportionnelle.
+  - `SCENE_LA_DETECTOR` conserve texte GFX-only mais reactive l'overlay micro (`visual.waveform.enabled=true`).
+- Gate:
+  - `PLATFORMIO_BUILD_DIR=/tmp/pio-build-zacus pio run -e freenove_esp32s3_full_with_ui -j 1` => SUCCESS.
+
+## [2026-02-26] Run WIN_ETAPE hotline flow + suppression SCENE_BOOT_PALETTE
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226_173053_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226_173053_status.txt`
+- Scope:
+  - suppression complete `SCENE_BOOT_PALETTE` (runtime + canonique scene + ecrans + script de verification),
+  - scene d'attente HOT-LINE sur `SCENE_WIN_ETAPE` avec envoi ESPNOW `WAITING_VALIDATION`,
+  - transition ACK `ACK_WIN1/ACK_WIN2` vers ETAPE1/ETAPE2,
+  - `SCENE_WIN_ETAPE1` en mode GFX direct (demoscene),
+  - maintien LA_DETECTOR cible Freenove (oscillo/VU/FFT + WS2812 tuner).
+- Realisation:
+  - `main.cpp`: retrait `BOOT_PALETTE_PREVIEW` + retrait logique boot palette + aide/dispatch associes.
+  - `scene_editor_all.yaml`: suppression bloc `SCENE_BOOT_PALETTE`, meta export ajustee, maj scenes WIN_ETAPE/WIN_ETAPE1.
+  - suppression fichiers: `data/story/screens/SCENE_BOOT_PALETTE.json`, `data/screens/SCENE_BOOT_PALETTE.json`.
+  - `DEFAULT.json`: `RTC_ESP_ETAPE1` devient ecran `SCENE_WIN_ETAPE` avec action `ACTION_ESP_NOW_WAITING` et transitions ACK1/ACK2.
+  - ajout action `data/story/actions/ACTION_ESP_NOW_WAITING.json`.
+  - UI runtime: desactivation chemin intro WIN_ETAPE (plus de masquage), cleanup scene elargi WIN_ETAPE/1/2, direct-FX active pour `SCENE_WIN_ETAPE1` preset demo.
+  - `verify_scene_text_led_matrix.py`: suppression verification `BOOT_PALETTE_PREVIEW`.

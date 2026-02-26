@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
+#include <Preferences.h>
 #include <WebServer.h>
 #include <cerrno>
 #include <cctype>
@@ -61,7 +62,7 @@ constexpr const char* kDiagAudioFile = "/music/boot_radio.mp3";
 constexpr size_t kSerialLineCapacity = 192U;
 constexpr bool kBootDiagnosticTone = true;
 constexpr const char* kEspNowBroadcastTarget = "broadcast";
-constexpr const char* kStepWinEtape = "WIN_ETAPE1";
+constexpr const char* kStepWinEtape = "RTC_ESP_ETAPE1";
 constexpr const char* kPackWin = "PACK_WIN";
 constexpr const char* kWebAuthHeaderName = "Authorization";
 constexpr const char* kWebAuthBearerPrefix = "Bearer ";
@@ -69,6 +70,11 @@ constexpr const char* kProvisionStatusPath = "/api/provision/status";
 constexpr const char* kSetupWifiConnectPath = "/api/wifi/connect";
 constexpr const char* kSetupNetworkWifiConnectPath = "/api/network/wifi/connect";
 constexpr size_t kWebAuthTokenCapacity = 65U;
+constexpr size_t kEspNowDeviceNameCapacity = 33U;
+constexpr const char* kEspNowDeviceNameDefault = "U_SON";
+constexpr const char* kCredentialsNvsNamespace = "zacus_net";
+constexpr const char* kEspNowDeviceNameNvsKey = "esp_name";
+constexpr uint32_t kEspNowDiscoveryIntervalMs = 15000U;
 #if defined(USE_AUDIO) && (USE_AUDIO != 0)
 constexpr const char* kAmpMusicPathPrimary = "/music";
 constexpr const char* kAmpMusicPathFallback1 = "/audio/music";
@@ -76,13 +82,35 @@ constexpr const char* kAmpMusicPathFallback2 = "/audio";
 #endif
 constexpr const char* kCameraSceneId = "SCENE_PHOTO_MANAGER";
 constexpr const char* kMediaManagerSceneId = "SCENE_MEDIA_MANAGER";
-constexpr const char* kBootPaletteSceneId = "SCENE_BOOT_PALETTE";
 constexpr const char* kTestLabSceneId = "SCENE_TEST_LAB";
 constexpr const char* kTestLabLockStepId = "TEST_LAB_LOCK";
-constexpr uint32_t kBootPaletteDurationMs = 3500U;
-constexpr bool kBootPaletteAutoOnBoot = false;
 constexpr bool kLockNvsMediaManagerMode = true;
-constexpr bool kForceTestLabSceneLock = true;
+constexpr bool kForceTestLabSceneLock = false;
+
+struct SceneBacklightFxState {
+  bool enabled = false;
+  bool level_sync = false;
+  uint8_t min_level = 0U;
+  uint8_t max_level = 125U;
+  uint8_t base_level = 20U;
+  uint8_t spike_pct = 18U;
+  uint8_t glitch_pct = 65U;
+  uint32_t next_spike_ms = 0U;
+  uint32_t spike_end_ms = 0U;
+  uint8_t spike_level = 0U;
+};
+
+struct SceneWs2812FxState {
+  bool single_random_blink = false;
+  bool one_led_at_a_time = true;
+  bool level_sync = false;
+  uint8_t r = 0U;
+  uint8_t g = 0U;
+  uint8_t b = 0U;
+  uint8_t brightness = 52U;
+  uint8_t min_brightness = 6U;
+  uint8_t max_brightness = 95U;
+};
 
 AudioManager g_audio;
 ScenarioManager g_scenario;
@@ -116,13 +144,15 @@ bool g_la_dispatch_in_progress = false;
 bool g_has_ring_sent_for_win_etape = false;
 bool g_win_etape_ui_refresh_pending = false;
 bool g_boot_media_manager_mode = false;
-bool g_boot_palette_active = false;
-uint32_t g_boot_palette_until_ms = 0U;
 uint8_t g_lcd_backlight_level = 30U;
+uint8_t g_lcd_backlight_base_level = 30U;
 bool g_setup_mode = true;
 bool g_web_auth_required = false;
 bool g_resource_profile_auto = true;
 char g_web_auth_token[kWebAuthTokenCapacity] = {0};
+char g_espnow_device_name[kEspNowDeviceNameCapacity] = "U_SON";
+bool g_espnow_discovery_runtime_enabled = true;
+uint32_t g_next_espnow_discovery_ms = 0U;
 char g_last_action_step_key[72] = {0};
 char g_serial_line[kSerialLineCapacity] = {0};
 size_t g_serial_line_len = 0U;
@@ -133,6 +163,11 @@ SceneFxOrchestrator g_scene_fx_orchestrator;
 RuntimeSerialService g_runtime_serial_service;
 RuntimeSceneService g_runtime_scene_service;
 RuntimeWebService g_runtime_web_service;
+SceneBacklightFxState g_scene_backlight_fx;
+SceneWs2812FxState g_scene_ws2812_fx;
+char g_scene_backlight_mode[24] = "static";
+uint8_t g_scene_ws2812_runtime_brightness = 0U;
+uint32_t g_scene_ws2812_runtime_next_update_ms = 0U;
 #if defined(USE_AUDIO) && (USE_AUDIO != 0)
 ui::audio::AmigaAudioPlayer g_amp_player;
 bool g_amp_ready = false;
@@ -270,6 +305,121 @@ void copyText(char* out, size_t out_size, const char* text) {
   out[out_size - 1U] = '\0';
 }
 
+void normalizeEspNowDeviceNameInPlace(char* text) {
+  if (text == nullptr) {
+    return;
+  }
+  trimAsciiInPlace(text);
+  for (size_t index = 0U; text[index] != '\0'; ++index) {
+    unsigned char value = static_cast<unsigned char>(text[index]);
+    if (std::isspace(value)) {
+      text[index] = '_';
+      continue;
+    }
+    if (std::isalnum(value)) {
+      text[index] = static_cast<char>(std::toupper(value));
+      continue;
+    }
+    if (text[index] != '_' && text[index] != '-') {
+      text[index] = '_';
+    }
+  }
+  trimAsciiInPlace(text);
+}
+
+void loadEspNowDeviceNameFromNvs() {
+  copyText(g_espnow_device_name, sizeof(g_espnow_device_name), kEspNowDeviceNameDefault);
+  Preferences prefs;
+  if (!prefs.begin(kCredentialsNvsNamespace, true)) {
+    return;
+  }
+  char stored[kEspNowDeviceNameCapacity] = {0};
+  prefs.getString(kEspNowDeviceNameNvsKey, stored, sizeof(stored));
+  prefs.end();
+  normalizeEspNowDeviceNameInPlace(stored);
+  if (stored[0] != '\0') {
+    copyText(g_espnow_device_name, sizeof(g_espnow_device_name), stored);
+  }
+}
+
+bool saveEspNowDeviceNameToNvs(const char* device_name) {
+  if (device_name == nullptr || device_name[0] == '\0') {
+    return false;
+  }
+  char normalized[kEspNowDeviceNameCapacity] = {0};
+  copyText(normalized, sizeof(normalized), device_name);
+  normalizeEspNowDeviceNameInPlace(normalized);
+  if (normalized[0] == '\0') {
+    return false;
+  }
+  Preferences prefs;
+  if (!prefs.begin(kCredentialsNvsNamespace, false)) {
+    return false;
+  }
+  const size_t written = prefs.putString(kEspNowDeviceNameNvsKey, normalized);
+  prefs.end();
+  if (written == 0U) {
+    return false;
+  }
+  copyText(g_espnow_device_name, sizeof(g_espnow_device_name), normalized);
+  return true;
+}
+
+bool sendEspNowDiscoveryProbe() {
+  StaticJsonDocument<256> probe;
+  char msg_id[32] = {0};
+  snprintf(msg_id, sizeof(msg_id), "disc-%08lX", static_cast<unsigned long>(millis()));
+  probe["msg_id"] = msg_id;
+  probe["seq"] = static_cast<uint32_t>(millis());
+  probe["type"] = "command";
+  probe["ack"] = true;
+  JsonObject payload = probe["payload"].to<JsonObject>();
+  payload["cmd"] = "ESPNOW_STATUS";
+  payload["source"] = g_espnow_device_name;
+
+  String frame;
+  serializeJson(probe, frame);
+  return g_network.sendEspNowTarget(kEspNowBroadcastTarget, frame.c_str());
+}
+
+uint8_t runEspNowDiscoverySweep(uint8_t probes = 3U, uint16_t probe_gap_ms = 120U, uint16_t settle_ms = 450U) {
+  if (probes == 0U) {
+    probes = 1U;
+  }
+  for (uint8_t index = 0U; index < probes; ++index) {
+    sendEspNowDiscoveryProbe();
+    if (index + 1U < probes) {
+      delay(probe_gap_ms);
+    }
+  }
+  const uint32_t deadline = millis() + settle_ms;
+  while (static_cast<int32_t>(millis() - deadline) < 0) {
+    delay(20U);
+  }
+  return g_network.espNowPeerCount();
+}
+
+void maybeRunEspNowDiscoveryRuntime(uint32_t now_ms) {
+  if (!g_espnow_discovery_runtime_enabled) {
+    return;
+  }
+  if (g_next_espnow_discovery_ms != 0U && static_cast<int32_t>(now_ms - g_next_espnow_discovery_ms) < 0) {
+    return;
+  }
+  const NetworkManager::Snapshot net = g_network.snapshot();
+  if (!net.espnow_enabled) {
+    g_next_espnow_discovery_ms = now_ms + 1000U;
+    return;
+  }
+  const bool ok = sendEspNowDiscoveryProbe();
+  g_next_espnow_discovery_ms = now_ms + kEspNowDiscoveryIntervalMs;
+  if (ok) {
+    ZACUS_RL_LOG_MS(4000U,
+                    "[NET] ESPNOW discovery tick peers=%u\n",
+                    static_cast<unsigned int>(g_network.espNowPeerCount()));
+  }
+}
+
 BootModeStore::StartupMode currentStartupMode() {
   return g_boot_media_manager_mode ? BootModeStore::StartupMode::kMediaManager : BootModeStore::StartupMode::kStory;
 }
@@ -285,7 +435,33 @@ void printBootModeStatus() {
                 g_boot_mode_store.isMediaValidated() ? 1U : 0U);
 }
 
-void applyLcdBacklight(uint8_t level) {
+uint32_t hashSceneFxSeed(uint32_t value) {
+  value ^= value >> 16U;
+  value *= 0x7feb352dUL;
+  value ^= value >> 15U;
+  value *= 0x846ca68bUL;
+  value ^= value >> 16U;
+  return value;
+}
+
+bool parseHexRgbColor(const char* text, uint32_t* out_rgb) {
+  if (text == nullptr || text[0] == '\0' || out_rgb == nullptr) {
+    return false;
+  }
+  const char* begin = text;
+  if (begin[0] == '#') {
+    ++begin;
+  }
+  char* end = nullptr;
+  const unsigned long value = strtoul(begin, &end, 16);
+  if (end == begin || *end != '\0' || value > 0xFFFFFFUL) {
+    return false;
+  }
+  *out_rgb = static_cast<uint32_t>(value);
+  return true;
+}
+
+void applyLcdBacklightEffective(uint8_t level) {
 #if (FREENOVE_TFT_BL >= 0)
   g_lcd_backlight_level = level;
 #if defined(TFT_BACKLIGHT_ON) && (TFT_BACKLIGHT_ON == LOW)
@@ -298,6 +474,339 @@ void applyLcdBacklight(uint8_t level) {
 #else
   (void)level;
 #endif
+}
+
+void applyLcdBacklight(uint8_t level) {
+  g_lcd_backlight_base_level = level;
+  applyLcdBacklightEffective(level);
+}
+
+void configureSceneVisualHardwareHints(const char* scene_id, const String& payload_json) {
+  const bool is_u_son_proto = (scene_id != nullptr) && (std::strcmp(scene_id, "SCENE_U_SON_PROTO") == 0);
+
+  SceneBacklightFxState backlight = {};
+  backlight.enabled = is_u_son_proto;
+  backlight.level_sync = is_u_son_proto;
+  backlight.min_level = 0U;
+  backlight.max_level = 95U;
+  backlight.base_level = 18U;
+  backlight.spike_pct = 18U;
+  backlight.glitch_pct = 65U;
+
+  SceneWs2812FxState ws = {};
+  ws.single_random_blink = is_u_son_proto;
+  ws.one_led_at_a_time = true;
+  ws.level_sync = is_u_son_proto;
+  ws.r = 0x6FU;
+  ws.g = 0xD8U;
+  ws.b = 0xFFU;
+  ws.brightness = 48U;
+  ws.min_brightness = 4U;
+  ws.max_brightness = 95U;
+
+  uint32_t accent_rgb = 0x6FD8FFUL;
+  bool ws_use_theme_accent = ws.single_random_blink;
+
+  if (!payload_json.isEmpty()) {
+    DynamicJsonDocument document(4096);
+    const DeserializationError error = deserializeJson(document, payload_json);
+    if (!error) {
+      parseHexRgbColor(document["theme"]["accent"] | document["visual"]["theme"]["accent"] | "", &accent_rgb);
+
+      if (document["text"]["glitch"].is<unsigned int>()) {
+        backlight.glitch_pct = static_cast<uint8_t>(document["text"]["glitch"].as<unsigned int>());
+      } else if (document["text"]["glitch_pct"].is<unsigned int>()) {
+        backlight.glitch_pct = static_cast<uint8_t>(document["text"]["glitch_pct"].as<unsigned int>());
+      }
+      if (backlight.glitch_pct > 100U) {
+        backlight.glitch_pct = 100U;
+      }
+
+      const char* backlight_mode = document["hardware"]["backlight"]["mode"] | "";
+      if (backlight_mode[0] != '\0') {
+        if (std::strcmp(backlight_mode, "level_sync") == 0 || std::strcmp(backlight_mode, "level") == 0) {
+          backlight.enabled = true;
+          backlight.level_sync = true;
+        } else if (std::strcmp(backlight_mode, "glitch_sync") == 0 || std::strcmp(backlight_mode, "glitch") == 0) {
+          backlight.enabled = true;
+          backlight.level_sync = false;
+        } else {
+          backlight.enabled = false;
+          backlight.level_sync = false;
+        }
+      }
+      if (document["hardware"]["backlight"]["min"].is<int>()) {
+        const int parsed = document["hardware"]["backlight"]["min"].as<int>();
+        backlight.min_level = static_cast<uint8_t>((parsed < 0) ? 0 : ((parsed > 125) ? 125 : parsed));
+      }
+      if (document["hardware"]["backlight"]["max"].is<int>()) {
+        const int parsed = document["hardware"]["backlight"]["max"].as<int>();
+        backlight.max_level = static_cast<uint8_t>((parsed < 0) ? 0 : ((parsed > 125) ? 125 : parsed));
+      }
+      if (backlight.min_level > backlight.max_level) {
+        const uint8_t swapped = backlight.min_level;
+        backlight.min_level = backlight.max_level;
+        backlight.max_level = swapped;
+      }
+      if (document["hardware"]["backlight"]["base"].is<int>()) {
+        const int parsed = document["hardware"]["backlight"]["base"].as<int>();
+        backlight.base_level = static_cast<uint8_t>((parsed < 0) ? 0 : ((parsed > 125) ? 125 : parsed));
+      }
+      if (backlight.base_level < backlight.min_level) {
+        backlight.base_level = backlight.min_level;
+      } else if (backlight.base_level > backlight.max_level) {
+        backlight.base_level = backlight.max_level;
+      }
+      if (document["hardware"]["backlight"]["spike_pct"].is<unsigned int>()) {
+        backlight.spike_pct = static_cast<uint8_t>(document["hardware"]["backlight"]["spike_pct"].as<unsigned int>());
+      }
+      if (backlight.spike_pct > 100U) {
+        backlight.spike_pct = 100U;
+      }
+
+      const char* ws_mode = document["hardware"]["ws2812"]["mode"] | "";
+      if (ws_mode[0] != '\0') {
+        ws.single_random_blink = (std::strcmp(ws_mode, "single_random_blink") == 0);
+      }
+      if (document["hardware"]["ws2812"]["level_sync"].is<bool>()) {
+        ws.level_sync = document["hardware"]["ws2812"]["level_sync"].as<bool>();
+      }
+      if (document["hardware"]["ws2812"]["one_led_at_a_time"].is<bool>()) {
+        ws.one_led_at_a_time = document["hardware"]["ws2812"]["one_led_at_a_time"].as<bool>();
+      }
+      const char* ws_color_source = document["hardware"]["ws2812"]["color_source"] | "";
+      if (ws_color_source[0] != '\0') {
+        ws_use_theme_accent = (std::strcmp(ws_color_source, "theme.accent") == 0);
+      }
+      uint32_t ws_color_rgb = accent_rgb;
+      if (parseHexRgbColor(document["hardware"]["ws2812"]["color"] | "", &ws_color_rgb)) {
+        ws_use_theme_accent = false;
+      }
+      if (document["hardware"]["ws2812"]["brightness"].is<unsigned int>()) {
+        ws.brightness = static_cast<uint8_t>(document["hardware"]["ws2812"]["brightness"].as<unsigned int>());
+      }
+      if (ws.brightness > 125U) {
+        ws.brightness = 125U;
+      }
+      if (document["hardware"]["ws2812"]["min_brightness"].is<unsigned int>()) {
+        ws.min_brightness = static_cast<uint8_t>(document["hardware"]["ws2812"]["min_brightness"].as<unsigned int>());
+      }
+      if (document["hardware"]["ws2812"]["max_brightness"].is<unsigned int>()) {
+        ws.max_brightness = static_cast<uint8_t>(document["hardware"]["ws2812"]["max_brightness"].as<unsigned int>());
+      }
+      if (ws.max_brightness > 125U) {
+        ws.max_brightness = 125U;
+      }
+      if (ws.min_brightness > ws.max_brightness) {
+        ws.min_brightness = ws.max_brightness;
+      }
+      if (ws_use_theme_accent) {
+        ws_color_rgb = accent_rgb;
+      }
+      ws.r = static_cast<uint8_t>((ws_color_rgb >> 16U) & 0xFFU);
+      ws.g = static_cast<uint8_t>((ws_color_rgb >> 8U) & 0xFFU);
+      ws.b = static_cast<uint8_t>(ws_color_rgb & 0xFFU);
+    }
+  }
+
+  if (ws.single_random_blink) {
+    ws.one_led_at_a_time = true;
+  }
+  if (ws.level_sync && !ws.single_random_blink) {
+    ws.level_sync = false;
+  }
+  if (backlight.level_sync) {
+    if (backlight.max_level > 99U) {
+      backlight.max_level = 99U;
+    }
+    if (backlight.base_level > backlight.max_level) {
+      backlight.base_level = backlight.max_level;
+    }
+  }
+  if (ws.level_sync) {
+    if (ws.max_brightness > 99U) {
+      ws.max_brightness = 99U;
+    }
+    if (ws.min_brightness > ws.max_brightness) {
+      ws.min_brightness = ws.max_brightness;
+    }
+    if (ws.brightness < ws.min_brightness) {
+      ws.brightness = ws.min_brightness;
+    } else if (ws.brightness > ws.max_brightness) {
+      ws.brightness = ws.max_brightness;
+    }
+  }
+
+  g_scene_backlight_fx = backlight;
+  g_scene_ws2812_fx = ws;
+  g_scene_ws2812_runtime_brightness = ws.brightness;
+  g_scene_ws2812_runtime_next_update_ms = 0U;
+  const char* backlight_mode = "static";
+  if (g_scene_backlight_fx.enabled) {
+    backlight_mode = g_scene_backlight_fx.level_sync ? "level_sync" : "glitch_sync";
+  }
+  std::strncpy(g_scene_backlight_mode,
+               backlight_mode,
+               sizeof(g_scene_backlight_mode) - 1U);
+  g_scene_backlight_mode[sizeof(g_scene_backlight_mode) - 1U] = '\0';
+  g_hardware.setSceneSingleRandomBlink(g_scene_ws2812_fx.single_random_blink,
+                                       g_scene_ws2812_fx.r,
+                                       g_scene_ws2812_fx.g,
+                                       g_scene_ws2812_fx.b,
+                                       g_scene_ws2812_runtime_brightness);
+}
+
+void updateSceneBacklightFx(uint32_t now_ms) {
+  if (!g_scene_backlight_fx.enabled) {
+    if (g_lcd_backlight_level != g_lcd_backlight_base_level) {
+      applyLcdBacklightEffective(g_lcd_backlight_base_level);
+    }
+    return;
+  }
+
+  SceneBacklightFxState& fx = g_scene_backlight_fx;
+  if (fx.min_level > fx.max_level) {
+    const uint8_t swap = fx.min_level;
+    fx.min_level = fx.max_level;
+    fx.max_level = swap;
+  }
+  if (fx.max_level > 125U) {
+    fx.max_level = 125U;
+  }
+  if (fx.base_level < fx.min_level) {
+    fx.base_level = fx.min_level;
+  } else if (fx.base_level > fx.max_level) {
+    fx.base_level = fx.max_level;
+  }
+
+  if (fx.level_sync) {
+    const HardwareManager::Snapshot& hw = g_hardware.snapshotRef();
+    uint8_t level_pct = hw.mic_level_percent;
+    if (level_pct > 100U) {
+      level_pct = 100U;
+    }
+    int level = static_cast<int>(fx.base_level);
+    if (fx.max_level > fx.base_level) {
+      const uint16_t span = static_cast<uint16_t>(fx.max_level - fx.base_level);
+      level = static_cast<int>(fx.base_level + static_cast<uint8_t>((static_cast<uint16_t>(span) * level_pct) / 100U));
+    }
+    if (level_pct < 5U) {
+      level = fx.min_level;
+    }
+    if (fx.spike_pct > 0U && level_pct > 12U) {
+      const uint32_t noise = hashSceneFxSeed(now_ms ^ (static_cast<uint32_t>(level_pct) << 12U) ^ 0x42A7UL);
+      const uint8_t spike_chance =
+          static_cast<uint8_t>((static_cast<uint16_t>(fx.spike_pct) * static_cast<uint16_t>(level_pct)) / 100U);
+      if ((noise % 100U) < spike_chance) {
+        const uint8_t boost = static_cast<uint8_t>(2U + ((noise >> 8U) % 14U));
+        level += boost;
+      }
+    }
+    if (level < fx.min_level) {
+      level = fx.min_level;
+    } else if (level > fx.max_level) {
+      level = fx.max_level;
+    }
+    const uint8_t target = static_cast<uint8_t>(level);
+    if (target != g_lcd_backlight_level) {
+      applyLcdBacklightEffective(target);
+    }
+    return;
+  }
+
+  if (fx.next_spike_ms == 0U || static_cast<int32_t>(now_ms - fx.next_spike_ms) >= 0) {
+    const uint32_t noise = hashSceneFxSeed(now_ms ^ (static_cast<uint32_t>(fx.glitch_pct) << 8U) ^
+                                           (static_cast<uint32_t>(fx.spike_pct) << 16U));
+    uint8_t spike_chance = static_cast<uint8_t>(
+        (static_cast<uint16_t>(fx.spike_pct) * static_cast<uint16_t>(50U + fx.glitch_pct)) / 100U);
+    if (spike_chance > 95U) {
+      spike_chance = 95U;
+    }
+    if ((noise % 100U) < spike_chance) {
+      fx.spike_end_ms = now_ms + 12U + ((noise >> 8U) % 38U);
+      const uint8_t span = static_cast<uint8_t>(fx.max_level - fx.min_level);
+      const uint8_t spike_add = static_cast<uint8_t>(4U + ((noise >> 16U) % (span > 0U ? span : 1U)));
+      uint16_t level = static_cast<uint16_t>(fx.base_level) + spike_add;
+      if (level > fx.max_level) {
+        level = fx.max_level;
+      }
+      fx.spike_level = static_cast<uint8_t>(level);
+    } else {
+      fx.spike_end_ms = 0U;
+      fx.spike_level = fx.base_level;
+    }
+    fx.next_spike_ms = now_ms + 180U + ((noise >> 21U) % 1300U);
+  }
+
+  int level = static_cast<int>(fx.base_level);
+  const int jitter_span = (fx.glitch_pct < 20U) ? 0 : static_cast<int>(fx.glitch_pct / 25U);
+  if (jitter_span > 0) {
+    const uint32_t noise = hashSceneFxSeed(now_ms ^ 0x45A2B31UL);
+    const uint32_t range = static_cast<uint32_t>(jitter_span * 2 + 1);
+    level += static_cast<int>(noise % range) - jitter_span;
+  }
+  if (fx.spike_end_ms != 0U && static_cast<int32_t>(now_ms - fx.spike_end_ms) < 0) {
+    level = fx.spike_level;
+  }
+
+  if (level < fx.min_level) {
+    level = fx.min_level;
+  } else if (level > fx.max_level) {
+    level = fx.max_level;
+  }
+  const uint8_t target = static_cast<uint8_t>(level);
+  if (target != g_lcd_backlight_level) {
+    applyLcdBacklightEffective(target);
+  }
+}
+
+void updateSceneWs2812Fx(uint32_t now_ms) {
+  if (!g_scene_ws2812_fx.single_random_blink || !g_scene_ws2812_fx.level_sync || !g_hardware_started) {
+    return;
+  }
+  if (now_ms < g_scene_ws2812_runtime_next_update_ms) {
+    return;
+  }
+  g_scene_ws2812_runtime_next_update_ms = now_ms + 70U;
+
+  uint8_t min_brightness = g_scene_ws2812_fx.min_brightness;
+  uint8_t max_brightness = g_scene_ws2812_fx.max_brightness;
+  if (max_brightness > 99U) {
+    max_brightness = 99U;
+  }
+  if (min_brightness > max_brightness) {
+    min_brightness = max_brightness;
+  }
+
+  const HardwareManager::Snapshot& hw = g_hardware.snapshotRef();
+  uint8_t level_pct = hw.mic_level_percent;
+  if (level_pct > 100U) {
+    level_pct = 100U;
+  }
+  uint8_t target = min_brightness;
+  if (max_brightness > min_brightness) {
+    const uint16_t span = static_cast<uint16_t>(max_brightness - min_brightness);
+    target = static_cast<uint8_t>(min_brightness + static_cast<uint8_t>((span * level_pct) / 100U));
+  }
+  if (level_pct > 55U) {
+    const uint32_t noise = hashSceneFxSeed(now_ms ^ 0x9A5F13UL ^ (static_cast<uint32_t>(level_pct) << 6U));
+    const uint8_t chance = static_cast<uint8_t>(6U + (g_scene_backlight_fx.glitch_pct / 8U));
+    if ((noise % 100U) < chance) {
+      const uint8_t boost = static_cast<uint8_t>(4U + ((noise >> 8U) % 10U));
+      const uint16_t boosted = static_cast<uint16_t>(target) + boost;
+      target = static_cast<uint8_t>((boosted > max_brightness) ? max_brightness : boosted);
+    }
+  }
+
+  if (target == g_scene_ws2812_runtime_brightness) {
+    return;
+  }
+  g_scene_ws2812_runtime_brightness = target;
+  g_hardware.setSceneSingleRandomBlink(true,
+                                       g_scene_ws2812_fx.r,
+                                       g_scene_ws2812_fx.g,
+                                       g_scene_ws2812_fx.b,
+                                       g_scene_ws2812_runtime_brightness);
 }
 
 bool parseBootModeToken(const char* token, BootModeStore::StartupMode* out_mode) {
@@ -324,7 +833,10 @@ void applySceneResourcePolicy(const ScenarioSnapshot& snapshot) {
       (snapshot.step != nullptr && snapshot.step->id != nullptr &&
        std::strcmp(snapshot.step->id, kStepWinEtape) == 0 &&
        snapshot.audio_pack_id != nullptr && std::strcmp(snapshot.audio_pack_id, kPackWin) == 0);
-  const bool is_win_etape_scene = (screen_scene_id != nullptr && std::strcmp(screen_scene_id, "SCENE_WIN_ETAPE") == 0);
+  const bool is_win_etape_scene = (screen_scene_id != nullptr &&
+                                   (std::strcmp(screen_scene_id, "SCENE_WIN_ETAPE") == 0 ||
+                                    std::strcmp(screen_scene_id, "SCENE_WIN_ETAPE1") == 0 ||
+                                    std::strcmp(screen_scene_id, "SCENE_WIN_ETAPE2") == 0));
   const bool is_win_etape = is_win_etape_step || is_win_etape_scene;
   const bool is_la_scene =
       (screen_scene_id != nullptr && std::strstr(screen_scene_id, "LA") != nullptr) ||
@@ -970,6 +1482,12 @@ void appendCompactRuntimeStatus(JsonObject out) {
   out["screen"] = (scenario.screen_scene_id != nullptr) ? scenario.screen_scene_id : "";
   out["audio_pack"] = (scenario.audio_pack_id != nullptr) ? scenario.audio_pack_id : "";
   out["audio_playing"] = g_audio.isPlaying();
+  JsonObject espnow = out["espnow"].to<JsonObject>();
+  espnow["device_name"] = g_espnow_device_name;
+  espnow["send_mode"] = "broadcast";
+  espnow["discovery"] = true;
+  espnow["discovery_runtime"] = g_espnow_discovery_runtime_enabled;
+  espnow["discovery_interval_ms"] = kEspNowDiscoveryIntervalMs;
   out["hw_ready"] = hardware.ready;
   out["cam_enabled"] = camera.enabled;
   out["cam_scene_active"] = g_camera_scene_active;
@@ -1073,7 +1591,7 @@ bool executeEspNowCommandPayload(const char* payload_text, uint32_t now_ms, EspN
     }
     out_result->ok = ok;
     if (!out_result->ok) {
-      out_result->error = "invalid_next_event";
+      out_result->error = "scene_not_found";
     }
     return true;
   }
@@ -1083,6 +1601,11 @@ bool executeEspNowCommandPayload(const char* payload_text, uint32_t now_ms, EspN
     return true;
   }
   if (command == "WIFI_RECONNECT") {
+    if (g_network_cfg.local_ssid[0] == '\0') {
+      out_result->ok = false;
+      out_result->error = "no_credentials";
+      return true;
+    }
     out_result->ok = webReconnectLocalWifi();
     if (!out_result->ok) {
       out_result->error = "wifi_reconnect_failed";
@@ -1099,6 +1622,85 @@ bool executeEspNowCommandPayload(const char* payload_text, uint32_t now_ms, EspN
   if (command == "ESPNOW_OFF") {
     g_network.disableEspNow();
     out_result->ok = true;
+    return true;
+  }
+  if (command == "ESPNOW_DISCOVERY") {
+    const uint8_t discovered = runEspNowDiscoverySweep();
+    out_result->ok = discovered > 0U;
+    if (!out_result->ok) {
+      out_result->error = "peer_not_found";
+      return true;
+    }
+    StaticJsonDocument<384> response;
+    response["target"] = "broadcast";
+    response["mode"] = "broadcast+discovery";
+    response["device_name"] = g_espnow_device_name;
+    response["peer_count"] = discovered;
+    JsonArray peers = response["peers"].to<JsonArray>();
+    for (uint8_t index = 0U; index < discovered; ++index) {
+      char peer[18] = {0};
+      if (!g_network.espNowPeerAt(index, peer, sizeof(peer))) {
+        continue;
+      }
+      peers.add(peer);
+    }
+    serializeJson(response, out_result->data_json);
+    return true;
+  }
+  if (command == "ESPNOW_DISCOVERY_RUNTIME") {
+    if (!trailing_arg.isEmpty()) {
+      bool enabled = false;
+      if (!parseBoolToken(trailing_arg.c_str(), &enabled)) {
+        out_result->ok = false;
+        out_result->error = "invalid_discovery_runtime";
+        return true;
+      }
+      g_espnow_discovery_runtime_enabled = enabled;
+      g_next_espnow_discovery_ms = millis() + 50U;
+    }
+    StaticJsonDocument<160> response;
+    response["enabled"] = g_espnow_discovery_runtime_enabled;
+    response["interval_ms"] = kEspNowDiscoveryIntervalMs;
+    response["device_name"] = g_espnow_device_name;
+    serializeJson(response, out_result->data_json);
+    out_result->ok = true;
+    return true;
+  }
+  if (command == "ESPNOW_DEVICE_NAME_GET") {
+    StaticJsonDocument<128> response;
+    response["device_name"] = g_espnow_device_name;
+    serializeJson(response, out_result->data_json);
+    out_result->ok = true;
+    return true;
+  }
+  if (command == "ESPNOW_DEVICE_NAME_SET") {
+    String next_name = trailing_arg;
+    next_name.trim();
+    if (next_name.isEmpty() && !args.isNull()) {
+      if (args.is<const char*>()) {
+        next_name = args.as<const char*>();
+      } else if (args.is<JsonObjectConst>()) {
+        JsonObjectConst name_args = args.as<JsonObjectConst>();
+        const char* requested = name_args["device_name"] | name_args["name"] | name_args["value"] | "";
+        if (requested != nullptr && requested[0] != '\0') {
+          next_name = requested;
+        }
+      }
+    }
+    next_name.trim();
+    if (next_name.isEmpty()) {
+      out_result->ok = false;
+      out_result->error = "missing_device_name";
+      return true;
+    }
+    out_result->ok = saveEspNowDeviceNameToNvs(next_name.c_str());
+    if (!out_result->ok) {
+      out_result->error = "device_name_store_failed";
+      return true;
+    }
+    StaticJsonDocument<128> response;
+    response["device_name"] = g_espnow_device_name;
+    serializeJson(response, out_result->data_json);
     return true;
   }
   if (command == "STORY_REFRESH_SD") {
@@ -1416,7 +2018,8 @@ bool parseEspNowSendPayload(const char* argument, String& payload, bool* used_ta
 
 void printNetworkStatus() {
   const NetworkManager::Snapshot net = g_network.snapshot();
-  Serial.printf("NET_STATUS state=%s mode=%s sta=%u connecting=%u ap=%u fallback_ap=%u espnow=%u ip=%s sta_ssid=%s "
+  Serial.printf("NET_STATUS state=%s mode=%s sta=%u connecting=%u ap=%u fallback_ap=%u espnow=%u espnow_name=%s "
+                "espnow_mode=broadcast+discovery discovery_runtime=%u discovery_interval_ms=%lu ip=%s sta_ssid=%s "
                 "ap_ssid=%s ap_clients=%u local_target=%s local_match=%u local_retry_paused=%u rssi=%ld peers=%u rx=%lu "
                 "tx_ok=%lu tx_fail=%lu drop=%lu last_msg=%s seq=%lu type=%s ack=%u\n",
                 net.state,
@@ -1426,6 +2029,9 @@ void printNetworkStatus() {
                 net.ap_enabled ? 1U : 0U,
                 net.fallback_ap_active ? 1U : 0U,
                 net.espnow_enabled ? 1U : 0U,
+                g_espnow_device_name,
+                g_espnow_discovery_runtime_enabled ? 1U : 0U,
+                static_cast<unsigned long>(kEspNowDiscoveryIntervalMs),
                 net.ip,
                 net.sta_ssid[0] != '\0' ? net.sta_ssid : "n/a",
                 net.ap_ssid[0] != '\0' ? net.ap_ssid : "n/a",
@@ -1471,6 +2077,11 @@ void printEspNowStatusJson() {
   document["last_type"] = net.last_type;
   document["last_ack"] = net.espnow_last_ack;
   document["last_payload"] = net.last_payload;
+  document["device_name"] = g_espnow_device_name;
+  document["send_mode"] = "broadcast";
+  document["discovery"] = true;
+  document["discovery_runtime"] = g_espnow_discovery_runtime_enabled;
+  document["discovery_interval_ms"] = kEspNowDiscoveryIntervalMs;
   JsonArray peers = document["peers"].to<JsonArray>();
   for (uint8_t index = 0U; index < g_network.espNowPeerCount(); ++index) {
     char peer[18] = {0};
@@ -1800,7 +2411,7 @@ void printRuntimeStatus() {
 void printHardwareStatus() {
   const HardwareManager::Snapshot& hw = g_hardware.snapshotRef();
   Serial.printf(
-      "HW_STATUS ready=%u ws2812=%u mic=%u battery=%u auto=%u manual=%u led=%u,%u,%u br=%u "
+      "HW_STATUS ready=%u ws2812=%u mic=%u battery=%u auto=%u manual=%u bl=%u bl_mode=%s led_mode=%s one_led=%u led=%u,%u,%u br=%u "
       "mic_pct=%u mic_peak=%u mic_noise=%u mic_gain=%u mic_freq=%u mic_cents=%d mic_conf=%u "
       "la_gate=%u la_match=%u la_lock=%u la_pending=%u la_stable_ms=%lu la_timeout_ms=%lu "
       "battery_pct=%u battery_mv=%u charging=%u scene=%s\n",
@@ -1810,6 +2421,10 @@ void printHardwareStatus() {
       hw.battery_ready ? 1U : 0U,
       g_hardware_cfg.led_auto_from_scene ? 1U : 0U,
       hw.led_manual ? 1U : 0U,
+      static_cast<unsigned int>(g_lcd_backlight_level),
+      g_scene_backlight_mode,
+      hw.led_mode,
+      hw.led_one_at_a_time ? 1U : 0U,
       hw.led_r,
       hw.led_g,
       hw.led_b,
@@ -1974,11 +2589,15 @@ void printUiSceneStatus() {
   document["show_title"] = ui.show_title;
   document["show_subtitle"] = ui.show_subtitle;
   document["show_symbol"] = ui.show_symbol;
+  document["text_backend"] = ui.text_backend;
+  document["lvgl_text_disabled"] = ui.lvgl_text_disabled;
   document["title"] = ui.title;
   document["subtitle"] = ui.subtitle;
   document["symbol"] = ui.symbol;
   document["effect"] = ui.effect;
   document["effect_speed_ms"] = ui.effect_speed_ms;
+  document["text_glitch_pct"] = ui.text_glitch_pct;
+  document["text_size_pct"] = ui.text_size_pct;
   document["transition"] = ui.transition;
   document["transition_ms"] = ui.transition_ms;
   document["bg_rgb"] = ui.bg_rgb;
@@ -2350,6 +2969,11 @@ void webFillEspNowStatus(JsonObject out, const NetworkManager::Snapshot& net) {
   out["last_type"] = String(net.last_type);
   out["last_ack"] = net.espnow_last_ack;
   out["last_payload"] = String(net.last_payload);
+  out["device_name"] = g_espnow_device_name;
+  out["send_mode"] = "broadcast";
+  out["discovery"] = true;
+  out["discovery_runtime"] = g_espnow_discovery_runtime_enabled;
+  out["discovery_interval_ms"] = kEspNowDiscoveryIntervalMs;
   JsonArray peers = out["peers"].to<JsonArray>();
   for (uint8_t index = 0U; index < g_network.espNowPeerCount(); ++index) {
     char peer[18] = {0};
@@ -2388,10 +3012,14 @@ void webFillHardwareStatus(JsonObject out) {
   out["mic_ready"] = hw.mic_ready;
   out["battery_ready"] = hw.battery_ready;
   out["led_manual"] = hw.led_manual;
+  out["backlight_level"] = g_lcd_backlight_level;
+  out["backlight_mode"] = g_scene_backlight_mode;
   JsonObject led = out["led"].to<JsonObject>();
   led["r"] = hw.led_r;
   led["g"] = hw.led_g;
   led["b"] = hw.led_b;
+  led["mode"] = hw.led_mode;
+  led["one_led_at_a_time"] = hw.led_one_at_a_time;
   out["led_brightness"] = hw.led_brightness;
   out["mic_enabled"] = g_hardware_cfg.mic_enabled;
   out["mic_threshold_pct"] = g_hardware_cfg.mic_event_threshold_pct;
@@ -2796,12 +3424,19 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
 
   if (std::strcmp(action_id, "ACTION_ESP_NOW_SEND_ETAPE1") == 0 ||
       std::strcmp(action_id, "ACTION_ESP_NOW_SEND_ETAPE2") == 0 ||
+      std::strcmp(action_id, "ACTION_ESP_NOW_WAITING") == 0 ||
+      std::strcmp(action_id, "ACTION_ESP_NOW_WAITING_VALIDATION") == 0 ||
       std::strcmp(action_type, "espnow_send") == 0) {
     const char* target = action_doc["config"]["target"] | action_doc["config"]["peer"] | "broadcast";
     const char* payload = action_doc["config"]["payload"] | "";
     String fallback_payload;
     if (payload[0] == '\0') {
-      const char* inferred = std::strstr(action_id, "ETAPE2") != nullptr ? "ACK_WIN2" : "ACK_WIN1";
+      const char* inferred = "WAITING_VALIDATION";
+      if (std::strstr(action_id, "ETAPE2") != nullptr) {
+        inferred = "ACK_WIN2";
+      } else if (std::strstr(action_id, "ETAPE1") != nullptr) {
+        inferred = "ACK_WIN1";
+      }
       fallback_payload = inferred;
       payload = fallback_payload.c_str();
     }
@@ -3346,29 +3981,6 @@ bool dispatchControlActionImpl(const String& action_raw, uint32_t now_ms, String
       *out_error = "scene_goto_arg";
     }
     return false;
-  }
-
-  if (startsWithIgnoreCase(action.c_str(), "BOOT_PALETTE_PREVIEW")) {
-    uint32_t duration_ms = kBootPaletteDurationMs;
-    if (action.length() > std::strlen("BOOT_PALETTE_PREVIEW")) {
-      String value = action.substring(static_cast<unsigned int>(std::strlen("BOOT_PALETTE_PREVIEW")));
-      value.trim();
-      if (!value.isEmpty()) {
-        const long parsed = value.toInt();
-        if (parsed <= 0 || parsed > 30000) {
-          if (out_error != nullptr) {
-            *out_error = "boot_palette_preview_range";
-          }
-          return false;
-        }
-        duration_ms = static_cast<uint32_t>(parsed);
-      }
-    }
-    g_boot_palette_active = true;
-    g_boot_palette_until_ms = now_ms + duration_ms;
-    refreshSceneIfNeeded(true);
-    Serial.printf("BOOT_PALETTE_PREVIEW ms=%lu\n", static_cast<unsigned long>(duration_ms));
-    return true;
   }
 
   if (startsWithIgnoreCase(action.c_str(), "HW_LED_SET ")) {
@@ -4139,6 +4751,11 @@ bool dispatchScenarioEventByType(StoryEventType type, const char* event_name, ui
     case StoryEventType::kEspNow: {
       const bool dispatched_espnow = g_scenario.notifyEspNowEvent(event_name, now_ms);
       const bool dispatched_serial = g_scenario.notifySerialEvent(event_name, now_ms);
+      if (event_name != nullptr &&
+          (std::strcmp(event_name, "ACK_WIN1") == 0 || std::strcmp(event_name, "ACK_WIN2") == 0 ||
+           std::strcmp(event_name, "WAITING_VALIDATION") == 0)) {
+        g_win_etape_ui_refresh_pending = true;
+      }
       return dispatched_espnow || dispatched_serial;
     }
     case StoryEventType::kAction:
@@ -4378,8 +4995,12 @@ void refreshSceneIfNeededImpl(bool force_render) {
     }
   }
 
-  if (g_hardware_started && g_hardware_cfg.led_auto_from_scene && snapshot.screen_scene_id != nullptr) {
-    g_hardware.setSceneHint(snapshot.screen_scene_id);
+  const char* led_scene_id = snapshot.screen_scene_id;
+  if (kForceTestLabSceneLock) {
+    led_scene_id = kTestLabSceneId;
+  }
+  if (g_hardware_started && g_hardware_cfg.led_auto_from_scene && led_scene_id != nullptr) {
+    g_hardware.setSceneHint(led_scene_id);
   }
   if (!kForceTestLabSceneLock) {
     executeStoryActionsForStep(snapshot, now_ms);
@@ -4396,14 +5017,6 @@ void refreshSceneIfNeededImpl(bool force_render) {
     if (!test_lab_payload.isEmpty()) {
       screen_payload = test_lab_payload;
     }
-  } else if (g_boot_palette_active && now_ms < g_boot_palette_until_ms) {
-    const String boot_payload = g_storage.loadScenePayloadById(kBootPaletteSceneId);
-    if (!boot_payload.isEmpty()) {
-      screen_payload = boot_payload;
-      // Keep a known scene_id so UI profile mapping stays valid; only override visual payload.
-      render_scene_id = snapshot.screen_scene_id;
-      render_step_id = step_id;
-    }
   }
   if ((render_scene_id != nullptr) && render_scene_id[0] != '\0' && screen_payload.isEmpty()) {
     ZACUS_RL_LOG_MS(6000U,
@@ -4412,6 +5025,8 @@ void refreshSceneIfNeededImpl(bool force_render) {
                     render_step_id,
                     render_scene_id);
   }
+  const char* visual_scene_id = render_scene_id;
+  configureSceneVisualHardwareHints(visual_scene_id, screen_payload);
   Serial.printf("[UI] render step=%s screen=%s pack=%s playing=%u\n",
                 render_step_id,
                 render_scene_id != nullptr ? render_scene_id : "n/a",
@@ -4542,7 +5157,6 @@ void handleSerialCommandImpl(const char* command_line, uint32_t now_ms) {
         "SC_LIST SC_LOAD <id> SCENE_GOTO <scene_id> SC_COVERAGE SC_REVALIDATE SC_REVALIDATE_ALL SC_EVENT <type> [name] "
         "SC_EVENT_RAW <name> "
         "STORY_REFRESH_SD STORY_SD_STATUS "
-        "BOOT_PALETTE_PREVIEW [ms] "
         "UI_GFX_STATUS UI_MEM_STATUS UI_SCENE_STATUS PERF_STATUS PERF_RESET RESOURCE_STATUS RESOURCE_PROFILE <gfx_focus|gfx_plus_mic|gfx_plus_cam_snapshot> RESOURCE_PROFILE_AUTO <on|off> "
         "SIMD_STATUS SIMD_SELFTEST SIMD_BENCH [loops] [pixels] "
         "HW_STATUS HW_STATUS_JSON HW_LED_SET <r> <g> <b> [brightness] [pulse] HW_LED_AUTO <ON|OFF> HW_MIC_STATUS HW_BAT_STATUS "
@@ -4556,7 +5170,9 @@ void handleSerialCommandImpl(const char* command_line, uint32_t now_ms) {
         "NET_STATUS WIFI_STATUS WIFI_TEST WIFI_STA <ssid> <pass> WIFI_CONNECT <ssid> <pass> WIFI_PROVISION <ssid> <pass> WIFI_FORGET WIFI_DISCONNECT "
         "AUTH_STATUS AUTH_TOKEN_ROTATE [token] "
         "WIFI_AP_ON [ssid] [pass] WIFI_AP_OFF "
-        "ESPNOW_ON ESPNOW_OFF ESPNOW_STATUS ESPNOW_STATUS_JSON ESPNOW_PEER_ADD <mac> ESPNOW_PEER_DEL <mac> ESPNOW_PEER_LIST "
+        "ESPNOW_ON ESPNOW_OFF ESPNOW_STATUS ESPNOW_STATUS_JSON ESPNOW_DISCOVERY ESPNOW_DISCOVERY_RUNTIME [on|off] "
+        "ESPNOW_DEVICE_NAME_GET ESPNOW_DEVICE_NAME_SET <name> "
+        "ESPNOW_PEER_ADD <mac> ESPNOW_PEER_DEL <mac> ESPNOW_PEER_LIST "
         "ESPNOW_SEND <text|json> "
         "AMP_SHOW AMP_HIDE AMP_TOGGLE AMP_SCAN AMP_PLAY <idx|path> AMP_NEXT AMP_PREV AMP_STOP AMP_STATUS "
         "AUDIO_TEST AUDIO_TEST_FS AUDIO_PROFILE <idx> AUDIO_FX <idx> AUDIO_STATUS VOL <0..21> AUDIO_STOP STOP");
@@ -4918,7 +5534,6 @@ void handleSerialCommandImpl(const char* command_line, uint32_t now_ms) {
   }
   if (std::strcmp(command, "HW_LED_SET") == 0 || std::strcmp(command, "HW_LED_AUTO") == 0 ||
       std::strcmp(command, "LCD_BACKLIGHT") == 0 ||
-      std::strcmp(command, "BOOT_PALETTE_PREVIEW") == 0 ||
       std::strcmp(command, "CAM_ON") == 0 || std::strcmp(command, "CAM_OFF") == 0 ||
       std::strcmp(command, "CAM_SNAPSHOT") == 0 || std::strcmp(command, "CAM_UI_SHOW") == 0 ||
       std::strcmp(command, "CAM_UI_HIDE") == 0 || std::strcmp(command, "CAM_UI_TOGGLE") == 0 ||
@@ -5154,6 +5769,46 @@ void handleSerialCommandImpl(const char* command_line, uint32_t now_ms) {
     Serial.println("ACK ESPNOW_OFF");
     return;
   }
+  if (std::strcmp(command, "ESPNOW_DISCOVERY") == 0) {
+    const uint8_t discovered = runEspNowDiscoverySweep();
+    Serial.printf("ACK ESPNOW_DISCOVERY mode=broadcast+discovery peers=%u\n", discovered);
+    for (uint8_t index = 0U; index < discovered; ++index) {
+      char peer[18] = {0};
+      if (!g_network.espNowPeerAt(index, peer, sizeof(peer))) {
+        continue;
+      }
+      Serial.printf("ESPNOW_PEER idx=%u mac=%s\n", index, peer);
+    }
+    return;
+  }
+  if (std::strcmp(command, "ESPNOW_DISCOVERY_RUNTIME") == 0) {
+    if (argument != nullptr && argument[0] != '\0') {
+      bool enabled = false;
+      if (!parseBoolToken(argument, &enabled)) {
+        Serial.println("ERR ESPNOW_DISCOVERY_RUNTIME_ARG");
+        return;
+      }
+      g_espnow_discovery_runtime_enabled = enabled;
+      g_next_espnow_discovery_ms = now_ms + 50U;
+    }
+    Serial.printf("ACK ESPNOW_DISCOVERY_RUNTIME enabled=%u interval_ms=%lu\n",
+                  g_espnow_discovery_runtime_enabled ? 1U : 0U,
+                  static_cast<unsigned long>(kEspNowDiscoveryIntervalMs));
+    return;
+  }
+  if (std::strcmp(command, "ESPNOW_DEVICE_NAME_GET") == 0) {
+    Serial.printf("ACK ESPNOW_DEVICE_NAME_GET name=%s\n", g_espnow_device_name);
+    return;
+  }
+  if (std::strcmp(command, "ESPNOW_DEVICE_NAME_SET") == 0) {
+    if (argument == nullptr || argument[0] == '\0') {
+      Serial.println("ERR ESPNOW_DEVICE_NAME_SET_ARG");
+      return;
+    }
+    const bool ok = saveEspNowDeviceNameToNvs(argument);
+    Serial.printf("ACK ESPNOW_DEVICE_NAME_SET ok=%u name=%s\n", ok ? 1U : 0U, g_espnow_device_name);
+    return;
+  }
   if (std::strcmp(command, "ESPNOW_PEER_ADD") == 0) {
     if (argument == nullptr || argument[0] == '\0') {
       Serial.println("ERR ESPNOW_PEER_ADD_ARG");
@@ -5361,6 +6016,7 @@ void setup() {
   }
   RuntimeConfigService::load(g_storage, &g_network_cfg, &g_hardware_cfg, &g_camera_cfg, &g_media_cfg);
   loadBootProvisioningState();
+  loadEspNowDeviceNameFromNvs();
   {
     BootModeStore::StartupMode startup_mode = BootModeStore::StartupMode::kStory;
     if (g_boot_mode_store.loadMode(&startup_mode)) {
@@ -5435,6 +6091,7 @@ void setup() {
   } else {
     Serial.println("[NET] ESP-NOW boot disabled by APP_ESPNOW config");
   }
+  g_next_espnow_discovery_ms = millis() + 2000U;
   setupWebUi();
   g_audio.begin();
   Serial.printf("[MAIN] audio profile=%u:%s count=%u\n",
@@ -5458,16 +6115,6 @@ void setup() {
   } else {
     const bool routed = g_scenario.gotoScene(kTestLabSceneId, millis(), "boot_story_test_lab");
     Serial.printf("[BOOT] route test_lab scene=%s ok=%u\n", kTestLabSceneId, routed ? 1U : 0U);
-  }
-  if (!kForceTestLabSceneLock && !g_boot_media_manager_mode && kBootPaletteAutoOnBoot) {
-    g_boot_palette_active = true;
-    g_boot_palette_until_ms = millis() + kBootPaletteDurationMs;
-    Serial.printf("[BOOT] palette pre-scene id=%s duration_ms=%lu\n",
-                  kBootPaletteSceneId,
-                  static_cast<unsigned long>(kBootPaletteDurationMs));
-  } else {
-    g_boot_palette_active = false;
-    g_boot_palette_until_ms = 0U;
   }
   g_last_action_step_key[0] = '\0';
 
@@ -5564,10 +6211,12 @@ void runRuntimeIteration(uint32_t now_ms) {
 
   const uint32_t network_started_us = perfMonitor().beginSample();
   g_network.update(now_ms);
+  maybeRunEspNowDiscoveryRuntime(now_ms);
   perfMonitor().endSample(PerfSection::kNetworkUpdate, network_started_us);
   if (g_hardware_started) {
     applyMicRuntimePolicy();
     g_hardware.update(now_ms);
+    updateSceneWs2812Fx(now_ms);
     maybeEmitHardwareEvents(now_ms);
     maybeLogHardwareTelemetry(now_ms);
     maybeStreamMicTunerStatus(now_ms);
@@ -5681,11 +6330,8 @@ void runRuntimeIteration(uint32_t now_ms) {
   la_metrics.gate_elapsed_ms = la_gate_elapsed_ms;
   la_metrics.gate_timeout_ms = g_hardware_cfg.mic_la_timeout_ms;
   g_ui.setLaMetrics(la_metrics);
-  if (g_boot_palette_active && now_ms >= g_boot_palette_until_ms) {
-    g_boot_palette_active = false;
-    refreshSceneIfNeeded(true);
-  }
   refreshSceneIfNeeded(false);
+  updateSceneBacklightFx(now_ms);
   const uint32_t ui_started_us = perfMonitor().beginSample();
   g_ui.tick(now_ms);
   char runtime_event[24] = {0};

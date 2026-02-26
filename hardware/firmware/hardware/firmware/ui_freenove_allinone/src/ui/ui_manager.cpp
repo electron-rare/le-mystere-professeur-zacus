@@ -1126,6 +1126,10 @@ UiMemorySnapshot UiManager::memorySnapshot() const {
   return snapshot;
 }
 
+UiSceneStatusSnapshot UiManager::sceneStatusSnapshot() const {
+  return scene_status_;
+}
+
 void UiManager::dumpMemoryStatus() const {
   const UiMemorySnapshot snapshot = memorySnapshot();
 #if LV_USE_MEM_MONITOR
@@ -1216,6 +1220,11 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   const char* step_id_for_ui = (step_id != nullptr && step_id[0] != '\0') ? step_id : "";
   const char* audio_pack_id_for_ui = (audio_pack_id != nullptr && audio_pack_id[0] != '\0') ? audio_pack_id : "";
   if (normalized_scene_id == nullptr) {
+    scene_status_.valid = false;
+    copyTextSafe(scene_status_.scenario_id, sizeof(scene_status_.scenario_id), scenario_id);
+    copyTextSafe(scene_status_.step_id, sizeof(scene_status_.step_id), step_id_for_ui);
+    copyTextSafe(scene_status_.scene_id, sizeof(scene_status_.scene_id), raw_scene_id);
+    copyTextSafe(scene_status_.audio_pack_id, sizeof(scene_status_.audio_pack_id), audio_pack_id_for_ui);
     UI_LOGI("unknown scene id '%s' in scenario=%s step=%s", raw_scene_id, scenario_id, step_id_for_log);
     return;
   }
@@ -1234,6 +1243,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   const bool is_locked_scene = (std::strcmp(scene_id, "SCENE_LOCKED") == 0);
   const bool qr_scene = (std::strcmp(scene_id, "SCENE_CAMERA_SCAN") == 0 ||
                          std::strcmp(scene_id, "SCENE_QR_DETECTOR") == 0);
+  const bool parse_payload_this_frame = static_state_changed || win_etape_intro_scene;
   if (static_state_changed && scene_changed && has_previous_scene) {
     cleanupSceneTransitionAssets(last_scene_id_, scene_id);
   }
@@ -1326,6 +1336,52 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     return fallback;
   };
 
+  auto effectToToken = [](SceneEffect value) -> const char* {
+    switch (value) {
+      case SceneEffect::kNone:
+        return "none";
+      case SceneEffect::kPulse:
+        return "pulse";
+      case SceneEffect::kScan:
+        return "scan";
+      case SceneEffect::kRadar:
+        return "radar";
+      case SceneEffect::kWave:
+        return "wave";
+      case SceneEffect::kBlink:
+        return "blink";
+      case SceneEffect::kGlitch:
+        return "glitch";
+      case SceneEffect::kCelebrate:
+        return "celebrate";
+      default:
+        return "none";
+    }
+  };
+
+  auto transitionToToken = [](SceneTransition value) -> const char* {
+    switch (value) {
+      case SceneTransition::kNone:
+        return "none";
+      case SceneTransition::kFade:
+        return "fade";
+      case SceneTransition::kSlideLeft:
+        return "slide_left";
+      case SceneTransition::kSlideRight:
+        return "slide_right";
+      case SceneTransition::kSlideUp:
+        return "slide_up";
+      case SceneTransition::kSlideDown:
+        return "slide_down";
+      case SceneTransition::kZoom:
+        return "zoom";
+      case SceneTransition::kGlitch:
+        return "glitch";
+      default:
+        return "none";
+    }
+  };
+
   auto parseAlignToken = [](const char* token, SceneTextAlign fallback) -> SceneTextAlign {
     if (token == nullptr || token[0] == '\0') {
       return fallback;
@@ -1367,7 +1423,6 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   String title = "MISSION";
   String subtitle;
   String symbol = "RUN";
-  bool win_etape_bravo_mode = false;
   bool show_title = false;
   bool show_subtitle = true;
   bool show_symbol = true;
@@ -1546,7 +1601,6 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     show_title = true;
     show_subtitle = true;
     show_symbol = false;
-    win_etape_bravo_mode = true;
     win_etape_fireworks = false;
     subtitle_scroll_mode = SceneScrollMode::kNone;
   } else if (std::strcmp(scene_id, "SCENE_FINAL_WIN") == 0) {
@@ -1570,6 +1624,24 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     text_rgb = 0xE8FFE7UL;
   }
 
+  if (!parse_payload_this_frame && scene_status_.valid &&
+      scene_status_.payload_crc == payload_crc &&
+      std::strcmp(scene_status_.scene_id, scene_id) == 0) {
+    title = scene_status_.title;
+    subtitle = scene_status_.subtitle;
+    symbol = scene_status_.symbol;
+    show_title = scene_status_.show_title;
+    show_subtitle = scene_status_.show_subtitle;
+    show_symbol = scene_status_.show_symbol;
+    effect = parseEffectToken(scene_status_.effect, effect, "scene status cache");
+    effect_speed_ms = scene_status_.effect_speed_ms;
+    transition = parseTransitionToken(scene_status_.transition, transition, "scene status cache");
+    transition_ms = scene_status_.transition_ms;
+    bg_rgb = scene_status_.bg_rgb;
+    accent_rgb = scene_status_.accent_rgb;
+    text_rgb = scene_status_.text_rgb;
+  }
+
   if (static_state_changed) {
     resetSceneTimeline();
   }
@@ -1578,7 +1650,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     qr_rules_.clear();
   }
 
-  if (screen_payload_json != nullptr && screen_payload_json[0] != '\0') {
+  if (parse_payload_this_frame && screen_payload_json != nullptr && screen_payload_json[0] != '\0') {
     DynamicJsonDocument document(4096);
     const DeserializationError error = deserializeJson(document, screen_payload_json);
     if (!error) {
@@ -1865,15 +1937,9 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     }
   }
 
-  if (is_locked_scene) {
-    title = "Module U-SON PROTO";
-    subtitle = "VERIFICATION EN COURS";
-    show_title = true;
-    show_subtitle = true;
-    show_symbol = false;
-    effect = SceneEffect::kGlitch;
-    demo_mode = "standard";
-    const uint32_t speed_entropy = mixNoise(static_cast<uint32_t>(lv_tick_get()), reinterpret_cast<uintptr_t>(this) ^ 0xA5A37UL);
+  if (is_locked_scene && effect == SceneEffect::kGlitch && effect_speed_ms == 0U) {
+    const uint32_t speed_entropy =
+        mixNoise(static_cast<uint32_t>(lv_tick_get()), reinterpret_cast<uintptr_t>(this) ^ 0xA5A37UL);
     effect_speed_ms = static_cast<uint16_t>(80U + (speed_entropy % 141U));
   }
 
@@ -1881,9 +1947,6 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     waveform_sample_count = HardwareManager::kMicWaveformCapacity;
   } else if (waveform_sample_count > HardwareManager::kMicWaveformCapacity) {
     waveform_sample_count = HardwareManager::kMicWaveformCapacity;
-  }
-  if (is_locked_scene) {
-    show_symbol = false;
   }
   if (waveform_sample_count < 2U) {
     waveform_sample_count = 2U;
@@ -1903,33 +1966,12 @@ void UiManager::renderScene(const ScenarioDef* scenario,
                           waveform_amplitude_pct,
                           waveform_jitter);
   if (win_etape_intro_scene) {
-    effect = SceneEffect::kNone;
-    transition = SceneTransition::kFade;
-    transition_ms = 220U;
-    subtitle_scroll_mode = SceneScrollMode::kNone;
-    win_etape_fireworks = false;
-    if (static_state_changed) {
-      resetSceneTimeline();
+    if (subtitle.length() == 0U) {
+      subtitle = kWinEtapeWaitingSubtitle;
     }
-  }
-  if (win_etape_bravo_mode) {
-    title = "BRAVO!";
-    subtitle = audio_playing ? "Validation en cours..." : kWinEtapeWaitingSubtitle;
-  }
-  if (is_locked_scene) {
-    title = "Module U-SON PROTO";
-    subtitle = "VERIFICATION EN COURS";
-  }
-  if (is_locked_scene) {
-    if (static_state_changed) {
-      resetSceneTimeline();
+    if (audio_playing) {
+      subtitle = "Validation en cours...";
     }
-  }
-  if (win_etape_bravo_mode && timeline_keyframe_count_ > 1U) {
-    timeline_keyframe_count_ = 1U;
-    timeline_duration_ms_ = 0U;
-    timeline_loop_ = true;
-    timeline_effect_index_ = -1;
   }
   if (static_state_changed && direct_fx_scene) {
     direct_fx_scene_active_ = fx_engine_.config().lgfx_backend;
@@ -2000,9 +2042,6 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     lv_label_set_text(scene_subtitle_label_, subtitle_ui.c_str());
     const char* symbol_glyph = mapSymbolToken(symbol.c_str());
     lv_label_set_text(scene_symbol_label_, (symbol_glyph != nullptr) ? symbol_glyph : LV_SYMBOL_PLAY);
-    if (win_etape_bravo_mode) {
-      show_title = true;
-    }
     if (show_title) {
       lv_obj_clear_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
     } else {
@@ -2056,7 +2095,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     }
   }
 
-  if (static_state_changed && is_locked_scene && scene_title_label_ != nullptr) {
+  if (static_state_changed && is_locked_scene && show_title && scene_title_label_ != nullptr) {
     lv_obj_clear_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(scene_title_label_);
     const bool title_bounce_inverted =
@@ -2083,7 +2122,8 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     lv_obj_set_style_transform_angle(scene_title_label_, 0, LV_PART_MAIN);
     lv_obj_set_style_text_color(scene_title_label_, lv_color_hex(0xFFFFFFUL), LV_PART_MAIN);
   }
-  if (static_state_changed && is_locked_scene && scene_subtitle_label_ != nullptr) {
+  if (static_state_changed && is_locked_scene && show_subtitle && subtitle.length() > 0U &&
+      scene_subtitle_label_ != nullptr) {
     lv_obj_clear_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(scene_subtitle_label_);
     lv_anim_t subtitle_lock_jitter_x;
@@ -2116,7 +2156,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     lv_obj_set_style_transform_angle(scene_subtitle_label_, 0, LV_PART_MAIN);
     lv_obj_set_style_text_color(scene_subtitle_label_, lv_color_hex(0xFFFFFFUL), LV_PART_MAIN);
   }
-  if (static_state_changed && is_locked_scene && scene_symbol_label_ != nullptr) {
+  if (static_state_changed && is_locked_scene && !show_symbol && scene_symbol_label_ != nullptr) {
     lv_obj_add_flag(scene_symbol_label_, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(scene_symbol_label_, "");
   }
@@ -2130,6 +2170,36 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   }
 
   applySceneDynamicState(subtitle, show_subtitle, audio_playing, text_rgb);
+  const bool subtitle_visible = show_subtitle && subtitle.length() > 0U;
+  const String title_ascii = asciiFallbackForUiText(title.c_str());
+  const String subtitle_ascii = asciiFallbackForUiText(subtitle.c_str());
+  const String symbol_ascii = asciiFallbackForUiText(symbol.c_str());
+  scene_status_.valid = true;
+  scene_status_.audio_playing = audio_playing;
+  scene_status_.show_title = show_title;
+  scene_status_.show_subtitle = subtitle_visible;
+  scene_status_.show_symbol = show_symbol;
+  scene_status_.payload_crc = payload_crc;
+  scene_status_.effect_speed_ms = effect_speed_ms_;
+  scene_status_.transition_ms = transition_ms;
+  if (theme_cache_valid_) {
+    scene_status_.bg_rgb = theme_cache_bg_;
+    scene_status_.accent_rgb = theme_cache_accent_;
+    scene_status_.text_rgb = theme_cache_text_;
+  } else {
+    scene_status_.bg_rgb = bg_rgb;
+    scene_status_.accent_rgb = accent_rgb;
+    scene_status_.text_rgb = text_rgb;
+  }
+  copyTextSafe(scene_status_.scenario_id, sizeof(scene_status_.scenario_id), scenario_id);
+  copyTextSafe(scene_status_.step_id, sizeof(scene_status_.step_id), step_id_for_ui);
+  copyTextSafe(scene_status_.scene_id, sizeof(scene_status_.scene_id), scene_id);
+  copyTextSafe(scene_status_.audio_pack_id, sizeof(scene_status_.audio_pack_id), audio_pack_id_for_ui);
+  copyTextSafe(scene_status_.title, sizeof(scene_status_.title), title_ascii.c_str());
+  copyTextSafe(scene_status_.subtitle, sizeof(scene_status_.subtitle), subtitle_ascii.c_str());
+  copyTextSafe(scene_status_.symbol, sizeof(scene_status_.symbol), symbol_ascii.c_str());
+  copyTextSafe(scene_status_.effect, sizeof(scene_status_.effect), effectToToken(effect));
+  copyTextSafe(scene_status_.transition, sizeof(scene_status_.transition), transitionToToken(transition));
   std::strncpy(last_scene_id_, scene_id, sizeof(last_scene_id_) - 1U);
   last_scene_id_[sizeof(last_scene_id_) - 1U] = '\0';
   last_payload_crc_ = payload_crc;

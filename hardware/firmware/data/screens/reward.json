@@ -1,17 +1,17 @@
 {
-  "title": "DETECTEUR LEFOU",
-  "subtitle": "Analyse en cours",
-  "symbol": "AUDIO",
-  "effect": "wave",
-  "effect_speed_ms": 460,
+  "title": "RECOMPENSE",
+  "subtitle": "Indice debloque",
+  "symbol": "WIN",
+  "effect": "celebrate",
+  "effect_speed_ms": 420,
   "theme": {
-    "bg": "#071B1A",
-    "accent": "#46E6C8",
-    "text": "#E9FFF9"
+    "bg": "#2A103E",
+    "accent": "#F9D860",
+    "text": "#FFF9E6"
   },
   "transition": {
     "effect": "zoom",
-    "duration_ms": 250
+    "duration_ms": 300
   },
   "timeline": {
     "loop": true,
@@ -19,27 +19,27 @@
     "keyframes": [
       {
         "at_ms": 0,
-        "effect": "wave",
-        "speed_ms": 460,
+        "effect": "celebrate",
+        "speed_ms": 420,
         "theme": {
-          "bg": "#071B1A",
-          "accent": "#46E6C8",
-          "text": "#E9FFF9"
+          "bg": "#2A103E",
+          "accent": "#F9D860",
+          "text": "#FFF9E6"
         }
       },
       {
         "at_ms": 1200,
-        "effect": "radar",
-        "speed_ms": 620,
+        "effect": "pulse",
+        "speed_ms": 280,
         "theme": {
-          "bg": "#0A2523",
-          "accent": "#7FF2DA",
-          "text": "#F2FFFC"
+          "bg": "#3E1A52",
+          "accent": "#FFD97D",
+          "text": "#FFFDF2"
         }
       }
     ]
   },
-  "id": "SCENE_LEFOU_DETECTOR",
+  "id": "SCENE_REWARD",
   "text": {
     "show_title": false,
     "show_subtitle": true,
@@ -53,7 +53,7 @@
     "show_title": false,
     "show_subtitle": true,
     "show_symbol": true,
-    "effect_speed_ms": 460
+    "effect_speed_ms": 420
   },
   "framing": {
     "preset": "center",

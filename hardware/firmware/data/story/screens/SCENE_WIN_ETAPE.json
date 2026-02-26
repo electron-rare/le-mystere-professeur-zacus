@@ -1,45 +1,45 @@
 {
-  "title": "DETECTEUR LEFOU",
-  "subtitle": "Analyse en cours",
-  "symbol": "AUDIO",
-  "effect": "wave",
-  "effect_speed_ms": 460,
+  "title": "VICTOIRE",
+  "subtitle": "Etape validee",
+  "symbol": "WIN",
+  "effect": "celebrate",
+  "effect_speed_ms": 420,
   "theme": {
-    "bg": "#071B1A",
-    "accent": "#46E6C8",
-    "text": "#E9FFF9"
+    "bg": "#231038",
+    "accent": "#F4CB4A",
+    "text": "#FFF8E2"
   },
   "transition": {
     "effect": "zoom",
-    "duration_ms": 250
+    "duration_ms": 280
   },
   "timeline": {
     "loop": true,
-    "duration_ms": 1200,
+    "duration_ms": 1000,
     "keyframes": [
       {
         "at_ms": 0,
-        "effect": "wave",
-        "speed_ms": 460,
+        "effect": "celebrate",
+        "speed_ms": 420,
         "theme": {
-          "bg": "#071B1A",
-          "accent": "#46E6C8",
-          "text": "#E9FFF9"
+          "bg": "#231038",
+          "accent": "#F4CB4A",
+          "text": "#FFF8E2"
         }
       },
       {
-        "at_ms": 1200,
-        "effect": "radar",
-        "speed_ms": 620,
+        "at_ms": 1000,
+        "effect": "blink",
+        "speed_ms": 240,
         "theme": {
-          "bg": "#0A2523",
-          "accent": "#7FF2DA",
-          "text": "#F2FFFC"
+          "bg": "#341A4D",
+          "accent": "#FFE083",
+          "text": "#FFFDF3"
         }
       }
     ]
   },
-  "id": "SCENE_LEFOU_DETECTOR",
+  "id": "SCENE_WIN_ETAPE",
   "text": {
     "show_title": false,
     "show_subtitle": true,
@@ -53,7 +53,7 @@
     "show_title": false,
     "show_subtitle": true,
     "show_symbol": true,
-    "effect_speed_ms": 460
+    "effect_speed_ms": 420
   },
   "framing": {
     "preset": "center",

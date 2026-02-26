@@ -1,45 +1,55 @@
 {
-  "title": "DETECTEUR LEFOU",
-  "subtitle": "Analyse en cours",
-  "symbol": "AUDIO",
+  "title": "PIC DE SIGNAL",
+  "subtitle": "Interference soudaine detectee",
+  "symbol": "ALERT",
   "effect": "wave",
-  "effect_speed_ms": 460,
+  "effect_speed_ms": 260,
   "theme": {
-    "bg": "#071B1A",
-    "accent": "#46E6C8",
-    "text": "#E9FFF9"
+    "bg": "#24090C",
+    "accent": "#FF6A52",
+    "text": "#FFF2EB"
   },
   "transition": {
-    "effect": "zoom",
-    "duration_ms": 250
+    "effect": "glitch",
+    "duration_ms": 170
   },
   "timeline": {
     "loop": true,
-    "duration_ms": 1200,
+    "duration_ms": 1400,
     "keyframes": [
       {
         "at_ms": 0,
         "effect": "wave",
-        "speed_ms": 460,
+        "speed_ms": 260,
         "theme": {
-          "bg": "#071B1A",
-          "accent": "#46E6C8",
-          "text": "#E9FFF9"
+          "bg": "#24090C",
+          "accent": "#FF6A52",
+          "text": "#FFF2EB"
         }
       },
       {
-        "at_ms": 1200,
-        "effect": "radar",
-        "speed_ms": 620,
+        "at_ms": 700,
+        "effect": "blink",
+        "speed_ms": 180,
         "theme": {
-          "bg": "#0A2523",
-          "accent": "#7FF2DA",
-          "text": "#F2FFFC"
+          "bg": "#2F1014",
+          "accent": "#FF8C73",
+          "text": "#FFF8F5"
+        }
+      },
+      {
+        "at_ms": 1400,
+        "effect": "wave",
+        "speed_ms": 320,
+        "theme": {
+          "bg": "#24090C",
+          "accent": "#FF6A52",
+          "text": "#FFF2EB"
         }
       }
     ]
   },
-  "id": "SCENE_LEFOU_DETECTOR",
+  "id": "SCENE_SIGNAL_SPIKE",
   "text": {
     "show_title": false,
     "show_subtitle": true,
@@ -53,7 +63,7 @@
     "show_title": false,
     "show_subtitle": true,
     "show_symbol": true,
-    "effect_speed_ms": 460
+    "effect_speed_ms": 260
   },
   "framing": {
     "preset": "center",

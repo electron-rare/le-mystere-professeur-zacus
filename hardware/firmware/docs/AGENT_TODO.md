@@ -1,3 +1,67 @@
+## [2026-02-26] UI Freenove conforme `/data` (palette v3 + UI_SCENE_STATUS + verification profonde)
+
+- Skills chain active (ordre):
+  - `freenove-firmware-orchestrator`
+  - `firmware-story-stack`
+  - `firmware-littlefs-stack`
+  - `firmware-graphics-stack`
+  - `firmware-build-stack`
+- Checkpoint securite reutilise (run en cours):
+  - `/tmp/zacus_checkpoint/20260225_235911_wip.patch`
+  - `/tmp/zacus_checkpoint/20260225_235911_status.txt`
+- Lot 1 (source de verite `/data`):
+  - ajout palette canonique:
+    - `data/story/palette/screens_palette_v3.yaml`
+  - ajout commande tooling:
+    - `./tools/dev/story-gen sync-screens` (`--check` supporte)
+    - fichiers: `lib/zacus_story_gen_ai/src/zacus_story_gen_ai/cli.py`, `lib/zacus_story_gen_ai/src/zacus_story_gen_ai/generator.py`
+  - regeneration ecrans depuis palette:
+    - `data/story/screens/*.json` (set canonique complet)
+    - `data/screens/*.json` (mirror legacy durable)
+  - source prioritaire intro Win Etape alignee:
+    - `data/ui/scene_win_etape.json`
+- Lot 2 (runtime UI + diagnostic):
+  - metadata source payload ecran exposee:
+    - `StorageManager::ScenePayloadMeta` + `lastScenePayloadMeta()`
+    - `hardware/firmware/ui_freenove_allinone/include/storage/storage_manager.h`
+    - `hardware/firmware/ui_freenove_allinone/src/storage/storage_manager.cpp`
+  - snapshot rendu scene ajoute:
+    - `UiSceneStatusSnapshot` + `sceneStatusSnapshot()`
+    - `hardware/firmware/ui_freenove_allinone/include/ui/ui_manager.h`
+    - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+  - nouvelle commande serie JSON mono-ligne:
+    - `UI_SCENE_STATUS`
+    - `hardware/firmware/ui_freenove_allinone/src/app/main.cpp`
+  - reduction overrides tardifs lock/win_etape (JSON domine le statique) + cache parse payload hors changements de scene:
+    - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+- Lot 3 (verification profonde UI):
+  - nouveau validateur:
+    - `tools/dev/verify_story_ui_conformance.py`
+  - combine transitions deep + lecture `UI_SCENE_STATUS` + comparaison `/data/story/screens` avec allowlist dynamique QR/WIN_ETAPE.
+- Stabilite complementaire:
+  - correction fallback `SC_LOAD` quand scenario JSON est volumineux (`NoMemory`):
+    - parse filtree des seuls champs id dans `loadScenarioIdFromFile`
+    - `hardware/firmware/ui_freenove_allinone/src/app/scenario_manager.cpp`
+- Gates build/tooling executees (vert):
+  - `./tools/dev/story-gen validate` ✅
+  - `./tools/dev/story-gen sync-screens --check` ✅
+  - `./tools/dev/story-gen generate-cpp` ✅
+  - `./tools/dev/story-gen generate-bundle --out-dir /tmp/zacus_bundle_final_ui` ✅
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t buildfs` ✅
+- Flash/FS USB modem:
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- Verification hardware USB modem (vert):
+  - `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 8 --wait-port 10` ✅
+  - `python3 tools/dev/verify_story_default_flow.py --port /dev/cu.usbmodem5AB90753301 --baud 115200` ✅
+  - `python3 tools/dev/test_story_4scenarios.py --port /dev/cu.usbmodem5AB90753301 --baud 115200` ✅
+    - log: `artifacts/rc_live/test_4scenarios_20260226-004510.log`
+  - `python3 tools/dev/verify_story_transitions_deep.py --port /dev/cu.usbmodem5AB90753301 --baud 115200` ✅
+    - log: `artifacts/rc_live/deep_transition_verify_20260226-004530.log` (51/51 pass)
+  - `python3 tools/dev/verify_story_ui_conformance.py --port /dev/cu.usbmodem5AB90753301 --baud 115200` ✅
+    - log: `artifacts/rc_live/ui_conformance_verify_20260226-010143.log` (51/51 pass, 0 payload missing)
+
 ## [2026-02-25] Lots 3→4→5 Freenove (stabilite unlock + perf cache + validation USB modem)
 
 - Skills chain active (ordre):

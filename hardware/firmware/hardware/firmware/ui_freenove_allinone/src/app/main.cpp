@@ -910,6 +910,7 @@ bool webAuthorizeApiRequest(const char* path);
 void printHardwareStatus();
 void printMicTunerStatus();
 void printHardwareStatusJson();
+void printUiSceneStatus();
 void printCameraStatus();
 void printMediaStatus();
 void maybeEmitHardwareEvents(uint32_t now_ms);
@@ -1928,6 +1929,38 @@ void printMediaStatus() {
                 media.record_dir,
                 media.last_ok ? 1U : 0U,
                 media.last_error[0] != '\0' ? media.last_error : "none");
+}
+
+void printUiSceneStatus() {
+  const UiSceneStatusSnapshot ui = g_ui.sceneStatusSnapshot();
+  const StorageManager::ScenePayloadMeta payload_meta = g_storage.lastScenePayloadMeta();
+
+  StaticJsonDocument<1536> document;
+  document["valid"] = ui.valid;
+  document["scenario_id"] = ui.scenario_id;
+  document["step_id"] = ui.step_id;
+  document["scene_id"] = ui.scene_id;
+  document["audio_pack_id"] = ui.audio_pack_id;
+  document["audio_playing"] = ui.audio_playing;
+  document["show_title"] = ui.show_title;
+  document["show_subtitle"] = ui.show_subtitle;
+  document["show_symbol"] = ui.show_symbol;
+  document["title"] = ui.title;
+  document["subtitle"] = ui.subtitle;
+  document["symbol"] = ui.symbol;
+  document["effect"] = ui.effect;
+  document["effect_speed_ms"] = ui.effect_speed_ms;
+  document["transition"] = ui.transition;
+  document["transition_ms"] = ui.transition_ms;
+  document["bg_rgb"] = ui.bg_rgb;
+  document["accent_rgb"] = ui.accent_rgb;
+  document["text_rgb"] = ui.text_rgb;
+  document["payload_crc"] = ui.payload_crc;
+  document["payload_origin"] = payload_meta.origin;
+  document["payload_source_kind"] = payload_meta.source_kind;
+
+  serializeJson(document, Serial);
+  Serial.println();
 }
 
 constexpr const char* kWebUiIndex = R"HTML(
@@ -4406,7 +4439,7 @@ void handleSerialCommandImpl(const char* command_line, uint32_t now_ms) {
         "SC_LIST SC_LOAD <id> SCENE_GOTO <scene_id> SC_COVERAGE SC_REVALIDATE SC_REVALIDATE_ALL SC_EVENT <type> [name] "
         "SC_EVENT_RAW <name> "
         "STORY_REFRESH_SD STORY_SD_STATUS "
-        "UI_GFX_STATUS UI_MEM_STATUS PERF_STATUS PERF_RESET RESOURCE_STATUS RESOURCE_PROFILE <gfx_focus|gfx_plus_mic|gfx_plus_cam_snapshot> RESOURCE_PROFILE_AUTO <on|off> "
+        "UI_GFX_STATUS UI_MEM_STATUS UI_SCENE_STATUS PERF_STATUS PERF_RESET RESOURCE_STATUS RESOURCE_PROFILE <gfx_focus|gfx_plus_mic|gfx_plus_cam_snapshot> RESOURCE_PROFILE_AUTO <on|off> "
         "SIMD_STATUS SIMD_SELFTEST SIMD_BENCH [loops] [pixels] "
         "HW_STATUS HW_STATUS_JSON HW_LED_SET <r> <g> <b> [brightness] [pulse] HW_LED_AUTO <ON|OFF> HW_MIC_STATUS HW_BAT_STATUS "
         "MIC_TUNER_STATUS [ON|OFF|<period_ms>] "
@@ -4434,6 +4467,10 @@ void handleSerialCommandImpl(const char* command_line, uint32_t now_ms) {
   }
   if (std::strcmp(command, "UI_MEM_STATUS") == 0) {
     g_ui.dumpStatus(UiStatusTopic::kMemory);
+    return;
+  }
+  if (std::strcmp(command, "UI_SCENE_STATUS") == 0) {
+    printUiSceneStatus();
     return;
   }
 #if defined(USE_AUDIO) && (USE_AUDIO != 0)

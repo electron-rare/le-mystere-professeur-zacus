@@ -50,7 +50,7 @@ bool loadScenarioIdFromFile(const char* scenario_file_path, String* out_scenario
     return false;
   }
   const size_t file_size = static_cast<size_t>(file.size());
-  if (file_size == 0U || file_size > 12288U) {
+  if (file_size == 0U || file_size > 32768U) {
     file.close();
     Serial.printf("[SCENARIO] unexpected scenario config size: %s (%u bytes)\n",
                   scenario_file_path,
@@ -58,8 +58,14 @@ bool loadScenarioIdFromFile(const char* scenario_file_path, String* out_scenario
     return false;
   }
 
-  DynamicJsonDocument document(file_size + 512U);
-  const DeserializationError error = deserializeJson(document, file);
+  StaticJsonDocument<64> filter;
+  filter["scenario"] = true;
+  filter["scenario_id"] = true;
+  filter["id"] = true;
+
+  StaticJsonDocument<384> document;
+  const DeserializationError error =
+      deserializeJson(document, file, DeserializationOption::Filter(filter));
   file.close();
   if (error) {
     Serial.printf("[SCENARIO] invalid scenario config json (%s): %s\n",

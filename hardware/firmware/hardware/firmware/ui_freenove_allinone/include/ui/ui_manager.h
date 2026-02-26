@@ -85,6 +85,29 @@ struct UiMemorySnapshot {
   uint16_t conv_pixels_per_ms = 0U;
 };
 
+struct UiSceneStatusSnapshot {
+  bool valid = false;
+  bool audio_playing = false;
+  bool show_title = false;
+  bool show_subtitle = false;
+  bool show_symbol = false;
+  uint32_t payload_crc = 0U;
+  uint16_t effect_speed_ms = 0U;
+  uint16_t transition_ms = 0U;
+  uint32_t bg_rgb = 0U;
+  uint32_t accent_rgb = 0U;
+  uint32_t text_rgb = 0U;
+  char scenario_id[48] = {0};
+  char step_id[64] = {0};
+  char scene_id[64] = {0};
+  char audio_pack_id[64] = {0};
+  char title[96] = {0};
+  char subtitle[160] = {0};
+  char symbol[48] = {0};
+  char effect[24] = {0};
+  char transition[24] = {0};
+};
+
 enum class UiStatusTopic : uint8_t {
   kGraphics = 0,
   kMemory,
@@ -111,6 +134,7 @@ class UiManager {
   bool simulateQrPayload(const char* payload);
   void dumpStatus(UiStatusTopic topic) const;
   UiMemorySnapshot memorySnapshot() const;
+  UiSceneStatusSnapshot sceneStatusSnapshot() const;
 
  private:
   void update();
@@ -435,6 +459,7 @@ class UiManager {
   FlushContext flush_ctx_;
   BufferConfig buffer_cfg_;
   GraphicsStats graphics_stats_;
+  UiSceneStatusSnapshot scene_status_;
   uint16_t rgb332_to_565_lut_[256] = {};
   bool color_lut_ready_ = false;
   bool dma_requested_ = false;

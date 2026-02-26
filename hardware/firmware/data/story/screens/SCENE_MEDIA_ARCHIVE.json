@@ -1,45 +1,55 @@
 {
-  "title": "DETECTEUR LEFOU",
-  "subtitle": "Analyse en cours",
-  "symbol": "AUDIO",
-  "effect": "wave",
-  "effect_speed_ms": 460,
+  "title": "ARCHIVES MEDIA",
+  "subtitle": "Photos et enregistrements sauvegardes",
+  "symbol": "READY",
+  "effect": "radar",
+  "effect_speed_ms": 760,
   "theme": {
-    "bg": "#071B1A",
-    "accent": "#46E6C8",
-    "text": "#E9FFF9"
+    "bg": "#0D1A34",
+    "accent": "#7CB1FF",
+    "text": "#EEF4FF"
   },
   "transition": {
-    "effect": "zoom",
-    "duration_ms": 250
+    "effect": "fade",
+    "duration_ms": 240
   },
   "timeline": {
     "loop": true,
-    "duration_ms": 1200,
+    "duration_ms": 2000,
     "keyframes": [
       {
         "at_ms": 0,
-        "effect": "wave",
-        "speed_ms": 460,
+        "effect": "radar",
+        "speed_ms": 760,
         "theme": {
-          "bg": "#071B1A",
-          "accent": "#46E6C8",
-          "text": "#E9FFF9"
+          "bg": "#0D1A34",
+          "accent": "#7CB1FF",
+          "text": "#EEF4FF"
         }
       },
       {
-        "at_ms": 1200,
-        "effect": "radar",
+        "at_ms": 1000,
+        "effect": "pulse",
         "speed_ms": 620,
         "theme": {
-          "bg": "#0A2523",
-          "accent": "#7FF2DA",
-          "text": "#F2FFFC"
+          "bg": "#132245",
+          "accent": "#9CC7FF",
+          "text": "#F7FAFF"
+        }
+      },
+      {
+        "at_ms": 2000,
+        "effect": "radar",
+        "speed_ms": 760,
+        "theme": {
+          "bg": "#0D1A34",
+          "accent": "#7CB1FF",
+          "text": "#EEF4FF"
         }
       }
     ]
   },
-  "id": "SCENE_LEFOU_DETECTOR",
+  "id": "SCENE_MEDIA_ARCHIVE",
   "text": {
     "show_title": false,
     "show_subtitle": true,
@@ -53,7 +63,7 @@
     "show_title": false,
     "show_subtitle": true,
     "show_symbol": true,
-    "effect_speed_ms": 460
+    "effect_speed_ms": 760
   },
   "framing": {
     "preset": "center",

@@ -1,15 +1,22 @@
-# Test Toolbox
+---
+# Zacus Tools – Test Toolbox
 
-Lightweight test entrypoints for Zacus.
+---
 
-## Prerequisites
+## 📝 Description
 
+Entrées de test légères pour le projet Zacus (validation, hardware, CI, simulation UART).
+
+---
+
+## 🚀 Installation & usage
+
+Pré-requis :
 - `python3`
-- Optional: `pyyaml` for content checks (`pip install pyyaml`)
-- Optional: `pyserial` for USB serial tests (`pip install pyserial`)
+- (Optionnel) `pyyaml` pour les checks de contenu (`pip install pyyaml`)
+- (Optionnel) `pyserial` pour les tests USB série (`pip install pyserial`)
 
-## Quick commands
-
+Commandes rapides :
 ```bash
 bash tools/test/run_content_checks.sh
 python3 tools/test/run_serial_suite.py --list-suites
@@ -19,39 +26,44 @@ bash tools/test/run_rc_gate.sh --sprint s1 --port-esp32 /dev/cu.SLAB_USBtoUART
 bash tools/test/hw_now.sh
 ```
 
-## Hardware modes
+Modes hardware :
+- Sans hardware : utiliser `--allow-no-hardware` pour retour `SKIP` (exit 0)
+- Avec hardware : connecter les adaptateurs USB-UART avant les suites
 
-- No hardware / CI laptop:
-  - use `--allow-no-hardware` on serial tools to return `SKIP` with exit code `0`.
-- With hardware:
-  - connect USB-UART adapters before running serial suites.
-
-## Minimal wiring for UI Link simulation
-
-UART 3.3V only:
-
-- ESP32 TX (GPIO22) -> adapter RX
-- ESP32 RX (GPIO19) -> adapter TX
+Simulation UI Link (UART 3.3V) :
+- ESP32 TX (GPIO22) -> RX adaptateur
+- ESP32 RX (GPIO19) -> TX adaptateur
 - GND -> GND
-- Baud: `19200`
-
-Then run:
-
+- Baud : `19200`
 ```bash
 python3 tools/test/ui_link_sim.py --port /dev/ttyUSB0 --script "NEXT:click,OK:long"
 ```
 
-## Wrapper path inside firmware workspace
+Wrappers pour firmware :
+- `hardware/firmware/tools/test/` (forward vers ce dossier)
 
-For teams working from `hardware/firmware`, wrappers are provided under:
+Helpers RC cycle :
+- Sprint gate : `bash tools/test/run_rc_gate.sh --sprint s1..s5 ...`
+- Live one-shot : `bash tools/test/hw_now.sh`
+- Board seed : `bash hardware/firmware/tools/dev/rc_execution_seed.sh`
+- Board source of truth : `hardware/firmware/docs/RC_FINAL_BOARD.md`
 
-- `hardware/firmware/tools/test/`
+---
 
-They forward to this canonical `tools/test` implementation.
+## 🤝 Contribuer
 
-## RC cycle helpers
+Les contributions sont bienvenues !
+Merci de lire [../../CONTRIBUTING.md](../../CONTRIBUTING.md) avant toute PR.
 
-- Sprint gate runner: `bash tools/test/run_rc_gate.sh --sprint s1..s5 ...`
-- Live one-shot (upload + smoke + s1+s2): `bash tools/test/hw_now.sh`
-- Board seed script: `bash hardware/firmware/tools/dev/rc_execution_seed.sh`
-- RC board source of truth: `hardware/firmware/docs/RC_FINAL_BOARD.md`
+---
+
+## 🧑‍🎓 Licence
+
+- **Code** : MIT (`../../LICENSE`)
+
+---
+
+## 👤 Contact
+
+Pour toute question ou suggestion, ouvre une issue GitHub ou contacte l’auteur principal :
+- Clément SAILLANT — [github.com/electron-rare](https://github.com/electron-rare)

@@ -1,4 +1,20 @@
-## Mapping hardware ESP32-S3 Freenove Media Kit
+
+---
+# 🎛️ Zacus Firmware – Freenove All-in-One
+
+![Funk](https://media.giphy.com/media/3o7TKtnuHOHHUjR38Y/giphy.gif)
+
+---
+
+## 📝 Description
+
+Bienvenue dans le cockpit le plus funky du multivers ! Ce firmware fusionne UI, audio, scénarios et hardware sur la carte Freenove Media Kit (ESP32). Ici, chaque pixel danse, chaque bouton groove, et chaque boot est une fête.
+
+> *"Si tu entends un son rétro ou vois un plasma violet, c’est normal. Si le microcontrôleur se met à rapper, c’est probablement un bug… ou un feature caché."*
+
+---
+
+## 🕹️ Mapping hardware (ESP32-S3 Freenove Media Kit)
 
 | Fonction         | Broche ESP32-S3 | Signal TFT/Touch/Audio | Remarques                      |
 |------------------|-----------------|-----------------------|--------------------------------|
@@ -22,6 +38,88 @@
 - Profils fournis: `0=sketch19`, `1=swap_bck_ws`, `2=dout2_alt`.
 - Le tactile est désactivé par défaut (`FREENOVE_HAS_TOUCH=0`).
 
+---
+
+## 📦 Contenu du dossier
+
+- Sources : `src/` (app, ui, audio, storage, camera, drivers, system)
+- Polices : `src/ui/fonts/`
+- Layouts d’écran : `src/ui/screens/`
+- Partition custom : `partitions/freenove_esp32s3_app6mb_fs6mb.csv`
+- Mapping hardware détaillé (voir pour descendre plus haut )
+
+---
+
+## 🚀 Installation & usage
+
+1. Clone ce repo, chausse tes lunettes de soleil.
+2. Va dans `hardware/firmware` et build comme un DJ :
+  ```sh
+  pio run -e freenove_allinone
+  pio run -e freenove_allinone -t upload --upload-port <PORT>
+  ```
+3. Pour la version ESP32-S3 (partition 6MB app / 6MB FS) :
+  ```sh
+  pio run -e freenove_esp32s3
+  pio run -e freenove_esp32s3 -t buildfs
+  pio run -e freenove_esp32s3 -t uploadfs --upload-port <PORT>
+  pio run -e freenove_esp32s3 -t upload --upload-port <PORT>
+  ```
+4. Branche, allume, et laisse la magie opérer.
+
+---
+
+## 🧩 Fonctionnalités qui groovent
+
+- Navigation UI dynamique (LVGL, écrans générés depuis fichiers)
+- Exécution de scénarios (lecture, transitions, actions, audio)
+- Gestion audio (lecture/stop, mapping fichiers LittleFS)
+- Gestion boutons et tactile (événements, mapping, callbacks)
+- Fallback robuste si fichier manquant (scénario par défaut)
+- Génération de logs et artefacts (logs/, artifacts/)
+- Validation hardware sur Freenove (affichage, audio, boutons, tactile)
+- Documentation et onboarding synchronisés
+- Mode autonome (pas besoin d’ESP32 séparé)
+
+> *"Si tu rates un bouton, c’est que tu danses trop fort. Si tu vois un plasma violet, c’est que tu es dans le groove."*
+
+---
+
+## 🛠️ Modules principaux
+
+- `audio_manager` : fait swinguer l’audio (lecture, stop, état)
+- `scenario_manager` : enchaîne les étapes comme un DJ
+- `ui_manager` : LVGL, écrans dynamiques, FX visuels
+- `storage_manager` : LittleFS (init, vérif, groove des assets)
+- `button_manager` : boutons physiques, pour les vrais
+- `touch_manager` : tactile XPT2046, pour les DJ du futur
+
+---
+
+## 🦄 Funky extras & notes
+
+- Firmware expérimental : fusion audio + UI, mode "party hard" activé
+- Pour la compatibilité UI Link, prévoir un mode optionnel
+- Si tu veux une intro Amiga92, active la scène `SCENE_WIN_ETAPE` et laisse-toi porter par le FX timeline (plasma, starfield, boingball…)
+- Pour tester la scène MP3 : `SCENE_MP3_PLAYER` (overlay AmigaAMP, scan `/music`)
+- Pour la caméra : `SCENE_CAMERA_SCAN` (Win311 overlay, boutons = SNAP/SAVE/GALLERY/DELETE/CLOSE)
+- Pour tout le reste, consulte les logs, et si tu comprends tout du premier coup, tu gagnes un badge "Zacus Funk Master".
+
+---
+
+## 🤝 Contribuer
+
+Merci de lire [../../../../../../CONTRIBUTING.md](../../../../../../CONTRIBUTING.md) avant toute PR. Les pull requests avec punchlines sont encouragées.
+
+---
+
+## 👤 Contact
+
+Pour toute question, suggestion, ou battle de funk, ouvre une issue GitHub ou contacte l’auteur principal :
+- Clément SAILLANT — [github.com/electron-rare](https://github.com/electron-rare)
+
+> *"Ce firmware a été validé par un oscilloscope, un grille-pain, et un synthé vintage. Si tu trouves un bug, c’est peut-être un easter egg ou feat foirée."*
+---
 
 # Firmware Freenove Media Kit All-in-One
 

@@ -1,43 +1,67 @@
 
-# Firmware UI ESP8266 OLED (UI Link v2)
+---
+# Zacus Firmware – UI ESP8266 OLED (UI Link v2)
+// TODO NO DEV FINISH (need KILL_LIFE ?)
+---
 
-> **[Mise à jour 2026]**
->
-> **Tous les assets LittleFS (scénarios, écrans, scènes, audio, etc.) sont désormais centralisés dans le dossier `hardware/firmware/data/` à la racine du projet.**
->
-> Ce dossier unique sert de source pour le flash LittleFS sur ESP32, ESP8266 et RP2040. Les anciens dossiers `data/` dans les sous-projets doivent être migrés/supprimés (voir encart migration ci-dessous).
+## 📝 Description
 
+Firmware UI OLED léger (U8G2) pour ESP8266, implémentant UI Link v2 en UART full duplex.
 
-Ce firmware garde une UI OLED legere (U8G2) et implemente UI Link v2 en UART full duplex.
+---
 
-## Architecture
+## 🚀 Installation & usage
 
-- `src/core/telemetry_state.h`: modele de telemetrie
-- `src/core/stat_parser.*`: decode `STAT`/`KEYFRAME` v2 (`k=v`, CRC8)
-- `src/core/link_monitor.*`: watchdog lien et recovery
-- `src/core/render_scheduler.*`: rendu non bloquant
-- `src/apps/*`: ecrans fonctionnels (boot, lien, mp3, ulock)
-- `src/main.cpp`: handshake `HELLO`, reponse `PONG`, boucle UI
+Tous les assets LittleFS (scénarios, écrans, scènes, audio, etc.) sont centralisés dans `hardware/firmware/data/` à la racine du projet.
+Ce dossier unique sert de source pour le flash LittleFS sur ESP32, ESP8266 et RP2040.
 
-## Protocole
+---
 
-Transport: trames ASCII ligne par ligne:
+## 📦 Architecture & contenu
 
+- `src/core/telemetry_state.h` : modèle de télémétrie
+- `src/core/stat_parser.*` : decode `STAT`/`KEYFRAME` v2 (`k=v`, CRC8)
+- `src/core/link_monitor.*` : watchdog lien et recovery
+- `src/core/render_scheduler.*` : rendu non bloquant
+- `src/apps/*` : écrans fonctionnels (boot, lien, mp3, unlock)
+- `src/main.cpp` : handshake `HELLO`, réponse `PONG`, boucle UI
+
+---
+
+## 🛠️ Protocole
+
+Transport : trames ASCII ligne par ligne :
 `<TYPE>,k=v,k=v*CC\n`
-
 - CRC8 polynomial `0x07`
-- UI -> ESP32: `HELLO`, `PONG`
-- ESP32 -> UI: `ACK`, `KEYFRAME`, `STAT`, `PING`
-- Capacites OLED annoncees: `caps=btn:0;touch:0;display:oled`
+- UI -> ESP32 : `HELLO`, `PONG`
+- ESP32 -> UI : `ACK`, `KEYFRAME`, `STAT`, `PING`
+- Capacités OLED annoncées : `caps=btn:0;touch:0;display:oled`
 
-## Cablage UART
+---
 
+## 🔌 Câblage
+
+### UART
 - ESP32 `GPIO22 (TX)` -> ESP8266 `D4 (RX)`
 - ESP8266 `D5 (TX)` -> ESP32 `GPIO19 (RX)`
 - GND commun obligatoire
-- Baud par defaut: `57600`
+- Baud par défaut : `57600`
 
-## Cablage OLED I2C
+### OLED I2C
+
+---
+
+## 🤝 Contribuer
+
+Merci de lire [../../../../../../../../CONTRIBUTING.md](../../../../../../../../CONTRIBUTING.md) avant toute PR.
+
+---
+
+## 👤 Contact
+
+Pour toute question ou suggestion, ouvre une issue GitHub ou contacte l’auteur principal :
+- Clément SAILLANT — [github.com/electron-rare](https://github.com/electron-rare)
+---
 
 - VCC -> `3V3`
 - GND -> `GND`

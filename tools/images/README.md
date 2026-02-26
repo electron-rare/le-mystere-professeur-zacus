@@ -1,16 +1,45 @@
-# Printable image generator
+---
+# Zacus Tools – Printable Image Generator
 
-Creates PNG drafts for each printable asset with the OpenAI Images API.
+---
 
-## Requirements
-- `OPENAI_API_KEY` in your environment.
-- Dependencies installed in `.venv` (`PyYAML`, `openai`).
+## 📝 Description
 
-## Run
+Génère des ébauches PNG pour chaque asset imprimable à partir du manifeste, via l’API OpenAI Images.
+
+---
+
+## 🚀 Installation & usage
+
+Pré-requis :
+- `OPENAI_API_KEY` dans l’environnement
+- Dépendances dans `.venv` (`PyYAML`, `openai`)
+
+Exécution :
 ```sh
 PYTHON=.venv/bin/python tools/images/generate_printables.py \
   --manifest printables/manifests/zacus_v1_printables.yaml
 ```
-Add `--force` to regenerate outputs even if files already exist.
+Ajouter `--force` pour régénérer même si les fichiers existent déjà.
 
-Outputs land in `printables/export/png/zacus_v1/` and mirror the IDs from the manifest.
+Les sorties sont dans `printables/export/png/zacus_v1/` et reprennent les IDs du manifeste.
+
+---
+
+## 🤝 Contribuer
+
+Les contributions sont bienvenues !
+Merci de lire [../../CONTRIBUTING.md](../../CONTRIBUTING.md) avant toute PR.
+
+---
+
+## 🧑‍🎓 Licence
+
+- **Code** : MIT (`../../LICENSE`)
+
+---
+
+## 👤 Contact
+
+Pour toute question ou suggestion, ouvre une issue GitHub ou contacte l’auteur principal :
+- Clément SAILLANT — [github.com/electron-rare](https://github.com/electron-rare)

@@ -1,16 +1,24 @@
-# Solution complète
+# Solution complète (scénario canon zacus_v2.yaml)
 
-## coupable unique
-Lila Caron, assistante en chef des capteurs et gardienne des prototypes, est la seule à porter les gants signalés dans la salle des archives, la seule présente à 18h15 dans la salle des prototypes et la seule à avoir physiquement touché la baie de transfert après le message du professeur.
+> ⚡ Le Media Kit ESP32 valide chaque étape, joue les jingles et ouvre le Media Hub. Même un électron fatigué peut réussir la mission !
++Et si un ion s’échappe, c’est juste pour vérifier la conductivité du groupe !
 
-## mobile + méthode
-Lila a repéré la dérive éthique que représenterait la diffusion de l’Auréole. Elle a saboté les capteurs pour générer la hausse de température, a verrouillé les accès et a envoyé un faux message d’urgence pour que l’équipe se focalise sur les alarmes. Elle a ensuite laissé des indices clairs mais ciblés (code 1-4-3, note partielle, empreinte) pour conduire les détectives vers sa vérité : un message de protection, pas une conspiration.
+# Solution complète (scénario canon zacus_v2.yaml)
 
-## preuve et chronologie
-1. **Puzzle sonore (Atelier des ondes)** : la partition renversée renvoie au code 1-4-3, l’empreinte du professeur sur la baie de transfert et l’alarme ciblée. Cela indique qu’un humain manipulateur (pas un accident) a verrouillé la porte.
-2. **Logs (Salle des archives)** : les relevés exposent la présence de Lila juste après la transmission de Zacus et la suppression d’un enregistrement. Les autres rôles ont des alibis nets et aucune signature sur la baie.
-3. **Note du tableau (Bureau du Professeur)** : le message effacé et la formule incomplète montrent qu’elle a utilisé ses doigts (gants) pour brouiller l’écriture et qu’elle connaissait bien le calendrier de Zacus.
-4. **Mobile moral** : la dernière phrase écrite dans le carnet secret exprime son refus d’abandonner l’expérience aux militaires. En accusant Lila, toute la suite devient cohérente : elle protège la science en dissimulant le professeur.
+## Nature de l’épreuve
+Il n’y a pas de coupable unique : la disparition de Zacus est un test d’éthique et de coopération. L’équipe doit stabiliser U-SON (LA 440 Hz), respecter la règle de Zone 4 (piano LEFOU), puis trouver et scanner le QR WIN aux Archives.
 
-## épilogue
-Zacus réapparaît au moment de l’accusation finale, silencieux dans les archives. Il remercie les enfants : sans le temps gagné par Lila, il n’aurait pas pu stabiliser l’Auréole et canaliser l’énergie vers la bibliothèque des étudiants plutôt que le secteur militaire.
+## Étapes et preuves
+1. **Atelier des Ondes** : produire un LA 440 Hz stable (preuve : stabilité validée par feedback visuel/audio, passage à l’étape 2).
+2. **Zone 4 — Studio de Résonance** : jouer la séquence L-E-F-O-U sur le piano-alphabet (preuve : validation par observation MJ, passage à l’étape Archives).
+3. **Salle des Archives** : trouver et scanner le QR WIN caché derrière le portrait (preuve : QR scanné, accès Media Hub).
+
+## Sens et morale
+Le test n’est pas la vitesse, mais la coopération, la précision et le calme. U-SON ne doit pas devenir un objet de panique. L’équipe gagne si elle fait preuve de stabilité, de respect des règles et d’entraide.
+
+## Finale
+Zacus réapparaît : ce n’était pas une punition mais un test d’éthique. L’équipe a protégé le prototype par sa méthode et son calme. Accès final au Media Hub.
+
+## Backups et sécurité
+- Un QR WIN de secours est disponible dans la boîte MJ (voir YAML).
+- Si la caméra ne fonctionne pas, le MJ peut valider manuellement la réussite.

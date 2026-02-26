@@ -1,3 +1,312 @@
+## [2026-02-26] Calibration demandee "BGR565" (passe B compile-time)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226T055214Z_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226T055214Z_status.txt`
+- Decision appliquee:
+  - En pratique, le mode reste RGB565 avec ordre panneau BGR (`TFT_RGB_ORDER=TFT_BGR`), pas un format bpp different.
+  - `hardware/firmware/ui_freenove_allinone/include/ui_freenove_config.h` (3 variantes LCD).
+- Build/flash:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload` ✅
+- Verification serie:
+  - `UI_GFX_STATUS`: `depth=16 mode=RGB565` ✅
+  - `SCENE_GOTO SCENE_TEST_LAB`: `ACK ... ok=1` ✅
+  - `UI_SCENE_STATUS`: `scene_id=SCENE_TEST_LAB`, subtitle palette canonique ✅
+- Validation visuelle ecran:
+  - en attente retour utilisateur sur l'ordre percu mire + scroller.
+
+## [2026-02-26] Alignement final LVGL DMA sur contrat FX + recalibration BGR
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226T052733Z_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226T052733Z_status.txt`
+- Retour visuel:
+  - mire: `NBBGRJCM`
+  - texte: `BGRJMC`
+- Correctif:
+  - `pushImageDma` LGFX n'utilise plus `pushImageDMA<T>` (chemin d'interpretation different).
+  - `pushImageDma` passe maintenant par:
+    - `setAddrWindow(...)`
+    - `writePixelsDMA(..., swap=true)`
+  - objectif: appliquer strictement le meme contrat RGB565+swap que `pushColors(..., true)` (parite LVGL/FX).
+  - fichier: `hardware/firmware/ui_freenove_allinone/src/drivers/display/display_hal_lgfx.cpp`
+  - calibration panneau remise en `TFT_BGR` (3 variantes) dans `hardware/firmware/ui_freenove_allinone/include/ui_freenove_config.h`.
+
+## [2026-02-26] Recalibration panneau apres validation visuelle (RGB retenu)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226T052733Z_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226T052733Z_status.txt`
+- Retour utilisateur apres lot precedent:
+  - mire: `NBBGRJMC`
+  - texte: `RVBJMC`
+- Decision:
+  - le contrat pipeline LVGL+FX reste unifie (RGB565), mais calibration panneau bascule en `TFT_RGB`.
+- Correctif:
+  - `hardware/firmware/ui_freenove_allinone/include/ui_freenove_config.h`
+  - `TFT_RGB_ORDER` repasse a `TFT_RGB` pour les 3 variantes.
+- Build/flash:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload` ✅
+- Verification serie:
+  - `UI_GFX_STATUS` confirme `depth=16 mode=RGB565` ✅
+  - `SCENE_GOTO SCENE_TEST_LAB` + `UI_SCENE_STATUS` confirment scene test lock active ✅
+
+## [2026-02-26] Correction pipeline couleur LVGL+LGFX (contrat RGB565 unifie)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226T051611Z_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226T051611Z_status.txt`
+- Baseline pre-patch capturee:
+  - commandes serie: `UI_GFX_STATUS`, `SCENE_GOTO SCENE_TEST_LAB`, `UI_SCENE_STATUS`
+  - observation ecran reference user:
+    - mire: `NOIR, BLANC, ROUGE, BLEU, VERT, CYAN, JAUNE, MAGENTA`
+    - texte FX: `BLEU, VERT, ROUGE, JAUNE, MAGENTA, CYAN`
+- Correctif applique (scope pipeline uniquement):
+  - contrat HAL documente: `pushImageDma` et `pushColors(..., true)` doivent consommer le meme format logique RGB565.
+    - `hardware/firmware/ui_freenove_allinone/include/drivers/display/display_hal.h`
+  - chemin LVGL DMA aligne sur RGB565 LGFX (plus de voie `swap565` implicite):
+    - `hardware/firmware/ui_freenove_allinone/src/drivers/display/display_hal_lgfx.cpp`
+    - `pushImageDMA(..., reinterpret_cast<const lgfx::rgb565_t*>(pixels))`
+  - calibration panneau compile-time reglee en BGR sur les 3 variantes:
+    - `hardware/firmware/ui_freenove_allinone/include/ui_freenove_config.h`
+- Build/flash:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload` ✅
+- Verification post-flash:
+  - `UI_GFX_STATUS` confirme `depth=16 mode=RGB565 backend=LGFX` ✅
+  - `SCENE_GOTO SCENE_TEST_LAB` + `UI_SCENE_STATUS` confirment mire active (`TEST_LAB_LOCK`) ✅
+  - regression `SCENE_U_SON_PROTO`, `SCENE_LA_DETECTOR`, `SCENE_FINAL_WIN` executee; lock test lab force le retour `SCENE_TEST_LAB` (comportement attendu en mode calibration) ⚠️
+
+## [2026-02-26] Calibration couleur: alignement LGFX flush DMA + retour RGB global
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226T044708Z_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226T044708Z_status.txt`
+- Symptome recu:
+  - mire observee: `NOIR BLANC ROUGE BLEU VERT CYAN JAUNE MAGENTA`
+  - scroller LGFX observe: `BLEU VERT ROUGE JAUNE MAGENTA CYAN`
+- Correctif applique:
+  - retour `TFT_RGB_ORDER` a `TFT_RGB` (3 variantes LCD):
+    - `hardware/firmware/ui_freenove_allinone/include/ui_freenove_config.h`
+  - restauration du type LGFX attendu sur flush DMA LVGL:
+    - `display_.pushImageDMA(..., reinterpret_cast<const lgfx::swap565_t*>(pixels));`
+    - `hardware/firmware/ui_freenove_allinone/src/drivers/display/display_hal_lgfx.cpp`
+- Build/flash:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload` ✅
+- Verification serie post-flash:
+  - `UI_GFX_STATUS`: `depth=16 mode=RGB565 dma_async=1 backend=LGFX` ✅
+  - `SCENE_GOTO SCENE_TEST_LAB` + `UI_SCENE_STATUS`: scene test lock active + subtitle palette canonique ✅
+
+## [2026-02-26] Correction couleur globale UI Freenove: passage RGB (LCD panel)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226T043651Z_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226T043651Z_status.txt`
+- Baseline pre-fix (avant flash RGB):
+  - commandes serie: `UI_GFX_STATUS`, `UI_SCENE_STATUS`, `SCENE_GOTO SCENE_TEST_LAB`
+  - statut: `mode=RGB565`, scene active `SCENE_TEST_LAB`, subtitle palette canonique presente.
+  - observation utilisateur precedente conservee comme evidence: inversion R/B visible a l'ecran.
+- Correctif applique:
+  - `TFT_RGB_ORDER` force a `TFT_RGB` pour les 3 variantes LCD dans
+    `hardware/firmware/ui_freenove_allinone/include/ui_freenove_config.h`.
+  - mapping LovyanGFX conserve via `cfg.rgb_order` derive de `TFT_RGB_ORDER`
+    (`hardware/firmware/ui_freenove_allinone/src/drivers/display/display_hal_lgfx.cpp`).
+  - pas de changement sur `LV_COLOR_16_SWAP`, policy theme, JSON story, ni cycle scroller.
+- Build/flash:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload` ✅
+- Verification post-flash:
+  - `UI_GFX_STATUS`: `depth=16 mode=RGB565 theme256=0` ✅
+  - `SCENE_GOTO SCENE_TEST_LAB` + `UI_SCENE_STATUS`: scene/test payload actifs ✅
+  - lock scene test toujours actif (`kForceTestLabSceneLock=true`), donc les `SCENE_GOTO` vers autres scenes reviennent sur `SCENE_TEST_LAB` (comportement attendu dans ce mode).
+- Limitation:
+  - regression visuelle multi-scenes non executable tant que le lock test est actif compile-time.
+  - validation visuelle finale demandee sur hardware: ordre mire + couleurs du scroller RVBCMJ.
+
+## [2026-02-26] TEST_LAB lock + FX texte wave + RGB confirme
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226T040721Z_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226T040721Z_status.txt`
+  - `/tmp/zacus_checkpoint/20260226T040313Z_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226T040313Z_status.txt`
+- Correctifs:
+  - lock test scene reactive: `kForceTestLabSceneLock=true` dans `ui_freenove_allinone/src/app/main.cpp`.
+  - ajout FX texte wave sur `SCENE_TEST_LAB` (anim sinus sur sous-titre) dans `ui_freenove_allinone/src/ui/ui_manager.cpp`.
+  - `TFT_RGB_ORDER` laisse en `TFT_RGB` (demande "remettre en RGB").
+- Build/flash:
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+
+## [2026-02-26] Palette globale LVGL+GFX: alignement `TFT_RGB_ORDER` sur Freenove
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226T034545Z_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226T034545Z_status.txt`
+- Correctif global couleur:
+  - declaration explicite `TFT_RGB_ORDER TFT_BGR` ajoutee pour variantes ST7796:
+    - `hardware/firmware/ui_freenove_allinone/include/ui_freenove_config.h`
+  - backend LovyanGFX aligne sur macro panel:
+    - `cfg.rgb_order` derive de `TFT_RGB_ORDER` dans
+      `hardware/firmware/ui_freenove_allinone/src/drivers/display/display_hal_lgfx.cpp`
+  - mire `SCENE_TEST_LAB` remise en palette canonique (plus de compensation locale RGB):
+    - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+- Build/flash:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+
+## [2026-02-26] SCENE_TEST_LAB: suppression fond noir sous titre/sous-titre
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226T034545Z_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226T034545Z_status.txt`
+- Correctif (scene test uniquement):
+  - retrait du fond noir opacifie sous les labels de `SCENE_TEST_LAB`.
+  - styles labels forces en fond transparent (`LV_OPA_TRANSP`), padding `0`, radius `0`.
+  - applique dans les deux passes de stylage (state static + post dynamic) pour eviter le retour des blocs noirs.
+- Build/flash:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- Verification serie:
+  - `UI_SCENE_STATUS` confirme `scene_id=SCENE_TEST_LAB`, `step_id=TEST_LAB_LOCK`, `show_title=true`, `show_subtitle=true` ✅
+
+## [2026-02-26] SCENE_TEST_LAB: texte force visible + scene lock test + flash FS
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226T032507Z_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226T032507Z_status.txt`
+- Correctifs cibles (SCENE_TEST_LAB uniquement):
+  - verrou runtime test actif (`kForceTestLabSceneLock=true`) pour rester sur `SCENE_TEST_LAB`.
+  - override rendu: scene forcee `SCENE_TEST_LAB` + step logique `TEST_LAB_LOCK`.
+  - labels titre/sous-titre re-styles apres dynamic state avec `lv_obj_remove_style_all(...)` puis style explicite (font, couleur, opa, bg, padding, align) pour eviter blocs noirs sans texte.
+  - payload scene test aligne avec sous-titre compact:
+    - `NOIR | BLANC | ROUGE | VERT | BLEU | CYAN | MAGENTA | JAUNE`
+- Flash/gates executes:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `pio run -e freenove_esp32s3 -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 8 --wait-port 10` ✅
+- Verification serie:
+  - `UI_SCENE_STATUS`: `scene_id=SCENE_TEST_LAB`, `step_id=TEST_LAB_LOCK`, `show_title=true`, `show_subtitle=true`, payload `/story/screens/SCENE_TEST_LAB.json` ✅
+
+## [2026-02-26] Boot: desactivation auto scene palette + backlight par defaut 30
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226T015322Z_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226T015322Z_status.txt`
+- Correctifs:
+  - scene boot palette automatique desactivee (`kBootPaletteAutoOnBoot=false`) pour ne plus rester sur la mire au boot.
+  - retroeclairage LCD par defaut au boot fixe a `30` (`g_lcd_backlight_level=30`).
+- Build + upload Freenove:
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- Verification serie:
+  - `STATUS` au boot: `step=SCENE_U_SON_PROTO` ✅
+  - `LCD_BACKLIGHT`: `level=30` ✅
+
+## [2026-02-26] SCENE_TEST_LAB: compensation ordre couleur TFT_BGR
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226T031015Z_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226T031015Z_status.txt`
+- Constat:
+  - la mire etait bien active mais les couleurs etaient lues `NOIR BLANC BLEU ROUGE VERT JAUNE CYAN MAGENTA`.
+  - cause: panel en ordre `TFT_BGR`, donc inversion R/B sur les barres RGB de test.
+- Correctif:
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+  - ajout d'une conversion `toPanelOrder(...)` appliquee uniquement a la mire `SCENE_TEST_LAB` quand `TFT_RGB_ORDER == TFT_BGR`.
+  - objectif: conserver l'ordre visuel canonique `NOIR BLANC ROUGE VERT BLEU CYAN MAGENTA JAUNE` sur l'ecran physique.
+- Gates/flash:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+
+## [2026-02-26] SCENE_TEST_LAB: overlay texte force (titre + liste)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226T031519Z_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226T031519Z_status.txt`
+- Constat:
+  - titre/sous-titre non visibles sur la mire selon validation ecran.
+  - la liste multi-ligne passait par un mode `LV_LABEL_LONG_DOT` qui ne convient pas a une mire en lignes.
+- Correctif:
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+  - en `SCENE_TEST_LAB`:
+    - fond contraste noir semi-opaque sur titre/sous-titre
+    - pads/rayon pour lisibilite
+    - subtitle en `LV_LABEL_LONG_WRAP` + largeur forcee
+    - alignement explicite top/bottom
+    - reset des styles de fond/padding hors `SCENE_TEST_LAB` pour eviter regressions.
+- Gates/flash:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 8 --wait-port 10` ✅
+  - `python3 tools/dev/verify_story_default_flow.py --port /dev/cu.usbmodem5AB90753301 --baud 115200` ✅
+
+## [2026-02-26] SCENE_TEST_LAB: mire fixe visible au boot
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226T025819Z_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226T025819Z_status.txt`
+- Correctif:
+  - `SCENE_TEST_LAB` n'est plus forcé vide côté UI fallback.
+  - Le fallback interne de `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp` expose désormais la mire fixe par défaut (texte + fond noir, aucun FX).
+  - La scène est forcée côté boot via `SCENE_TEST_LAB` dans le code runtime (déjà en place), et la payload `/story/screens/SCENE_TEST_LAB.json` est chargée côté FS.
+- Gates/flash/validation:
+  - `pio run -e freenove_esp32s3` ✅
+  - `pio run -e freenove_esp32s3 -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 8 --wait-port 10` ✅
+
+## [2026-02-26] Pre-scene boot palette + commande LCD_BACKLIGHT
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226T013435Z_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226T013435Z_status.txt`
+- Ajouts:
+  - pre-scene boot palette temporaire (`SCENE_BOOT_PALETTE`) affichee avant la scene story initiale.
+  - payload ajoute:
+    - `data/story/screens/SCENE_BOOT_PALETTE.json`
+    - `data/screens/SCENE_BOOT_PALETTE.json`
+  - commande serie ecran:
+    - `LCD_BACKLIGHT [0..255]` (set/get) dans `ui_freenove_allinone/src/app/main.cpp`.
+- Build + upload Freenove:
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- Verification serie:
+  - `LCD_BACKLIGHT 140` -> `ACK LCD_BACKLIGHT ok=1`
+  - `LCD_BACKLIGHT` -> `LCD_BACKLIGHT level=140` ✅
+
+## [2026-02-26] Verrou temporaire NVS media manager (STEP_MEDIA_MANAGER)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226T011719Z_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226T011719Z_status.txt`
+- Correctif:
+  - blocage explicite de l'action `ACTION_SET_BOOT_MEDIA_MANAGER` pour empecher toute ecriture NVS vers le mode media manager.
+  - fichier: `hardware/firmware/ui_freenove_allinone/src/app/main.cpp`
+  - comportement: force le mode runtime `STORY` et log `[ACTION] SET_BOOT_MEDIA_MANAGER blocked nvs_lock=1`.
+- Build + upload Freenove:
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- Verification serie:
+  - `BOOT_MODE_STATUS` avant/apres `SCENE_GOTO SCENE_MEDIA_MANAGER` reste `mode=story`
+  - log de blocage observe: `[ACTION] SET_BOOT_MEDIA_MANAGER blocked nvs_lock=1` ✅
+
+## [2026-02-26] Wildcard bouton ANY -> BTN*_SHORT/LONG (global runtime)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226T010816Z_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226T010816Z_status.txt`
+- Correctif applique globalement (sans changement de schema scenario):
+  - `button/ANY` matche maintenant tout nom bouton non vide (ex: `BTN1_SHORT`, `BTN3_LONG`) dans:
+    - `hardware/firmware/ui_freenove_allinone/src/app/scenario_manager.cpp`
+    - `hardware/libs/story/src/core/story_engine_v2.cpp`
+  - matching strict conserve pour les autres types d'evenements.
+- Documentation contrat:
+  - note runtime ajoutee dans `docs/protocols/story_specs/README.md`.
+- Gates executees:
+  - `python3 tools/dev/verify_story_default_flow.py` ✅
+  - `pio run -e freenove_esp32s3` ✅
+
 ## [2026-02-26] UI Freenove conforme `/data` (palette v3 + UI_SCENE_STATUS + verification profonde)
 
 - Skills chain active (ordre):
@@ -2472,3 +2781,74 @@
   - log diagnostic: `logs/sdmmc_diag_20260225-195139.log`
   - resultat: `SUMMARY sd_errors=0 panic_markers=0 ack_next_ok=10 ack_next_fail=0`
   - gate smoke: `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --baud 115200 --timeout 10 --wait-port 20` ✅
+
+## [2026-02-26] Scene de test persistante (YAML + JSON + runtime)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226_025905_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226_025905_status.txt`
+- Ajouts:
+  - scene spec editable: `lib/zacus_story_portable/story_generator/story_specs/scenarios/DEFAULT/scene_test_lab.yaml`
+  - payload ecran canonique: `data/story/screens/SCENE_TEST_LAB.json`
+  - mirror legacy: `data/screens/SCENE_TEST_LAB.json`
+  - scene id runtime enregistre: `hardware/libs/story/src/resources/screen_scene_registry.cpp`
+- Usage test rapide:
+  - `SCENE_GOTO SCENE_TEST_LAB`
+- Build/upload Freenove:
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- Verification serie (scene test):
+  - `SCENE_GOTO SCENE_TEST_LAB` -> `ACK SCENE_GOTO ok=1` ✅
+  - `STATUS` -> `screen=SCENE_TEST_LAB` ✅
+  - `UI_SCENE_STATUS` -> `payload_origin=/story/screens/SCENE_TEST_LAB.json` ✅
+- Correctif mirror `data/screens/SCENE_TEST_LAB.json` (fichier vide corrige) + re-uploadfs Freenove ✅
+
+## [2026-02-26] SCENE_TEST_LAB -> mire validation LVGL/GFX
+
+- Payload mire/validation enrichi:
+  - `data/story/screens/SCENE_TEST_LAB.json` (timeline palette, transition glitch, demo fireworks, waveform, framing split, marquee)
+  - mirror: `data/screens/SCENE_TEST_LAB.json`
+  - spec: `lib/zacus_story_portable/story_generator/story_specs/scenarios/DEFAULT/scene_test_lab.yaml`
+- Flash FS Freenove:
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- Verification serie:
+  - `SCENE_GOTO SCENE_TEST_LAB` -> `ACK SCENE_GOTO ok=1` ✅
+  - `UI_SCENE_STATUS` -> `scene_id=SCENE_TEST_LAB`, `payload_origin=/story/screens/SCENE_TEST_LAB.json`, `transition=glitch` ✅
+
+## [2026-02-26] SCENE_TEST_LAB -> mire fixe palette (etape 1)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260226_031933_wip.patch`
+  - `/tmp/zacus_checkpoint/20260226_031933_status.txt`
+- Scene test simplifiee en mire fixe (sans timeline/effets/particules/waveform):
+  - `data/story/screens/SCENE_TEST_LAB.json`
+  - `data/screens/SCENE_TEST_LAB.json`
+- Upload FS Freenove:
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- Activation:
+  - `SCENE_GOTO SCENE_TEST_LAB` -> `ACK SCENE_GOTO ok=1` ✅
+  - `UI_SCENE_STATUS` -> `effect=none`, `timeline=0`, `accent=#FF0000` ✅
+
+## [2026-02-26] Fix affichage SCENE_TEST_LAB (stabilite lancement)
+
+- Constat: `SCENE_GOTO SCENE_TEST_LAB` etait bien ACK mais la scene pouvait etre remplacee par transitions scenario automatiques.
+- Correctif firmware:
+  - `hardware/firmware/ui_freenove_allinone/src/app/main.cpp`
+  - ajout `isFixedTestSceneActive(...)`
+  - quand `screen_scene_id == SCENE_TEST_LAB`, `g_scenario.tick(now_ms)` est saute (freeze transitions auto) pour garder la mire visible pendant calibration.
+- Build/upload Freenove:
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- Verification serie:
+  - `SCENE_GOTO SCENE_TEST_LAB` -> `ACK SCENE_GOTO ok=1` ✅
+  - `STATUS` apres 2s/5s/10s conserve `screen=SCENE_TEST_LAB` ✅
+
+## [2026-02-26] Boot scene forcee sur detector
+
+- Correctif boot story:
+  - `hardware/firmware/ui_freenove_allinone/src/app/main.cpp`
+  - ajout `kBootStorySceneId = SCENE_LA_DETECTOR`
+  - au boot (hors media manager), route immediate vers `SCENE_LA_DETECTOR` via `g_scenario.gotoScene(..., "boot_story_default")`
+- Build + upload Freenove:
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` ✅
+- Verification:
+  - `STATUS` apres reboot -> `step=SCENE_LA_DETECTOR screen=SCENE_LA_DETECTOR` ✅

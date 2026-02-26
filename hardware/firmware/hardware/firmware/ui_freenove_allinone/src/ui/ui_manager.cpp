@@ -1240,6 +1240,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
                                       std::strcmp(scene_id, "SCENE_WIN_ETAPE1") == 0 ||
                                       std::strcmp(scene_id, "SCENE_WIN_ETAPE2") == 0);
   const bool direct_fx_scene = isDirectFxSceneId(scene_id);
+  const bool test_lab_scene = (std::strcmp(scene_id, "SCENE_TEST_LAB") == 0);
   const bool is_locked_scene = (std::strcmp(scene_id, "SCENE_LOCKED") == 0);
   const bool qr_scene = (std::strcmp(scene_id, "SCENE_CAMERA_SCAN") == 0 ||
                          std::strcmp(scene_id, "SCENE_QR_DETECTOR") == 0);
@@ -1477,6 +1478,24 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     bg_rgb = 0x2A0508UL;
     accent_rgb = 0xFF4A45UL;
     text_rgb = 0xFFD5D1UL;
+  } else if (std::strcmp(scene_id, "SCENE_TEST_LAB") == 0) {
+    title = "MIRE COULEUR";
+    subtitle = "NOIR | BLANC | ROUGE | VERT | BLEU | CYAN | MAGENTA | JAUNE";
+    symbol = "";
+    effect = SceneEffect::kNone;
+    show_title = true;
+    show_subtitle = true;
+    show_symbol = false;
+    bg_rgb = 0x000000UL;
+    accent_rgb = 0x888888UL;
+    text_rgb = 0xFFFFFFUL;
+    transition = SceneTransition::kNone;
+    transition_ms = 0U;
+    waveform_enabled = false;
+    demo_mode = "standard";
+    demo_particle_count = 0U;
+    demo_strobe_level = 0U;
+    la_detection_scene_ = false;
   } else if (std::strcmp(scene_id, "SCENE_WARNING") == 0) {
     title = "ALERTE";
     subtitle = "Signal anormal";
@@ -1973,32 +1992,72 @@ void UiManager::renderScene(const ScenarioDef* scenario,
       subtitle = "Validation en cours...";
     }
   }
-  if (static_state_changed && direct_fx_scene) {
+  const bool test_lab_lgfx_scroller = test_lab_scene;
+  if (static_state_changed && (direct_fx_scene || test_lab_lgfx_scroller)) {
     direct_fx_scene_active_ = fx_engine_.config().lgfx_backend;
     if (direct_fx_scene_active_) {
-      direct_fx_scene_preset_ =
-          (std::strcmp(scene_id, "SCENE_FIREWORKS") == 0) ? ui::fx::FxPreset::kFireworks : ui::fx::FxPreset::kWinner;
+      if (test_lab_lgfx_scroller) {
+        direct_fx_scene_preset_ = ui::fx::FxPreset::kDemo;
+      } else {
+        direct_fx_scene_preset_ =
+            (std::strcmp(scene_id, "SCENE_FIREWORKS") == 0) ? ui::fx::FxPreset::kFireworks : ui::fx::FxPreset::kWinner;
+      }
       fx_engine_.setEnabled(true);
       fx_engine_.setPreset(direct_fx_scene_preset_);
       fx_engine_.setMode(ui::fx::FxMode::kClassic);
       fx_engine_.setBpm(125U);
       fx_engine_.setScrollFont(ui::fx::FxScrollFont::kItalic);
-      const String fx_scroll_text = asciiFallbackForUiText((subtitle.length() > 0U) ? subtitle.c_str() : title.c_str());
-      if (fx_scroll_text.length() > 0U) {
-        fx_engine_.setScrollText(fx_scroll_text.c_str());
+      if (test_lab_lgfx_scroller) {
+        fx_engine_.setScrollerCentered(true);
+        fx_engine_.setScrollText("RVBCMJ -- DEMOMAKING RULEZ ---");
       } else {
-        fx_engine_.setScrollText(nullptr);
+        fx_engine_.setScrollerCentered(false);
+        const String fx_scroll_text = asciiFallbackForUiText((subtitle.length() > 0U) ? subtitle.c_str() : title.c_str());
+        if (fx_scroll_text.length() > 0U) {
+          fx_engine_.setScrollText(fx_scroll_text.c_str());
+        } else {
+          fx_engine_.setScrollText(nullptr);
+        }
       }
     }
   } else if (static_state_changed && !win_etape_intro_scene) {
     direct_fx_scene_active_ = false;
     if (!intro_active_) {
       fx_engine_.setEnabled(false);
+      fx_engine_.setScrollerCentered(false);
     }
   }
 
   if (static_state_changed) {
     stopSceneAnimations();
+    if (scene_ring_outer_ != nullptr) {
+      if (test_lab_scene) {
+        lv_obj_add_flag(scene_ring_outer_, LV_OBJ_FLAG_HIDDEN);
+      } else {
+        lv_obj_clear_flag(scene_ring_outer_, LV_OBJ_FLAG_HIDDEN);
+      }
+    }
+    if (scene_ring_inner_ != nullptr) {
+      if (test_lab_scene) {
+        lv_obj_add_flag(scene_ring_inner_, LV_OBJ_FLAG_HIDDEN);
+      } else {
+        lv_obj_clear_flag(scene_ring_inner_, LV_OBJ_FLAG_HIDDEN);
+      }
+    }
+    if (scene_core_ != nullptr) {
+      if (test_lab_scene) {
+        lv_obj_add_flag(scene_core_, LV_OBJ_FLAG_HIDDEN);
+      } else {
+        lv_obj_clear_flag(scene_core_, LV_OBJ_FLAG_HIDDEN);
+      }
+    }
+    if (scene_fx_bar_ != nullptr) {
+      if (test_lab_scene) {
+        lv_obj_add_flag(scene_fx_bar_, LV_OBJ_FLAG_HIDDEN);
+      } else {
+        lv_obj_clear_flag(scene_fx_bar_, LV_OBJ_FLAG_HIDDEN);
+      }
+    }
     demo_particle_count_ = demo_particle_count;
     demo_strobe_level_ = demo_strobe_level;
     if (demo_mode == "cinematic") {
@@ -2072,6 +2131,103 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     applySubtitleScroll(subtitle_scroll_mode, subtitle_scroll_speed_ms, subtitle_scroll_pause_ms, subtitle_scroll_loop);
     for (lv_obj_t* particle : scene_particles_) {
       lv_obj_set_style_bg_color(particle, lv_color_hex(text_rgb), LV_PART_MAIN);
+    }
+    if (test_lab_scene) {
+      constexpr uint32_t kTestLabPaletteInputRgb[] = {
+          0x000000UL,  // noir
+          0xFFFFFFUL,  // blanc
+          0xFF0000UL,  // rouge
+          0x00FF00UL,  // vert
+          0x0000FFUL,  // bleu
+          0x00FFFFUL,  // cyan
+          0xFF00FFUL,  // magenta
+          0xFFFF00UL,  // jaune
+      };
+      const uint8_t palette_count = static_cast<uint8_t>(sizeof(kTestLabPaletteInputRgb) / sizeof(kTestLabPaletteInputRgb[0]));
+      const int16_t width_px = activeDisplayWidth();
+      const int16_t height_px = activeDisplayHeight();
+      for (uint8_t index = 0U; index < kCracktroBarCount; ++index) {
+        lv_obj_t* bar = scene_cracktro_bars_[index];
+        if (bar == nullptr) {
+          continue;
+        }
+        if (index >= palette_count) {
+          lv_obj_add_flag(bar, LV_OBJ_FLAG_HIDDEN);
+          continue;
+        }
+        const int16_t x0 = static_cast<int16_t>((static_cast<int32_t>(width_px) * index) / palette_count);
+        const int16_t x1 = static_cast<int16_t>((static_cast<int32_t>(width_px) * (index + 1U)) / palette_count);
+        int16_t bar_width = static_cast<int16_t>(x1 - x0);
+        if (bar_width < 1) {
+          bar_width = 1;
+        }
+        lv_obj_set_pos(bar, x0, 0);
+        lv_obj_set_size(bar, static_cast<lv_coord_t>(bar_width + 1), height_px);
+        lv_obj_set_style_bg_color(bar, lv_color_hex(kTestLabPaletteInputRgb[index]), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_radius(bar, 0, LV_PART_MAIN);
+        lv_obj_set_style_translate_x(bar, 0, LV_PART_MAIN);
+        lv_obj_set_style_translate_y(bar, 0, LV_PART_MAIN);
+        lv_obj_clear_flag(bar, LV_OBJ_FLAG_HIDDEN);
+      }
+      if (scene_title_label_ != nullptr) {
+        lv_obj_clear_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_text_font(scene_title_label_, &lv_font_montserrat_14, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_text_color(scene_title_label_, lv_color_hex(0xFFFFFFUL), LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_text_opa(scene_title_label_, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_opa(scene_title_label_, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_bg_opa(scene_title_label_, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_pad_left(scene_title_label_, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_right(scene_title_label_, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_top(scene_title_label_, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_bottom(scene_title_label_, 0, LV_PART_MAIN);
+        lv_obj_set_style_radius(scene_title_label_, 0, LV_PART_MAIN);
+        lv_obj_align(scene_title_label_, LV_ALIGN_TOP_MID, 0, 6);
+        lv_obj_move_foreground(scene_title_label_);
+      }
+      if (scene_subtitle_label_ != nullptr) {
+        lv_obj_clear_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_long_mode(scene_subtitle_label_, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(scene_subtitle_label_, activeDisplayWidth() - 20);
+        lv_obj_set_style_text_font(scene_subtitle_label_, &lv_font_montserrat_14, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_text_align(scene_subtitle_label_, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_text_color(scene_subtitle_label_, lv_color_hex(0xFFFFFFUL), LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_text_opa(scene_subtitle_label_, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_opa(scene_subtitle_label_, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_bg_opa(scene_subtitle_label_, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_pad_left(scene_subtitle_label_, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_right(scene_subtitle_label_, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_top(scene_subtitle_label_, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_bottom(scene_subtitle_label_, 0, LV_PART_MAIN);
+        lv_obj_set_style_radius(scene_subtitle_label_, 0, LV_PART_MAIN);
+        lv_obj_align(scene_subtitle_label_, LV_ALIGN_BOTTOM_MID, 0, -6);
+        lv_obj_move_foreground(scene_subtitle_label_);
+      }
+      if (scene_subtitle_label_ != nullptr) {
+        lv_anim_t subtitle_wave;
+        lv_anim_init(&subtitle_wave);
+        lv_anim_set_var(&subtitle_wave, scene_subtitle_label_);
+        lv_anim_set_exec_cb(&subtitle_wave, animSetSineTranslateY);
+        lv_anim_set_values(&subtitle_wave, 0, 4095);
+        lv_anim_set_time(&subtitle_wave, resolveAnimMs(2400U));
+        lv_anim_set_repeat_count(&subtitle_wave, LV_ANIM_REPEAT_INFINITE);
+        lv_anim_start(&subtitle_wave);
+      }
+    } else {
+      if (scene_title_label_ != nullptr) {
+        lv_obj_set_style_bg_opa(scene_title_label_, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_pad_left(scene_title_label_, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_right(scene_title_label_, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_top(scene_title_label_, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_bottom(scene_title_label_, 0, LV_PART_MAIN);
+      }
+      if (scene_subtitle_label_ != nullptr) {
+        lv_obj_set_style_bg_opa(scene_subtitle_label_, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_pad_left(scene_subtitle_label_, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_right(scene_subtitle_label_, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_top(scene_subtitle_label_, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_bottom(scene_subtitle_label_, 0, LV_PART_MAIN);
+      }
     }
 
     if (timeline_keyframe_count_ > 1U && timeline_duration_ms_ > 0U) {
@@ -2169,11 +2325,56 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     }
   }
 
-  applySceneDynamicState(subtitle, show_subtitle, audio_playing, text_rgb);
-  const bool subtitle_visible = show_subtitle && subtitle.length() > 0U;
   const String title_ascii = asciiFallbackForUiText(title.c_str());
   const String subtitle_ascii = asciiFallbackForUiText(subtitle.c_str());
   const String symbol_ascii = asciiFallbackForUiText(symbol.c_str());
+  applySceneDynamicState(subtitle, show_subtitle, audio_playing, text_rgb);
+  if (test_lab_scene) {
+    if (scene_title_label_ != nullptr) {
+      const char* current_title = lv_label_get_text(scene_title_label_);
+      if (current_title == nullptr || std::strcmp(current_title, title_ascii.c_str()) != 0) {
+        lv_label_set_text(scene_title_label_, title_ascii.c_str());
+      }
+      lv_obj_remove_style_all(scene_title_label_);
+      lv_obj_clear_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_set_style_text_font(scene_title_label_, &lv_font_montserrat_14, LV_PART_MAIN);
+      lv_obj_set_style_text_color(scene_title_label_, lv_color_hex(0xFFFFFFUL), LV_PART_MAIN);
+      lv_obj_set_style_text_opa(scene_title_label_, LV_OPA_COVER, LV_PART_MAIN);
+      lv_obj_set_style_opa(scene_title_label_, LV_OPA_COVER, LV_PART_MAIN);
+      lv_obj_set_style_bg_opa(scene_title_label_, LV_OPA_TRANSP, LV_PART_MAIN);
+      lv_obj_set_style_pad_left(scene_title_label_, 0, LV_PART_MAIN);
+      lv_obj_set_style_pad_right(scene_title_label_, 0, LV_PART_MAIN);
+      lv_obj_set_style_pad_top(scene_title_label_, 0, LV_PART_MAIN);
+      lv_obj_set_style_pad_bottom(scene_title_label_, 0, LV_PART_MAIN);
+      lv_obj_set_style_radius(scene_title_label_, 0, LV_PART_MAIN);
+      lv_obj_align(scene_title_label_, LV_ALIGN_TOP_MID, 0, 6);
+      lv_obj_move_foreground(scene_title_label_);
+    }
+    if (scene_subtitle_label_ != nullptr) {
+      const char* current_subtitle = lv_label_get_text(scene_subtitle_label_);
+      if (current_subtitle == nullptr || std::strcmp(current_subtitle, subtitle_ascii.c_str()) != 0) {
+        lv_label_set_text(scene_subtitle_label_, subtitle_ascii.c_str());
+      }
+      lv_obj_remove_style_all(scene_subtitle_label_);
+      lv_obj_clear_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
+      lv_label_set_long_mode(scene_subtitle_label_, LV_LABEL_LONG_WRAP);
+      lv_obj_set_width(scene_subtitle_label_, activeDisplayWidth() - 20);
+      lv_obj_set_style_text_font(scene_subtitle_label_, &lv_font_montserrat_14, LV_PART_MAIN);
+      lv_obj_set_style_text_align(scene_subtitle_label_, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+      lv_obj_set_style_text_color(scene_subtitle_label_, lv_color_hex(0xFFFFFFUL), LV_PART_MAIN);
+      lv_obj_set_style_text_opa(scene_subtitle_label_, LV_OPA_COVER, LV_PART_MAIN);
+      lv_obj_set_style_opa(scene_subtitle_label_, LV_OPA_COVER, LV_PART_MAIN);
+      lv_obj_set_style_bg_opa(scene_subtitle_label_, LV_OPA_TRANSP, LV_PART_MAIN);
+      lv_obj_set_style_pad_left(scene_subtitle_label_, 0, LV_PART_MAIN);
+      lv_obj_set_style_pad_right(scene_subtitle_label_, 0, LV_PART_MAIN);
+      lv_obj_set_style_pad_top(scene_subtitle_label_, 0, LV_PART_MAIN);
+      lv_obj_set_style_pad_bottom(scene_subtitle_label_, 0, LV_PART_MAIN);
+      lv_obj_set_style_radius(scene_subtitle_label_, 0, LV_PART_MAIN);
+      lv_obj_align(scene_subtitle_label_, LV_ALIGN_BOTTOM_MID, 0, -6);
+      lv_obj_move_foreground(scene_subtitle_label_);
+    }
+  }
+  const bool subtitle_visible = show_subtitle && subtitle.length() > 0U;
   scene_status_.valid = true;
   scene_status_.audio_playing = audio_playing;
   scene_status_.show_title = show_title;

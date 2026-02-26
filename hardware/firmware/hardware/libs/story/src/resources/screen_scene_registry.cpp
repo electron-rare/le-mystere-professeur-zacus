@@ -14,6 +14,7 @@ constexpr ScreenSceneDef kScenes[] = {
     {"SCENE_LOCKED", 0U, 0U},
     {"SCENE_BROKEN", 0U, 0U},
     {"SCENE_U_SON_PROTO", 0U, 0U},
+    {"SCENE_TEST_LAB", 0U, 0U},
     {"SCENE_SEARCH", 1U, 1U},
     {"SCENE_LA_DETECTOR", 1U, 1U},
     {"SCENE_LEFOU_DETECTOR", 1U, 1U},

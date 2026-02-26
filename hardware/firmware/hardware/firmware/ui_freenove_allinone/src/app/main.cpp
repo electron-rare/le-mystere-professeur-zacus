@@ -76,6 +76,13 @@ constexpr const char* kAmpMusicPathFallback2 = "/audio";
 #endif
 constexpr const char* kCameraSceneId = "SCENE_PHOTO_MANAGER";
 constexpr const char* kMediaManagerSceneId = "SCENE_MEDIA_MANAGER";
+constexpr const char* kBootPaletteSceneId = "SCENE_BOOT_PALETTE";
+constexpr const char* kTestLabSceneId = "SCENE_TEST_LAB";
+constexpr const char* kTestLabLockStepId = "TEST_LAB_LOCK";
+constexpr uint32_t kBootPaletteDurationMs = 3500U;
+constexpr bool kBootPaletteAutoOnBoot = false;
+constexpr bool kLockNvsMediaManagerMode = true;
+constexpr bool kForceTestLabSceneLock = true;
 
 AudioManager g_audio;
 ScenarioManager g_scenario;
@@ -109,6 +116,9 @@ bool g_la_dispatch_in_progress = false;
 bool g_has_ring_sent_for_win_etape = false;
 bool g_win_etape_ui_refresh_pending = false;
 bool g_boot_media_manager_mode = false;
+bool g_boot_palette_active = false;
+uint32_t g_boot_palette_until_ms = 0U;
+uint8_t g_lcd_backlight_level = 30U;
 bool g_setup_mode = true;
 bool g_web_auth_required = false;
 bool g_resource_profile_auto = true;
@@ -167,6 +177,10 @@ const char* scenarioIdFromSnapshot(const ScenarioSnapshot& snapshot) {
 
 const char* stepIdFromSnapshot(const ScenarioSnapshot& snapshot) {
   return (snapshot.step != nullptr && snapshot.step->id != nullptr) ? snapshot.step->id : "n/a";
+}
+
+bool isFixedTestSceneActive(const ScenarioSnapshot& snapshot) {
+  return snapshot.screen_scene_id != nullptr && std::strcmp(snapshot.screen_scene_id, kTestLabSceneId) == 0;
 }
 
 bool loadScenarioByIdPreferStoryFile(const char* scenario_id, String* out_source, String* out_path) {
@@ -269,6 +283,21 @@ void printBootModeStatus() {
   Serial.printf("BOOT_MODE_STATUS mode=%s media_validated=%u\n",
                 BootModeStore::modeLabel(mode),
                 g_boot_mode_store.isMediaValidated() ? 1U : 0U);
+}
+
+void applyLcdBacklight(uint8_t level) {
+#if (FREENOVE_TFT_BL >= 0)
+  g_lcd_backlight_level = level;
+#if defined(TFT_BACKLIGHT_ON) && (TFT_BACKLIGHT_ON == LOW)
+  const uint8_t duty = static_cast<uint8_t>(255U - level);
+#else
+  const uint8_t duty = level;
+#endif
+  pinMode(FREENOVE_TFT_BL, OUTPUT);
+  analogWrite(FREENOVE_TFT_BL, duty);
+#else
+  (void)level;
+#endif
 }
 
 bool parseBootModeToken(const char* token, BootModeStore::StartupMode* out_mode) {
@@ -2799,6 +2828,11 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
 
   if (std::strcmp(action_id, "ACTION_SET_BOOT_MEDIA") == 0 ||
       std::strcmp(action_id, "ACTION_SET_BOOT_MEDIA_MANAGER") == 0) {
+    if (kLockNvsMediaManagerMode) {
+      applyStartupMode(BootModeStore::StartupMode::kStory);
+      Serial.println("[ACTION] SET_BOOT_MEDIA_MANAGER blocked nvs_lock=1");
+      return true;
+    }
     const bool mode_ok = g_boot_mode_store.saveMode(BootModeStore::StartupMode::kMediaManager);
     const bool flag_ok = g_boot_mode_store.setMediaValidated(true);
     applyStartupMode(BootModeStore::StartupMode::kMediaManager);
@@ -3314,6 +3348,29 @@ bool dispatchControlActionImpl(const String& action_raw, uint32_t now_ms, String
     return false;
   }
 
+  if (startsWithIgnoreCase(action.c_str(), "BOOT_PALETTE_PREVIEW")) {
+    uint32_t duration_ms = kBootPaletteDurationMs;
+    if (action.length() > std::strlen("BOOT_PALETTE_PREVIEW")) {
+      String value = action.substring(static_cast<unsigned int>(std::strlen("BOOT_PALETTE_PREVIEW")));
+      value.trim();
+      if (!value.isEmpty()) {
+        const long parsed = value.toInt();
+        if (parsed <= 0 || parsed > 30000) {
+          if (out_error != nullptr) {
+            *out_error = "boot_palette_preview_range";
+          }
+          return false;
+        }
+        duration_ms = static_cast<uint32_t>(parsed);
+      }
+    }
+    g_boot_palette_active = true;
+    g_boot_palette_until_ms = now_ms + duration_ms;
+    refreshSceneIfNeeded(true);
+    Serial.printf("BOOT_PALETTE_PREVIEW ms=%lu\n", static_cast<unsigned long>(duration_ms));
+    return true;
+  }
+
   if (startsWithIgnoreCase(action.c_str(), "HW_LED_SET ")) {
     String args = action.substring(static_cast<unsigned int>(std::strlen("HW_LED_SET ")));
     args.trim();
@@ -3349,6 +3406,32 @@ bool dispatchControlActionImpl(const String& action_raw, uint32_t now_ms, String
         g_hardware.setSceneHint(snapshot.screen_scene_id);
       }
     }
+    return true;
+  }
+
+  if (startsWithIgnoreCase(action.c_str(), "LCD_BACKLIGHT ")) {
+    String value = action.substring(static_cast<unsigned int>(std::strlen("LCD_BACKLIGHT ")));
+    value.trim();
+    if (value.isEmpty()) {
+      if (out_error != nullptr) {
+        *out_error = "lcd_backlight_arg";
+      }
+      return false;
+    }
+    const int parsed = value.toInt();
+    if (parsed < 0 || parsed > 255) {
+      if (out_error != nullptr) {
+        *out_error = "lcd_backlight_range";
+      }
+      return false;
+    }
+    applyLcdBacklight(static_cast<uint8_t>(parsed));
+    Serial.printf("LCD_BACKLIGHT level=%u\n", static_cast<unsigned int>(g_lcd_backlight_level));
+    return true;
+  }
+
+  if (action.equalsIgnoreCase("LCD_BACKLIGHT")) {
+    Serial.printf("LCD_BACKLIGHT level=%u\n", static_cast<unsigned int>(g_lcd_backlight_level));
     return true;
   }
 
@@ -4298,27 +4381,47 @@ void refreshSceneIfNeededImpl(bool force_render) {
   if (g_hardware_started && g_hardware_cfg.led_auto_from_scene && snapshot.screen_scene_id != nullptr) {
     g_hardware.setSceneHint(snapshot.screen_scene_id);
   }
-  executeStoryActionsForStep(snapshot, now_ms);
+  if (!kForceTestLabSceneLock) {
+    executeStoryActionsForStep(snapshot, now_ms);
+  }
 
   const char* step_id = (snapshot.step != nullptr && snapshot.step->id != nullptr) ? snapshot.step->id : "n/a";
-  const String screen_payload = g_storage.loadScenePayloadById(snapshot.screen_scene_id);
-  if ((snapshot.screen_scene_id != nullptr) && snapshot.screen_scene_id[0] != '\0' && screen_payload.isEmpty()) {
+  String screen_payload = g_storage.loadScenePayloadById(snapshot.screen_scene_id);
+  const char* render_scene_id = snapshot.screen_scene_id;
+  const char* render_step_id = step_id;
+  if (kForceTestLabSceneLock) {
+    render_scene_id = kTestLabSceneId;
+    render_step_id = kTestLabLockStepId;
+    const String test_lab_payload = g_storage.loadScenePayloadById(kTestLabSceneId);
+    if (!test_lab_payload.isEmpty()) {
+      screen_payload = test_lab_payload;
+    }
+  } else if (g_boot_palette_active && now_ms < g_boot_palette_until_ms) {
+    const String boot_payload = g_storage.loadScenePayloadById(kBootPaletteSceneId);
+    if (!boot_payload.isEmpty()) {
+      screen_payload = boot_payload;
+      // Keep a known scene_id so UI profile mapping stays valid; only override visual payload.
+      render_scene_id = snapshot.screen_scene_id;
+      render_step_id = step_id;
+    }
+  }
+  if ((render_scene_id != nullptr) && render_scene_id[0] != '\0' && screen_payload.isEmpty()) {
     ZACUS_RL_LOG_MS(6000U,
                     "[UI] missing scene payload scenario=%s step=%s screen=%s\n",
                     scenarioIdFromSnapshot(snapshot),
-                    step_id,
-                    snapshot.screen_scene_id);
+                    render_step_id,
+                    render_scene_id);
   }
   Serial.printf("[UI] render step=%s screen=%s pack=%s playing=%u\n",
-                step_id,
-                snapshot.screen_scene_id != nullptr ? snapshot.screen_scene_id : "n/a",
+                render_step_id,
+                render_scene_id != nullptr ? render_scene_id : "n/a",
                 snapshot.audio_pack_id != nullptr ? snapshot.audio_pack_id : "n/a",
                 g_audio.isPlaying() ? 1U : 0U);
   applySceneResourcePolicy(snapshot);
   UiSceneFrame frame = {};
   frame.scenario = snapshot.scenario;
-  frame.screen_scene_id = snapshot.screen_scene_id;
-  frame.step_id = step_id;
+  frame.screen_scene_id = render_scene_id;
+  frame.step_id = render_step_id;
   frame.audio_pack_id = snapshot.audio_pack_id;
   frame.audio_playing = g_audio.isPlaying();
   frame.screen_payload_json = screen_payload.isEmpty() ? nullptr : screen_payload.c_str();
@@ -4439,9 +4542,11 @@ void handleSerialCommandImpl(const char* command_line, uint32_t now_ms) {
         "SC_LIST SC_LOAD <id> SCENE_GOTO <scene_id> SC_COVERAGE SC_REVALIDATE SC_REVALIDATE_ALL SC_EVENT <type> [name] "
         "SC_EVENT_RAW <name> "
         "STORY_REFRESH_SD STORY_SD_STATUS "
+        "BOOT_PALETTE_PREVIEW [ms] "
         "UI_GFX_STATUS UI_MEM_STATUS UI_SCENE_STATUS PERF_STATUS PERF_RESET RESOURCE_STATUS RESOURCE_PROFILE <gfx_focus|gfx_plus_mic|gfx_plus_cam_snapshot> RESOURCE_PROFILE_AUTO <on|off> "
         "SIMD_STATUS SIMD_SELFTEST SIMD_BENCH [loops] [pixels] "
         "HW_STATUS HW_STATUS_JSON HW_LED_SET <r> <g> <b> [brightness] [pulse] HW_LED_AUTO <ON|OFF> HW_MIC_STATUS HW_BAT_STATUS "
+        "LCD_BACKLIGHT [0..255] "
         "MIC_TUNER_STATUS [ON|OFF|<period_ms>] "
         "CAM_STATUS CAM_ON CAM_OFF CAM_SNAPSHOT [filename] "
         "CAM_UI_SHOW CAM_UI_HIDE CAM_UI_TOGGLE CAM_REC_SNAP CAM_REC_SAVE [auto|bmp|jpg|raw] CAM_REC_GALLERY CAM_REC_NEXT CAM_REC_DELETE CAM_REC_STATUS "
@@ -4812,6 +4917,8 @@ void handleSerialCommandImpl(const char* command_line, uint32_t now_ms) {
     return;
   }
   if (std::strcmp(command, "HW_LED_SET") == 0 || std::strcmp(command, "HW_LED_AUTO") == 0 ||
+      std::strcmp(command, "LCD_BACKLIGHT") == 0 ||
+      std::strcmp(command, "BOOT_PALETTE_PREVIEW") == 0 ||
       std::strcmp(command, "CAM_ON") == 0 || std::strcmp(command, "CAM_OFF") == 0 ||
       std::strcmp(command, "CAM_SNAPSHOT") == 0 || std::strcmp(command, "CAM_UI_SHOW") == 0 ||
       std::strcmp(command, "CAM_UI_HIDE") == 0 || std::strcmp(command, "CAM_UI_TOGGLE") == 0 ||
@@ -5342,13 +5449,30 @@ void setup() {
   if (!g_scenario.begin(kDefaultScenarioFile)) {
     Serial.println("[MAIN] scenario init failed");
   }
-  if (g_boot_media_manager_mode) {
+  if (kForceTestLabSceneLock) {
+    const bool routed = g_scenario.gotoScene(kTestLabSceneId, millis(), "boot_force_test_lab");
+    Serial.printf("[BOOT] route test_lab scene=%s ok=%u lock=1\n", kTestLabSceneId, routed ? 1U : 0U);
+  } else if (g_boot_media_manager_mode) {
     const bool routed = g_scenario.gotoScene(kMediaManagerSceneId, millis(), "boot_mode_media_manager");
     Serial.printf("[BOOT] route media_manager scene=%s ok=%u\n", kMediaManagerSceneId, routed ? 1U : 0U);
+  } else {
+    const bool routed = g_scenario.gotoScene(kTestLabSceneId, millis(), "boot_story_test_lab");
+    Serial.printf("[BOOT] route test_lab scene=%s ok=%u\n", kTestLabSceneId, routed ? 1U : 0U);
+  }
+  if (!kForceTestLabSceneLock && !g_boot_media_manager_mode && kBootPaletteAutoOnBoot) {
+    g_boot_palette_active = true;
+    g_boot_palette_until_ms = millis() + kBootPaletteDurationMs;
+    Serial.printf("[BOOT] palette pre-scene id=%s duration_ms=%lu\n",
+                  kBootPaletteSceneId,
+                  static_cast<unsigned long>(kBootPaletteDurationMs));
+  } else {
+    g_boot_palette_active = false;
+    g_boot_palette_until_ms = 0U;
   }
   g_last_action_step_key[0] = '\0';
 
   g_ui.begin();
+  applyLcdBacklight(g_lcd_backlight_level);
   g_ui.setHardwareController(&g_hardware);
   UiLaMetrics boot_la_metrics = {};
   boot_la_metrics.locked = false;
@@ -5526,7 +5650,19 @@ void runRuntimeIteration(uint32_t now_ms) {
   perfMonitor().endSample(PerfSection::kAudioUpdate, audio_started_us);
   g_media.update(now_ms, &g_audio);
   const uint32_t scenario_started_us = perfMonitor().beginSample();
-  g_scenario.tick(now_ms);
+  const ScenarioSnapshot scenario_before_tick = g_scenario.snapshot();
+  if (kForceTestLabSceneLock) {
+    if (!isFixedTestSceneActive(scenario_before_tick)) {
+      const bool routed = g_scenario.gotoScene(kTestLabSceneId, now_ms, "runtime_force_test_lab");
+      if (!routed) {
+        ZACUS_RL_LOG_MS(4000U, "[SCENE] force test lab failed\n");
+      }
+    }
+  } else if (isFixedTestSceneActive(scenario_before_tick)) {
+    // Keep SCENE_TEST_LAB stable while calibrating colors (no automatic step transitions).
+  } else {
+    g_scenario.tick(now_ms);
+  }
   perfMonitor().endSample(PerfSection::kScenarioTick, scenario_started_us);
   startPendingAudioIfAny();
   if (g_win_etape_ui_refresh_pending) {
@@ -5545,6 +5681,10 @@ void runRuntimeIteration(uint32_t now_ms) {
   la_metrics.gate_elapsed_ms = la_gate_elapsed_ms;
   la_metrics.gate_timeout_ms = g_hardware_cfg.mic_la_timeout_ms;
   g_ui.setLaMetrics(la_metrics);
+  if (g_boot_palette_active && now_ms >= g_boot_palette_until_ms) {
+    g_boot_palette_active = false;
+    refreshSceneIfNeeded(true);
+  }
   refreshSceneIfNeeded(false);
   const uint32_t ui_started_us = perfMonitor().beginSample();
   g_ui.tick(now_ms);

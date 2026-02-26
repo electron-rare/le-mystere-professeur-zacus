@@ -1,0 +1,86 @@
+{
+  "id": "SCENE_BOOT_PALETTE",
+  "title": "MIRE PALETTE",
+  "subtitle": "NOIR BLANC ROUGE VERT BLEU CYAN MAGENTA JAUNE",
+  "symbol": "PALETTE",
+  "effect": "blink",
+  "effect_speed_ms": 120,
+  "theme": {
+    "bg": "#000000",
+    "accent": "#FFFFFF",
+    "text": "#FFFFFF"
+  },
+  "transition": {
+    "effect": "fade",
+    "duration_ms": 120
+  },
+  "timeline": {
+    "loop": true,
+    "duration_ms": 2400,
+    "keyframes": [
+      {
+        "at_ms": 0,
+        "effect": "blink",
+        "speed_ms": 90,
+        "theme": { "bg": "#000000", "accent": "#FFFFFF", "text": "#FFFFFF" }
+      },
+      {
+        "at_ms": 300,
+        "effect": "scan",
+        "speed_ms": 110,
+        "theme": { "bg": "#3F0000", "accent": "#FF0000", "text": "#FFFFFF" }
+      },
+      {
+        "at_ms": 600,
+        "effect": "scan",
+        "speed_ms": 110,
+        "theme": { "bg": "#003600", "accent": "#00FF00", "text": "#FFFFFF" }
+      },
+      {
+        "at_ms": 900,
+        "effect": "scan",
+        "speed_ms": 110,
+        "theme": { "bg": "#00003F", "accent": "#0000FF", "text": "#FFFFFF" }
+      },
+      {
+        "at_ms": 1200,
+        "effect": "scan",
+        "speed_ms": 110,
+        "theme": { "bg": "#003A3A", "accent": "#00FFFF", "text": "#FFFFFF" }
+      },
+      {
+        "at_ms": 1500,
+        "effect": "scan",
+        "speed_ms": 110,
+        "theme": { "bg": "#3A003A", "accent": "#FF00FF", "text": "#FFFFFF" }
+      },
+      {
+        "at_ms": 1800,
+        "effect": "scan",
+        "speed_ms": 110,
+        "theme": { "bg": "#3A3300", "accent": "#FFFF00", "text": "#FFFFFF" }
+      },
+      {
+        "at_ms": 2100,
+        "effect": "blink",
+        "speed_ms": 90,
+        "theme": { "bg": "#000000", "accent": "#FFFFFF", "text": "#FFFFFF" }
+      }
+    ]
+  },
+  "text": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "title_case": "upper",
+    "subtitle_case": "raw",
+    "title_align": "top",
+    "subtitle_align": "bottom"
+  },
+  "visual": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "effect_speed_ms": 120
+  }
+}

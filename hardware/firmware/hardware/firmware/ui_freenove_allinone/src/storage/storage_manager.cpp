@@ -435,10 +435,9 @@ String StorageManager::loadScenePayloadById(const char* scene_id) const {
 
   const char* normalized_scene_id = storyNormalizeScreenSceneId(scene_id);
   if (normalized_scene_id == nullptr) {
-    Serial.printf("[FS] scene payload missing for unknown scene id=%s\n", scene_id);
-    last_scene_payload_origin_.remove(0);
-    last_scene_payload_source_kind_.remove(0);
-    return String();
+    // Allow dynamic scenes that are present on LittleFS even if not in static registry.
+    normalized_scene_id = scene_id;
+    Serial.printf("[FS] scene payload fallback for unknown scene id=%s\n", scene_id);
   }
   if (std::strcmp(scene_id, normalized_scene_id) != 0) {
     Serial.printf("[FS] scene payload alias normalized: %s -> %s\n", scene_id, normalized_scene_id);

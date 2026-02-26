@@ -66,7 +66,12 @@ class FreenoveLgfxDevice final : public lgfx::LGFX_Device {
 #else
       cfg.invert = false;
 #endif
-      cfg.rgb_order = false;
+      cfg.rgb_order =
+#if defined(TFT_RGB_ORDER) && (TFT_RGB_ORDER == TFT_BGR)
+          true;
+#else
+          false;
+#endif
       cfg.dlen_16bit = false;
       cfg.bus_shared = true;
       panel_.config(cfg);
@@ -171,7 +176,13 @@ class LovyanGfxDisplayHal final : public DisplayHal {
   }
 
   void pushImageDma(int16_t x, int16_t y, int16_t w, int16_t h, const uint16_t* pixels) override {
-    display_.pushImageDMA(x, y, w, h, reinterpret_cast<const lgfx::swap565_t*>(pixels));
+    if (pixels == nullptr || w <= 0 || h <= 0) {
+      return;
+    }
+    // Keep the same RGB565+swap contract as pushColors(..., swap=true).
+    display_.setAddrWindow(x, y, w, h);
+    const int32_t count = static_cast<int32_t>(w) * static_cast<int32_t>(h);
+    display_.writePixelsDMA(pixels, count, true);
   }
 
   void pushColors(const uint16_t* pixels, uint32_t count, bool swap_bytes) override {

@@ -15,12 +15,15 @@ constexpr uint32_t kEtape2DelayMs = 15UL * 60UL * 1000UL;
 constexpr uint32_t kEtape2TestDelayMs = 5000U;
 constexpr uint32_t kWinDueDelayMs = 10UL * 60UL * 1000UL;
 
-bool eventNameMatches(const char* expected, const char* actual) {
+bool eventNameMatches(const char* expected, const char* actual, StoryEventType type) {
   if (expected == nullptr || expected[0] == '\0') {
     return true;
   }
   if (actual == nullptr) {
     return false;
+  }
+  if (type == StoryEventType::kButton && std::strcmp(expected, "ANY") == 0) {
+    return actual[0] != '\0';
   }
   return std::strcmp(expected, actual) == 0;
 }
@@ -583,7 +586,7 @@ bool ScenarioManager::transitionMatches(const TransitionDef& transition,
   if (transition.eventType != type) {
     return false;
   }
-  return eventNameMatches(transition.eventName, event_name);
+  return eventNameMatches(transition.eventName, event_name, type);
 }
 
 void ScenarioManager::clearStepResourceOverrides() {

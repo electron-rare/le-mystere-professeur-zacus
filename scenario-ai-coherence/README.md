@@ -1,21 +1,24 @@
-# Scenario AI Coherence
 
-## Rôle de ce dossier
 
-Ce dossier contient les artefacts de cohérence scénario générés par IA et validés par des humains.
 
-### Structure
+# Zacus Scenario AI Coherence — Bundle Unifié
 
-- **`version-finale/`** : Contenus finaux validés et approuvés pour utilisation dans le jeu
-- *Futurs artefacts* : Versions intermédiaires, logs de génération, et autres documents de travail IA
+Ce dossier contient tous les artefacts validés, fusionnés et prêts à l’intégration :
 
-## Processus
+- scenario_complet.md : déroulé narratif, synthèse, fiches, supports
+- charte_graphique.yaml / charte_graphique.json : charte visuelle
+- listing_fichiers.yaml / listing_fichiers.json : listing supports
+- scenario_canonical.yaml : scénario canonique YAML
+- scenario_promptable_template.yaml : template éditable
+- scenario_runtime.json : runtime JSON
+- zacus_v2.yaml : narration MJ alignée
+- fsm_mermaid.md : diagramme FSM
+- CODEX_PROMPT.md : consignes firmware/scénario
+- INTRO OFFICIELLE – VERSION AVEC HOT-LINE.md : intro alternative
 
-1. **Génération IA** : Création initiale de contenu scénario via outils d'IA
-2. **Validation humaine** : Révision et approbation par les mainteneurs
-3. **Intégration** : Déplacement vers `version-finale/` une fois validé
-4. **Utilisation** : Référencé par les autres composants du kit d'enquête
+Tous les sous-dossiers ont été supprimés. Les fichiers sont fusionnés, cohérents et validés.
+
+Pour toute intégration, utilisez scenario_complet.md pour le déroulé, scenario_canonical.yaml/scenario_runtime.json pour la technique, et les fichiers charte/listing pour les assets.
 
 ## Licence
-
-Contenus de ce dossier : **CC BY-NC 4.0** (voir `LICENSES/CC-BY-NC-4.0.txt`)
+Contenus : **CC BY-NC 4.0** (voir LICENSES/CC-BY-NC-4.0.txt)

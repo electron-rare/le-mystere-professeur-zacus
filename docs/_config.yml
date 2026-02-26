@@ -1,0 +1,12 @@
+title: "Le Mystère du Professeur Zacus"
+description: "Enquête scientifique immersive — scénarios YAML, printables, audio, modules ESP32/Arduino."
+baseurl: ""
+url: ""
+
+markdown: kramdown
+kramdown:
+  input: GFM
+
+exclude:
+  - README.md
+  - README_FAQ_SNIPPET.md

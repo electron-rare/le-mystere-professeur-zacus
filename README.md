@@ -4,7 +4,9 @@
 ![Couverture](./assets/cover.png)
 
 > **Bienvenue dans l’enquête la plus instable du multivers** : indices imprimables, audio, modules électroniques (option), et un guide MJ qui ne bug jamais (sauf si tu l’imprimes en 3D).
+> 
 > **⚛ L’électron rare — ⚡ unstable by design**
+> 
 > **Auteur : Clément SAILLANT**
 
 [![Build](https://img.shields.io/badge/build-validate%20%2B%20export-brightgreen)](./.github/workflows/validate.yml)
@@ -124,7 +126,7 @@ docs/                        Mini-site / FAQ / ressources
 
 > *"Si tu reconnais le prototype sur la photo, tu es officiellement un expert en électronique de fête."*
 
-![Prototype](./assets/board.jpg)
+![Prototype](./assets/board.png)
 
 ![Printables](./assets/printables.png)
 

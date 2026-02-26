@@ -5,10 +5,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+_DUPLICATE_SUFFIX_RE = re.compile(r" \d+\.[^.]+$")
+
+
+def _looks_like_duplicate_copy(path: Path) -> bool:
+    return _DUPLICATE_SUFFIX_RE.search(path.name) is not None
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -73,7 +80,11 @@ def export_workbench(repo_root: Path, out_path: Path, scenario_path: Path, inclu
     scene_order = _scenario_scene_order(scenario_path)
     entries_by_scene: dict[str, dict[str, Any]] = {}
     all_scene_ids: list[str] = []
+    ignored_duplicate_files: list[str] = []
     for json_path in sorted(screens_dir.glob("*.json")):
+        if _looks_like_duplicate_copy(json_path):
+            ignored_duplicate_files.append(str(json_path.relative_to(repo_root)).replace("\\", "/"))
+            continue
         payload = _load_json(json_path)
         scene_id = str(payload.get("id", json_path.stem)).strip()
         if scene_id:
@@ -96,6 +107,8 @@ def export_workbench(repo_root: Path, out_path: Path, scenario_path: Path, inclu
                 "effect": payload.get("effect", "none"),
                 "timeline": payload.get("timeline", {}),
             },
+            "render": payload.get("render", {}),
+            "hardware": payload.get("hardware", {}),
         }
         entries_by_scene[scene_id] = entry
 
@@ -131,6 +144,7 @@ def export_workbench(repo_root: Path, out_path: Path, scenario_path: Path, inclu
             "exported_scene_count": len(entries),
             "unused_scene_ids": unused_scene_ids,
             "missing_screen_ids": missing_screen_ids,
+            "ignored_duplicate_files": ignored_duplicate_files,
         },
         "scenes": entries,
     }
@@ -150,6 +164,8 @@ def apply_workbench(repo_root: Path, in_path: Path) -> None:
         rel = str(entry.get("screen_json", "") or "").strip()
         if not rel:
             continue
+        if _looks_like_duplicate_copy(Path(rel)):
+            continue
         screen_path = repo_root / rel
         if not screen_path.exists():
             continue
@@ -160,11 +176,28 @@ def apply_workbench(repo_root: Path, in_path: Path) -> None:
             for key in ("title", "subtitle", "symbol", "visual", "theme", "transition"):
                 if key in lvgl:
                     payload[key] = lvgl[key]
+            visual = lvgl.get("visual")
+            if isinstance(visual, dict):
+                # Keep text visibility flags aligned with visual flags to avoid runtime drift.
+                text_cfg = payload.get("text")
+                if not isinstance(text_cfg, dict):
+                    text_cfg = {}
+                for flag in ("show_title", "show_subtitle", "show_symbol"):
+                    value = visual.get(flag)
+                    if isinstance(value, bool):
+                        text_cfg[flag] = value
+                payload["text"] = text_cfg
         if isinstance(fx, dict):
             if "effect" in fx:
                 payload["effect"] = fx["effect"]
             if "timeline" in fx:
                 payload["timeline"] = fx["timeline"]
+        render_cfg = entry.get("render")
+        if isinstance(render_cfg, dict):
+            payload["render"] = render_cfg
+        hardware_cfg = entry.get("hardware")
+        if isinstance(hardware_cfg, dict):
+            payload["hardware"] = hardware_cfg
         with screen_path.open("w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=2, ensure_ascii=True)
             fh.write("\n")

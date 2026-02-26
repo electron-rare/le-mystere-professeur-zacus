@@ -569,9 +569,55 @@ SCENE_ALIASES: dict[str, str] = {
     "SCENE_LE_FOU_DETECTOR": "SCENE_LEFOU_DETECTOR",
 }
 
+CANONICAL_SCREEN_SCENE_IDS: tuple[str, ...] = (
+    "SCENE_LOCKED",
+    "SCENE_BROKEN",
+    "SCENE_U_SON_PROTO",
+    "SCENE_SEARCH",
+    "SCENE_LA_DETECTOR",
+    "SCENE_LEFOU_DETECTOR",
+    "SCENE_WARNING",
+    "SCENE_CAMERA_SCAN",
+    "SCENE_QR_DETECTOR",
+    "SCENE_SIGNAL_SPIKE",
+    "SCENE_REWARD",
+    "SCENE_WIN_ETAPE1",
+    "SCENE_WIN_ETAPE2",
+    "SCENE_FINAL_WIN",
+    "SCENE_MEDIA_ARCHIVE",
+    "SCENE_READY",
+    "SCENE_WIN",
+    "SCENE_WINNER",
+    "SCENE_FIREWORKS",
+    "SCENE_WIN_ETAPE",
+    "SCENE_MP3_PLAYER",
+    "SCENE_MEDIA_MANAGER",
+    "SCENE_PHOTO_MANAGER",
+)
+
+LEGACY_SCREEN_ALIASES: dict[str, str] = {
+    "SCENE_LA_DETECT": "SCENE_LA_DETECTOR",
+    "SCENE_U_SON": "SCENE_U_SON_PROTO",
+    "SCENE_LE_FOU_DETECTOR": "SCENE_LEFOU_DETECTOR",
+    "SCENE_LOCK": "SCENE_LOCKED",
+    "LOCKED": "SCENE_LOCKED",
+    "LOCK": "SCENE_LOCKED",
+    "SCENE_AUDIO_PLAYER": "SCENE_MP3_PLAYER",
+    "SCENE_MP3": "SCENE_MP3_PLAYER",
+}
+
+_ACTIVE_SCENE_PROFILES: dict[str, dict[str, Any]] | None = None
+
 
 def _canonical_scene_id(scene_id: str) -> str:
     return SCENE_ALIASES.get(scene_id, scene_id)
+
+
+def _scene_slug(scene_id: str) -> str:
+    slug = scene_id
+    if slug.startswith("SCENE_"):
+        slug = slug[6:]
+    return slug.lower()
 
 DEFAULT_TEXT_OPTIONS: dict[str, Any] = {
     "show_title": False,
@@ -732,12 +778,85 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return obj
 
 
+def _active_scene_profiles() -> dict[str, dict[str, Any]]:
+    return _ACTIVE_SCENE_PROFILES if _ACTIVE_SCENE_PROFILES is not None else SCENE_PROFILES
+
+
+def _build_default_scene_profiles() -> dict[str, dict[str, Any]]:
+    profiles: dict[str, dict[str, Any]] = {}
+    for scene_id in CANONICAL_SCREEN_SCENE_IDS:
+        base = SCENE_PROFILES.get(scene_id)
+        if base is None:
+            fallback = copy.deepcopy(DEFAULT_SCENE_PROFILE)
+            fallback["title"] = scene_id.replace("SCENE_", "").replace("_", " ")
+            fallback["subtitle"] = ""
+            fallback["symbol"] = "RUN"
+            fallback["effect"] = "pulse"
+            base = fallback
+        profiles[scene_id] = copy.deepcopy(base)
+    return profiles
+
+
+def _deep_merge_dict(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            base[key] = _deep_merge_dict(dict(base[key]), value)
+        else:
+            base[key] = copy.deepcopy(value)
+    return base
+
+
+def _palette_path(paths: StoryPaths) -> Path:
+    return paths.story_data_dir / "palette" / "screens_palette_v3.yaml"
+
+
+def _load_scene_profiles(paths: StoryPaths) -> dict[str, dict[str, Any]]:
+    profiles = _build_default_scene_profiles()
+    palette_path = _palette_path(paths)
+    if not palette_path.exists():
+        return profiles
+
+    payload = _load_yaml(palette_path)
+    scenes_payload = payload.get("scenes")
+    if not isinstance(scenes_payload, dict):
+        raise StoryGenerationError(f"Invalid palette file {palette_path}: missing mapping 'scenes'")
+
+    missing: list[str] = []
+    for scene_id in CANONICAL_SCREEN_SCENE_IDS:
+        override = scenes_payload.get(scene_id)
+        if not isinstance(override, dict):
+            missing.append(scene_id)
+            continue
+        profiles[scene_id] = _deep_merge_dict(copy.deepcopy(profiles[scene_id]), override)
+
+    if missing:
+        raise StoryGenerationError(
+            f"Palette {palette_path} missing canonical scene profiles: {', '.join(sorted(missing))}"
+        )
+
+    for scene_id, override in scenes_payload.items():
+        if not isinstance(scene_id, str) or not isinstance(override, dict):
+            continue
+        if scene_id in profiles:
+            continue
+        fallback = _build_default_scene_profiles().get(scene_id, copy.deepcopy(DEFAULT_SCENE_PROFILE))
+        profiles[scene_id] = _deep_merge_dict(copy.deepcopy(fallback), override)
+
+    return profiles
+
+
+def _activate_scene_profiles(paths: StoryPaths) -> dict[str, dict[str, Any]]:
+    global _ACTIVE_SCENE_PROFILES
+    _ACTIVE_SCENE_PROFILES = _load_scene_profiles(paths)
+    return _ACTIVE_SCENE_PROFILES
+
+
 def _normalize_scene_id(value: Any, issues: list[ValidationIssue], source: str) -> str:
     scene_id = str(value).strip() if isinstance(value, str) else ""
     if not scene_id:
         return ""
     scene_id = _canonical_scene_id(scene_id)
-    if scene_id not in SCENE_PROFILES:
+    if scene_id not in _active_scene_profiles():
         issues.append(ValidationIssue(source, "screen_scene_id", f"unknown scene id '{scene_id}'"))
         return ""
     return scene_id
@@ -1222,7 +1341,7 @@ def _with_resource_id(payload: dict[str, Any] | None, resource_id: str) -> dict[
 
 
 def _scene_profile(scene_id: str) -> dict[str, Any]:
-    profile = SCENE_PROFILES.get(scene_id, DEFAULT_SCENE_PROFILE)
+    profile = _active_scene_profiles().get(scene_id, DEFAULT_SCENE_PROFILE)
     return copy.deepcopy(profile)
 
 
@@ -1550,6 +1669,19 @@ def _normalize_screen_payload(source_payload: dict[str, Any] | None, scene_id: s
     return payload
 
 
+def _load_screen_payload_with_legacy_fallback(
+    resource_root: Path | None, screen_id: str
+) -> tuple[dict[str, Any] | None, bool]:
+    source_payload = _load_resource_payload(resource_root, "screens", screen_id, required=False)
+    if source_payload is not None:
+        return source_payload, False
+    if screen_id in _active_scene_profiles():
+        # Legacy bundles may omit some known screen JSON files. For those scenes,
+        # generate payloads from profile defaults instead of failing hard.
+        return None, True
+    raise StoryGenerationError(f"Missing required screens resource '{screen_id}'")
+
+
 def generate_bundle_files(
     scenarios: list[dict[str, Any]],
     out_dir: Path,
@@ -1562,6 +1694,7 @@ def generate_bundle_files(
         "actions": set(),
         "apps": set(),
     }
+    autogenerated_screens: list[str] = []
     bindings: dict[str, dict[str, Any]] = {}
 
     for scenario in scenarios:
@@ -1598,9 +1731,11 @@ def generate_bundle_files(
         _write_json_with_checksum(out_dir, f"story/apps/{app_id}.json", app_payload)
 
     for screen_id in sorted(resources["screens"]):
-        source_payload = _load_resource_payload(resource_root, "screens", screen_id, required=True)
+        source_payload, autogenerated = _load_screen_payload_with_legacy_fallback(resource_root, screen_id)
         payload = _normalize_screen_payload(source_payload, screen_id)
         _write_json_with_checksum(out_dir, f"story/screens/{screen_id}.json", payload)
+        if autogenerated:
+            autogenerated_screens.append(screen_id)
 
     for audio_id in sorted(resources["audio"]):
         source_payload = _load_resource_payload(resource_root, "audio", audio_id)
@@ -1616,6 +1751,9 @@ def generate_bundle_files(
         "spec_hash": spec_hash,
         "scenarios": [scenario["id"] for scenario in scenarios],
         "resource_counts": {key: len(values) for key, values in resources.items()},
+        "autogenerated_resources": {
+            "screens": autogenerated_screens,
+        },
     }
     _write_json_with_checksum(out_dir, "story/manifest.json", manifest)
 
@@ -1664,7 +1802,87 @@ def load_and_validate(paths: StoryPaths, spec_dir: Path | None = None, game_dir:
     return scenarios, game_ids
 
 
+def _pretty_json(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, indent=2, ensure_ascii=True) + "\n"
+
+
+def _build_screen_payload_from_profile(scene_id: str) -> dict[str, Any]:
+    profile_payload = _scene_profile(scene_id)
+    return _normalize_screen_payload(profile_payload, scene_id)
+
+
+def _legacy_screen_mirror_targets(scene_id: str) -> list[tuple[str, str]]:
+    targets: list[tuple[str, str]] = [(_scene_slug(scene_id), scene_id)]
+    for alias_id, canonical in LEGACY_SCREEN_ALIASES.items():
+        if canonical != scene_id:
+            continue
+        alias_slug = _scene_slug(alias_id)
+        if any(existing_slug == alias_slug for existing_slug, _ in targets):
+            continue
+        targets.append((alias_slug, alias_id))
+    return targets
+
+
+def _sync_screens(paths: StoryPaths, check_only: bool) -> dict[str, Any]:
+    _activate_scene_profiles(paths)
+    story_screens_dir = paths.story_data_dir / "screens"
+    legacy_screens_dir = paths.fw_root / "data" / "screens"
+    story_screens_dir.mkdir(parents=True, exist_ok=True)
+    legacy_screens_dir.mkdir(parents=True, exist_ok=True)
+
+    story_written = 0
+    story_unchanged = 0
+    legacy_written = 0
+    legacy_unchanged = 0
+    drifts: list[str] = []
+
+    for scene_id in CANONICAL_SCREEN_SCENE_IDS:
+        payload = _build_screen_payload_from_profile(scene_id)
+        payload_text = _pretty_json(payload)
+        story_path = story_screens_dir / f"{scene_id}.json"
+        current_story = story_path.read_text(encoding="utf-8") if story_path.exists() else None
+        if current_story != payload_text:
+            if check_only:
+                drifts.append(str(story_path))
+            else:
+                story_path.write_text(payload_text, encoding="utf-8")
+                story_written += 1
+        else:
+            story_unchanged += 1
+
+        for slug, payload_id in _legacy_screen_mirror_targets(scene_id):
+            legacy_payload = dict(payload)
+            legacy_payload["id"] = payload_id
+            legacy_text = _pretty_json(legacy_payload)
+            legacy_path = legacy_screens_dir / f"{slug}.json"
+            current_legacy = legacy_path.read_text(encoding="utf-8") if legacy_path.exists() else None
+            if current_legacy != legacy_text:
+                if check_only:
+                    drifts.append(str(legacy_path))
+                else:
+                    legacy_path.write_text(legacy_text, encoding="utf-8")
+                    legacy_written += 1
+            else:
+                legacy_unchanged += 1
+
+    if check_only and drifts:
+        raise StoryGenerationError(
+            "screen sync drift detected:\n" + "\n".join(f"- {path}" for path in sorted(set(drifts)))
+        )
+
+    return {
+        "check_only": check_only,
+        "story_count": len(CANONICAL_SCREEN_SCENE_IDS),
+        "story_written": story_written,
+        "story_unchanged": story_unchanged,
+        "legacy_written": legacy_written,
+        "legacy_unchanged": legacy_unchanged,
+        "palette_path": str(_palette_path(paths)),
+    }
+
+
 def run_validate(paths: StoryPaths, spec_dir: Path | None = None, game_dir: Path | None = None) -> dict[str, Any]:
+    _activate_scene_profiles(paths)
     scenarios, game_ids = load_and_validate(paths, spec_dir=spec_dir, game_dir=game_dir)
     return {
         "scenarios": [item["id"] for item in scenarios],
@@ -1680,6 +1898,7 @@ def run_generate_cpp(
     spec_dir: Path | None = None,
     game_dir: Path | None = None,
 ) -> dict[str, Any]:
+    _activate_scene_profiles(paths)
     scenarios, game_ids = load_and_validate(paths, spec_dir=spec_dir, game_dir=game_dir)
     cpp_out = out_dir or paths.generated_cpp_dir
     spec_hash = generate_cpp_files(scenarios, cpp_out)
@@ -1698,6 +1917,7 @@ def run_generate_bundle(
     spec_dir: Path | None = None,
     game_dir: Path | None = None,
 ) -> dict[str, Any]:
+    _activate_scene_profiles(paths)
     scenarios, game_ids = load_and_validate(paths, spec_dir=spec_dir, game_dir=game_dir)
     bundle_out = out_dir or paths.bundle_root
     spec_hash = _story_spec_hash(scenarios)
@@ -1721,3 +1941,7 @@ def run_generate_bundle(
         "scenario_count": len(scenarios),
         "game_scenario_count": len(game_ids),
     }
+
+
+def run_sync_screens(paths: StoryPaths, check_only: bool = False) -> dict[str, Any]:
+    return _sync_screens(paths, check_only=check_only)

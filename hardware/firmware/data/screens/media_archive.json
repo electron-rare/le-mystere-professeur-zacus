@@ -1,0 +1,85 @@
+{
+  "title": "ARCHIVES MEDIA",
+  "subtitle": "Photos et enregistrements sauvegardes",
+  "symbol": "READY",
+  "effect": "radar",
+  "effect_speed_ms": 760,
+  "theme": {
+    "bg": "#0D1A34",
+    "accent": "#7CB1FF",
+    "text": "#EEF4FF"
+  },
+  "transition": {
+    "effect": "fade",
+    "duration_ms": 240
+  },
+  "timeline": {
+    "loop": true,
+    "duration_ms": 2000,
+    "keyframes": [
+      {
+        "at_ms": 0,
+        "effect": "radar",
+        "speed_ms": 760,
+        "theme": {
+          "bg": "#0D1A34",
+          "accent": "#7CB1FF",
+          "text": "#EEF4FF"
+        }
+      },
+      {
+        "at_ms": 1000,
+        "effect": "pulse",
+        "speed_ms": 620,
+        "theme": {
+          "bg": "#132245",
+          "accent": "#9CC7FF",
+          "text": "#F7FAFF"
+        }
+      },
+      {
+        "at_ms": 2000,
+        "effect": "radar",
+        "speed_ms": 760,
+        "theme": {
+          "bg": "#0D1A34",
+          "accent": "#7CB1FF",
+          "text": "#EEF4FF"
+        }
+      }
+    ]
+  },
+  "id": "SCENE_MEDIA_ARCHIVE",
+  "text": {
+    "show_title": false,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "title_case": "upper",
+    "subtitle_case": "raw",
+    "title_align": "top",
+    "subtitle_align": "bottom"
+  },
+  "visual": {
+    "show_title": false,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "effect_speed_ms": 760
+  },
+  "framing": {
+    "preset": "center",
+    "x_offset": 0,
+    "y_offset": 0,
+    "scale_pct": 100
+  },
+  "scroll": {
+    "mode": "none",
+    "speed_ms": 4200,
+    "pause_ms": 900,
+    "loop": true
+  },
+  "demo": {
+    "mode": "standard",
+    "particle_count": 4,
+    "strobe_level": 65
+  }
+}

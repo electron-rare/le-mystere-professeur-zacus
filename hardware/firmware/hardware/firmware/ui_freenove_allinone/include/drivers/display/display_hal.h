@@ -30,6 +30,7 @@ class DisplayHal {
   virtual void endWrite() = 0;
 
   virtual void setAddrWindow(int16_t x, int16_t y, int16_t w, int16_t h) = 0;
+  // Contract: both DMA image and pushColors(swap=true) consume the same logical RGB565 pixel format.
   virtual void pushImageDma(int16_t x, int16_t y, int16_t w, int16_t h, const uint16_t* pixels) = 0;
   virtual void pushColors(const uint16_t* pixels, uint32_t count, bool swap_bytes) = 0;
   virtual void pushColor(uint16_t color565) = 0;

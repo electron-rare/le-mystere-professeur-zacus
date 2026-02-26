@@ -15,12 +15,15 @@ constexpr uint32_t kEtape2DelayMs = 15UL * 60UL * 1000UL;
 constexpr uint32_t kEtape2TestDelayMs = 5000U;
 constexpr uint32_t kWinDueDelayMs = 10UL * 60UL * 1000UL;
 
-bool eventNameMatches(const char* expected, const char* actual) {
+bool eventNameMatches(const char* expected, const char* actual, StoryEventType type) {
   if (expected == nullptr || expected[0] == '\0') {
     return true;
   }
   if (actual == nullptr) {
     return false;
+  }
+  if (type == StoryEventType::kButton && std::strcmp(expected, "ANY") == 0) {
+    return actual[0] != '\0';
   }
   return std::strcmp(expected, actual) == 0;
 }
@@ -50,7 +53,7 @@ bool loadScenarioIdFromFile(const char* scenario_file_path, String* out_scenario
     return false;
   }
   const size_t file_size = static_cast<size_t>(file.size());
-  if (file_size == 0U || file_size > 12288U) {
+  if (file_size == 0U || file_size > 32768U) {
     file.close();
     Serial.printf("[SCENARIO] unexpected scenario config size: %s (%u bytes)\n",
                   scenario_file_path,
@@ -58,8 +61,14 @@ bool loadScenarioIdFromFile(const char* scenario_file_path, String* out_scenario
     return false;
   }
 
-  DynamicJsonDocument document(file_size + 512U);
-  const DeserializationError error = deserializeJson(document, file);
+  StaticJsonDocument<64> filter;
+  filter["scenario"] = true;
+  filter["scenario_id"] = true;
+  filter["id"] = true;
+
+  StaticJsonDocument<384> document;
+  const DeserializationError error =
+      deserializeJson(document, file, DeserializationOption::Filter(filter));
   file.close();
   if (error) {
     Serial.printf("[SCENARIO] invalid scenario config json (%s): %s\n",
@@ -221,10 +230,15 @@ void ScenarioManager::tick(uint32_t now_ms) {
 }
 
 void ScenarioManager::notifyUnlock(uint32_t now_ms) {
+  (void)notifyUnlockEvent("UNLOCK", now_ms);
+}
+
+bool ScenarioManager::notifyUnlockEvent(const char* event_name, uint32_t now_ms) {
   timer_armed_ = true;
   timer_fired_ = false;
   etape2_due_at_ms_ = now_ms + (test_mode_ ? kEtape2TestDelayMs : kEtape2DelayMs);
-  dispatchEvent(StoryEventType::kUnlock, "UNLOCK", now_ms, "button_unlock");
+  const char* name = (event_name != nullptr && event_name[0] != '\0') ? event_name : "UNLOCK";
+  return dispatchEvent(StoryEventType::kUnlock, name, now_ms, "unlock_event");
 }
 
 void ScenarioManager::notifyButton(uint8_t key, bool long_press, uint32_t now_ms) {
@@ -572,7 +586,7 @@ bool ScenarioManager::transitionMatches(const TransitionDef& transition,
   if (transition.eventType != type) {
     return false;
   }
-  return eventNameMatches(transition.eventName, event_name);
+  return eventNameMatches(transition.eventName, event_name, type);
 }
 
 void ScenarioManager::clearStepResourceOverrides() {

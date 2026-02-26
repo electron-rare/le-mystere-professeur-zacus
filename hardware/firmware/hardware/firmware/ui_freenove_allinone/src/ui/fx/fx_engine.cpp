@@ -496,6 +496,14 @@ FxScrollFont FxEngine::scrollFont() const {
   return scroll_font_;
 }
 
+void FxEngine::setScrollerCentered(bool centered) {
+  scroller_centered_ = centered;
+}
+
+bool FxEngine::scrollerCentered() const {
+  return scroller_centered_;
+}
+
 void FxEngine::setBpm(uint16_t bpm) {
   bpm_ = clampValue<uint16_t>(bpm, 60U, 220U);
   fx_sync_init(&sync_, bpm_);
@@ -1823,8 +1831,10 @@ void FxEngine::renderScroller(uint32_t now_ms) {
   }
   const int16_t width = static_cast<int16_t>(config_.sprite_width);
   const int16_t height = static_cast<int16_t>(config_.sprite_height);
-  const int16_t base_y = static_cast<int16_t>(
-      clampValue<int>(height - static_cast<int>(kScrollerBaseYOffset), 12, height - 18));
+  const int16_t base_y = scroller_centered_
+                             ? static_cast<int16_t>(height / 2)
+                             : static_cast<int16_t>(
+                                   clampValue<int>(height - static_cast<int>(kScrollerBaseYOffset), 12, height - 18));
   const int16_t top = static_cast<int16_t>(base_y - kScrollerAmpPx - kSafeBandMarginTop - kSafeFeatherPx);
   const int16_t bottom = static_cast<int16_t>(base_y + kScrollerAmpPx + kScrollerGlyphHeight +
                                               kSafeBandMarginBottom + kSafeFeatherPx);
@@ -1853,6 +1863,14 @@ void FxEngine::renderScroller(uint32_t now_ms) {
   const uint8_t tint = static_cast<uint8_t>(128 + (fx_sin8(ph) >> 1U));
   const uint16_t accent = fx_rgb565(40U, static_cast<uint8_t>(120U + tint / 2U),
                                     static_cast<uint8_t>(180U + tint / 3U));
+  const uint16_t color_cycle[6] = {
+      fx_rgb565(255U, 0U, 0U),     // rouge
+      fx_rgb565(0U, 255U, 0U),     // vert
+      fx_rgb565(0U, 0U, 255U),     // bleu
+      fx_rgb565(0U, 255U, 255U),   // cyan
+      fx_rgb565(255U, 0U, 255U),   // magenta
+      fx_rgb565(255U, 255U, 0U),   // jaune
+  };
 
   const int repeat = (width / total_px) + 3;
   for (int r = 0; r < repeat; ++r) {
@@ -1860,7 +1878,9 @@ void FxEngine::renderScroller(uint32_t now_ms) {
       const int x_char = x0 + static_cast<int>(i * kScrollerCharWidth);
       const int16_t y_off = static_cast<int16_t>(
           (fx_sin8(static_cast<uint8_t>(scroll_wave_phase_ + static_cast<uint8_t>(i * 9U))) * kScrollerAmpPx) / 127);
-      const uint16_t col = ((i & 7U) == 0U) ? accent : base_col;
+      const uint16_t col = scroller_centered_
+                               ? color_cycle[i % 6U]
+                               : (((i & 7U) == 0U) ? accent : base_col);
       drawChar6x8(static_cast<int16_t>(x_char), static_cast<int16_t>(base_y + y_off), scroll_text_[i], col,
                   shadow_col);
     }

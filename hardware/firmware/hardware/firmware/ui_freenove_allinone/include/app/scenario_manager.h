@@ -28,6 +28,7 @@ class ScenarioManager {
   void tick(uint32_t now_ms);
 
   void notifyUnlock(uint32_t now_ms);
+  bool notifyUnlockEvent(const char* event_name, uint32_t now_ms);
   void notifyButton(uint8_t key, bool long_press, uint32_t now_ms);
   void notifyAudioDone(uint32_t now_ms);
   bool notifyButtonEvent(const char* event_name, uint32_t now_ms);

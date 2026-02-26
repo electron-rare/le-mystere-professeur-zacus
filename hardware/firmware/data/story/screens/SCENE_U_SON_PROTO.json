@@ -1,23 +1,110 @@
 {
   "id": "SCENE_U_SON_PROTO",
-  "title": "U-SON PROTO",
-  "subtitle": "Calibration signal en cours",
-  "symbol": "U1",
-  "effect": "pulse",
+  "title": "PROTO U-SON",
+  "subtitle": "Signal brouille / transmission active",
+  "symbol": "ALERT",
+  "effect": "text_glitch",
+  "effect_speed_ms": 180,
+  "theme": {
+    "bg": "#06040B",
+    "accent": "#F35DFF",
+    "text": "#FFFFFF"
+  },
+  "render": {
+    "text_backend": "lgfx_overlay",
+    "disable_lvgl_text": true,
+    "foreground_fx": "text_glitch",
+    "wave": false
+  },
+  "transition": {
+    "effect": "glitch",
+    "duration_ms": 160
+  },
+  "timeline": {
+    "loop": true,
+    "duration_ms": 30000,
+    "keyframes": [
+      {
+        "at_ms": 0,
+        "effect": "tunnel3d",
+        "speed_ms": 15000,
+        "theme": {
+          "bg": "#0B050A",
+          "accent": "#F35DFF",
+          "text": "#FFFFFF"
+        }
+      },
+      {
+        "at_ms": 15000,
+        "effect": "rotozoom",
+        "speed_ms": 15000,
+        "theme": {
+          "bg": "#12061F",
+          "accent": "#FF94E8",
+          "text": "#FFFFFF"
+        }
+      }
+    ]
+  },
+  "text": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "title_case": "center",
+    "subtitle_case": "raw",
+    "symbol_align": "top",
+    "title_align": "center",
+    "subtitle_align": "bottom",
+    "glitch": 88,
+    "size": 100
+  },
   "visual": {
     "show_title": true,
     "show_subtitle": true,
     "show_symbol": true,
-    "effect_speed_ms": 540
+    "effect_speed_ms": 180,
+    "waveform": {
+      "enabled": false,
+      "sample_count": 0,
+      "amplitude_pct": 0,
+      "jitter": false
+    }
   },
-  "theme": {
-    "bg": "#0F162A",
-    "accent": "#6FE6FF",
-    "text": "#EAFBFF"
+  "hardware": {
+    "backlight": {
+      "mode": "level_sync",
+      "min": 0,
+      "max": 95,
+      "base": 14,
+      "spike_pct": 16
+    },
+    "ws2812": {
+      "mode": "single_random_blink",
+      "one_led_at_a_time": true,
+      "level_sync": true,
+      "color_source": "theme.accent",
+      "min_brightness": 4,
+      "max_brightness": 95,
+      "auto": true
+    }
   },
-  "transition": {
-    "effect": "fade",
-    "duration_ms": 200
+  "framing": {
+    "preset": "center",
+    "x_offset": 0,
+    "y_offset": 0,
+    "scale_pct": 100
   },
-  "timeline": {}
+  "scroll": {
+    "mode": "none",
+    "speed_ms": 0,
+    "pause_ms": 0,
+    "loop": false,
+    "loop_delay_ms": 0
+  },
+  "demo": {
+    "mode": "shadebobs",
+    "particle_count": 6,
+    "strobe_level": 3,
+    "enable": false
+  }
 }

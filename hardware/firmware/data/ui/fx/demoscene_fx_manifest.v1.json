@@ -1,0 +1,256 @@
+{
+  "manifest_id": "demoscene_fx_manifest_v1",
+  "version": "1.2.0",
+  "updated_at": "2026-02-26",
+  "owner": "ui_freenove_allinone",
+  "source_of_truth": {
+    "timelines": [
+      "/ui/fx/timelines/demo_3d.json",
+      "/ui/fx/timelines/demo_90s.json",
+      "/ui/fx/timelines/winner.json",
+      "/ui/fx/timelines/fireworks.json",
+      "/ui/fx/timelines/boingball.json",
+      "/ui/fx/timelines/u_son_proto_30s.json"
+    ],
+    "runtime_mapping": {
+      "file": "hardware/firmware/ui_freenove_allinone/src/ui/fx/fx_engine.cpp",
+      "function": "timelinePathForPreset"
+    }
+  },
+  "target_profile": {
+    "engine_adapter": "lvgl_overlay_plus_lovyangfx_blit",
+    "internal_resolution": "160x120_i8",
+    "default_bpm": 125,
+    "timeline_profile_ms": {
+      "phase_a": 30000,
+      "phase_b": 15000,
+      "phase_c": 20000,
+      "phase_c_loop": true
+    }
+  },
+  "presets": [
+    {
+      "preset": "demo",
+      "enum": "FxPreset::kDemo",
+      "timeline": "/ui/fx/timelines/demo_3d.json",
+      "timeline_fallback": "/ui/fx/timelines/demo_90s.json",
+      "default_mode": "FxMode::kStarfield3D",
+      "default_scroll_font": "FxScrollFont::kBasic",
+      "scene_bindings": [
+        "SCENE_WIN_ETAPE:phase_a"
+      ]
+    },
+    {
+      "preset": "winner",
+      "enum": "FxPreset::kWinner",
+      "timeline": "/ui/fx/timelines/winner.json",
+      "default_mode": "FxMode::kDotSphere3D",
+      "default_scroll_font": "FxScrollFont::kOutline",
+      "scene_bindings": [
+        "SCENE_WIN_ETAPE:phase_b",
+        "SCENE_WINNER"
+      ]
+    },
+    {
+      "preset": "fireworks",
+      "enum": "FxPreset::kFireworks",
+      "timeline": "/ui/fx/timelines/fireworks.json",
+      "default_mode": "FxMode::kRayCorridor",
+      "default_scroll_font": "FxScrollFont::kBold",
+      "scene_bindings": [
+        "SCENE_FIREWORKS"
+      ]
+    },
+    {
+      "preset": "boingball",
+      "enum": "FxPreset::kBoingball",
+      "timeline": "/ui/fx/timelines/boingball.json",
+      "default_mode": "FxMode::kRayCorridor",
+      "default_scroll_font": "FxScrollFont::kItalic",
+      "scene_bindings": [
+        "SCENE_WIN_ETAPE:phase_c"
+      ]
+    },
+    {
+      "preset": "uson_proto",
+      "enum": "FxPreset::kUsonProto",
+      "timeline": "/ui/fx/timelines/u_son_proto_30s.json",
+      "default_mode": "FxMode::kClassic",
+      "default_scroll_font": "FxScrollFont::kBasic",
+      "scene_bindings": [
+        "SCENE_U_SON_PROTO"
+      ],
+      "notes": [
+        "no wave text",
+        "foreground text uses lgfx_overlay"
+      ]
+    }
+  ],
+  "fx_types": [
+    {
+      "id": "transition_flash",
+      "family": "transition",
+      "track": "UI",
+      "deterministic": true,
+      "main_params": [
+        "flashFrames",
+        "fadeOut"
+      ]
+    },
+    {
+      "id": "scrolltext",
+      "family": "text",
+      "track": "UI",
+      "deterministic": true,
+      "main_params": [
+        "textId",
+        "speed",
+        "waveAmp",
+        "wavePeriod"
+      ]
+    },
+    {
+      "id": "starfield",
+      "family": "background",
+      "track": "BG",
+      "deterministic": true,
+      "main_params": [
+        "layers",
+        "stars",
+        "speedNear",
+        "driftAmp"
+      ]
+    },
+    {
+      "id": "rasterbars",
+      "family": "background",
+      "track": "MID",
+      "deterministic": true,
+      "main_params": [
+        "bars",
+        "thickness",
+        "amp",
+        "speed"
+      ]
+    },
+    {
+      "id": "shadebobs",
+      "family": "particles",
+      "track": "MID",
+      "deterministic": true,
+      "main_params": [
+        "bobs",
+        "radius",
+        "decay",
+        "mode"
+      ]
+    },
+    {
+      "id": "plasma",
+      "family": "background",
+      "track": "BG",
+      "deterministic": true,
+      "main_params": [
+        "speed",
+        "paletteId",
+        "contrast"
+      ]
+    },
+    {
+      "id": "tunnel3d",
+      "family": "3d",
+      "track": "BG",
+      "deterministic": true,
+      "main_params": [
+        "speed",
+        "rotSpeed"
+      ]
+    },
+    {
+      "id": "rotozoom",
+      "family": "3d",
+      "track": "BG",
+      "deterministic": true,
+      "main_params": [
+        "rotSpeed",
+        "zoomBase",
+        "zoomAmp"
+      ]
+    },
+    {
+      "id": "wirecube",
+      "family": "3d",
+      "track": "MID",
+      "deterministic": true,
+      "main_params": [
+        "rotX",
+        "rotY",
+        "rotZ",
+        "intensity"
+      ]
+    }
+  ],
+  "overlay_fx_types": [
+    {
+      "id": "text_glitch",
+      "runtime_effect_token": "glitch",
+      "family": "text_overlay",
+      "deterministic": true,
+      "payload_contract": {
+        "text.glitch": "0..100",
+        "text.size": "0..100"
+      },
+      "defaults": {
+        "textId": "",
+        "text.glitch": 65,
+        "text.size": 100
+      },
+      "runtime_support": {
+        "parser_file": "hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp",
+        "effect_file": "hardware/firmware/ui_freenove_allinone/src/ui/ui_manager_effects.cpp"
+      }
+    }
+  ],
+  "track_contract": {
+    "minimum_tracks": [
+      "scroll_speed",
+      "sine_amp",
+      "sine_freq",
+      "star_density",
+      "star_speed_l1",
+      "star_speed_l2",
+      "star_speed_l3",
+      "glitch_amount",
+      "jitter_px",
+      "blink_rate",
+      "fireworks_rate",
+      "particle_speed",
+      "gravity",
+      "fade",
+      "zoom",
+      "shake"
+    ],
+    "evaluation_order": [
+      "tracks",
+      "fx_update",
+      "fx_render",
+      "overlay_invalidate"
+    ]
+  },
+  "acceptance_gates": [
+    "same_seed_plus_same_tracks_equals_same_output",
+    "readable_foreground_text",
+    "no_per_frame_heap_alloc",
+    "stable_fps_with_no_panic_or_reboot_markers"
+  ],
+  "references_consulted": [
+    "https://www.pouet.net/prodlist.php?type%5B0%5D=cracktro",
+    "https://www.youtube.com/results?search_query=amiga+cracktro",
+    "https://www.youtube.com/results?search_query=amiga+demoscene+1992",
+    "https://www.youtube.com/results?search_query=demoscene+text+glitch+effect",
+    "https://www.youtube.com/results?search_query=amiga+cracktro+scroller",
+    "https://css-tricks.com/glitch-effect-text-images-svg/",
+    "https://www.theflatnet.de/pub/cbm/amiga/AmigaDevDocs/hard_2.html",
+    "https://github.com/mrandreastoth/AmigaStyleDemo"
+  ]
+}

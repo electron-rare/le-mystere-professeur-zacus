@@ -90,6 +90,8 @@ class FxEngine {
   void setScrollText(const char* text);
   void setScrollFont(FxScrollFont font);
   FxScrollFont scrollFont() const;
+  void setScrollerCentered(bool centered);
+  bool scrollerCentered() const;
   void setBpm(uint16_t bpm);
   bool renderFrame(uint32_t now_ms,
                    drivers::display::DisplayHal& display,
@@ -229,6 +231,7 @@ class FxEngine {
   uint32_t scroll_phase_px_q16_ = 0U;
   uint8_t scroll_wave_phase_ = 0U;
   uint8_t scroll_highlight_phase_ = 0U;
+  bool scroller_centered_ = false;
   BgMode bg_mode_ = BgMode::kPlasma;
   MidMode mid_mode_ = MidMode::kShadeBobs;
   fx_sync_t sync_ = {};

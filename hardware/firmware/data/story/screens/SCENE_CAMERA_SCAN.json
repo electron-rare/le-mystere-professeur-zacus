@@ -1,0 +1,75 @@
+{
+  "title": "ZACUS QR VALIDATION",
+  "subtitle": "Scanne le QR final",
+  "symbol": "QR",
+  "effect": "none",
+  "effect_speed_ms": 0,
+  "theme": {
+    "bg": "#102040",
+    "accent": "#5CA3FF",
+    "text": "#F3F7FF"
+  },
+  "transition": {
+    "effect": "fade",
+    "duration_ms": 180
+  },
+  "timeline": {
+    "loop": true,
+    "duration_ms": 1000,
+    "keyframes": [
+      {
+        "at_ms": 0,
+        "effect": "none",
+        "speed_ms": 0,
+        "theme": {
+          "bg": "#102040",
+          "accent": "#5CA3FF",
+          "text": "#F3F7FF"
+        }
+      },
+      {
+        "at_ms": 1000,
+        "effect": "none",
+        "speed_ms": 0,
+        "theme": {
+          "bg": "#102040",
+          "accent": "#5CA3FF",
+          "text": "#F3F7FF"
+        }
+      }
+    ]
+  },
+  "id": "SCENE_CAMERA_SCAN",
+  "text": {
+    "show_title": false,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "title_case": "upper",
+    "subtitle_case": "raw",
+    "title_align": "top",
+    "subtitle_align": "bottom"
+  },
+  "visual": {
+    "show_title": false,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "effect_speed_ms": 0
+  },
+  "framing": {
+    "preset": "center",
+    "x_offset": 0,
+    "y_offset": 0,
+    "scale_pct": 100
+  },
+  "scroll": {
+    "mode": "none",
+    "speed_ms": 4200,
+    "pause_ms": 900,
+    "loop": true
+  },
+  "demo": {
+    "mode": "standard",
+    "particle_count": 4,
+    "strobe_level": 65
+  }
+}

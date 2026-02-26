@@ -1,0 +1,40 @@
+{
+  "meta": {
+    "title": "U_SON Proto 30s (Tunnel + Rotozoom)",
+    "fps": 50,
+    "bpm": 125,
+    "seed": 252252,
+    "internal": {
+      "w": 160,
+      "h": 120,
+      "fmt": "I8"
+    }
+  },
+  "clips": [
+    {
+      "id": "u_son_tunnel",
+      "t0": 0.0,
+      "t1": 15.0,
+      "track": "BG",
+      "fx": "tunnel3d",
+      "params": {
+        "speed": 0.85,
+        "rotSpeed": 0.14
+      }
+    },
+    {
+      "id": "u_son_rotozoom",
+      "t0": 15.0,
+      "t1": 30.0,
+      "track": "BG",
+      "fx": "rotozoom",
+      "params": {
+        "rotSpeed": 0.19,
+        "zoomBase": 0.92,
+        "zoomAmp": 0.23
+      }
+    }
+  ],
+  "mods": [],
+  "events": []
+}

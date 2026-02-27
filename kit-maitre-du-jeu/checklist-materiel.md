@@ -1,3 +1,16 @@
+# 🚨 En cas de blocage : Hotline Zacus
+
+Si une équipe est bloquée ou rencontre un problème technique, suivez ces instructions :
+
+1. **Appelez la « Ligne directe Professeur Zacus »**
+	- Numéro fictif à afficher sur le support (voir printables/src/prompts/hotline.md).
+	- Exemple d’instruction à donner : « Appelez la hotline et indiquez le code affiché sur l’échelle ».
+2. **QR code d’aide audio**
+	- Scannez le QR code présent sur la fiche hotline pour écouter un message d’aide ou d’indice audio.
+3. **Astuce MJ**
+	- Si la solution n’est pas évidente, consultez la FAQ ou la documentation technique.
+
+👉 Pensez à placer la fiche hotline et le QR code dans la salle de jeu, bien visibles des joueurs.
 # Checklist matériel (version canon Zacus v2)
 
 > ⚡ Le Media Kit ESP32 fait le gros du boulot : feedbacks, transitions, QR, Media Hub… Le MJ n’a plus qu’à canaliser l’énergie ionique du groupe !

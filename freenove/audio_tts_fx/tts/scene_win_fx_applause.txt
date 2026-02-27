@@ -1,0 +1,3 @@
+Effet sonore : Applaudissements
+
+Description : Un tonnerre d’applaudissements pour marquer la victoire.

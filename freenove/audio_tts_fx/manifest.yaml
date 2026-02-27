@@ -1,0 +1,12 @@
+# Manifest Freenove Audio TTS & FX
+# Ce fichier liste les fichiers audio à placer dans la Freenove
+
+tts:
+  - scene_win_indice1.mp3  # Indice 1 - SCENE_WIN
+  - scene_win_indice2.mp3  # Indice 2 - SCENE_WIN
+  - scene_win_indice3.mp3  # Indice 3 - SCENE_WIN
+  - scene_win_resolution.mp3  # Résolution - SCENE_WIN
+fx:
+  - applause.mp3           # Applaudissements
+  - suspense.mp3           # Effet suspense
+  - victory_fanfare.mp3    # Fanfare de victoire

@@ -1,0 +1,3 @@
+Effet sonore : Suspense
+
+Description : Un effet sonore pour accentuer le suspense juste avant la révélation finale.

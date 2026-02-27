@@ -12,7 +12,7 @@
   },
   "transition": {
     "effect": "none",
-    "duration_ms": 0
+    "duration_ms": 220
   },
   "text": {
     "show_title": true,
@@ -53,5 +53,9 @@
     "particle_count": 0,
     "strobe_level": 0,
     "enable": false
+  },
+  "render": {
+    "text_backend": "lgfx_overlay",
+    "disable_lvgl_text": true
   }
 }

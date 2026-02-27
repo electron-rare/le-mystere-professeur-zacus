@@ -7,7 +7,12 @@ Families and sizes:
 - Inter: 14 / 18 / 24 / 32
 - Orbitron: 28 / 40
 - IBM Plex Mono: 14 / 18
+- IBM Plex Mono Bold: 12 / 16 / 20 / 24
+- IBM Plex Mono Italic: 12 / 16 / 20 / 24
 - Press Start 2P: 16 / 24 (optional via `UI_FONT_PIXEL_ENABLE`)
+- Bungee: 24
+- Monoton: 24
+- Rubik Glitch: 24
 
 Generated files live in:
 - `hardware/firmware/ui_freenove_allinone/src/ui/fonts/`
@@ -37,7 +42,8 @@ Font getters:
 - `fontTitle()`
 - `fontMono()`
 - `fontPixel()`
-- plus size-specific helpers (`fontBodyS/M/L`, `fontTitleXL`)
+- plus size/style helpers (`fontBodyS/M/L`, `fontBold12/16/20/24`, `fontItalic12/16/20/24`, `fontTitleXL`)
+- funky helpers (`fontFunkyBungee`, `fontFunkyMonoton`, `fontFunkyRubikGlitch`)
 
 Styles:
 - `styleBody()`

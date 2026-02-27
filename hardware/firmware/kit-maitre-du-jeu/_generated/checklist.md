@@ -2,13 +2,13 @@
 
 ## Configurer
 
-- Scénario : Le mystère du Professeur Zacus
-- Fichier source : ../../game/scenarios/zacus_v1.yaml
-- Participants : 6–14
-- Durée : 60–90 min
-- Stations prévues : 4
-- Puzzles : 4
-- Preuves listées : 3
+- Scénario : DEFAULT
+- Fichier source : ../../game/scenarios/default_unlock_win_etape2.yaml
+- Participants : ?–?
+- Durée : ?–? min
+- Stations prévues : 0
+- Puzzles : 0
+- Preuves listées : 0
 
 ## Matériel recommandé
 

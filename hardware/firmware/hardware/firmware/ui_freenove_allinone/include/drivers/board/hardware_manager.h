@@ -9,6 +9,16 @@
 class HardwareManager {
  public:
   static constexpr uint8_t kMicWaveformCapacity = 16U;
+  static constexpr uint8_t kMicSpectrumBinCount = 5U;
+
+  enum class LedRuntimeMode : uint8_t {
+    kPalette = 0,
+    kBroken,
+    kTuner,
+    kSingleRandomBlink,
+    kDominantBandSingle,
+  };
+
   struct LedPaletteEntry {
     const char* scene_id;
     uint8_t r;
@@ -29,6 +39,7 @@ class HardwareManager {
     uint8_t led_g = 0U;
     uint8_t led_b = 0U;
     uint8_t led_brightness = 0U;
+    bool led_one_at_a_time = false;
     uint8_t mic_level_percent = 0U;
     uint16_t mic_peak = 0U;
     uint16_t mic_noise_floor = 0U;
@@ -39,6 +50,8 @@ class HardwareManager {
     uint8_t mic_waveform_count = 0U;
     uint8_t mic_waveform_head = 0U;
     uint8_t mic_waveform[kMicWaveformCapacity] = {0};
+    uint8_t mic_spectrum[kMicSpectrumBinCount] = {0};
+    uint16_t mic_spectrum_peak_hz = 0U;
     uint16_t battery_mv = 0U;
     uint16_t battery_cell_mv = 0U;
     uint8_t battery_percent = 0U;
@@ -46,6 +59,7 @@ class HardwareManager {
     bool last_button_long = false;
     uint32_t last_button_ms = 0U;
     uint32_t button_count = 0U;
+    char led_mode[24] = "palette";
     char scene_id[24] = "SCENE_READY";
   };
 
@@ -66,6 +80,12 @@ class HardwareManager {
   const Snapshot& snapshotRef() const;
   void setMicRuntimeEnabled(bool enabled);
   bool micRuntimeEnabled() const;
+  void setSceneSingleRandomBlink(bool enabled,
+                                 uint8_t r,
+                                 uint8_t g,
+                                 uint8_t b,
+                                 uint8_t brightness,
+                                 bool dominant_band_sync = false);
 
  private:
   bool beginMic();
@@ -80,6 +100,12 @@ class HardwareManager {
                            uint8_t base_g,
                            uint8_t base_b,
                            uint8_t brightness);
+  void applySingleRandomBlinkPattern(uint32_t now_ms,
+                                    uint8_t base_r,
+                                    uint8_t base_g,
+                                    uint8_t base_b,
+                                    uint8_t brightness);
+  void applyDominantBandSinglePattern(uint32_t now_ms, uint8_t brightness);
   void estimatePitch(uint16_t& freq_hz, int16_t& cents, uint8_t& confidence, uint16_t& peak_for_window);
   void estimatePitchFromSamples(const int16_t* samples,
                                size_t sample_count,
@@ -127,6 +153,13 @@ class HardwareManager {
   uint8_t manual_g_ = 0U;
   uint8_t manual_b_ = 0U;
   uint8_t manual_brightness_ = 0U;
+  bool scene_single_random_blink_ = false;
+  uint8_t scene_single_blink_r_ = 0U;
+  uint8_t scene_single_blink_g_ = 0U;
+  uint8_t scene_single_blink_b_ = 0U;
+  uint8_t scene_single_blink_brightness_ = 0U;
+  bool scene_single_blink_dominant_band_ = false;
+  LedRuntimeMode led_runtime_mode_ = LedRuntimeMode::kPalette;
   uint16_t mic_agc_gain_q8_ = 256U;
   uint16_t mic_noise_floor_raw_ = 120U;
   uint32_t mic_last_signal_ms_ = 0U;

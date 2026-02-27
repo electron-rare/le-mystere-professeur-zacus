@@ -650,13 +650,19 @@ void UiManager::invalidateFxOverlayObjects() {
       }
     }
   } else {
-    invalidate_if_visible(scene_title_label_);
-    invalidate_if_visible(scene_subtitle_label_);
-    invalidate_if_visible(scene_symbol_label_);
+    if (!scene_disable_lvgl_text_) {
+      invalidate_if_visible(scene_title_label_);
+      invalidate_if_visible(scene_subtitle_label_);
+      invalidate_if_visible(scene_symbol_label_);
+    }
     invalidate_if_visible(page_label_);
   }
 
   if (!invalidated) {
+    if (scene_disable_lvgl_text_ && !intro_active_) {
+      drivers::display::displayHalInvalidateOverlay();
+      return;
+    }
     if (intro_root_ != nullptr) {
       lv_obj_invalidate(intro_root_);
       return;

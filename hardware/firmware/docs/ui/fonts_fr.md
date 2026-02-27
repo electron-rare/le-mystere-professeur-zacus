@@ -7,10 +7,13 @@
 - `fontBodyS()`
 - `fontBodyM()`
 - `fontBodyL()`
+- `fontBold12()` / `fontBold16()` / `fontBold20()` / `fontBold24()`
+- `fontItalic12()` / `fontItalic16()` / `fontItalic20()` / `fontItalic24()`
 - `fontTitle()`
 - `fontTitleXL()`
 - `fontMono()`
 - `fontPixel()`
+- `fontFunkyBungee()` / `fontFunkyMonoton()` / `fontFunkyRubikGlitch()`
 
 Styles are also exposed (`styleBody`, `styleTitle`, `styleTitleXL`, `styleMono`, `stylePixel`).
 Optional 1px shadow is enabled on title/pixel styles (`UI_FONT_STYLE_SHADOW=1`, disable with `-DUI_FONT_STYLE_SHADOW=0`).
@@ -20,7 +23,12 @@ Target families:
 - Inter: `14, 18, 24, 32`
 - Orbitron: `28, 40`
 - IBM Plex Mono: `14, 18`
+- IBM Plex Mono Bold: `12, 16, 20, 24`
+- IBM Plex Mono Italic: `12, 16, 20, 24`
 - Press Start 2P (optional): `16, 24`
+- Bungee: `24`
+- Monoton: `24`
+- Rubik Glitch: `24`
 
 Runtime defaults now use the external generated set (`UI_FONT_EXTERNAL_SET=1` by default in `ui_fonts.cpp`).
 You can force fallback to Montserrat with `-DUI_FONT_EXTERNAL_SET=0`.

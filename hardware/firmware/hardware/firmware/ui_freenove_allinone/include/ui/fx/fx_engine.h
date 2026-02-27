@@ -24,8 +24,11 @@ enum class FxScenePhase : uint8_t {
 enum class FxPreset : uint8_t {
   kDemo = 0,
   kWinner,
+  kWinEtape1,
   kFireworks,
   kBoingball,
+  kUsonProto,
+  kLaDetector,
 };
 
 enum class FxMode : uint8_t {
@@ -285,6 +288,8 @@ class FxEngine {
   bool v9_timeline_dirty_ = true;
   bool v9_use_runtime_ = true;
   FxPreset v9_loaded_preset_ = FxPreset::kDemo;
+  uint32_t v9_loop_period_ms_ = 0U;
+  uint32_t v9_loop_elapsed_ms_ = 0U;
   uint32_t blit_cpu_time_total_us_ = 0U;
   uint32_t blit_dma_submit_time_total_us_ = 0U;
   uint32_t blit_dma_wait_time_total_us_ = 0U;

@@ -1,6 +1,6 @@
 version: 3
 name: screens_palette_v3
-description: Unified Freenove screen palette. Source-of-truth for data/story/screens and data/screens mirrors.
+description: Unified Freenove screen palette. Source-of-truth for data/story/screens and off-FS legacy mirrors.
 scenes:
   SCENE_LOCKED:
     title: VERROUILLE
@@ -122,9 +122,9 @@ scenes:
         accent: '#35E7B0'
         text: '#EFFFF8'
   SCENE_LA_DETECTOR:
-    title: DETECTION
+    title: recherche d'accordance
     subtitle: Balayage en cours
-    symbol: SCAN
+    symbol: ''
     effect: scan
     effect_speed_ms: 960
     theme:

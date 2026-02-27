@@ -2,8 +2,8 @@
 
 ## Règles
 
-- Max 14 enfants : rotation toutes les 15 min.
-- Durée cible 60–90 min : deux pauses courtes.
+- Max ? enfants : rotation toutes les 15 min.
+- Durée cible ?–? min : deux pauses courtes.
 - Un seul enfant parle à la fois, signal sonore pour les transitions.
 - Indices dans leurs enveloppes jusqu’à validation du chef de piste.
 

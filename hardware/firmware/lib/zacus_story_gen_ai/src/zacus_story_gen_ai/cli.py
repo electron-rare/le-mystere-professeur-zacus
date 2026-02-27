@@ -43,7 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     sync_screens_p = sub.add_parser(
         "sync-screens",
         parents=[common],
-        help="Synchronize data/story/screens and data/screens from palette",
+        help="Synchronize data/story/screens and legacy_payloads/fs_excluded/screens from palette",
     )
     sync_screens_p.add_argument(
         "--check",
@@ -116,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"[story-gen] OK sync-screens mode={mode} story={result['story_count']} "
                 f"story_written={result['story_written']} legacy_written={result['legacy_written']} "
-                f"palette={result['palette_path']}"
+                f"palette={result['palette_path']} legacy_dir={result['legacy_dir']}"
             )
             return 0
 

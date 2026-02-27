@@ -5,7 +5,7 @@ Source de verite edition UI:
 
 Artefacts generes et commits:
 - `data/story/screens/SCENE_*.json` (canoniques runtime)
-- `data/screens/*.json` (mirror legacy durable)
+- `legacy_payloads/fs_excluded/screens/*.json` (archive legacy hors LittleFS)
 
 Commande de synchro:
 - `./tools/dev/story-gen sync-screens` (ecrit les artefacts)
@@ -14,8 +14,8 @@ Commande de synchro:
 ## Contrat runtime
 
 - Le runtime Freenove charge d'abord `/story/screens/<SCENE>.json`.
-- Le fallback `/screens/<slug|SCENE>.json` est conserve durablement pour compat legacy.
-- Le mirror `/screens` doit rester synchronise automatiquement depuis la palette.
+- Le fallback `/screens/<slug|SCENE>.json` reste supporte pour compat legacy.
+- Les mirrors legacy sont maintenus hors `data/` pour ne pas etre embarques dans LittleFS par defaut.
 
 ## Scenes canoniques (registre runtime)
 

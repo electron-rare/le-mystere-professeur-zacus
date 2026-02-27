@@ -619,12 +619,24 @@ bool parseFxPresetToken(const String& text, ui::fx::FxPreset* out_preset) {
     *out_preset = ui::fx::FxPreset::kWinner;
     return true;
   }
+  if (normalized == "win_etape1" || normalized == "winetape1") {
+    *out_preset = ui::fx::FxPreset::kWinEtape1;
+    return true;
+  }
   if (normalized == "fireworks") {
     *out_preset = ui::fx::FxPreset::kFireworks;
     return true;
   }
   if (normalized == "boingball") {
     *out_preset = ui::fx::FxPreset::kBoingball;
+    return true;
+  }
+  if (normalized == "uson_proto" || normalized == "u_son_proto") {
+    *out_preset = ui::fx::FxPreset::kUsonProto;
+    return true;
+  }
+  if (normalized == "la_detector" || normalized == "ladetector") {
+    *out_preset = ui::fx::FxPreset::kLaDetector;
     return true;
   }
   return false;
@@ -690,10 +702,16 @@ const char* fxPresetToken(ui::fx::FxPreset preset) {
       return "demo";
     case ui::fx::FxPreset::kWinner:
       return "winner";
+    case ui::fx::FxPreset::kWinEtape1:
+      return "win_etape1";
     case ui::fx::FxPreset::kFireworks:
       return "fireworks";
     case ui::fx::FxPreset::kBoingball:
       return "boingball";
+    case ui::fx::FxPreset::kUsonProto:
+      return "uson_proto";
+    case ui::fx::FxPreset::kLaDetector:
+      return "la_detector";
     default:
       return "demo";
   }
@@ -744,8 +762,23 @@ void UiManager::animSetRandomTextOpa(void* obj, int32_t value) {
     return;
   }
   lv_obj_t* target = static_cast<lv_obj_t*>(obj);
-  constexpr uint8_t min_opa = 60U;
+  uint8_t min_opa = 60U;
   constexpr uint8_t max_opa = LV_OPA_COVER;
+  if (g_instance != nullptr) {
+    const uint8_t glitch_pct = g_instance->text_glitch_pct_;
+    const uint16_t atten = static_cast<uint16_t>(glitch_pct) * 2U;
+    if (atten >= 190U) {
+      min_opa = 14U;
+    } else {
+      min_opa = static_cast<uint8_t>(204U - atten);
+      if (min_opa < 14U) {
+        min_opa = 14U;
+      }
+    }
+    if (target == g_instance->scene_subtitle_label_ && min_opa < 34U) {
+      min_opa = 34U;
+    }
+  }
   const uint32_t mixed =
       mixNoise(static_cast<uint32_t>(value) * 1664525UL + 1013904223UL, reinterpret_cast<uintptr_t>(target) ^ 0x7F4A7C15UL);
   const uint16_t span = static_cast<uint16_t>(max_opa - min_opa);
@@ -951,7 +984,7 @@ void UiManager::update() {
     pollAsyncFlush();
     return;
   }
-  // Frame order contract: FX (LGFX) -> invalidate LVGL overlay -> lv_timer_handler when bus is free.
+  // Frame order contract: FX background first, then LVGL flush, then LGFX text/scene overlays on top.
   if (fx_candidate) {
     ui::fx::FxScenePhase fx_phase = ui::fx::FxScenePhase::kPhaseC;
     if (intro_active_) {
@@ -991,6 +1024,708 @@ void UiManager::update() {
   run_lvgl_draw();
   pending_lvgl_flush_request_ = false;
   pollAsyncFlush();
+  // Overlay text must be drawn after LVGL flush; wait briefly for async DMA completion.
+  const bool overlay_needed = scene_use_lgfx_text_overlay_ || la_detection_scene_;
+  const uint32_t overlay_wait_started_us = micros();
+  while (isDisplayOutputBusy()) {
+    pollAsyncFlush();
+    if (!isDisplayOutputBusy()) {
+      break;
+    }
+    drivers::display::displayHal().waitDmaComplete(1800U);
+    pollAsyncFlush();
+    if (!isDisplayOutputBusy()) {
+      break;
+    }
+    if ((micros() - overlay_wait_started_us) >= 50000U) {
+      if (overlay_needed) {
+        ++overlay_skip_busy_count_;
+      }
+      return;
+    }
+    delayMicroseconds(120U);
+  }
+  if (isDisplayOutputBusy()) {
+    if (overlay_needed) {
+      ++overlay_skip_busy_count_;
+    }
+    return;
+  }
+  if (scene_use_lgfx_text_overlay_) {
+    renderLgfxSceneTextOverlay(now_ms);
+  }
+  renderLgfxLaDetectorOverlay(now_ms);
+}
+
+void UiManager::renderLgfxSceneTextOverlay(uint32_t now_ms) {
+  if (!scene_use_lgfx_text_overlay_ || !scene_status_.valid) {
+    return;
+  }
+  if (std::strcmp(scene_status_.scene_id, "SCENE_LA_DETECTOR") == 0) {
+    return;
+  }
+  drivers::display::DisplayHal& display = drivers::display::displayHal();
+  if (!display.supportsOverlayText()) {
+    ++overlay_draw_fail_count_;
+    return;
+  }
+  bool write_ready = false;
+  for (uint8_t attempt = 0U; attempt < 3U; ++attempt) {
+    if (display.startWrite()) {
+      write_ready = true;
+      break;
+    }
+    display.waitDmaComplete(2200U);
+    delayMicroseconds(static_cast<unsigned int>(100U * (attempt + 1U)));
+  }
+  if (!write_ready) {
+    ++overlay_startwrite_fail_count_;
+    ++overlay_draw_fail_count_;
+    return;
+  }
+
+  const int16_t width = activeDisplayWidth();
+  const int16_t height = activeDisplayHeight();
+  if (width <= 0 || height <= 0) {
+    display.endWrite();
+    return;
+  }
+  auto to565 = [&display](uint32_t rgb) -> uint16_t {
+    return display.color565(static_cast<uint8_t>((rgb >> 16U) & 0xFFU),
+                            static_cast<uint8_t>((rgb >> 8U) & 0xFFU),
+                            static_cast<uint8_t>(rgb & 0xFFU));
+  };
+  auto ensureReadableRgb = [](uint32_t rgb, uint32_t fallback) -> uint32_t {
+    const uint8_t r = static_cast<uint8_t>((rgb >> 16U) & 0xFFU);
+    const uint8_t g = static_cast<uint8_t>((rgb >> 8U) & 0xFFU);
+    const uint8_t b = static_cast<uint8_t>(rgb & 0xFFU);
+    const uint16_t luma = static_cast<uint16_t>((static_cast<uint16_t>(r) * 30U) +
+                                                (static_cast<uint16_t>(g) * 59U) +
+                                                (static_cast<uint16_t>(b) * 11U)) /
+                          100U;
+    if (luma < 70U) {
+      return fallback;
+    }
+    return rgb;
+  };
+  auto mixRgb = [](uint32_t lhs, uint32_t rhs, uint8_t rhs_pct) -> uint32_t {
+    const uint8_t lhs_pct = static_cast<uint8_t>(100U - rhs_pct);
+    const uint8_t l_r = static_cast<uint8_t>((lhs >> 16U) & 0xFFU);
+    const uint8_t l_g = static_cast<uint8_t>((lhs >> 8U) & 0xFFU);
+    const uint8_t l_b = static_cast<uint8_t>(lhs & 0xFFU);
+    const uint8_t r_r = static_cast<uint8_t>((rhs >> 16U) & 0xFFU);
+    const uint8_t r_g = static_cast<uint8_t>((rhs >> 8U) & 0xFFU);
+    const uint8_t r_b = static_cast<uint8_t>(rhs & 0xFFU);
+    const uint8_t out_r = static_cast<uint8_t>((static_cast<uint16_t>(l_r) * lhs_pct + static_cast<uint16_t>(r_r) * rhs_pct) / 100U);
+    const uint8_t out_g = static_cast<uint8_t>((static_cast<uint16_t>(l_g) * lhs_pct + static_cast<uint16_t>(r_g) * rhs_pct) / 100U);
+    const uint8_t out_b = static_cast<uint8_t>((static_cast<uint16_t>(l_b) * lhs_pct + static_cast<uint16_t>(r_b) * rhs_pct) / 100U);
+    return (static_cast<uint32_t>(out_r) << 16U) | (static_cast<uint32_t>(out_g) << 8U) | out_b;
+  };
+
+  const uint32_t text_rgb = ensureReadableRgb(scene_status_.text_rgb, 0xF5FAFFUL);
+  const uint32_t accent_rgb = scene_status_.accent_rgb;
+  const uint16_t title_color = to565(text_rgb);
+  const uint16_t symbol_color = to565(mixRgb(text_rgb, accent_rgb, 55U));
+  const uint16_t subtitle_color = to565(mixRgb(text_rgb, accent_rgb, 30U));
+  const bool uson_proto_scene = (std::strcmp(scene_status_.scene_id, "SCENE_U_SON_PROTO") == 0);
+  const uint8_t glitch_pct = (scene_status_.text_glitch_pct > 100U) ? 100U : scene_status_.text_glitch_pct;
+  int16_t jitter_span = (glitch_pct < 8U) ? 0 : static_cast<int16_t>(1 + (glitch_pct / 18U));
+  if (uson_proto_scene && jitter_span > 1) {
+    jitter_span = static_cast<int16_t>(jitter_span / 2);
+    if (jitter_span < 1) {
+      jitter_span = 1;
+    }
+  }
+  const uint32_t seed = pseudoRandom32((now_ms / 16U) ^ scene_status_.payload_crc ^ 0xA53F1UL);
+
+  drivers::display::OverlayFontFace title_font = overlay_title_font_face_;
+  uint8_t title_size = 1U;
+  if (scene_status_.text_size_pct >= 85U) {
+    title_size = 3U;
+  } else if (scene_status_.text_size_pct >= 60U) {
+    title_size = 2U;
+  }
+  const bool title_font_is_ibm_family =
+      title_font == drivers::display::OverlayFontFace::kIbmBold12 ||
+      title_font == drivers::display::OverlayFontFace::kIbmBold16 ||
+      title_font == drivers::display::OverlayFontFace::kIbmBold20 ||
+      title_font == drivers::display::OverlayFontFace::kIbmBold24;
+  if (uson_proto_scene && title_font_is_ibm_family) {
+    if (scene_status_.text_size_pct >= 85U) {
+      title_font = drivers::display::OverlayFontFace::kIbmBold24;
+      title_size = 3U;
+    } else if (scene_status_.text_size_pct >= 60U) {
+      title_font = drivers::display::OverlayFontFace::kIbmBold24;
+      title_size = 2U;
+    } else if (scene_status_.text_size_pct >= 40U) {
+      title_font = drivers::display::OverlayFontFace::kIbmBold16;
+      title_size = 2U;
+    } else {
+      title_font = drivers::display::OverlayFontFace::kIbmBold16;
+      title_size = 1U;
+    }
+  }
+  const drivers::display::OverlayFontFace symbol_font = overlay_symbol_font_face_;
+  const uint8_t symbol_size = (scene_status_.text_size_pct >= 60U && !uson_proto_scene) ? 2U : 1U;
+  const drivers::display::OverlayFontFace subtitle_font = overlay_subtitle_font_face_;
+  const uint8_t subtitle_size = 1U;
+
+  auto jitter = [&](uint32_t salt) -> int16_t {
+    if (jitter_span == 0) {
+      return 0;
+    }
+    const uint32_t value = pseudoRandom32(seed ^ salt);
+    const uint32_t span = static_cast<uint32_t>(jitter_span * 2 + 1);
+    return static_cast<int16_t>(static_cast<int32_t>(value % span) - jitter_span);
+  };
+  auto resolveY = [height](SceneTextAlign align, uint8_t slot) -> int16_t {
+    int16_t y = 0;
+    switch (align) {
+      case SceneTextAlign::kTop:
+        y = (slot == 0U) ? 8 : (slot == 1U ? 38 : 72);
+        break;
+      case SceneTextAlign::kBottom:
+        y = (slot == 0U) ? static_cast<int16_t>(height - 130)
+                         : (slot == 1U ? static_cast<int16_t>(height - 70) : static_cast<int16_t>(height - 28));
+        break;
+      case SceneTextAlign::kCenter:
+      default:
+        y = (slot == 0U) ? static_cast<int16_t>((height / 2) - 76)
+                         : (slot == 1U ? static_cast<int16_t>((height / 2) - 10)
+                                       : static_cast<int16_t>((height / 2) + 42));
+        break;
+    }
+    if (y < 2) {
+      y = 2;
+    } else if (y > (height - 20)) {
+      y = static_cast<int16_t>(height - 20);
+    }
+    return y;
+  };
+
+  bool text_attempted = false;
+  bool text_draw_ok = false;
+  auto drawLine = [&](const char* text,
+                      SceneTextAlign align,
+                      uint8_t slot,
+                      drivers::display::OverlayFontFace font_face,
+                      uint8_t size,
+                      uint16_t color,
+                      uint32_t salt) {
+    if (text == nullptr || text[0] == '\0') {
+      return;
+    }
+    text_attempted = true;
+    uint8_t effective_size = size;
+    if (uson_proto_scene && slot == 1U && scene_status_.text_size_pct >= 40U) {
+      const uint16_t pulse_window_ms = static_cast<uint16_t>(now_ms % 1800U);
+      if (pulse_window_ms < 180U) {
+        effective_size = static_cast<uint8_t>(size + 1U);
+      }
+    }
+    const uint8_t max_size = 4U;
+    if (effective_size > max_size) {
+      effective_size = max_size;
+    }
+    const int16_t text_w = display.measureOverlayText(text, font_face, effective_size);
+    int16_t x = static_cast<int16_t>((width - text_w) / 2);
+    int16_t y = static_cast<int16_t>(resolveY(align, slot) + jitter(salt + 2U));
+
+    drivers::display::OverlayTextCommand command = {};
+    command.text = text;
+    command.font_face = font_face;
+    command.size = effective_size;
+    command.opaque_bg = false;
+
+    const uint32_t glitch_gate = pseudoRandom32(seed ^ (salt + 3U)) % 100U;
+    if (glitch_pct > 12U && glitch_gate < glitch_pct) {
+      command.x = static_cast<int16_t>(x + 1 + jitter(salt + 4U));
+      command.y = static_cast<int16_t>(y + jitter(salt + 5U));
+      command.color565 = to565(accent_rgb);
+      display.drawOverlayText(command);
+    }
+
+    command.x = x;
+    command.y = y;
+    uint16_t final_color = color;
+    if (uson_proto_scene && slot == 1U && ((seed ^ salt) & 0x1U) != 0U) {
+      final_color = symbol_color;
+    }
+    command.color565 = final_color;
+    if (display.drawOverlayText(command)) {
+      text_draw_ok = true;
+    }
+  };
+
+  if (scene_status_.show_symbol) {
+    drawLine(scene_status_.symbol, overlay_symbol_align_, 0U, symbol_font, symbol_size, symbol_color, 0x1000U);
+  }
+  if (scene_status_.show_title) {
+    drawLine(scene_status_.title, overlay_title_align_, 1U, title_font, title_size, title_color, 0x2000U);
+  }
+  if (scene_status_.show_subtitle) {
+    drawLine(scene_status_.subtitle, overlay_subtitle_align_, 2U, subtitle_font, subtitle_size, subtitle_color, 0x3000U);
+  }
+
+  if (text_attempted) {
+    if (text_draw_ok) {
+      ++overlay_draw_ok_count_;
+    } else {
+      ++overlay_draw_fail_count_;
+    }
+  }
+  display.endWrite();
+}
+
+void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
+  if (!scene_status_.valid) {
+    return;
+  }
+  if (!la_detection_scene_ || !scene_use_lgfx_text_overlay_) {
+    return;
+  }
+  if (std::strcmp(scene_status_.scene_id, "SCENE_LA_DETECTOR") != 0) {
+    return;
+  }
+
+  const HardwareManager::Snapshot* active_snapshot = waveform_snapshot_ref_;
+  if (active_snapshot == nullptr && waveform_snapshot_valid_) {
+    active_snapshot = &waveform_snapshot_;
+  }
+
+  drivers::display::DisplayHal& display = drivers::display::displayHal();
+  bool write_ready = false;
+  for (uint8_t attempt = 0U; attempt < 3U; ++attempt) {
+    if (display.startWrite()) {
+      write_ready = true;
+      break;
+    }
+    display.waitDmaComplete(2200U);
+    delayMicroseconds(static_cast<unsigned int>(100U * (attempt + 1U)));
+  }
+  if (!write_ready) {
+    ++overlay_startwrite_fail_count_;
+    ++overlay_draw_fail_count_;
+    return;
+  }
+
+  const int16_t width = activeDisplayWidth();
+  const int16_t height = activeDisplayHeight();
+  if (width <= 0 || height <= 0) {
+    display.endWrite();
+    return;
+  }
+
+  auto clamp_i16 = [](int16_t value, int16_t lo, int16_t hi) -> int16_t {
+    if (value < lo) {
+      return lo;
+    }
+    if (value > hi) {
+      return hi;
+    }
+    return value;
+  };
+  auto color565 = [&display](uint32_t rgb) -> uint16_t {
+    return display.color565(static_cast<uint8_t>((rgb >> 16U) & 0xFFU),
+                            static_cast<uint8_t>((rgb >> 8U) & 0xFFU),
+                            static_cast<uint8_t>(rgb & 0xFFU));
+  };
+
+  const uint16_t osc_main = color565(0x4DF871UL);
+  const uint16_t osc_ring = color565(0x1B4A2FUL);
+  const uint16_t vu_fill = color565(0x8DFF9DUL);
+  const uint16_t vu_peak = color565(0xF8FF6AUL);
+  const uint16_t fft_low = color565(0xFF5E52UL);
+  const uint16_t fft_mid = color565(0x7DFF7FUL);
+  const uint16_t fft_high = color565(0x5A8DFFUL);
+  const uint16_t marker = color565(0x6CC9FFUL);
+  bool text_attempted = false;
+  bool text_draw_ok = false;
+
+  const uint8_t glitch_pct = (scene_status_.text_glitch_pct > 100U) ? 100U : scene_status_.text_glitch_pct;
+  const int16_t jitter = (glitch_pct < 12U) ? 0 : static_cast<int16_t>(1 + (glitch_pct / 28U));
+  const int16_t jitter_x = (jitter == 0) ? 0 : static_cast<int16_t>(signedNoise(now_ms, 0xA1B2C3UL, jitter));
+  const int16_t jitter_y = (jitter == 0) ? 0 : static_cast<int16_t>(signedNoise(now_ms, 0xB4C3D2UL, jitter));
+
+  const int16_t ring_cx = static_cast<int16_t>((width * 36) / 100 + jitter_x);
+  const int16_t ring_cy = static_cast<int16_t>((height * 54) / 100 + jitter_y);
+  int16_t ring_radius = static_cast<int16_t>((height * 22) / 100);
+  if (ring_radius < 28) {
+    ring_radius = 28;
+  }
+  if (ring_radius > 62) {
+    ring_radius = 62;
+  }
+  constexpr float kTau = 6.28318530718f;
+  constexpr float kHalfPi = 1.57079632679f;
+
+  display.drawOverlayCircle(ring_cx, ring_cy, static_cast<int16_t>(ring_radius + 1), osc_ring);
+  display.drawOverlayCircle(ring_cx, ring_cy, ring_radius, osc_ring);
+  display.drawOverlayCircle(ring_cx, ring_cy, static_cast<int16_t>(ring_radius - 1), osc_ring);
+  display.drawOverlayCircle(ring_cx, ring_cy, static_cast<int16_t>(ring_radius - 4), osc_ring);
+  display.drawOverlayCircle(ring_cx, ring_cy, static_cast<int16_t>(ring_radius - 5), osc_ring);
+  display.drawOverlayCircle(ring_cx, ring_cy, static_cast<int16_t>(ring_radius - 6), osc_ring);
+
+  const uint8_t stability_pct = (la_detection_stability_pct_ > 100U) ? 100U : la_detection_stability_pct_;
+  if (la_overlay_show_progress_ring_) {
+    const int16_t gauge_outer = static_cast<int16_t>(ring_radius + 12);
+    const int16_t gauge_inner = static_cast<int16_t>(gauge_outer - 4);
+    const uint16_t gauge_bg = color565(0x1A3E2DUL);
+    const uint16_t gauge_fg = color565(0x66FFADUL);
+    const uint16_t gauge_tip = color565(0xB7FFE1UL);
+    constexpr uint8_t kGaugeSegments = 72U;
+    const uint8_t active_segments = static_cast<uint8_t>((static_cast<uint16_t>(stability_pct) * kGaugeSegments) / 100U);
+    for (uint8_t segment = 0U; segment < kGaugeSegments; ++segment) {
+      const float phase = static_cast<float>(segment) / static_cast<float>(kGaugeSegments);
+      const float angle = (-kHalfPi) + (phase * kTau);
+      const int16_t x0 = clamp_i16(static_cast<int16_t>(ring_cx + std::cos(angle) * static_cast<float>(gauge_inner)),
+                                   2,
+                                   static_cast<int16_t>(width - 3));
+      const int16_t y0 = clamp_i16(static_cast<int16_t>(ring_cy + std::sin(angle) * static_cast<float>(gauge_inner)),
+                                   2,
+                                   static_cast<int16_t>(height - 3));
+      const int16_t x1 = clamp_i16(static_cast<int16_t>(ring_cx + std::cos(angle) * static_cast<float>(gauge_outer)),
+                                   2,
+                                   static_cast<int16_t>(width - 3));
+      const int16_t y1 = clamp_i16(static_cast<int16_t>(ring_cy + std::sin(angle) * static_cast<float>(gauge_outer)),
+                                   2,
+                                   static_cast<int16_t>(height - 3));
+      uint16_t gauge_color = (segment < active_segments) ? gauge_fg : gauge_bg;
+      if (segment == active_segments && stability_pct > 0U) {
+        gauge_color = gauge_tip;
+      }
+      display.drawOverlayLine(x0, y0, x1, y1, gauge_color);
+    }
+  }
+
+  if (scene_status_.show_title && scene_status_.title[0] != '\0') {
+    text_attempted = true;
+    drivers::display::OverlayTextCommand title_cmd = {};
+    title_cmd.text = scene_status_.title;
+    title_cmd.font_face = drivers::display::OverlayFontFace::kIbmBold24;
+    title_cmd.size = (scene_status_.text_size_pct >= 70U) ? 2U : 1U;
+    title_cmd.color565 = color565(0xEBFFF4UL);
+    const int16_t title_w = display.measureOverlayText(title_cmd.text, title_cmd.font_face, title_cmd.size);
+    title_cmd.x = static_cast<int16_t>((width - title_w) / 2);
+    title_cmd.y = 6;
+    if (display.drawOverlayText(title_cmd)) {
+      text_draw_ok = true;
+    }
+  }
+  if (scene_status_.show_subtitle && scene_status_.subtitle[0] != '\0') {
+    text_attempted = true;
+    drivers::display::OverlayTextCommand subtitle_cmd = {};
+    subtitle_cmd.text = scene_status_.subtitle;
+    subtitle_cmd.font_face = drivers::display::OverlayFontFace::kIbmBold16;
+    subtitle_cmd.size = 1U;
+    subtitle_cmd.color565 = color565(0x9BE7D5UL);
+    const int16_t subtitle_w = display.measureOverlayText(subtitle_cmd.text, subtitle_cmd.font_face, subtitle_cmd.size);
+    subtitle_cmd.x = static_cast<int16_t>((width - subtitle_w) / 2);
+    subtitle_cmd.y = 34;
+    if (display.drawOverlayText(subtitle_cmd)) {
+      text_draw_ok = true;
+    }
+  }
+
+  if (la_overlay_show_hourglass_) {
+    const int16_t hg_w = la_overlay_hourglass_modern_ ? 30 : 14;
+    const int16_t hg_h = la_overlay_hourglass_modern_ ? 48 : 24;
+    const int16_t hg_x = static_cast<int16_t>(width - hg_w - 10);
+    const int16_t hg_y = la_overlay_hourglass_modern_ ? 6 : 4;
+    const uint16_t hg_border = color565(0x78D3FFUL);
+    const uint16_t hg_fill = color565(0xC8F4FFUL);
+    const uint16_t hg_glow = color565(0x2E6486UL);
+    if (la_overlay_hourglass_modern_) {
+      display.drawOverlayRect(static_cast<int16_t>(hg_x - 1), static_cast<int16_t>(hg_y - 1), static_cast<int16_t>(hg_w + 2), static_cast<int16_t>(hg_h + 2), hg_glow);
+    }
+    display.drawOverlayRect(hg_x, hg_y, hg_w, hg_h, hg_border);
+    display.drawOverlayLine(hg_x + 2, hg_y + 2, hg_x + hg_w - 3, hg_y + hg_h - 3, hg_border);
+    display.drawOverlayLine(hg_x + hg_w - 3, hg_y + 2, hg_x + 2, hg_y + hg_h - 3, hg_border);
+
+    float remain = 1.0f;
+    if (la_detection_gate_timeout_ms_ > 0U) {
+      const uint32_t elapsed = (la_detection_gate_elapsed_ms_ > la_detection_gate_timeout_ms_)
+                                   ? la_detection_gate_timeout_ms_
+                                   : la_detection_gate_elapsed_ms_;
+      remain = 1.0f - (static_cast<float>(elapsed) / static_cast<float>(la_detection_gate_timeout_ms_));
+    }
+    if (remain < 0.0f) {
+      remain = 0.0f;
+    } else if (remain > 1.0f) {
+      remain = 1.0f;
+    }
+
+    const int16_t chamber_h = static_cast<int16_t>((hg_h - 8) / 2);
+    int16_t top_fill = static_cast<int16_t>(remain * static_cast<float>(chamber_h));
+    if (top_fill < 0) {
+      top_fill = 0;
+    } else if (top_fill > chamber_h) {
+      top_fill = chamber_h;
+    }
+    int16_t bottom_fill = static_cast<int16_t>(chamber_h - top_fill);
+    if (bottom_fill < 0) {
+      bottom_fill = 0;
+    } else if (bottom_fill > chamber_h) {
+      bottom_fill = chamber_h;
+    }
+    const int16_t sand_inset = la_overlay_hourglass_modern_ ? 6 : 4;
+    const int16_t inner_half = static_cast<int16_t>((hg_w / 2) - sand_inset);
+    const int16_t top_start_y = static_cast<int16_t>(hg_y + 3);
+    if (top_fill > 0 && inner_half > 0) {
+      for (int16_t row = 0; row < top_fill; ++row) {
+        const float t = static_cast<float>(row) / static_cast<float>((chamber_h > 1) ? (chamber_h - 1) : 1);
+        int16_t half = static_cast<int16_t>((1.0f - t) * static_cast<float>(inner_half));
+        if (half < 1) {
+          half = 1;
+        }
+        const int16_t y = static_cast<int16_t>(top_start_y + row);
+        display.drawOverlayLine(static_cast<int16_t>(hg_x + (hg_w / 2) - half),
+                                y,
+                                static_cast<int16_t>(hg_x + (hg_w / 2) + half),
+                                y,
+                                hg_fill);
+      }
+    }
+    if (bottom_fill > 0 && inner_half > 0) {
+      for (int16_t row = 0; row < bottom_fill; ++row) {
+        const float t = static_cast<float>(row) / static_cast<float>((chamber_h > 1) ? (chamber_h - 1) : 1);
+        int16_t half = static_cast<int16_t>((1.0f - t) * static_cast<float>(inner_half));
+        if (half < 1) {
+          half = 1;
+        }
+        const int16_t y = static_cast<int16_t>(hg_y + hg_h - 4 - row);
+        display.drawOverlayLine(static_cast<int16_t>(hg_x + (hg_w / 2) - half),
+                                y,
+                                static_cast<int16_t>(hg_x + (hg_w / 2) + half),
+                                y,
+                                hg_fill);
+      }
+    }
+    if (la_overlay_hourglass_modern_) {
+      const int16_t neck_x = static_cast<int16_t>(hg_x + (hg_w / 2));
+      const int16_t neck_y0 = static_cast<int16_t>(hg_y + (hg_h / 2) - 2);
+      const int16_t neck_y1 = static_cast<int16_t>(neck_y0 + 5);
+      display.drawOverlayLine(neck_x, neck_y0, neck_x, neck_y1, hg_fill);
+    }
+  }
+
+  auto draw_thick_line = [&](int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color) {
+    display.drawOverlayLine(x0, y0, x1, y1, color);
+    display.drawOverlayLine(clamp_i16(static_cast<int16_t>(x0 + 1), 2, static_cast<int16_t>(width - 3)),
+                            y0,
+                            clamp_i16(static_cast<int16_t>(x1 + 1), 2, static_cast<int16_t>(width - 3)),
+                            y1,
+                            color);
+    display.drawOverlayLine(x0,
+                            clamp_i16(static_cast<int16_t>(y0 + 1), 2, static_cast<int16_t>(height - 3)),
+                            x1,
+                            clamp_i16(static_cast<int16_t>(y1 + 1), 2, static_cast<int16_t>(height - 3)),
+                            color);
+  };
+
+  if (active_snapshot != nullptr) {
+    uint8_t count = active_snapshot->mic_waveform_count;
+    if (count > HardwareManager::kMicWaveformCapacity) {
+      count = HardwareManager::kMicWaveformCapacity;
+    }
+    const uint8_t max_points = 32U;
+    uint8_t points = (count < max_points) ? count : max_points;
+    if (points >= 3U) {
+      const uint8_t head = active_snapshot->mic_waveform_head;
+      const uint16_t start = (head >= points) ? static_cast<uint16_t>(head - points)
+                                              : static_cast<uint16_t>(head + HardwareManager::kMicWaveformCapacity - points);
+      int16_t prev_x = ring_cx;
+      int16_t prev_y = static_cast<int16_t>(ring_cy - ring_radius);
+      const int16_t amp_radius = static_cast<int16_t>(8 + (active_snapshot->mic_level_percent / 4U));
+      for (uint8_t index = 0U; index < points; ++index) {
+        const uint16_t sample_index = static_cast<uint16_t>(start + index) % HardwareManager::kMicWaveformCapacity;
+        uint8_t sample = active_snapshot->mic_waveform[sample_index];
+        if (sample > 100U) {
+          sample = 100U;
+        }
+        const float phase = static_cast<float>(index) / static_cast<float>(points);
+        const float angle = (-kHalfPi) + (phase * kTau);
+        int16_t radius = static_cast<int16_t>(ring_radius + ((static_cast<int16_t>(sample) - 50) * amp_radius) / 60);
+        if (radius < static_cast<int16_t>(ring_radius - amp_radius)) {
+          radius = static_cast<int16_t>(ring_radius - amp_radius);
+        } else if (radius > static_cast<int16_t>(ring_radius + amp_radius)) {
+          radius = static_cast<int16_t>(ring_radius + amp_radius);
+        }
+        int16_t x = static_cast<int16_t>(ring_cx + std::cos(angle) * static_cast<float>(radius));
+        int16_t y = static_cast<int16_t>(ring_cy + std::sin(angle) * static_cast<float>(radius));
+        x = clamp_i16(x, 2, static_cast<int16_t>(width - 3));
+        y = clamp_i16(y, 2, static_cast<int16_t>(height - 3));
+        if (index > 0U) {
+          draw_thick_line(prev_x, prev_y, x, y, osc_main);
+        }
+        prev_x = x;
+        prev_y = y;
+      }
+    }
+
+    if (la_overlay_meter_bottom_horizontal_) {
+      const int16_t meter_x = 10;
+      const int16_t meter_w = static_cast<int16_t>(width - 20);
+      const int16_t meter_h = 10;
+      const int16_t meter_y = static_cast<int16_t>(height - 14);
+      const uint16_t meter_bg = color565(0x0E2A1BUL);
+      const uint16_t meter_border = color565(0x56B89FUL);
+      if (meter_w > 20) {
+        display.fillOverlayRect(meter_x, meter_y, meter_w, meter_h, meter_bg);
+        display.drawOverlayRect(meter_x, meter_y, meter_w, meter_h, meter_border);
+        const int16_t fill_w =
+            static_cast<int16_t>((static_cast<int32_t>(meter_w - 2) * active_snapshot->mic_level_percent) / 100);
+        if (fill_w > 0) {
+          display.fillOverlayRect(static_cast<int16_t>(meter_x + 1),
+                                  static_cast<int16_t>(meter_y + 1),
+                                  fill_w,
+                                  static_cast<int16_t>(meter_h - 2),
+                                  vu_fill);
+        }
+        const int16_t peak_x = static_cast<int16_t>(
+            meter_x + 1 + (static_cast<int32_t>(meter_w - 2) * active_snapshot->mic_pitch_confidence) / 100);
+        display.drawOverlayLine(peak_x,
+                                static_cast<int16_t>(meter_y - 1),
+                                peak_x,
+                                static_cast<int16_t>(meter_y + meter_h),
+                                vu_peak);
+      }
+    } else {
+      const int16_t vu_x = static_cast<int16_t>(width - 24);
+      const int16_t vu_y = 26;
+      const int16_t vu_w = 10;
+      const int16_t vu_h = static_cast<int16_t>(height - 70);
+      if (vu_h > 20) {
+        display.drawOverlayRect(vu_x, vu_y, vu_w, vu_h, marker);
+        const int16_t fill_h =
+            static_cast<int16_t>((static_cast<int32_t>(vu_h - 2) * active_snapshot->mic_level_percent) / 100);
+        if (fill_h > 0) {
+          const int16_t fy = static_cast<int16_t>(vu_y + vu_h - 1 - fill_h);
+          display.fillOverlayRect(static_cast<int16_t>(vu_x + 1), fy, static_cast<int16_t>(vu_w - 2), fill_h, vu_fill);
+        }
+        const int16_t peak_h =
+            static_cast<int16_t>((static_cast<int32_t>(vu_h - 2) * active_snapshot->mic_pitch_confidence) / 100);
+        if (peak_h > 0) {
+          const int16_t py = static_cast<int16_t>(vu_y + vu_h - 1 - peak_h);
+          display.drawOverlayLine(vu_x, py, static_cast<int16_t>(vu_x + vu_w - 1), py, vu_peak);
+        }
+      }
+    }
+
+    constexpr uint8_t kFftVisualBandCount = 15U;
+    const int16_t fft_bottom = la_overlay_meter_bottom_horizontal_ ? static_cast<int16_t>(height - 28)
+                                                                    : static_cast<int16_t>(height - 18);
+    const int16_t fft_gap = 1;
+    const int16_t fft_area_w = 120;
+    int16_t fft_bar_w = static_cast<int16_t>((fft_area_w - ((kFftVisualBandCount - 1U) * fft_gap)) / kFftVisualBandCount);
+    if (fft_bar_w < 3) {
+      fft_bar_w = 3;
+    }
+    const int16_t fft_used_w =
+        static_cast<int16_t>((kFftVisualBandCount * fft_bar_w) + ((kFftVisualBandCount - 1U) * fft_gap));
+    int16_t fft_x0 = static_cast<int16_t>(width - fft_used_w - 8);
+    if (fft_x0 < 6) {
+      fft_x0 = 6;
+    }
+    const int16_t fft_max_h = 54;
+    auto sampleFftBand = [&](uint8_t visual_index) -> uint8_t {
+      constexpr uint8_t kSourceBands = HardwareManager::kMicSpectrumBinCount;
+      if (kSourceBands == 0U) {
+        return 0U;
+      }
+      if (kSourceBands == 1U || kFftVisualBandCount <= 1U) {
+        return active_snapshot->mic_spectrum[0];
+      }
+      const float pos = (static_cast<float>(visual_index) * static_cast<float>(kSourceBands - 1U)) /
+                        static_cast<float>(kFftVisualBandCount - 1U);
+      uint8_t left = static_cast<uint8_t>(pos);
+      if (left >= kSourceBands) {
+        left = static_cast<uint8_t>(kSourceBands - 1U);
+      }
+      uint8_t right = (left + 1U < kSourceBands) ? static_cast<uint8_t>(left + 1U) : left;
+      const float frac = pos - static_cast<float>(left);
+      const float blended = (static_cast<float>(active_snapshot->mic_spectrum[left]) * (1.0f - frac)) +
+                            (static_cast<float>(active_snapshot->mic_spectrum[right]) * frac);
+      int value = static_cast<int>(std::round(blended));
+      if (value < 0) {
+        value = 0;
+      } else if (value > 100) {
+        value = 100;
+      }
+      return static_cast<uint8_t>(value);
+    };
+
+    for (uint8_t index = 0U; index < kFftVisualBandCount; ++index) {
+      const uint8_t band = sampleFftBand(index);
+      int16_t h = static_cast<int16_t>(4 + (static_cast<int32_t>(fft_max_h) * band) / 100);
+      if (h < 4) {
+        h = 4;
+      }
+      if (h > fft_max_h) {
+        h = fft_max_h;
+      }
+      const int16_t x = static_cast<int16_t>(fft_x0 + index * (fft_bar_w + fft_gap));
+      const int16_t y = static_cast<int16_t>(fft_bottom - h);
+      uint16_t c = fft_mid;
+      if (index <= 4U) {
+        c = fft_low;
+      } else if (index >= 10U) {
+        c = fft_high;
+      }
+      display.fillOverlayRect(x, y, fft_bar_w, h, c);
+      display.drawOverlayRect(x, y, fft_bar_w, h, marker);
+    }
+
+    const uint8_t a4_band = static_cast<uint8_t>(((440U - 400U) * (kFftVisualBandCount - 1U) + 40U) / 80U);
+    const int16_t marker_x = static_cast<int16_t>(fft_x0 + a4_band * (fft_bar_w + fft_gap) + (fft_bar_w / 2));
+    display.drawOverlayLine(marker_x, static_cast<int16_t>(fft_bottom - fft_max_h - 4), marker_x, fft_bottom, marker);
+
+    if (la_overlay_show_pitch_text_) {
+      text_attempted = true;
+      char pitch_line[44] = {0};
+      std::snprintf(pitch_line,
+                    sizeof(pitch_line),
+                    "A4 440Hz  %3uHz  %+dc",
+                    static_cast<unsigned int>(active_snapshot->mic_freq_hz),
+                    static_cast<int>(active_snapshot->mic_pitch_cents));
+      drivers::display::OverlayTextCommand text_cmd = {};
+      text_cmd.text = pitch_line;
+      text_cmd.x = static_cast<int16_t>(width - 126);
+      text_cmd.y = static_cast<int16_t>(height - 24);
+      text_cmd.font_face = drivers::display::OverlayFontFace::kBuiltinSmall;
+      text_cmd.size = 1U;
+      text_cmd.color565 = marker;
+      if (display.drawOverlayText(text_cmd)) {
+        text_draw_ok = true;
+      }
+    }
+  }
+
+  if (la_overlay_show_caption_ && la_overlay_caption_[0] != '\0') {
+    text_attempted = true;
+    drivers::display::OverlayTextCommand caption_cmd = {};
+    caption_cmd.text = la_overlay_caption_;
+    caption_cmd.font_face = la_overlay_caption_font_;
+    caption_cmd.size = la_overlay_caption_size_;
+    caption_cmd.color565 = color565(0xC8FCE9UL);
+    const int16_t caption_width = display.measureOverlayText(caption_cmd.text, caption_cmd.font_face, caption_cmd.size);
+    int16_t caption_x = static_cast<int16_t>((width - caption_width) / 2);
+    caption_cmd.x = caption_x;
+    caption_cmd.y = la_overlay_meter_bottom_horizontal_ ? static_cast<int16_t>(height - 28)
+                                                        : static_cast<int16_t>(height - 12);
+    if (display.drawOverlayText(caption_cmd)) {
+      text_draw_ok = true;
+    }
+  }
+
+  if (text_attempted) {
+    if (text_draw_ok) {
+      ++overlay_draw_ok_count_;
+    } else {
+      ++overlay_draw_fail_count_;
+    }
+  }
+  display.endWrite();
 }
 
 
@@ -1236,16 +1971,14 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   const uint32_t payload_crc = hashScenePayload(screen_payload_json);
   const bool static_state_changed = shouldApplySceneStaticState(scene_id, screen_payload_json, scene_changed);
   const bool has_previous_scene = (last_scene_id_[0] != '\0');
-  const bool win_etape_intro_scene = (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0 ||
-                                      std::strcmp(scene_id, "SCENE_WIN_ETAPE1") == 0 ||
-                                      std::strcmp(scene_id, "SCENE_WIN_ETAPE2") == 0);
+  const bool win_etape_intro_scene = false;
   const bool direct_fx_scene = isDirectFxSceneId(scene_id);
   const bool test_lab_scene = (std::strcmp(scene_id, "SCENE_TEST_LAB") == 0);
   const bool is_locked_scene = (std::strcmp(scene_id, "SCENE_LOCKED") == 0);
   const bool qr_scene = (std::strcmp(scene_id, "SCENE_CAMERA_SCAN") == 0 ||
                          std::strcmp(scene_id, "SCENE_QR_DETECTOR") == 0);
   const bool parse_payload_this_frame = static_state_changed || win_etape_intro_scene;
-  if (static_state_changed && scene_changed && has_previous_scene) {
+  if (scene_changed && has_previous_scene) {
     cleanupSceneTransitionAssets(last_scene_id_, scene_id);
   }
 
@@ -1284,6 +2017,10 @@ void UiManager::renderScene(const ScenarioDef* scenario,
       return SceneEffect::kBlink;
     }
     if (std::strcmp(normalized, "glitch") == 0 || std::strcmp(normalized, "camera_flash") == 0) {
+      return SceneEffect::kGlitch;
+    }
+    if (std::strcmp(normalized, "text_glitch") == 0 || std::strcmp(normalized, "glitch_text") == 0 ||
+        std::strcmp(normalized, "textglitch") == 0) {
       return SceneEffect::kGlitch;
     }
     if (std::strcmp(normalized, "celebrate") == 0 || std::strcmp(normalized, "reward") == 0) {
@@ -1421,10 +2158,82 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     return value;
   };
 
+  auto parseOverlayFontFace = [](const char* token,
+                                 drivers::display::OverlayFontFace fallback) -> drivers::display::OverlayFontFace {
+    if (token == nullptr || token[0] == '\0') {
+      return fallback;
+    }
+    char normalized[40] = {0};
+    std::strncpy(normalized, token, sizeof(normalized) - 1U);
+    for (size_t index = 0U; normalized[index] != '\0'; ++index) {
+      const char ch = normalized[index];
+      normalized[index] = (ch == '-' || ch == ' ') ? '_' : static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+    if (std::strcmp(normalized, "builtin_small") == 0) {
+      return drivers::display::OverlayFontFace::kBuiltinSmall;
+    }
+    if (std::strcmp(normalized, "builtin_medium") == 0) {
+      return drivers::display::OverlayFontFace::kBuiltinMedium;
+    }
+    if (std::strcmp(normalized, "builtin_large") == 0) {
+      return drivers::display::OverlayFontFace::kBuiltinLarge;
+    }
+    if (std::strcmp(normalized, "ibm_regular_14") == 0) {
+      return drivers::display::OverlayFontFace::kIbmRegular14;
+    }
+    if (std::strcmp(normalized, "ibm_regular_18") == 0) {
+      return drivers::display::OverlayFontFace::kIbmRegular18;
+    }
+    if (std::strcmp(normalized, "ibm_bold_12") == 0) {
+      return drivers::display::OverlayFontFace::kIbmBold12;
+    }
+    if (std::strcmp(normalized, "ibm_bold_16") == 0) {
+      return drivers::display::OverlayFontFace::kIbmBold16;
+    }
+    if (std::strcmp(normalized, "ibm_bold_20") == 0) {
+      return drivers::display::OverlayFontFace::kIbmBold20;
+    }
+    if (std::strcmp(normalized, "ibm_bold_24") == 0) {
+      return drivers::display::OverlayFontFace::kIbmBold24;
+    }
+    if (std::strcmp(normalized, "ibm_italic_12") == 0) {
+      return drivers::display::OverlayFontFace::kIbmItalic12;
+    }
+    if (std::strcmp(normalized, "ibm_italic_16") == 0) {
+      return drivers::display::OverlayFontFace::kIbmItalic16;
+    }
+    if (std::strcmp(normalized, "ibm_italic_20") == 0) {
+      return drivers::display::OverlayFontFace::kIbmItalic20;
+    }
+    if (std::strcmp(normalized, "ibm_italic_24") == 0) {
+      return drivers::display::OverlayFontFace::kIbmItalic24;
+    }
+    if (std::strcmp(normalized, "inter_18") == 0) {
+      return drivers::display::OverlayFontFace::kInter18;
+    }
+    if (std::strcmp(normalized, "inter_24") == 0) {
+      return drivers::display::OverlayFontFace::kInter24;
+    }
+    if (std::strcmp(normalized, "orbitron_28") == 0) {
+      return drivers::display::OverlayFontFace::kOrbitron28;
+    }
+    if (std::strcmp(normalized, "bungee_24") == 0) {
+      return drivers::display::OverlayFontFace::kBungee24;
+    }
+    if (std::strcmp(normalized, "monoton_24") == 0) {
+      return drivers::display::OverlayFontFace::kMonoton24;
+    }
+    if (std::strcmp(normalized, "rubik_glitch_24") == 0) {
+      return drivers::display::OverlayFontFace::kRubikGlitch24;
+    }
+    return fallback;
+  };
+
   String title = "MISSION";
   String subtitle;
   String symbol = "RUN";
-  bool show_title = false;
+  // Keep titles visible by default so payload misses cannot silently blank scene text.
+  bool show_title = true;
   bool show_subtitle = true;
   bool show_symbol = true;
   SceneEffect effect = SceneEffect::kPulse;
@@ -1433,6 +2242,10 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   uint16_t transition_ms = 240U;
   SceneTextAlign title_align = SceneTextAlign::kTop;
   SceneTextAlign subtitle_align = SceneTextAlign::kBottom;
+  SceneTextAlign symbol_align = SceneTextAlign::kCenter;
+  const char* symbol_align_token = "";
+  bool use_lgfx_text_overlay = false;
+  bool disable_lvgl_text = false;
   int16_t frame_dx = 0;
   int16_t frame_dy = 0;
   uint8_t frame_scale_pct = 100U;
@@ -1441,6 +2254,11 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   uint16_t subtitle_scroll_speed_ms = 4200U;
   uint16_t subtitle_scroll_pause_ms = 900U;
   bool subtitle_scroll_loop = true;
+  uint8_t text_glitch_pct = text_glitch_pct_;
+  uint8_t text_size_pct = text_size_pct_;
+  drivers::display::OverlayFontFace title_font_face = drivers::display::OverlayFontFace::kIbmBold24;
+  drivers::display::OverlayFontFace subtitle_font_face = drivers::display::OverlayFontFace::kIbmBold16;
+  drivers::display::OverlayFontFace symbol_font_face = drivers::display::OverlayFontFace::kBuiltinLarge;
   String demo_mode = "standard";
   uint8_t demo_particle_count = 4U;
   uint8_t demo_strobe_level = 65U;
@@ -1449,10 +2267,31 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   uint8_t waveform_sample_count = HardwareManager::kMicWaveformCapacity;
   uint8_t waveform_amplitude_pct = 95U;
   bool waveform_jitter = true;
+  bool la_overlay_show_progress_ring = true;
+  bool la_overlay_show_hourglass = true;
+  bool la_overlay_show_caption = true;
+  bool la_overlay_show_pitch_text = true;
+  drivers::display::OverlayFontFace la_overlay_caption_font = drivers::display::OverlayFontFace::kBuiltinSmall;
+  uint8_t la_overlay_caption_size = 1U;
+  String la_overlay_caption = "Recherche d'accordance";
+  bool la_overlay_meter_bottom_horizontal = true;
+  bool la_overlay_hourglass_modern = true;
   la_detection_scene_ = false;
   uint32_t bg_rgb = 0x07132AUL;
   uint32_t accent_rgb = 0x2A76FFUL;
   uint32_t text_rgb = 0xE8F1FFUL;
+  const bool uson_proto_scene = (std::strcmp(scene_id, "SCENE_U_SON_PROTO") == 0);
+  if (uson_proto_scene) {
+    use_lgfx_text_overlay = fx_engine_.config().lgfx_backend;
+    disable_lvgl_text = use_lgfx_text_overlay;
+    title_align = SceneTextAlign::kCenter;
+    subtitle_align = SceneTextAlign::kBottom;
+    symbol_align = SceneTextAlign::kTop;
+    symbol_align_token = "top";
+    title_font_face = drivers::display::OverlayFontFace::kIbmBold24;
+    subtitle_font_face = drivers::display::OverlayFontFace::kIbmBold16;
+    symbol_font_face = drivers::display::OverlayFontFace::kOrbitron28;
+  }
 
   if (is_locked_scene) {
     title = "Module U-SON PROTO";
@@ -1472,12 +2311,16 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     text_rgb = 0xF6FBFFUL;
   } else if (std::strcmp(scene_id, "SCENE_BROKEN") == 0 || std::strcmp(scene_id, "SCENE_U_SON_PROTO") == 0) {
     title = "PROTO U-SON";
-    subtitle = "Signal brouille";
+    subtitle = "Signal brouille / transmission active";
     symbol = "ALERT";
-    effect = SceneEffect::kBlink;
-    bg_rgb = 0x2A0508UL;
-    accent_rgb = 0xFF4A45UL;
-    text_rgb = 0xFFD5D1UL;
+    effect = SceneEffect::kNone;
+    bg_rgb = 0x06040BUL;
+    accent_rgb = 0x6FD8FFUL;
+    text_rgb = 0xF6FAFFUL;
+    title_align = SceneTextAlign::kCenter;
+    subtitle_align = SceneTextAlign::kBottom;
+    symbol_align = SceneTextAlign::kTop;
+    symbol_align_token = "top";
   } else if (std::strcmp(scene_id, "SCENE_TEST_LAB") == 0) {
     title = "MIRE COULEUR";
     subtitle = "NOIR | BLANC | ROUGE | VERT | BLEU | CYAN | MAGENTA | JAUNE";
@@ -1505,9 +2348,9 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     accent_rgb = 0xFF9A4AUL;
     text_rgb = 0xFFF2E6UL;
   } else if (std::strcmp(scene_id, "SCENE_LA_DETECTOR") == 0 || std::strcmp(scene_id, "SCENE_SEARCH") == 0) {
-    title = "DETECTEUR DE RESONNANCE";
-    subtitle = "";
-    symbol = "AUDIO";
+    title = "recherche d'accordance";
+    subtitle = "Balayage en cours";
+    symbol = "";
     effect = SceneEffect::kWave;
     bg_rgb = 0x04141FUL;
     accent_rgb = 0x49D9FFUL;
@@ -1521,6 +2364,12 @@ void UiManager::renderScene(const ScenarioDef* scenario,
       waveform_jitter = true;
       frame_split_layout = true;
       frame_dy = 8;
+      use_lgfx_text_overlay = fx_engine_.config().lgfx_backend;
+      disable_lvgl_text = use_lgfx_text_overlay;
+      show_title = true;
+      show_subtitle = true;
+      show_symbol = false;
+      symbol = "";
     }
   } else if (std::strcmp(scene_id, "SCENE_LEFOU_DETECTOR") == 0) {
     title = "DETECTEUR LEFOU";
@@ -1611,7 +2460,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     title = "BRAVO!";
     subtitle = audio_playing ? "Validation en cours..." : kWinEtapeWaitingSubtitle;
     symbol = "WIN";
-    effect = SceneEffect::kNone;
+    effect = (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0) ? SceneEffect::kCelebrate : SceneEffect::kNone;
     transition = SceneTransition::kFade;
     transition_ms = 220U;
     bg_rgb = 0x000022UL;
@@ -1619,7 +2468,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     text_rgb = 0xFFFFFFUL;
     show_title = true;
     show_subtitle = true;
-    show_symbol = false;
+    show_symbol = true;
     win_etape_fireworks = false;
     subtitle_scroll_mode = SceneScrollMode::kNone;
   } else if (std::strcmp(scene_id, "SCENE_FINAL_WIN") == 0) {
@@ -1656,9 +2505,16 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     effect_speed_ms = scene_status_.effect_speed_ms;
     transition = parseTransitionToken(scene_status_.transition, transition, "scene status cache");
     transition_ms = scene_status_.transition_ms;
+    text_glitch_pct = scene_status_.text_glitch_pct;
+    text_size_pct = scene_status_.text_size_pct;
+    use_lgfx_text_overlay = (std::strcmp(scene_status_.text_backend, "lgfx_overlay") == 0);
+    disable_lvgl_text = scene_status_.lvgl_text_disabled;
     bg_rgb = scene_status_.bg_rgb;
     accent_rgb = scene_status_.accent_rgb;
     text_rgb = scene_status_.text_rgb;
+    title_font_face = overlay_title_font_face_;
+    subtitle_font_face = overlay_subtitle_font_face_;
+    symbol_font_face = overlay_symbol_font_face_;
   }
 
   if (static_state_changed) {
@@ -1724,6 +2580,11 @@ void UiManager::renderScene(const ScenarioDef* scenario,
       subtitle = applyTextCase(subtitle_case, subtitle);
       title_align = parseAlignToken(document["text"]["title_align"] | "", title_align);
       subtitle_align = parseAlignToken(document["text"]["subtitle_align"] | "", subtitle_align);
+      symbol_align_token = document["text"]["symbol_align"] | "";
+      symbol_align = parseAlignToken(symbol_align_token, symbol_align);
+      title_font_face = parseOverlayFontFace(document["text"]["title_font_face"] | "", title_font_face);
+      subtitle_font_face = parseOverlayFontFace(document["text"]["subtitle_font_face"] | "", subtitle_font_face);
+      symbol_font_face = parseOverlayFontFace(document["text"]["symbol_font_face"] | "", symbol_font_face);
 
       effect = parseEffectToken(payload_effect, effect, "scene payload effect");
 
@@ -1735,6 +2596,84 @@ void UiManager::renderScene(const ScenarioDef* scenario,
       parseHexRgb(payload_bg, &bg_rgb);
       parseHexRgb(payload_accent, &accent_rgb);
       parseHexRgb(payload_secondary, &text_rgb);
+
+      const char* text_backend =
+          document["render"]["text_backend"] | document["render"]["text"]["backend"] | document["text_backend"] | "";
+      if (text_backend[0] != '\0') {
+        if (std::strcmp(text_backend, "lgfx_overlay") == 0 || std::strcmp(text_backend, "lgfx") == 0) {
+          use_lgfx_text_overlay = true;
+        } else if (std::strcmp(text_backend, "lvgl") == 0) {
+          use_lgfx_text_overlay = false;
+        }
+      }
+      if (document["render"]["disable_lvgl_text"].is<bool>()) {
+        disable_lvgl_text = document["render"]["disable_lvgl_text"].as<bool>();
+      }
+      if (document["render"]["wave"].is<bool>() && !document["render"]["wave"].as<bool>()) {
+        subtitle_scroll_mode = SceneScrollMode::kNone;
+      }
+      if (document["render"]["la_detector"].is<JsonObjectConst>()) {
+        const JsonObjectConst la_render = document["render"]["la_detector"].as<JsonObjectConst>();
+        const char* caption = la_render["caption"] | "";
+        if (caption[0] != '\0') {
+          la_overlay_caption = caption;
+        }
+        if (la_render["show_progress_ring"].is<bool>()) {
+          la_overlay_show_progress_ring = la_render["show_progress_ring"].as<bool>();
+        }
+        if (la_render["show_hourglass"].is<bool>()) {
+          la_overlay_show_hourglass = la_render["show_hourglass"].as<bool>();
+        }
+        if (la_render["show_caption"].is<bool>()) {
+          la_overlay_show_caption = la_render["show_caption"].as<bool>();
+        }
+        if (la_render["show_pitch_text"].is<bool>()) {
+          la_overlay_show_pitch_text = la_render["show_pitch_text"].as<bool>();
+        }
+        const char* meter_layout = la_render["meter_layout"] | "";
+        if (meter_layout[0] != '\0') {
+          char token[24] = {0};
+          std::strncpy(token, meter_layout, sizeof(token) - 1U);
+          for (size_t i = 0U; token[i] != '\0'; ++i) {
+            token[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(token[i])));
+          }
+          la_overlay_meter_bottom_horizontal = (std::strcmp(token, "bottom_horizontal") == 0);
+        }
+        const char* progress_layout = la_render["progress_layout"] | "";
+        if (progress_layout[0] != '\0') {
+          char token[16] = {0};
+          std::strncpy(token, progress_layout, sizeof(token) - 1U);
+          for (size_t i = 0U; token[i] != '\0'; ++i) {
+            token[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(token[i])));
+          }
+          la_overlay_show_progress_ring = (std::strcmp(token, "ring") == 0);
+        }
+        const char* hourglass_style = la_render["hourglass_style"] | "";
+        if (hourglass_style[0] != '\0') {
+          char token[16] = {0};
+          std::strncpy(token, hourglass_style, sizeof(token) - 1U);
+          for (size_t i = 0U; token[i] != '\0'; ++i) {
+            token[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(token[i])));
+          }
+          la_overlay_hourglass_modern = (std::strcmp(token, "modern") == 0);
+        }
+        if (la_render["caption_font"].is<unsigned int>()) {
+          const uint8_t legacy_font = static_cast<uint8_t>(la_render["caption_font"].as<unsigned int>());
+          if (legacy_font <= 1U) {
+            la_overlay_caption_font = drivers::display::OverlayFontFace::kBuiltinSmall;
+          } else if (legacy_font >= 4U) {
+            la_overlay_caption_font = drivers::display::OverlayFontFace::kBuiltinLarge;
+          } else {
+            la_overlay_caption_font = drivers::display::OverlayFontFace::kBuiltinMedium;
+          }
+        } else {
+          const char* caption_font = la_render["caption_font_face"] | "";
+          la_overlay_caption_font = parseOverlayFontFace(caption_font, la_overlay_caption_font);
+        }
+        if (la_render["caption_size"].is<unsigned int>()) {
+          la_overlay_caption_size = static_cast<uint8_t>(la_render["caption_size"].as<unsigned int>());
+        }
+      }
 
       if (document["effect_speed_ms"].is<unsigned int>()) {
         effect_speed_ms = static_cast<uint16_t>(document["effect_speed_ms"].as<unsigned int>());
@@ -1794,6 +2733,28 @@ void UiManager::renderScene(const ScenarioDef* scenario,
       }
       if (document["scroll"]["loop"].is<bool>()) {
         subtitle_scroll_loop = document["scroll"]["loop"].as<bool>();
+      }
+
+      if (document["text"]["glitch"].is<unsigned int>()) {
+        text_glitch_pct = static_cast<uint8_t>(document["text"]["glitch"].as<unsigned int>());
+      } else if (document["text"]["glitch_pct"].is<unsigned int>()) {
+        text_glitch_pct = static_cast<uint8_t>(document["text"]["glitch_pct"].as<unsigned int>());
+      } else if (document["text_glitch"].is<unsigned int>()) {
+        text_glitch_pct = static_cast<uint8_t>(document["text_glitch"].as<unsigned int>());
+      }
+      if (text_glitch_pct > 100U) {
+        text_glitch_pct = 100U;
+      }
+
+      if (document["text"]["size"].is<unsigned int>()) {
+        text_size_pct = static_cast<uint8_t>(document["text"]["size"].as<unsigned int>());
+      } else if (document["text"]["size_pct"].is<unsigned int>()) {
+        text_size_pct = static_cast<uint8_t>(document["text"]["size_pct"].as<unsigned int>());
+      } else if (document["text_size"].is<unsigned int>()) {
+        text_size_pct = static_cast<uint8_t>(document["text_size"].as<unsigned int>());
+      }
+      if (text_size_pct > 100U) {
+        text_size_pct = 100U;
       }
 
       if (document["demo"]["particle_count"].is<unsigned int>()) {
@@ -1961,6 +2922,12 @@ void UiManager::renderScene(const ScenarioDef* scenario,
         mixNoise(static_cast<uint32_t>(lv_tick_get()), reinterpret_cast<uintptr_t>(this) ^ 0xA5A37UL);
     effect_speed_ms = static_cast<uint16_t>(80U + (speed_entropy % 141U));
   }
+  if (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0 && effect == SceneEffect::kNone) {
+    effect = SceneEffect::kCelebrate;
+    if (effect_speed_ms == 0U) {
+      effect_speed_ms = 320U;
+    }
+  }
 
   if (waveform_sample_count == 0U) {
     waveform_sample_count = HardwareManager::kMicWaveformCapacity;
@@ -1973,9 +2940,21 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   if (waveform_amplitude_pct > 100U) {
     waveform_amplitude_pct = 100U;
   }
+  if (la_overlay_caption_size < 1U) {
+    la_overlay_caption_size = 1U;
+  } else if (la_overlay_caption_size > 3U) {
+    la_overlay_caption_size = 3U;
+  }
+  if (la_overlay_caption.isEmpty()) {
+    la_overlay_caption = "Recherche d'accordance";
+  }
   const bool mic_needed = la_detection_scene_ || waveform_enabled;
   if (hardware_ != nullptr) {
-    hardware_->setMicRuntimeEnabled(mic_needed);
+    // Runtime mic ownership is centralized in main.cpp resource policy.
+    // UI can request ON for waveform scenes but must not force OFF for other scenes (e.g. U_SON proto).
+    if (mic_needed) {
+      hardware_->setMicRuntimeEnabled(true);
+    }
   }
   configureWaveformOverlay((waveform_snapshot_ref_ != nullptr) ? waveform_snapshot_ref_
                                                                : (waveform_snapshot_valid_ ? &waveform_snapshot_
@@ -1984,6 +2963,11 @@ void UiManager::renderScene(const ScenarioDef* scenario,
                            waveform_sample_count,
                           waveform_amplitude_pct,
                           waveform_jitter);
+  if (scene_runtime_lgfx_lock_ && scene_id != nullptr && std::strncmp(scene_id, "SCENE_", 6U) == 0) {
+    use_lgfx_text_overlay = true;
+    disable_lvgl_text = true;
+    la_overlay_caption_font = drivers::display::OverlayFontFace::kIbmBold16;
+  }
   if (win_etape_intro_scene) {
     if (subtitle.length() == 0U) {
       subtitle = kWinEtapeWaitingSubtitle;
@@ -1992,15 +2976,37 @@ void UiManager::renderScene(const ScenarioDef* scenario,
       subtitle = "Validation en cours...";
     }
   }
+  if (use_lgfx_text_overlay && !fx_engine_.config().lgfx_backend) {
+    use_lgfx_text_overlay = false;
+  }
+  if (use_lgfx_text_overlay) {
+    disable_lvgl_text = true;
+    subtitle_scroll_mode = SceneScrollMode::kNone;
+    effect = SceneEffect::kNone;
+  }
   const bool test_lab_lgfx_scroller = test_lab_scene;
   if (static_state_changed && (direct_fx_scene || test_lab_lgfx_scroller)) {
     direct_fx_scene_active_ = fx_engine_.config().lgfx_backend;
     if (direct_fx_scene_active_) {
       if (test_lab_lgfx_scroller) {
         direct_fx_scene_preset_ = ui::fx::FxPreset::kDemo;
+      } else if (std::strcmp(scene_id, "SCENE_U_SON_PROTO") == 0) {
+        direct_fx_scene_preset_ = ui::fx::FxPreset::kUsonProto;
+      } else if (std::strcmp(scene_id, "SCENE_LA_DETECTOR") == 0) {
+        direct_fx_scene_preset_ = ui::fx::FxPreset::kLaDetector;
+      } else if (std::strcmp(scene_id, "SCENE_WIN_ETAPE1") == 0) {
+        direct_fx_scene_preset_ = ui::fx::FxPreset::kWinEtape1;
+      } else if (std::strcmp(scene_id, "SCENE_FIREWORKS") == 0) {
+        direct_fx_scene_preset_ = ui::fx::FxPreset::kFireworks;
+      } else if (std::strcmp(scene_id, "SCENE_WIN") == 0 ||
+                 std::strcmp(scene_id, "SCENE_REWARD") == 0 ||
+                 std::strcmp(scene_id, "SCENE_WINNER") == 0 ||
+                 std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0 ||
+                 std::strcmp(scene_id, "SCENE_WIN_ETAPE2") == 0 ||
+                 std::strcmp(scene_id, "SCENE_FINAL_WIN") == 0) {
+        direct_fx_scene_preset_ = ui::fx::FxPreset::kWinner;
       } else {
-        direct_fx_scene_preset_ =
-            (std::strcmp(scene_id, "SCENE_FIREWORKS") == 0) ? ui::fx::FxPreset::kFireworks : ui::fx::FxPreset::kWinner;
+        direct_fx_scene_preset_ = ui::fx::FxPreset::kDemo;
       }
       fx_engine_.setEnabled(true);
       fx_engine_.setPreset(direct_fx_scene_preset_);
@@ -2010,6 +3016,15 @@ void UiManager::renderScene(const ScenarioDef* scenario,
       if (test_lab_lgfx_scroller) {
         fx_engine_.setScrollerCentered(true);
         fx_engine_.setScrollText("RVBCMJ -- DEMOMAKING RULEZ ---");
+      } else if (std::strcmp(scene_id, "SCENE_U_SON_PROTO") == 0) {
+        fx_engine_.setScrollerCentered(false);
+        fx_engine_.setScrollText(nullptr);
+      } else if (std::strcmp(scene_id, "SCENE_LA_DETECTOR") == 0) {
+        fx_engine_.setScrollerCentered(false);
+        fx_engine_.setScrollText(nullptr);
+      } else if (std::strcmp(scene_id, "SCENE_WIN_ETAPE1") == 0) {
+        fx_engine_.setScrollerCentered(false);
+        fx_engine_.setScrollText(nullptr);
       } else {
         fx_engine_.setScrollerCentered(false);
         const String fx_scroll_text = asciiFallbackForUiText((subtitle.length() > 0U) ? subtitle.c_str() : title.c_str());
@@ -2029,35 +3044,32 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   }
 
   if (static_state_changed) {
+    overlay_draw_ok_count_ = 0U;
+    overlay_draw_fail_count_ = 0U;
+    overlay_startwrite_fail_count_ = 0U;
+    overlay_skip_busy_count_ = 0U;
     stopSceneAnimations();
-    if (scene_ring_outer_ != nullptr) {
-      if (test_lab_scene) {
-        lv_obj_add_flag(scene_ring_outer_, LV_OBJ_FLAG_HIDDEN);
-      } else {
-        lv_obj_clear_flag(scene_ring_outer_, LV_OBJ_FLAG_HIDDEN);
-      }
-    }
-    if (scene_ring_inner_ != nullptr) {
-      if (test_lab_scene) {
-        lv_obj_add_flag(scene_ring_inner_, LV_OBJ_FLAG_HIDDEN);
-      } else {
-        lv_obj_clear_flag(scene_ring_inner_, LV_OBJ_FLAG_HIDDEN);
-      }
-    }
-    if (scene_core_ != nullptr) {
-      if (test_lab_scene) {
-        lv_obj_add_flag(scene_core_, LV_OBJ_FLAG_HIDDEN);
-      } else {
-        lv_obj_clear_flag(scene_core_, LV_OBJ_FLAG_HIDDEN);
-      }
-    }
-    if (scene_fx_bar_ != nullptr) {
-      if (test_lab_scene) {
-        lv_obj_add_flag(scene_fx_bar_, LV_OBJ_FLAG_HIDDEN);
-      } else {
-        lv_obj_clear_flag(scene_fx_bar_, LV_OBJ_FLAG_HIDDEN);
-      }
-    }
+    scene_use_lgfx_text_overlay_ = use_lgfx_text_overlay;
+    scene_disable_lvgl_text_ = disable_lvgl_text && scene_use_lgfx_text_overlay_;
+    overlay_title_align_ = title_align;
+    overlay_subtitle_align_ = subtitle_align;
+    overlay_symbol_align_ = symbol_align;
+    overlay_title_font_face_ = title_font_face;
+    overlay_subtitle_font_face_ = subtitle_font_face;
+    overlay_symbol_font_face_ = symbol_font_face;
+    la_overlay_show_progress_ring_ = la_overlay_show_progress_ring;
+    la_overlay_show_hourglass_ = la_overlay_show_hourglass;
+    la_overlay_show_caption_ = la_overlay_show_caption;
+    la_overlay_show_pitch_text_ = la_overlay_show_pitch_text;
+    la_overlay_meter_bottom_horizontal_ = la_overlay_meter_bottom_horizontal;
+    la_overlay_hourglass_modern_ = la_overlay_hourglass_modern;
+    la_overlay_caption_font_ = la_overlay_caption_font;
+    la_overlay_caption_size_ = la_overlay_caption_size;
+    copyTextSafe(la_overlay_caption_, sizeof(la_overlay_caption_), la_overlay_caption.c_str());
+    const bool show_base_scene_fx = (!test_lab_scene && effect != SceneEffect::kNone && !scene_use_lgfx_text_overlay_);
+    setBaseSceneFxVisible(show_base_scene_fx);
+    text_glitch_pct_ = text_glitch_pct;
+    text_size_pct_ = text_size_pct;
     demo_particle_count_ = demo_particle_count;
     demo_strobe_level_ = demo_strobe_level;
     if (demo_mode == "cinematic") {
@@ -2097,38 +3109,120 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     applyThemeColors(bg_rgb, accent_rgb, text_rgb);
     const String title_ui = asciiFallbackForUiText(title.c_str());
     const String subtitle_ui = asciiFallbackForUiText(subtitle.c_str());
-    lv_label_set_text(scene_title_label_, title_ui.c_str());
-    lv_label_set_text(scene_subtitle_label_, subtitle_ui.c_str());
-    const char* symbol_glyph = mapSymbolToken(symbol.c_str());
-    lv_label_set_text(scene_symbol_label_, (symbol_glyph != nullptr) ? symbol_glyph : LV_SYMBOL_PLAY);
-    if (show_title) {
-      lv_obj_clear_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
+    const bool lvgl_text_enabled = !scene_disable_lvgl_text_;
+    if (lvgl_text_enabled) {
+      lv_label_set_text(scene_title_label_, title_ui.c_str());
+      lv_label_set_text(scene_subtitle_label_, subtitle_ui.c_str());
+      const char* symbol_glyph = mapSymbolToken(symbol.c_str());
+      lv_label_set_text(scene_symbol_label_, (symbol_glyph != nullptr) ? symbol_glyph : LV_SYMBOL_PLAY);
+      if (show_title) {
+        lv_obj_clear_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
+      } else {
+        lv_obj_add_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
+      }
+      if (show_symbol) {
+        lv_obj_clear_flag(scene_symbol_label_, LV_OBJ_FLAG_HIDDEN);
+      } else {
+        lv_obj_add_flag(scene_symbol_label_, LV_OBJ_FLAG_HIDDEN);
+      }
+      if (show_subtitle && subtitle.length() > 0U) {
+        lv_obj_clear_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
+      } else {
+        lv_obj_add_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
+      }
+      const lv_font_t* title_font = UiFonts::fontBold24();
+      if (text_size_pct_ <= 20U) {
+        title_font = UiFonts::fontBold12();
+      } else if (text_size_pct_ <= 45U) {
+        title_font = UiFonts::fontBold16();
+      } else if (text_size_pct_ <= 70U) {
+        title_font = UiFonts::fontBold20();
+      }
+      if (title_font == nullptr) {
+        title_font = &lv_font_montserrat_14;
+      }
+      const lv_font_t* subtitle_font = UiFonts::fontItalic12();
+      if (uson_proto_scene) {
+        if (text_size_pct_ <= 20U) {
+          subtitle_font = UiFonts::fontBold12();
+        } else if (text_size_pct_ <= 60U) {
+          subtitle_font = UiFonts::fontBold16();
+        } else {
+          subtitle_font = UiFonts::fontBold20();
+        }
+      }
+      if (subtitle_font == nullptr) {
+        subtitle_font = &lv_font_montserrat_14;
+      }
+      const lv_font_t* symbol_font = UiFonts::fontTitle();
+      if (symbol_font == nullptr) {
+        symbol_font = &lv_font_montserrat_14;
+      }
+      if (scene_title_label_ != nullptr) {
+        lv_obj_set_style_text_font(scene_title_label_, title_font, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_text_color(scene_title_label_, lv_color_hex(text_rgb), LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_text_opa(scene_title_label_, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_opa(scene_title_label_, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_bg_opa(scene_title_label_, LV_OPA_TRANSP, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_pad_left(scene_title_label_, 0, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_pad_right(scene_title_label_, 0, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_pad_top(scene_title_label_, 0, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_pad_bottom(scene_title_label_, 0, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_transform_angle(scene_title_label_, 0, LV_PART_MAIN | LV_STATE_ANY);
+      }
+      if (scene_subtitle_label_ != nullptr) {
+        lv_obj_set_style_text_font(scene_subtitle_label_, subtitle_font, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_text_color(scene_subtitle_label_, lv_color_hex(text_rgb), LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_text_opa(scene_subtitle_label_, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_opa(scene_subtitle_label_, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_bg_opa(scene_subtitle_label_, LV_OPA_TRANSP, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_pad_left(scene_subtitle_label_, 0, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_pad_right(scene_subtitle_label_, 0, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_pad_top(scene_subtitle_label_, 0, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_pad_bottom(scene_subtitle_label_, 0, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_transform_angle(scene_subtitle_label_, 0, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_width(scene_subtitle_label_, activeDisplayWidth() - 32);
+        lv_label_set_long_mode(scene_subtitle_label_, LV_LABEL_LONG_DOT);
+        lv_obj_set_style_text_align(scene_subtitle_label_, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_ANY);
+      }
+      if (scene_symbol_label_ != nullptr) {
+        lv_obj_set_style_text_font(scene_symbol_label_, symbol_font, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_text_color(scene_symbol_label_, lv_color_hex(text_rgb), LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_text_opa(scene_symbol_label_, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_opa(scene_symbol_label_, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_ANY);
+        lv_obj_set_style_transform_angle(scene_symbol_label_, 0, LV_PART_MAIN | LV_STATE_ANY);
+      }
+      applyTextLayout(title_align, subtitle_align, symbol_align);
+      if (scene_title_label_ != nullptr && !lv_obj_has_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_move_foreground(scene_title_label_);
+        lv_obj_set_style_opa(scene_title_label_, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_transform_angle(scene_title_label_, 0, LV_PART_MAIN);
+      }
+      if (scene_subtitle_label_ != nullptr && !lv_obj_has_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_move_foreground(scene_subtitle_label_);
+        lv_obj_set_style_opa(scene_subtitle_label_, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_transform_angle(scene_subtitle_label_, 0, LV_PART_MAIN);
+      }
     } else {
-      lv_obj_add_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
-    }
-    if (show_symbol) {
-      lv_obj_clear_flag(scene_symbol_label_, LV_OBJ_FLAG_HIDDEN);
-    } else {
-      lv_obj_add_flag(scene_symbol_label_, LV_OBJ_FLAG_HIDDEN);
-    }
-    if (show_subtitle && subtitle.length() > 0U) {
-      lv_obj_clear_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
-    } else {
-      lv_obj_add_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
-    }
-    applyTextLayout(title_align, subtitle_align);
-    if (scene_title_label_ != nullptr && !lv_obj_has_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN)) {
-      lv_obj_move_foreground(scene_title_label_);
-      lv_obj_set_style_opa(scene_title_label_, LV_OPA_COVER, LV_PART_MAIN);
-      lv_obj_set_style_transform_angle(scene_title_label_, 0, LV_PART_MAIN);
-    }
-    if (scene_subtitle_label_ != nullptr && !lv_obj_has_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN)) {
-      lv_obj_move_foreground(scene_subtitle_label_);
-      lv_obj_set_style_opa(scene_subtitle_label_, LV_OPA_COVER, LV_PART_MAIN);
-      lv_obj_set_style_transform_angle(scene_subtitle_label_, 0, LV_PART_MAIN);
+      if (scene_title_label_ != nullptr) {
+        lv_obj_add_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
+      }
+      if (scene_subtitle_label_ != nullptr) {
+        lv_obj_add_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
+      }
+      if (scene_symbol_label_ != nullptr) {
+        lv_obj_add_flag(scene_symbol_label_, LV_OBJ_FLAG_HIDDEN);
+      }
+      if (page_label_ != nullptr) {
+        lv_obj_add_flag(page_label_, LV_OBJ_FLAG_HIDDEN);
+      }
     }
     applySceneFraming(frame_dx, frame_dy, frame_scale_pct, frame_split_layout);
-    applySubtitleScroll(subtitle_scroll_mode, subtitle_scroll_speed_ms, subtitle_scroll_pause_ms, subtitle_scroll_loop);
+    if (lvgl_text_enabled) {
+      applySubtitleScroll(subtitle_scroll_mode, subtitle_scroll_speed_ms, subtitle_scroll_pause_ms, subtitle_scroll_loop);
+    } else {
+      applySubtitleScroll(SceneScrollMode::kNone, subtitle_scroll_speed_ms, subtitle_scroll_pause_ms, false);
+    }
     for (lv_obj_t* particle : scene_particles_) {
       lv_obj_set_style_bg_color(particle, lv_color_hex(text_rgb), LV_PART_MAIN);
     }
@@ -2228,6 +3322,12 @@ void UiManager::renderScene(const ScenarioDef* scenario,
         lv_obj_set_style_pad_top(scene_subtitle_label_, 0, LV_PART_MAIN);
         lv_obj_set_style_pad_bottom(scene_subtitle_label_, 0, LV_PART_MAIN);
       }
+    }
+
+    if (scene_use_lgfx_text_overlay_) {
+      resetSceneTimeline();
+      current_effect_ = SceneEffect::kNone;
+      effect_speed_ms_ = 0U;
     }
 
     if (timeline_keyframe_count_ > 1U && timeline_duration_ms_ > 0U) {
@@ -2335,7 +3435,6 @@ void UiManager::renderScene(const ScenarioDef* scenario,
       if (current_title == nullptr || std::strcmp(current_title, title_ascii.c_str()) != 0) {
         lv_label_set_text(scene_title_label_, title_ascii.c_str());
       }
-      lv_obj_remove_style_all(scene_title_label_);
       lv_obj_clear_flag(scene_title_label_, LV_OBJ_FLAG_HIDDEN);
       lv_obj_set_style_text_font(scene_title_label_, &lv_font_montserrat_14, LV_PART_MAIN);
       lv_obj_set_style_text_color(scene_title_label_, lv_color_hex(0xFFFFFFUL), LV_PART_MAIN);
@@ -2355,7 +3454,6 @@ void UiManager::renderScene(const ScenarioDef* scenario,
       if (current_subtitle == nullptr || std::strcmp(current_subtitle, subtitle_ascii.c_str()) != 0) {
         lv_label_set_text(scene_subtitle_label_, subtitle_ascii.c_str());
       }
-      lv_obj_remove_style_all(scene_subtitle_label_);
       lv_obj_clear_flag(scene_subtitle_label_, LV_OBJ_FLAG_HIDDEN);
       lv_label_set_long_mode(scene_subtitle_label_, LV_LABEL_LONG_WRAP);
       lv_obj_set_width(scene_subtitle_label_, activeDisplayWidth() - 20);
@@ -2380,9 +3478,16 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   scene_status_.show_title = show_title;
   scene_status_.show_subtitle = subtitle_visible;
   scene_status_.show_symbol = show_symbol;
+  scene_status_.lvgl_text_disabled = scene_disable_lvgl_text_;
   scene_status_.payload_crc = payload_crc;
   scene_status_.effect_speed_ms = effect_speed_ms_;
+  scene_status_.text_glitch_pct = text_glitch_pct_;
+  scene_status_.text_size_pct = text_size_pct_;
   scene_status_.transition_ms = transition_ms;
+  scene_status_.overlay_draw_ok = overlay_draw_ok_count_;
+  scene_status_.overlay_draw_fail = overlay_draw_fail_count_;
+  scene_status_.overlay_startwrite_fail = overlay_startwrite_fail_count_;
+  scene_status_.overlay_skip_busy = overlay_skip_busy_count_;
   if (theme_cache_valid_) {
     scene_status_.bg_rgb = theme_cache_bg_;
     scene_status_.accent_rgb = theme_cache_accent_;
@@ -2399,6 +3504,10 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   copyTextSafe(scene_status_.title, sizeof(scene_status_.title), title_ascii.c_str());
   copyTextSafe(scene_status_.subtitle, sizeof(scene_status_.subtitle), subtitle_ascii.c_str());
   copyTextSafe(scene_status_.symbol, sizeof(scene_status_.symbol), symbol_ascii.c_str());
+  copyTextSafe(scene_status_.symbol_align, sizeof(scene_status_.symbol_align), symbol_align_token);
+  copyTextSafe(scene_status_.text_backend,
+               sizeof(scene_status_.text_backend),
+               scene_use_lgfx_text_overlay_ ? "lgfx_overlay" : "lvgl");
   copyTextSafe(scene_status_.effect, sizeof(scene_status_.effect), effectToToken(effect));
   copyTextSafe(scene_status_.transition, sizeof(scene_status_.transition), transitionToToken(transition));
   std::strncpy(last_scene_id_, scene_id, sizeof(last_scene_id_) - 1U);
@@ -2579,8 +3688,8 @@ void UiManager::createWidgets() {
   lv_obj_set_style_text_color(scene_la_pitch_label_, lv_color_hex(0xE8F1FF), LV_PART_MAIN);
   lv_obj_set_style_text_color(scene_la_timer_label_, lv_color_hex(0x9AD6FF), LV_PART_MAIN);
   lv_obj_set_style_text_color(scene_la_timeout_label_, lv_color_hex(0x84CFFF), LV_PART_MAIN);
-  lv_obj_set_style_text_font(scene_title_label_, UiFonts::fontBodyM(), LV_PART_MAIN);
-  lv_obj_set_style_text_font(scene_subtitle_label_, UiFonts::fontBodyM(), LV_PART_MAIN);
+  lv_obj_set_style_text_font(scene_title_label_, UiFonts::fontBold24(), LV_PART_MAIN);
+  lv_obj_set_style_text_font(scene_subtitle_label_, UiFonts::fontItalic12(), LV_PART_MAIN);
   lv_obj_set_style_text_font(scene_symbol_label_, UiFonts::fontTitle(), LV_PART_MAIN);
   lv_obj_set_style_text_font(scene_la_status_label_, UiFonts::fontMono(), LV_PART_MAIN);
   lv_obj_set_style_text_font(scene_la_pitch_label_, UiFonts::fontBodyM(), LV_PART_MAIN);
@@ -2712,6 +3821,10 @@ void UiManager::animSetRandomTranslateX(void* obj, int32_t value) {
       amplitude = 62;
     } else if (target == g_instance->scene_core_) {
       amplitude = 30;
+    } else if (target == g_instance->scene_title_label_) {
+      amplitude = static_cast<int16_t>(2 + (static_cast<uint16_t>(g_instance->text_glitch_pct_) * 18U) / 100U);
+    } else if (target == g_instance->scene_subtitle_label_) {
+      amplitude = static_cast<int16_t>(1 + (static_cast<uint16_t>(g_instance->text_glitch_pct_) * 14U) / 100U);
     } else if (target == g_instance->scene_symbol_label_) {
       amplitude = 18;
     } else if (target == g_instance->scene_ring_outer_ || target == g_instance->scene_ring_inner_) {
@@ -2740,6 +3853,10 @@ void UiManager::animSetRandomTranslateY(void* obj, int32_t value) {
       amplitude = 34;
     } else if (target == g_instance->scene_core_) {
       amplitude = 24;
+    } else if (target == g_instance->scene_title_label_) {
+      amplitude = static_cast<int16_t>(1 + (static_cast<uint16_t>(g_instance->text_glitch_pct_) * 12U) / 100U);
+    } else if (target == g_instance->scene_subtitle_label_) {
+      amplitude = static_cast<int16_t>(1 + (static_cast<uint16_t>(g_instance->text_glitch_pct_) * 10U) / 100U);
     } else if (target == g_instance->scene_symbol_label_) {
       amplitude = 14;
     } else if (target == g_instance->scene_ring_outer_ || target == g_instance->scene_ring_inner_) {

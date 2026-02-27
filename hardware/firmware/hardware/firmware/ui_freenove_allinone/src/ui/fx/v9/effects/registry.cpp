@@ -8,6 +8,7 @@
 #include "ui/fx/v9/effects/tunnel3d.h"
 #include "ui/fx/v9/effects/rotozoom.h"
 #include "ui/fx/v9/effects/wirecube.h"
+#include "ui/fx/v9/effects/hourglass.h"
 
 namespace fx::effects {
 
@@ -39,6 +40,9 @@ void registerAll(Engine& e, FxServices svc)
   });
   e.registerFx("wirecube", [svc] {
     return std::unique_ptr<IFx>(new WireCubeFx(svc));
+  });
+  e.registerFx("hourglass", [svc] {
+    return std::unique_ptr<IFx>(new HourglassFx(svc));
   });
 }
 

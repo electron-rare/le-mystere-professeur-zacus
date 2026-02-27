@@ -1,59 +1,60 @@
 {
   "title": "WIN ETAPE 1",
-  "subtitle": "Validation distante",
+  "subtitle": "Validation distante confirmee",
   "symbol": "WIN",
-  "effect": "celebrate",
-  "effect_speed_ms": 360,
+  "effect": "tunnel3d",
+  "effect_speed_ms": 260,
   "theme": {
-    "bg": "#1E0F32",
-    "accent": "#F5C64A",
-    "text": "#FFF8E4"
+    "bg": "#0A1027",
+    "accent": "#6AD4FF",
+    "text": "#F4FAFF"
   },
   "transition": {
-    "effect": "zoom",
-    "duration_ms": 280
+    "effect": "fade",
+    "duration_ms": 220
   },
   "timeline": {
     "loop": true,
-    "duration_ms": 1200,
+    "duration_ms": 30000,
     "keyframes": [
       {
         "at_ms": 0,
-        "effect": "celebrate",
-        "speed_ms": 360,
+        "effect": "tunnel3d",
+        "speed_ms": 15000,
         "theme": {
-          "bg": "#1E0F32",
-          "accent": "#F5C64A",
-          "text": "#FFF8E4"
+          "bg": "#0A1027",
+          "accent": "#6AD4FF",
+          "text": "#F4FAFF"
         }
       },
       {
-        "at_ms": 1200,
-        "effect": "pulse",
-        "speed_ms": 260,
+        "at_ms": 15000,
+        "effect": "rotozoom",
+        "speed_ms": 15000,
         "theme": {
-          "bg": "#2A1645",
-          "accent": "#FFD97A",
-          "text": "#FFFDF3"
+          "bg": "#11193B",
+          "accent": "#8DE6FF",
+          "text": "#FFFFFF"
         }
       }
     ]
   },
   "id": "SCENE_WIN_ETAPE1",
   "text": {
-    "show_title": false,
+    "show_title": true,
     "show_subtitle": true,
     "show_symbol": true,
     "title_case": "upper",
     "subtitle_case": "raw",
-    "title_align": "top",
-    "subtitle_align": "bottom"
+    "title_align": "center",
+    "subtitle_align": "bottom",
+    "symbol_align": "top"
   },
   "visual": {
-    "show_title": false,
+    "show_title": true,
     "show_subtitle": true,
     "show_symbol": true,
-    "effect_speed_ms": 360
+    "effect_speed_ms": 260
   },
   "framing": {
     "preset": "center",
@@ -63,13 +64,18 @@
   },
   "scroll": {
     "mode": "none",
-    "speed_ms": 4200,
-    "pause_ms": 900,
-    "loop": true
+    "speed_ms": 0,
+    "pause_ms": 0,
+    "loop": false
   },
   "demo": {
-    "mode": "standard",
-    "particle_count": 4,
-    "strobe_level": 65
+    "mode": "arcade",
+    "particle_count": 5,
+    "strobe_level": 58
+  },
+  "render": {
+    "text_backend": "lgfx_overlay",
+    "disable_lvgl_text": true,
+    "wave": false
   }
 }

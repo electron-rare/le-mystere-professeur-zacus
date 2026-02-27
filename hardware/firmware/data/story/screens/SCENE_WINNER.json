@@ -41,7 +41,7 @@
   },
   "id": "SCENE_WINNER",
   "text": {
-    "show_title": false,
+    "show_title": true,
     "show_subtitle": true,
     "show_symbol": true,
     "title_case": "upper",
@@ -50,7 +50,7 @@
     "subtitle_align": "bottom"
   },
   "visual": {
-    "show_title": false,
+    "show_title": true,
     "show_subtitle": true,
     "show_symbol": true,
     "effect_speed_ms": 680
@@ -71,5 +71,9 @@
     "mode": "standard",
     "particle_count": 4,
     "strobe_level": 65
+  },
+  "render": {
+    "text_backend": "lgfx_overlay",
+    "disable_lvgl_text": true
   }
 }

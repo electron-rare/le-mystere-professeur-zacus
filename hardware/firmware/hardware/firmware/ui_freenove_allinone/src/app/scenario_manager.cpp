@@ -120,6 +120,7 @@ const char* ScenarioManager::readScenarioField(JsonVariantConst root,
 
 bool ScenarioManager::begin(const char* scenario_file_path) {
   scenario_ = nullptr;
+  debug_transition_bypass_enabled_ = false;
   initial_step_override_.remove(0);
   clearStepResourceOverrides();
   String selected_scenario_id;
@@ -162,6 +163,7 @@ bool ScenarioManager::begin(const char* scenario_file_path) {
 
 bool ScenarioManager::beginById(const char* scenario_id) {
   scenario_ = nullptr;
+  debug_transition_bypass_enabled_ = false;
   initial_step_override_.remove(0);
   clearStepResourceOverrides();
 
@@ -386,6 +388,17 @@ bool ScenarioManager::consumeAudioRequest(String* out_audio_pack_id) {
   return true;
 }
 
+void ScenarioManager::setDebugTransitionBypassEnabled(bool enabled, const char* source) {
+  debug_transition_bypass_enabled_ = enabled;
+  Serial.printf("[SCENARIO] debug bypass %s source=%s\n",
+                debug_transition_bypass_enabled_ ? "ON" : "OFF",
+                (source != nullptr && source[0] != '\0') ? source : "-");
+}
+
+bool ScenarioManager::debugTransitionBypassEnabled() const {
+  return debug_transition_bypass_enabled_;
+}
+
 uint32_t ScenarioManager::transitionEventMask() const {
   if (scenario_ == nullptr || scenario_->steps == nullptr) {
     return 0U;
@@ -398,6 +411,9 @@ uint32_t ScenarioManager::transitionEventMask() const {
     }
     for (uint8_t transition_index = 0; transition_index < step.transitionCount; ++transition_index) {
       const TransitionDef& transition = step.transitions[transition_index];
+      if (transition.debugOnly && !debug_transition_bypass_enabled_) {
+        continue;
+      }
       if (transition.trigger != StoryTransitionTrigger::kOnEvent &&
           transition.trigger != StoryTransitionTrigger::kAfterMs) {
         continue;
@@ -427,6 +443,9 @@ bool ScenarioManager::dispatchEvent(StoryEventType type,
     if (!transitionMatches(transition, type, event_name)) {
       continue;
     }
+    if (!isTransitionAllowed(transition, "dispatch", event_name)) {
+      continue;
+    }
     if (selected == nullptr || transition.priority > selected->priority) {
       selected = &transition;
     }
@@ -447,6 +466,16 @@ bool ScenarioManager::applyTransition(const TransitionDef& transition,
                                       const char* event_name) {
   if (scenario_ == nullptr || transition.targetStepId == nullptr) {
     return false;
+  }
+  if (!isTransitionAllowed(transition, source, event_name)) {
+    return false;
+  }
+  if (transition.debugOnly) {
+    Serial.printf("[SCENARIO] apply debug transition id=%s step=%s event=%s context=%s (bypass enabled)\n",
+                  transition.id != nullptr ? transition.id : "n/a",
+                  currentStep() != nullptr && currentStep()->id != nullptr ? currentStep()->id : "n/a",
+                  (event_name != nullptr && event_name[0] != '\0') ? event_name : "-",
+                  (source != nullptr && source[0] != '\0') ? source : "-");
   }
   const int8_t target = storyFindStepIndex(*scenario_, transition.targetStepId);
   if (target < 0) {
@@ -469,6 +498,9 @@ bool ScenarioManager::runImmediateTransitions(uint32_t now_ms, const char* sourc
     for (uint8_t i = 0; i < step->transitionCount; ++i) {
       const TransitionDef& transition = step->transitions[i];
       if (transition.trigger != StoryTransitionTrigger::kImmediate) {
+        continue;
+      }
+      if (!isTransitionAllowed(transition, "immediate", parent_event_name)) {
         continue;
       }
       if (selected == nullptr || transition.priority > selected->priority) {
@@ -503,6 +535,9 @@ void ScenarioManager::evaluateAfterMsTransitions(uint32_t now_ms) {
   for (uint8_t i = 0; i < step->transitionCount; ++i) {
     const TransitionDef& transition = step->transitions[i];
     if (transition.trigger != StoryTransitionTrigger::kAfterMs) {
+      continue;
+    }
+    if (!isTransitionAllowed(transition, "after_ms", "after_ms")) {
       continue;
     }
     if (now_ms - step_entered_at_ms_ < transition.afterMs) {
@@ -589,6 +624,23 @@ bool ScenarioManager::transitionMatches(const TransitionDef& transition,
   return eventNameMatches(transition.eventName, event_name, type);
 }
 
+bool ScenarioManager::isTransitionAllowed(const TransitionDef& transition,
+                                          const char* context,
+                                          const char* event_name) const {
+  if (!transition.debugOnly) {
+    return true;
+  }
+  if (!debug_transition_bypass_enabled_) {
+    Serial.printf("[SCENARIO] skip debug transition id=%s step=%s event=%s context=%s (bypass disabled)\n",
+                  transition.id != nullptr ? transition.id : "n/a",
+                  currentStep() != nullptr && currentStep()->id != nullptr ? currentStep()->id : "n/a",
+                  (event_name != nullptr && event_name[0] != '\0') ? event_name : "-",
+                  (context != nullptr && context[0] != '\0') ? context : "-");
+    return false;
+  }
+  return true;
+}
+
 void ScenarioManager::clearStepResourceOverrides() {
   for (uint8_t index = 0; index < step_resource_override_count_; ++index) {
     step_resource_overrides_[index].step_id.remove(0);
@@ -629,6 +681,13 @@ void ScenarioManager::loadStepResourceOverrides(const char* scenario_file_path) 
     Serial.printf("[SCENARIO] override parse failed (%s): %s\n", scenario_file_path, error.c_str());
     return;
   }
+
+  if (document["debug_transition_bypass_enabled"].is<bool>()) {
+    debug_transition_bypass_enabled_ = document["debug_transition_bypass_enabled"].as<bool>();
+  } else if (document["story"]["debug_transition_bypass_enabled"].is<bool>()) {
+    debug_transition_bypass_enabled_ = document["story"]["debug_transition_bypass_enabled"].as<bool>();
+  }
+  Serial.printf("[SCENARIO] debug bypass from scenario config=%u\n", debug_transition_bypass_enabled_ ? 1U : 0U);
 
   const char* const initial_step_keys[] = {"initial_step", "initialStepId"};
   const char* initial_step =

@@ -22,7 +22,7 @@ constexpr const char* {{ step.prefix }}Apps[] = {
 {% endif %}
 {% if step.transitions %}
 constexpr TransitionDef {{ step.prefix }}Transitions[] = {
-{% for tr in step.transitions %}    {"{{ tr.id }}", {{ tr.trigger_cpp }}, {{ tr.event_cpp }}, "{{ tr.event_name }}", {{ tr.after_ms }}U, "{{ tr.target_step_id }}", {{ tr.priority }}U},
+{% for tr in step.transitions %}    {"{{ tr.id }}", {{ tr.trigger_cpp }}, {{ tr.event_cpp }}, "{{ tr.event_name }}", {{ tr.after_ms }}U, "{{ tr.target_step_id }}", {{ tr.priority }}U, {{ tr.debug_only }}},
 {% endfor %}};
 {% endif %}
 {% endfor %}

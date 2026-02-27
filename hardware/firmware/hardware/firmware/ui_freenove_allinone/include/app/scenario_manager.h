@@ -42,6 +42,8 @@ class ScenarioManager {
   bool consumeSceneChanged();
   bool consumeAudioRequest(String* out_audio_pack_id);
   uint32_t transitionEventMask() const;
+  void setDebugTransitionBypassEnabled(bool enabled, const char* source);
+  bool debugTransitionBypassEnabled() const;
 
  private:
   struct StepResourceOverride {
@@ -72,6 +74,7 @@ class ScenarioManager {
   void enterStep(int8_t step_index, uint32_t now_ms, const char* source, const char* event_name = nullptr);
   const StepDef* currentStep() const;
   bool transitionMatches(const TransitionDef& transition, StoryEventType type, const char* event_name) const;
+  bool isTransitionAllowed(const TransitionDef& transition, const char* context, const char* event_name) const;
 
   const ScenarioDef* scenario_ = nullptr;
   int8_t current_step_index_ = -1;
@@ -84,6 +87,7 @@ class ScenarioManager {
   bool win_due_armed_ = false;
   bool win_due_fired_ = false;
   uint32_t win_due_at_ms_ = 0U;
+  bool debug_transition_bypass_enabled_ = false;
   String pending_audio_pack_;
   String forced_screen_scene_id_;
   String initial_step_override_;

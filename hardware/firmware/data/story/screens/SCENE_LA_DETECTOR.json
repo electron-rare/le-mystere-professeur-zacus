@@ -1,13 +1,30 @@
 {
-  "title": "DETECTION",
+  "title": "recherche d'accordance",
   "subtitle": "Balayage en cours",
-  "symbol": "SCAN",
+  "symbol": "",
   "effect": "scan",
   "effect_speed_ms": 960,
   "theme": {
     "bg": "#041F1B",
     "accent": "#2CE5A6",
     "text": "#EFFFF8"
+  },
+  "render": {
+    "text_backend": "lgfx_overlay",
+    "disable_lvgl_text": true,
+    "wave": false,
+    "la_detector": {
+      "caption": "Balayage en cours",
+      "show_progress_ring": true,
+      "show_hourglass": true,
+      "show_caption": false,
+      "show_pitch_text": false,
+      "caption_font_face": "ibm_bold_16",
+      "caption_size": 1,
+      "meter_layout": "bottom_horizontal",
+      "progress_layout": "ring",
+      "hourglass_style": "modern"
+    }
   },
   "transition": {
     "effect": "slide_up",
@@ -41,19 +58,27 @@
   },
   "id": "SCENE_LA_DETECTOR",
   "text": {
-    "show_title": false,
+    "show_title": true,
     "show_subtitle": true,
-    "show_symbol": true,
-    "title_case": "upper",
+    "show_symbol": false,
+    "title_case": "raw",
     "subtitle_case": "raw",
+    "symbol_align": "top",
     "title_align": "top",
-    "subtitle_align": "bottom"
+    "subtitle_align": "top",
+    "size": 72
   },
   "visual": {
-    "show_title": false,
+    "show_title": true,
     "show_subtitle": true,
-    "show_symbol": true,
-    "effect_speed_ms": 960
+    "show_symbol": false,
+    "effect_speed_ms": 960,
+    "waveform": {
+      "enabled": true,
+      "sample_count": 16,
+      "amplitude_pct": 95,
+      "jitter": true
+    }
   },
   "framing": {
     "preset": "center",

@@ -1,0 +1,7 @@
+# Test
+
+Tests firmware (PlatformIO Test Runner).
+
+Etat actuel:
+- pas de suite de tests automatisee committee.
+- verification principale: build+flash+smoke serie sur les deux cibles.

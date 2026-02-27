@@ -64,6 +64,7 @@ struct TransitionDef {
   uint32_t afterMs;
   const char* targetStepId;
   uint8_t priority;
+  bool debugOnly;
 };
 
 struct StepDef {

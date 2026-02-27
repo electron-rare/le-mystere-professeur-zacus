@@ -2,6 +2,7 @@ id: str()
 version: int(min=1)
 initial_step: str()
 estimated_duration_s: int(required=False, min=0)
+debug_transition_bypass_enabled: bool(required=False)
 app_bindings: list(include('app_binding'), min=1)
 steps: list(include('step'), min=1)
 
@@ -33,3 +34,4 @@ transition:
   target_step_id: str()
   after_ms: int(min=0)
   priority: int(min=0)
+  debug_only: bool(required=False)

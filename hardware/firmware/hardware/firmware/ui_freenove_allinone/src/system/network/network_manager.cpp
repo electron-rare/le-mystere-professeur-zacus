@@ -861,6 +861,10 @@ void NetworkManager::cachePeer(const uint8_t mac[6], bool from_isr) {
   if (mac == nullptr) {
     return;
   }
+  // Do not treat FF:FF:FF:FF:FF:FF as a discovered runtime peer.
+  if (isBroadcastMac(mac)) {
+    return;
+  }
   char peer_text[18] = {0};
   formatMac(mac, peer_text, sizeof(peer_text));
   if (peer_text[0] == '\0') {

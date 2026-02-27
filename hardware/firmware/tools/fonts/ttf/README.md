@@ -14,7 +14,13 @@ Ce dossier contient les polices TTF nécessaires à la génération des polices 
 - `Inter-Regular.ttf`
 - `Orbitron-Bold.ttf`
 - `IBMPlexMono-Regular.ttf`
+<<<<<<< HEAD
 - `PressStart2P-Regular.ttf` (optionnel si `UI_FONT_PIXEL_ENABLE=1`)
+=======
+- `IBMPlexMono-Bold.ttf`
+- `IBMPlexMono-Italic.ttf`
+- `PressStart2P-Regular.ttf` (optional when `UI_FONT_PIXEL_ENABLE=1`)
+>>>>>>> 1ffe24a (Refactor code structure for improved readability and maintainability)
 
 Ces fichiers ne sont pas versionnés dans le dépôt pour éviter d’inclure des binaires upstream.
 

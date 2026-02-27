@@ -977,6 +977,7 @@ def _normalize_story_specs(files: list[Path]) -> list[dict[str, Any]]:
                 target_step_id = str(transition.get("target_step_id", "")).strip()
                 after_ms = transition.get("after_ms", 0)
                 priority = transition.get("priority", 0)
+                debug_only = bool(transition.get("debug_only", False))
                 tr_id = str(transition.get("id", "")).strip()
                 if not tr_id:
                     tr_id = f"TR_{step_id}_{tidx + 1}"
@@ -1024,6 +1025,7 @@ def _normalize_story_specs(files: list[Path]) -> list[dict[str, Any]]:
                         "target_step_id": target_step_id,
                         "after_ms": after_ms,
                         "priority": priority,
+                        "debug_only": debug_only,
                     }
                 )
 
@@ -1061,6 +1063,7 @@ def _normalize_story_specs(files: list[Path]) -> list[dict[str, Any]]:
                 "id": sid,
                 "version": version,
                 "estimated_duration_s": int(raw.get("estimated_duration_s", 0) or 0),
+                "debug_transition_bypass_enabled": bool(raw.get("debug_transition_bypass_enabled", False)),
                 "initial_step": initial_step,
                 "app_bindings": bindings,
                 "steps": steps,
@@ -1180,6 +1183,7 @@ def _create_cpp_context(scenarios: list[dict[str, Any]], spec_hash: str) -> dict
                         "after_ms": max(0, int(transition["after_ms"])),
                         "target_step_id": transition["target_step_id"],
                         "priority": max(0, int(transition["priority"])),
+                        "debug_only": "true" if transition.get("debug_only", False) else "false",
                     }
                 )
             step_entries.append(
@@ -1702,6 +1706,7 @@ def generate_bundle_files(
             "id": scenario["id"],
             "version": scenario["version"],
             "estimated_duration_s": scenario.get("estimated_duration_s", 0),
+            "debug_transition_bypass_enabled": bool(scenario.get("debug_transition_bypass_enabled", False)),
             "initial_step": scenario["initial_step"],
             "app_bindings": scenario["app_bindings"],
             "steps": scenario["steps"],
@@ -1826,7 +1831,8 @@ def _legacy_screen_mirror_targets(scene_id: str) -> list[tuple[str, str]]:
 def _sync_screens(paths: StoryPaths, check_only: bool) -> dict[str, Any]:
     _activate_scene_profiles(paths)
     story_screens_dir = paths.story_data_dir / "screens"
-    legacy_screens_dir = paths.fw_root / "data" / "screens"
+    # Keep legacy payload mirrors out of the LittleFS data/ tree.
+    legacy_screens_dir = paths.fw_root / "legacy_payloads" / "fs_excluded" / "screens"
     story_screens_dir.mkdir(parents=True, exist_ok=True)
     legacy_screens_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1877,6 +1883,7 @@ def _sync_screens(paths: StoryPaths, check_only: bool) -> dict[str, Any]:
         "story_unchanged": story_unchanged,
         "legacy_written": legacy_written,
         "legacy_unchanged": legacy_unchanged,
+        "legacy_dir": str(legacy_screens_dir),
         "palette_path": str(_palette_path(paths)),
     }
 

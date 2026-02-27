@@ -1,0 +1,40 @@
+{
+  "meta": {
+    "title": "LA_DETECTOR Hourglass",
+    "fps": 50,
+    "bpm": 120,
+    "seed": 440252,
+    "internal": {
+      "w": 160,
+      "h": 120,
+      "fmt": "I8"
+    }
+  },
+  "clips": [
+    {
+      "id": "la_hourglass_bg",
+      "t0": 0.0,
+      "t1": 60.0,
+      "track": "BG",
+      "fx": "hourglass",
+      "params": {
+        "speed": 0.0167,
+        "glitch": 0.12
+      }
+    }
+  ],
+  "mods": [
+    {
+      "clip": "la_hourglass_bg",
+      "param": "glitch",
+      "type": "random_hold",
+      "args": {
+        "base": 0.12,
+        "min": 0.06,
+        "max": 0.2,
+        "holdBeats": 2
+      }
+    }
+  ],
+  "events": []
+}

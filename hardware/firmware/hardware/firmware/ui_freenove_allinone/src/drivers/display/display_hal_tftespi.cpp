@@ -104,6 +104,57 @@ class TftEsPiDisplayHal final : public DisplayHal {
     tft_.pushColor(color565);
   }
 
+  bool drawOverlayLine(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color565) override {
+    (void)x0;
+    (void)y0;
+    (void)x1;
+    (void)y1;
+    (void)color565;
+    return false;
+  }
+
+  bool drawOverlayRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color565) override {
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+    (void)color565;
+    return false;
+  }
+
+  bool fillOverlayRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color565) override {
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+    (void)color565;
+    return false;
+  }
+
+  bool drawOverlayCircle(int16_t x, int16_t y, int16_t radius, uint16_t color565) override {
+    (void)x;
+    (void)y;
+    (void)radius;
+    (void)color565;
+    return false;
+  }
+
+  bool supportsOverlayText() const override {
+    return false;
+  }
+
+  int16_t measureOverlayText(const char* text, OverlayFontFace font_face, uint8_t size) override {
+    (void)text;
+    (void)font_face;
+    (void)size;
+    return 0;
+  }
+
+  bool drawOverlayText(const OverlayTextCommand& command) override {
+    (void)command;
+    return false;
+  }
+
   uint16_t color565(uint8_t r, uint8_t g, uint8_t b) const override {
     const uint16_t red = static_cast<uint16_t>((r & 0xF8U) << 8U);
     const uint16_t green = static_cast<uint16_t>((g & 0xFCU) << 3U);

@@ -1,0 +1,6 @@
+[submodule "external/esp32-llm"]
+	path = external/esp32-llm
+	url = https://github.com/DaveBben/esp32-llm
+[submodule "external/esp-picotts"]
+	path = external/esp-picotts
+	url = https://github.com/DiUS/esp-picotts

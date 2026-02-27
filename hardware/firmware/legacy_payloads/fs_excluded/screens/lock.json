@@ -1,0 +1,75 @@
+{
+  "title": "VERROUILLE",
+  "subtitle": "Attente de debloquage",
+  "symbol": "LOCK",
+  "effect": "pulse",
+  "effect_speed_ms": 680,
+  "theme": {
+    "bg": "#08152D",
+    "accent": "#3E8DFF",
+    "text": "#F5F8FF"
+  },
+  "transition": {
+    "effect": "fade",
+    "duration_ms": 260
+  },
+  "timeline": {
+    "loop": true,
+    "duration_ms": 1400,
+    "keyframes": [
+      {
+        "at_ms": 0,
+        "effect": "pulse",
+        "speed_ms": 680,
+        "theme": {
+          "bg": "#08152D",
+          "accent": "#3E8DFF",
+          "text": "#F5F8FF"
+        }
+      },
+      {
+        "at_ms": 1400,
+        "effect": "blink",
+        "speed_ms": 420,
+        "theme": {
+          "bg": "#0A1E3A",
+          "accent": "#74B0FF",
+          "text": "#F8FBFF"
+        }
+      }
+    ]
+  },
+  "id": "SCENE_LOCK",
+  "text": {
+    "show_title": false,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "title_case": "upper",
+    "subtitle_case": "raw",
+    "title_align": "top",
+    "subtitle_align": "bottom"
+  },
+  "visual": {
+    "show_title": false,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "effect_speed_ms": 680
+  },
+  "framing": {
+    "preset": "center",
+    "x_offset": 0,
+    "y_offset": 0,
+    "scale_pct": 100
+  },
+  "scroll": {
+    "mode": "none",
+    "speed_ms": 4200,
+    "pause_ms": 900,
+    "loop": true
+  },
+  "demo": {
+    "mode": "standard",
+    "particle_count": 4,
+    "strobe_level": 65
+  }
+}

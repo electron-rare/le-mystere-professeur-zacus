@@ -28,11 +28,41 @@
       "prefix": "lv_font_ibmplexmono"
     },
     {
+      "family": "IBM Plex Mono Bold",
+      "file": "tools/fonts/ttf/IBMPlexMono-Bold.ttf",
+      "sizes": [12, 16, 20, 24],
+      "prefix": "lv_font_ibmplexmono_bold"
+    },
+    {
+      "family": "IBM Plex Mono Italic",
+      "file": "tools/fonts/ttf/IBMPlexMono-Italic.ttf",
+      "sizes": [12, 16, 20, 24],
+      "prefix": "lv_font_ibmplexmono_italic"
+    },
+    {
       "family": "Press Start 2P",
       "file": "tools/fonts/ttf/PressStart2P-Regular.ttf",
       "sizes": [16, 24],
       "prefix": "lv_font_pressstart2p",
       "optional_define": "UI_FONT_PIXEL_ENABLE"
+    },
+    {
+      "family": "Bungee",
+      "file": "tools/fonts/ttf/Bungee-Regular.ttf",
+      "sizes": [18, 24, 32],
+      "prefix": "lv_font_bungee"
+    },
+    {
+      "family": "Monoton",
+      "file": "tools/fonts/ttf/Monoton-Regular.ttf",
+      "sizes": [18, 24, 32],
+      "prefix": "lv_font_monoton"
+    },
+    {
+      "family": "Rubik Glitch",
+      "file": "tools/fonts/ttf/RubikGlitch-Regular.ttf",
+      "sizes": [18, 24, 32],
+      "prefix": "lv_font_rubikglitch"
     }
   ]
 }

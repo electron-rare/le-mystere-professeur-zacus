@@ -1,6 +1,7 @@
 id: DEFAULT
 version: 2
 initial_step: SCENE_U_SON_PROTO
+debug_transition_bypass_enabled: false
 
 app_bindings:
   - id: APP_AUDIO
@@ -32,23 +33,11 @@ steps:
     mp3_gate_open: false
     transitions:
       - trigger: on_event
-        event_type: audio_done
-        event_name: AUDIO_DONE
-        target_step_id: SCENE_U_SON_PROTO
-        after_ms: 0
-        priority: 80
-      - trigger: on_event
         event_type: button
         event_name: ANY
         target_step_id: SCENE_LA_DETECTOR
         after_ms: 0
         priority: 120
-      - trigger: on_event
-        event_type: serial
-        event_name: FORCE_ETAPE2
-        target_step_id: SCENE_LA_DETECTOR
-        after_ms: 0
-        priority: 140
 
   - step_id: SCENE_LA_DETECTOR
     screen_scene_id: SCENE_LA_DETECTOR
@@ -64,44 +53,20 @@ steps:
     mp3_gate_open: false
     transitions:
       - trigger: on_event
-        event_type: timer
-        event_name: ETAPE2_DUE
-        target_step_id: SCENE_U_SON_PROTO
-        after_ms: 0
-        priority: 100
-      - trigger: on_event
         event_type: serial
         event_name: BTN_NEXT
         target_step_id: RTC_ESP_ETAPE1
         after_ms: 0
         priority: 110
-      - trigger: on_event
-        event_type: unlock
-        event_name: UNLOCK
-        target_step_id: RTC_ESP_ETAPE1
-        after_ms: 0
-        priority: 115
-      - trigger: on_event
-        event_type: action
-        event_name: ACTION_FORCE_ETAPE2
-        target_step_id: RTC_ESP_ETAPE1
-        after_ms: 0
-        priority: 120
-      - trigger: on_event
-        event_type: serial
-        event_name: FORCE_WIN_ETAPE1
-        target_step_id: RTC_ESP_ETAPE1
-        after_ms: 0
-        priority: 130
 
   - step_id: RTC_ESP_ETAPE1
-    screen_scene_id: SCENE_WIN_ETAPE1
-    audio_pack_id: PACK_CONFIRM_WIN_ETAPE1
+    screen_scene_id: SCENE_WIN_ETAPE
+    audio_pack_id: ""
     actions:
       - ACTION_TRACE_STEP
       - ACTION_HW_LED_ALERT
-      - ACTION_ESP_NOW_SEND_ETAPE1
       - ACTION_QUEUE_SONAR
+      - ACTION_ESP_NOW_WAITING
     apps:
       - APP_AUDIO
       - APP_SCREEN
@@ -117,11 +82,11 @@ steps:
         after_ms: 0
         priority: 130
       - trigger: on_event
-        event_type: serial
-        event_name: FORCE_DONE
-        target_step_id: WIN_ETAPE1
+        event_type: espnow
+        event_name: ACK_WIN2
+        target_step_id: RTC_ESP_ETAPE2
         after_ms: 0
-        priority: 120
+        priority: 135
 
   - step_id: WIN_ETAPE1
     screen_scene_id: SCENE_WIN_ETAPE1
@@ -137,18 +102,6 @@ steps:
       - APP_ESPNOW
     mp3_gate_open: false
     transitions:
-      - trigger: on_event
-        event_type: serial
-        event_name: BTN_NEXT
-        target_step_id: STEP_WARNING
-        after_ms: 0
-        priority: 110
-      - trigger: on_event
-        event_type: serial
-        event_name: FORCE_DONE
-        target_step_id: STEP_WARNING
-        after_ms: 0
-        priority: 120
       - trigger: on_event
         event_type: espnow
         event_name: ACK_WARNING
@@ -188,6 +141,7 @@ steps:
         target_step_id: SCENE_LEFOU_DETECTOR
         after_ms: 0
         priority: 140
+        debug_only: true
 
   - step_id: SCENE_LEFOU_DETECTOR
     screen_scene_id: SCENE_LEFOU_DETECTOR
@@ -221,17 +175,12 @@ steps:
         after_ms: 0
         priority: 115
       - trigger: on_event
-        event_type: action
-        event_name: ACTION_FORCE_ETAPE2
-        target_step_id: RTC_ESP_ETAPE2
-        after_ms: 0
-        priority: 120
-      - trigger: on_event
         event_type: serial
         event_name: FORCE_WIN_ETAPE2
         target_step_id: RTC_ESP_ETAPE2
         after_ms: 0
         priority: 130
+        debug_only: true
 
   - step_id: RTC_ESP_ETAPE2
     screen_scene_id: SCENE_WIN_ETAPE2
@@ -261,6 +210,7 @@ steps:
         target_step_id: SCENE_QR_DETECTOR
         after_ms: 0
         priority: 120
+        debug_only: true
 
   - step_id: SCENE_QR_DETECTOR
     screen_scene_id: SCENE_QR_DETECTOR
@@ -295,17 +245,12 @@ steps:
         after_ms: 0
         priority: 110
       - trigger: on_event
-        event_type: action
-        event_name: ACTION_FORCE_ETAPE2
-        target_step_id: SCENE_FINAL_WIN
-        after_ms: 0
-        priority: 120
-      - trigger: on_event
         event_type: serial
         event_name: FORCE_WIN_ETAPE2
         target_step_id: SCENE_FINAL_WIN
         after_ms: 0
         priority: 130
+        debug_only: true
 
   - step_id: SCENE_FINAL_WIN
     screen_scene_id: SCENE_FINAL_WIN
@@ -339,17 +284,12 @@ steps:
         after_ms: 0
         priority: 120
       - trigger: on_event
-        event_type: action
-        event_name: FORCE_WIN_ETAPE2
-        target_step_id: STEP_MEDIA_MANAGER
-        after_ms: 0
-        priority: 130
-      - trigger: on_event
         event_type: serial
         event_name: FORCE_WIN_ETAPE2
         target_step_id: STEP_MEDIA_MANAGER
         after_ms: 0
         priority: 125
+        debug_only: true
 
   - step_id: STEP_MEDIA_MANAGER
     screen_scene_id: SCENE_MEDIA_MANAGER

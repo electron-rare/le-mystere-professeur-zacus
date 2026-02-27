@@ -24,8 +24,11 @@ enum class FxScenePhase : uint8_t {
 enum class FxPreset : uint8_t {
   kDemo = 0,
   kWinner,
+  kWinEtape1,
   kFireworks,
   kBoingball,
+  kUsonProto,
+  kLaDetector,
 };
 
 enum class FxMode : uint8_t {
@@ -90,6 +93,8 @@ class FxEngine {
   void setScrollText(const char* text);
   void setScrollFont(FxScrollFont font);
   FxScrollFont scrollFont() const;
+  void setScrollerCentered(bool centered);
+  bool scrollerCentered() const;
   void setBpm(uint16_t bpm);
   bool renderFrame(uint32_t now_ms,
                    drivers::display::DisplayHal& display,
@@ -229,6 +234,7 @@ class FxEngine {
   uint32_t scroll_phase_px_q16_ = 0U;
   uint8_t scroll_wave_phase_ = 0U;
   uint8_t scroll_highlight_phase_ = 0U;
+  bool scroller_centered_ = false;
   BgMode bg_mode_ = BgMode::kPlasma;
   MidMode mid_mode_ = MidMode::kShadeBobs;
   fx_sync_t sync_ = {};
@@ -282,6 +288,8 @@ class FxEngine {
   bool v9_timeline_dirty_ = true;
   bool v9_use_runtime_ = true;
   FxPreset v9_loaded_preset_ = FxPreset::kDemo;
+  uint32_t v9_loop_period_ms_ = 0U;
+  uint32_t v9_loop_elapsed_ms_ = 0U;
   uint32_t blit_cpu_time_total_us_ = 0U;
   uint32_t blit_dma_submit_time_total_us_ = 0U;
   uint32_t blit_dma_wait_time_total_us_ = 0U;

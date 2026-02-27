@@ -1,22 +1,21 @@
 {
-  "id": "SCENE_READY",
   "title": "PRET",
   "subtitle": "Scenario termine",
   "symbol": "READY",
   "effect": "wave",
-  "visual": {
-    "show_title": false,
-    "show_symbol": true,
-    "effect_speed_ms": 560
-  },
+  "effect_speed_ms": 560,
   "theme": {
     "bg": "#0F2A12",
     "accent": "#6CD96B",
     "text": "#EDFFED"
   },
+  "transition": {
+    "effect": "fade",
+    "duration_ms": 220
+  },
   "timeline": {
     "loop": true,
-    "duration_ms": 1600,
+    "duration_ms": 1500,
     "keyframes": [
       {
         "at_ms": 0,
@@ -29,7 +28,7 @@
         }
       },
       {
-        "at_ms": 1600,
+        "at_ms": 1500,
         "effect": "radar",
         "speed_ms": 740,
         "theme": {
@@ -40,8 +39,41 @@
       }
     ]
   },
-  "transition": {
-    "effect": "fade",
-    "duration_ms": 220
+  "id": "SCENE_READY",
+  "text": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "title_case": "upper",
+    "subtitle_case": "raw",
+    "title_align": "top",
+    "subtitle_align": "bottom"
+  },
+  "visual": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "effect_speed_ms": 560
+  },
+  "framing": {
+    "preset": "center",
+    "x_offset": 0,
+    "y_offset": 0,
+    "scale_pct": 100
+  },
+  "scroll": {
+    "mode": "none",
+    "speed_ms": 4200,
+    "pause_ms": 900,
+    "loop": true
+  },
+  "demo": {
+    "mode": "standard",
+    "particle_count": 4,
+    "strobe_level": 65
+  },
+  "render": {
+    "text_backend": "lgfx_overlay",
+    "disable_lvgl_text": true
   }
 }

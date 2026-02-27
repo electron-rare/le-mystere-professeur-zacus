@@ -1,0 +1,16 @@
+{
+  "A_MS": 30000,
+  "B_MS": 15000,
+  "C_MS": 20000,
+  "FX_PRESET_A": "demo",
+  "FX_PRESET_B": "winner",
+  "FX_PRESET_C": "boingball",
+  "FX_MODE_A": "starfield3d",
+  "FX_MODE_B": "dotsphere3d",
+  "FX_MODE_C": "raycorridor",
+  "FX_SCROLL_TEXT_A": "- BRAVO BRIGADE Z  - ",
+  "FX_SCROLL_TEXT_B": "Vous avez la frequence - KEEP THE BEAT - ",
+  "FX_SCROLL_TEXT_C": "BOINGBALL MODE - SCENE WIN ETAPE - ",
+  "FX_SCROLL_FONT": "italic",
+  "FX_BPM": 125
+}

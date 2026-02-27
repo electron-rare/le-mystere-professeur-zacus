@@ -1,16 +1,25 @@
 meta:
   purpose: Edit LVGL/FX/audio mapping scene by scene, then sync to screen JSON.
   source_runtime_scenario: game/scenarios/default_unlock_win_etape2.yaml
-  scope: runtime_only
+  scope: runtime_plus_unused
   used_scene_count: 9
-  exported_scene_count: 9
+  exported_scene_count: 24
   unused_scene_ids:
+  - SCENE_BROKEN
+  - SCENE_CAMERA_SCAN
+  - SCENE_FIREWORKS
   - SCENE_LOCKED
+  - SCENE_MEDIA_ARCHIVE
   - SCENE_MP3_PLAYER
   - SCENE_PHOTO_MANAGER
   - SCENE_READY
   - SCENE_REWARD
   - SCENE_SEARCH
+  - SCENE_SIGNAL_SPIKE
+  - SCENE_TEST_LAB
+  - SCENE_WIN
+  - SCENE_WINNER
+  - SCENE_WIN_ETAPE
   missing_screen_ids: []
 scenes:
 - scene_id: SCENE_U_SON_PROTO
@@ -19,152 +28,281 @@ scenes:
   runtime_step_ids:
   - SCENE_U_SON_PROTO
   lvgl:
-    title: U-SON PROTO
-    subtitle: Calibration signal en cours
-    symbol: U1
+    title: PROTO U-SON
+    subtitle: Signal brouille / transmission active
+    symbol: ALERT
     visual:
       show_title: true
       show_subtitle: true
       show_symbol: true
-      effect_speed_ms: 540
+      effect_speed_ms: 220
     theme:
-      bg: '#0F162A'
-      accent: '#6FE6FF'
-      text: '#EAFBFF'
+      bg: '#04030A'
+      accent: '#F35DFF'
+      text: '#FFFFFF'
     transition:
-      effect: fade
-      duration_ms: 200
+      effect: glitch
+      duration_ms: 160
   fx:
-    effect: pulse
-    timeline: {}
+    effect: text_glitch
+    timeline:
+      loop: true
+      duration_ms: 30000
+      keyframes:
+      - at_ms: 0
+        effect: tunnel3d
+        speed_ms: 15000
+        theme:
+          bg: '#06040B'
+          accent: '#F35DFF'
+          text: '#FFFFFF'
+      - at_ms: 15000
+        effect: rotozoom
+        speed_ms: 15000
+        theme:
+          bg: '#080513'
+          accent: '#EF7FE7'
+          text: '#FFFFFF'
+  text:
+    show_title: true
+    show_subtitle: true
+    show_symbol: true
+    title_case: center
+    subtitle_case: raw
+    symbol_align: top
+    title_align: center
+    subtitle_align: bottom
+    title_font_face: ibm_bold_24
+    subtitle_font_face: ibm_bold_16
+    symbol_font_face: orbitron_28
+    glitch: 42
+    size: 50
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
+    foreground_fx: text_glitch
+    wave: false
+  hardware:
+    backlight:
+      mode: level_sync
+      min: 30
+      max: 95
+      base: 42
+      spike_pct: 16
+    ws2812:
+      mode: dominant_band_single
+      one_led_at_a_time: true
+      level_sync: true
+      color_source: mic.dynamic
+      dynamic_color: true
+      min_brightness: 4
+      max_brightness: 95
+      auto: true
+  audio:
+    ambient_random:
+      enabled: true
+      track: /music/boot_radio.mp3
+      non_interruptive: true
+      volume_min: 21
+      volume_max: 21
+      delay_min_ms: 9000
+      delay_max_ms: 26000
+      eq_profiles: []
 - scene_id: SCENE_LA_DETECTOR
   screen_json: hardware/firmware/data/story/screens/SCENE_LA_DETECTOR.json
   default_audio_pack_id: ''
   runtime_step_ids:
   - SCENE_LA_DETECTOR
   lvgl:
-    title: LA DETECTOR
-    subtitle: Trouve la bonne resonance
-    symbol: LA
+    title: recherche d'accordance
+    subtitle: Balayage en cours
+    symbol: ''
     visual:
       show_title: true
       show_subtitle: true
-      show_symbol: true
-      effect_speed_ms: 460
+      show_symbol: false
+      effect_speed_ms: 960
+      waveform:
+        enabled: true
+        sample_count: 16
+        amplitude_pct: 95
+        jitter: true
     theme:
-      bg: '#111B20'
-      accent: '#86FFD2'
-      text: '#ECFFF6'
+      bg: '#041F1B'
+      accent: '#2CE5A6'
+      text: '#EFFFF8'
     transition:
-      effect: fade
-      duration_ms: 180
+      effect: slide_up
+      duration_ms: 220
   fx:
-    effect: radar
+    effect: scan
     timeline:
       loop: true
-      duration_ms: 2400
+      duration_ms: 1500
       keyframes:
       - at_ms: 0
-        effect: wave
-        speed_ms: 480
+        effect: scan
+        speed_ms: 960
         theme:
-          bg: '#000000'
-          accent: '#49D9FF'
-          text: '#E8F6FF'
-      - at_ms: 800
-        effect: radar
+          bg: '#041F1B'
+          accent: '#2CE5A6'
+          text: '#EFFFF8'
+      - at_ms: 1500
+        effect: pulse
         speed_ms: 620
         theme:
-          bg: '#000000'
-          accent: '#7EE8FF'
-          text: '#F2FAFF'
-      - at_ms: 1600
-        effect: wave
-        speed_ms: 340
-        theme:
-          bg: '#000000'
-          accent: '#D8FF6B'
-          text: '#F9FFD8'
-      - at_ms: 2400
-        effect: radar
-        speed_ms: 700
-        theme:
-          bg: '#000000'
-          accent: '#49D9FF'
-          text: '#E8F6FF'
+          bg: '#062923'
+          accent: '#63F0C3'
+          text: '#F3FFFB'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
+    wave: false
+    la_detector:
+      caption: Balayage en cours
+      show_progress_ring: true
+      show_hourglass: true
+      show_caption: false
+      show_pitch_text: false
+      caption_font: 1
+      caption_size: 1
+      meter_layout: bottom_horizontal
+      progress_layout: ring
+      hourglass_style: modern
+      caption_font_face: ibm_bold_16
 - scene_id: SCENE_WIN_ETAPE1
   screen_json: hardware/firmware/data/story/screens/SCENE_WIN_ETAPE1.json
   default_audio_pack_id: PACK_CONFIRM_WIN_ETAPE1
   runtime_step_ids:
-  - RTC_ESP_ETAPE1
   - WIN_ETAPE1
   lvgl:
     title: WIN ETAPE 1
-    subtitle: ACK distant valide
-    symbol: W1
+    subtitle: Validation distante confirmee
+    symbol: WIN
     visual:
       show_title: true
       show_subtitle: true
       show_symbol: true
-      effect_speed_ms: 320
+      effect_speed_ms: 260
     theme:
-      bg: '#1F142C'
-      accent: '#F3C86A'
-      text: '#FFF7E2'
+      bg: '#0A1027'
+      accent: '#6AD4FF'
+      text: '#F4FAFF'
     transition:
-      effect: zoom
-      duration_ms: 260
+      effect: fade
+      duration_ms: 220
   fx:
-    effect: celebrate
-    timeline: {}
+    effect: tunnel3d
+    timeline:
+      loop: true
+      duration_ms: 30000
+      keyframes:
+      - at_ms: 0
+        effect: tunnel3d
+        speed_ms: 15000
+        theme:
+          bg: '#0A1027'
+          accent: '#6AD4FF'
+          text: '#F4FAFF'
+      - at_ms: 15000
+        effect: rotozoom
+        speed_ms: 15000
+        theme:
+          bg: '#11193B'
+          accent: '#8DE6FF'
+          text: '#FFFFFF'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
+    wave: false
 - scene_id: SCENE_WARNING
   screen_json: hardware/firmware/data/story/screens/SCENE_WARNING.json
   default_audio_pack_id: PACK_BOOT_RADIO
   runtime_step_ids:
   - STEP_WARNING
   lvgl:
-    title: WARNING
-    subtitle: Nouvelle phase etape 2
-    symbol: '!'
+    title: ALERTE
+    subtitle: Signal anormal
+    symbol: WARN
     visual:
       show_title: true
       show_subtitle: true
       show_symbol: true
-      effect_speed_ms: 380
+      effect_speed_ms: 240
     theme:
-      bg: '#2B140E'
-      accent: '#FF9D57'
-      text: '#FFF0E8'
+      bg: '#261209'
+      accent: '#FF9A4A'
+      text: '#FFF2E6'
     transition:
       effect: fade
-      duration_ms: 180
+      duration_ms: 200
   fx:
     effect: blink
-    timeline: {}
+    timeline:
+      loop: true
+      duration_ms: 1400
+      keyframes:
+      - at_ms: 0
+        effect: blink
+        speed_ms: 240
+        theme:
+          bg: '#261209'
+          accent: '#FF9A4A'
+          text: '#FFF2E6'
+      - at_ms: 1400
+        effect: pulse
+        speed_ms: 520
+        theme:
+          bg: '#31170C'
+          accent: '#FFC071'
+          text: '#FFF8EF'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
 - scene_id: SCENE_LEFOU_DETECTOR
   screen_json: hardware/firmware/data/story/screens/SCENE_LEFOU_DETECTOR.json
   default_audio_pack_id: ''
   runtime_step_ids:
   - SCENE_LEFOU_DETECTOR
   lvgl:
-    title: LEFOU DETECTOR
-    subtitle: Analyse secondaire active
-    symbol: LF
+    title: DETECTEUR LEFOU
+    subtitle: Analyse en cours
+    symbol: AUDIO
     visual:
       show_title: true
       show_subtitle: true
       show_symbol: true
-      effect_speed_ms: 470
+      effect_speed_ms: 460
     theme:
-      bg: '#111722'
-      accent: '#9AC4FF'
-      text: '#EAF2FF'
+      bg: '#071B1A'
+      accent: '#46E6C8'
+      text: '#E9FFF9'
     transition:
-      effect: fade
-      duration_ms: 180
+      effect: zoom
+      duration_ms: 250
   fx:
-    effect: radar
-    timeline: {}
+    effect: wave
+    timeline:
+      loop: true
+      duration_ms: 1200
+      keyframes:
+      - at_ms: 0
+        effect: wave
+        speed_ms: 460
+        theme:
+          bg: '#071B1A'
+          accent: '#46E6C8'
+          text: '#E9FFF9'
+      - at_ms: 1200
+        effect: radar
+        speed_ms: 620
+        theme:
+          bg: '#0A2523'
+          accent: '#7FF2DA'
+          text: '#F2FFFC'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
 - scene_id: SCENE_WIN_ETAPE2
   screen_json: hardware/firmware/data/story/screens/SCENE_WIN_ETAPE2.json
   default_audio_pack_id: PACK_CONFIRM_WIN_ETAPE2
@@ -172,31 +310,51 @@ scenes:
   - RTC_ESP_ETAPE2
   lvgl:
     title: WIN ETAPE 2
-    subtitle: Validation finale distante
-    symbol: W2
+    subtitle: ACK en attente
+    symbol: WIN
     visual:
       show_title: true
       show_subtitle: true
       show_symbol: true
-      effect_speed_ms: 300
+      effect_speed_ms: 340
     theme:
-      bg: '#24142E'
-      accent: '#FFD37A'
-      text: '#FFF8E6'
+      bg: '#220F3A'
+      accent: '#FFCE62'
+      text: '#FFF8EA'
     transition:
       effect: zoom
-      duration_ms: 260
+      duration_ms: 280
   fx:
     effect: celebrate
-    timeline: {}
+    timeline:
+      loop: true
+      duration_ms: 1200
+      keyframes:
+      - at_ms: 0
+        effect: celebrate
+        speed_ms: 340
+        theme:
+          bg: '#220F3A'
+          accent: '#FFCE62'
+          text: '#FFF8EA'
+      - at_ms: 1200
+        effect: pulse
+        speed_ms: 260
+        theme:
+          bg: '#2E1850'
+          accent: '#FFE18E'
+          text: '#FFFDF5'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
 - scene_id: SCENE_QR_DETECTOR
   screen_json: hardware/firmware/data/story/screens/SCENE_QR_DETECTOR.json
   default_audio_pack_id: ''
   runtime_step_ids:
   - SCENE_QR_DETECTOR
   lvgl:
-    title: QR FINAL
-    subtitle: Scanne le QR de validation
+    title: ZACUS QR VALIDATION
+    subtitle: Scan du QR final
     symbol: QR
     visual:
       show_title: true
@@ -205,14 +363,34 @@ scenes:
       effect_speed_ms: 0
     theme:
       bg: '#102040'
-      accent: '#66AFFF'
-      text: '#F2F8FF'
+      accent: '#5CA3FF'
+      text: '#F3F7FF'
     transition:
       effect: fade
       duration_ms: 180
   fx:
     effect: none
-    timeline: {}
+    timeline:
+      loop: true
+      duration_ms: 1600
+      keyframes:
+      - at_ms: 0
+        effect: none
+        speed_ms: 0
+        theme:
+          bg: '#102040'
+          accent: '#5CA3FF'
+          text: '#F3F7FF'
+      - at_ms: 1600
+        effect: pulse
+        speed_ms: 520
+        theme:
+          bg: '#142A52'
+          accent: '#8EC1FF'
+          text: '#FCFEFF'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
 - scene_id: SCENE_FINAL_WIN
   screen_json: hardware/firmware/data/story/screens/SCENE_FINAL_WIN.json
   default_audio_pack_id: ''
@@ -226,17 +404,37 @@ scenes:
       show_title: true
       show_subtitle: true
       show_symbol: true
-      effect_speed_ms: 300
+      effect_speed_ms: 320
     theme:
-      bg: '#1A0F2A'
-      accent: '#FFD45E'
-      text: '#FFF7E0'
+      bg: '#1C0C2E'
+      accent: '#FFCC5C'
+      text: '#FFF7E4'
     transition:
       effect: fade
       duration_ms: 240
   fx:
     effect: celebrate
-    timeline: {}
+    timeline:
+      loop: true
+      duration_ms: 1400
+      keyframes:
+      - at_ms: 0
+        effect: celebrate
+        speed_ms: 320
+        theme:
+          bg: '#1C0C2E'
+          accent: '#FFCC5C'
+          text: '#FFF7E4'
+      - at_ms: 1400
+        effect: blink
+        speed_ms: 220
+        theme:
+          bg: '#2A1642'
+          accent: '#FFE18D'
+          text: '#FFFDF3'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
 - scene_id: SCENE_MEDIA_MANAGER
   screen_json: hardware/firmware/data/story/screens/SCENE_MEDIA_MANAGER.json
   default_audio_pack_id: ''
@@ -244,17 +442,17 @@ scenes:
   - STEP_MEDIA_MANAGER
   lvgl:
     title: MEDIA MANAGER
-    subtitle: Photo / MP3 / Story
-    symbol: MEDIA
+    subtitle: PHOTO / MP3 / STORY
+    symbol: READY
     visual:
       show_title: true
       show_subtitle: true
       show_symbol: true
-      effect_speed_ms: 560
+      effect_speed_ms: 620
     theme:
       bg: '#081A34'
-      accent: '#9BCBFF'
-      text: '#EDF7FF'
+      accent: '#8BC4FF'
+      text: '#EAF6FF'
     transition:
       effect: fade
       duration_ms: 220
@@ -262,19 +460,677 @@ scenes:
     effect: radar
     timeline:
       loop: true
-      duration_ms: 2200
+      duration_ms: 1200
       keyframes:
       - at_ms: 0
         effect: radar
-        speed_ms: 560
+        speed_ms: 620
         theme:
           bg: '#081A34'
-          accent: '#9BCBFF'
-          text: '#EDF7FF'
-      - at_ms: 1100
+          accent: '#8BC4FF'
+          text: '#EAF6FF'
+      - at_ms: 1200
         effect: pulse
-        speed_ms: 480
+        speed_ms: 520
         theme:
-          bg: '#0D264A'
-          accent: '#B8DDFF'
-          text: '#F7FBFF'
+          bg: '#0C2448'
+          accent: '#A6D4FF'
+          text: '#F5FAFF'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
+- scene_id: SCENE_BROKEN
+  screen_json: hardware/firmware/data/story/screens/SCENE_BROKEN.json
+  default_audio_pack_id: ''
+  runtime_step_ids: []
+  lvgl:
+    title: PROTO U-SON
+    subtitle: Signal brouille
+    symbol: ALERT
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 180
+    theme:
+      bg: '#2A0508'
+      accent: '#FF4A45'
+      text: '#FFF1F1'
+    transition:
+      effect: glitch
+      duration_ms: 160
+  fx:
+    effect: blink
+    timeline:
+      loop: true
+      duration_ms: 760
+      keyframes:
+      - at_ms: 0
+        effect: blink
+        speed_ms: 180
+        theme:
+          bg: '#2A0508'
+          accent: '#FF4A45'
+          text: '#FFF1F1'
+      - at_ms: 760
+        effect: blink
+        speed_ms: 140
+        theme:
+          bg: '#33070C'
+          accent: '#FF7A75'
+          text: '#FFF6F5'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
+- scene_id: SCENE_CAMERA_SCAN
+  screen_json: hardware/firmware/data/story/screens/SCENE_CAMERA_SCAN.json
+  default_audio_pack_id: ''
+  runtime_step_ids: []
+  lvgl:
+    title: ZACUS QR VALIDATION
+    subtitle: Scanne le QR final
+    symbol: QR
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 0
+    theme:
+      bg: '#102040'
+      accent: '#5CA3FF'
+      text: '#F3F7FF'
+    transition:
+      effect: fade
+      duration_ms: 180
+  fx:
+    effect: none
+    timeline:
+      loop: true
+      duration_ms: 1000
+      keyframes:
+      - at_ms: 0
+        effect: none
+        speed_ms: 0
+        theme:
+          bg: '#102040'
+          accent: '#5CA3FF'
+          text: '#F3F7FF'
+      - at_ms: 1000
+        effect: none
+        speed_ms: 0
+        theme:
+          bg: '#102040'
+          accent: '#5CA3FF'
+          text: '#F3F7FF'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
+- scene_id: SCENE_FIREWORKS
+  screen_json: hardware/firmware/data/story/screens/SCENE_FIREWORKS.json
+  default_audio_pack_id: ''
+  runtime_step_ids: []
+  lvgl:
+    title: FIREWORKS
+    subtitle: ''
+    symbol: RUN
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 680
+    theme:
+      bg: '#07132A'
+      accent: '#2A76FF'
+      text: '#E8F1FF'
+    transition:
+      effect: fade
+      duration_ms: 240
+  fx:
+    effect: pulse
+    timeline:
+      loop: true
+      duration_ms: 1400
+      keyframes:
+      - at_ms: 0
+        effect: pulse
+        speed_ms: 680
+        theme:
+          bg: '#07132A'
+          accent: '#2A76FF'
+          text: '#E8F1FF'
+      - at_ms: 1400
+        effect: blink
+        speed_ms: 360
+        theme:
+          bg: '#0B1F3C'
+          accent: '#5A99FF'
+          text: '#F1F7FF'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
+- scene_id: SCENE_LOCKED
+  screen_json: hardware/firmware/data/story/screens/SCENE_LOCKED.json
+  default_audio_pack_id: ''
+  runtime_step_ids: []
+  lvgl:
+    title: VERROUILLE
+    subtitle: Attente de debloquage
+    symbol: LOCK
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 680
+    theme:
+      bg: '#08152D'
+      accent: '#3E8DFF'
+      text: '#F5F8FF'
+    transition:
+      effect: fade
+      duration_ms: 260
+  fx:
+    effect: pulse
+    timeline:
+      loop: true
+      duration_ms: 1400
+      keyframes:
+      - at_ms: 0
+        effect: pulse
+        speed_ms: 680
+        theme:
+          bg: '#08152D'
+          accent: '#3E8DFF'
+          text: '#F5F8FF'
+      - at_ms: 1400
+        effect: blink
+        speed_ms: 420
+        theme:
+          bg: '#0A1E3A'
+          accent: '#74B0FF'
+          text: '#F8FBFF'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
+- scene_id: SCENE_MEDIA_ARCHIVE
+  screen_json: hardware/firmware/data/story/screens/SCENE_MEDIA_ARCHIVE.json
+  default_audio_pack_id: ''
+  runtime_step_ids: []
+  lvgl:
+    title: ARCHIVES MEDIA
+    subtitle: Photos et enregistrements sauvegardes
+    symbol: READY
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 760
+    theme:
+      bg: '#0D1A34'
+      accent: '#7CB1FF'
+      text: '#EEF4FF'
+    transition:
+      effect: fade
+      duration_ms: 240
+  fx:
+    effect: radar
+    timeline:
+      loop: true
+      duration_ms: 2000
+      keyframes:
+      - at_ms: 0
+        effect: radar
+        speed_ms: 760
+        theme:
+          bg: '#0D1A34'
+          accent: '#7CB1FF'
+          text: '#EEF4FF'
+      - at_ms: 1000
+        effect: pulse
+        speed_ms: 620
+        theme:
+          bg: '#132245'
+          accent: '#9CC7FF'
+          text: '#F7FAFF'
+      - at_ms: 2000
+        effect: radar
+        speed_ms: 760
+        theme:
+          bg: '#0D1A34'
+          accent: '#7CB1FF'
+          text: '#EEF4FF'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
+- scene_id: SCENE_MP3_PLAYER
+  screen_json: hardware/firmware/data/story/screens/SCENE_MP3_PLAYER.json
+  default_audio_pack_id: ''
+  runtime_step_ids: []
+  lvgl:
+    title: MP3 PLAYER
+    subtitle: ''
+    symbol: RUN
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 680
+    theme:
+      bg: '#07132A'
+      accent: '#2A76FF'
+      text: '#E8F1FF'
+    transition:
+      effect: fade
+      duration_ms: 240
+  fx:
+    effect: pulse
+    timeline:
+      loop: true
+      duration_ms: 1400
+      keyframes:
+      - at_ms: 0
+        effect: pulse
+        speed_ms: 680
+        theme:
+          bg: '#07132A'
+          accent: '#2A76FF'
+          text: '#E8F1FF'
+      - at_ms: 1400
+        effect: blink
+        speed_ms: 360
+        theme:
+          bg: '#0B1F3C'
+          accent: '#5A99FF'
+          text: '#F1F7FF'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
+- scene_id: SCENE_PHOTO_MANAGER
+  screen_json: hardware/firmware/data/story/screens/SCENE_PHOTO_MANAGER.json
+  default_audio_pack_id: ''
+  runtime_step_ids: []
+  lvgl:
+    title: PHOTO MANAGER
+    subtitle: Capture JPEG
+    symbol: SCAN
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 0
+    theme:
+      bg: '#0B1A2E'
+      accent: '#86CCFF'
+      text: '#EEF6FF'
+    transition:
+      effect: fade
+      duration_ms: 200
+  fx:
+    effect: none
+    timeline:
+      loop: true
+      duration_ms: 1000
+      keyframes:
+      - at_ms: 0
+        effect: none
+        speed_ms: 0
+        theme:
+          bg: '#0B1A2E'
+          accent: '#86CCFF'
+          text: '#EEF6FF'
+      - at_ms: 1000
+        effect: none
+        speed_ms: 0
+        theme:
+          bg: '#0B1A2E'
+          accent: '#86CCFF'
+          text: '#EEF6FF'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
+- scene_id: SCENE_READY
+  screen_json: hardware/firmware/data/story/screens/SCENE_READY.json
+  default_audio_pack_id: ''
+  runtime_step_ids: []
+  lvgl:
+    title: PRET
+    subtitle: Scenario termine
+    symbol: READY
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 560
+    theme:
+      bg: '#0F2A12'
+      accent: '#6CD96B'
+      text: '#EDFFED'
+    transition:
+      effect: fade
+      duration_ms: 220
+  fx:
+    effect: wave
+    timeline:
+      loop: true
+      duration_ms: 1500
+      keyframes:
+      - at_ms: 0
+        effect: wave
+        speed_ms: 560
+        theme:
+          bg: '#0F2A12'
+          accent: '#6CD96B'
+          text: '#EDFFED'
+      - at_ms: 1500
+        effect: radar
+        speed_ms: 740
+        theme:
+          bg: '#133517'
+          accent: '#9EE49D'
+          text: '#F4FFF4'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
+- scene_id: SCENE_REWARD
+  screen_json: hardware/firmware/data/story/screens/SCENE_REWARD.json
+  default_audio_pack_id: ''
+  runtime_step_ids: []
+  lvgl:
+    title: RECOMPENSE
+    subtitle: Indice debloque
+    symbol: WIN
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 420
+    theme:
+      bg: '#2A103E'
+      accent: '#F9D860'
+      text: '#FFF9E6'
+    transition:
+      effect: zoom
+      duration_ms: 300
+  fx:
+    effect: celebrate
+    timeline:
+      loop: true
+      duration_ms: 1200
+      keyframes:
+      - at_ms: 0
+        effect: celebrate
+        speed_ms: 420
+        theme:
+          bg: '#2A103E'
+          accent: '#F9D860'
+          text: '#FFF9E6'
+      - at_ms: 1200
+        effect: pulse
+        speed_ms: 280
+        theme:
+          bg: '#3E1A52'
+          accent: '#FFD97D'
+          text: '#FFFDF2'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
+- scene_id: SCENE_SEARCH
+  screen_json: hardware/firmware/data/story/screens/SCENE_SEARCH.json
+  default_audio_pack_id: ''
+  runtime_step_ids: []
+  lvgl:
+    title: RECHERCHE
+    subtitle: Analyse des indices
+    symbol: SCAN
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 920
+    theme:
+      bg: '#05261F'
+      accent: '#35E7B0'
+      text: '#EFFFF8'
+    transition:
+      effect: glitch
+      duration_ms: 230
+  fx:
+    effect: scan
+    timeline:
+      loop: true
+      duration_ms: 3000
+      keyframes:
+      - at_ms: 0
+        effect: scan
+        speed_ms: 920
+        theme:
+          bg: '#05261F'
+          accent: '#35E7B0'
+          text: '#EFFFF8'
+      - at_ms: 1600
+        effect: wave
+        speed_ms: 520
+        theme:
+          bg: '#07322A'
+          accent: '#67F0C4'
+          text: '#F2FFF9'
+      - at_ms: 3000
+        effect: scan
+        speed_ms: 820
+        theme:
+          bg: '#05261F'
+          accent: '#35E7B0'
+          text: '#EFFFF8'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
+- scene_id: SCENE_SIGNAL_SPIKE
+  screen_json: hardware/firmware/data/story/screens/SCENE_SIGNAL_SPIKE.json
+  default_audio_pack_id: ''
+  runtime_step_ids: []
+  lvgl:
+    title: PIC DE SIGNAL
+    subtitle: Interference soudaine detectee
+    symbol: ALERT
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 260
+    theme:
+      bg: '#24090C'
+      accent: '#FF6A52'
+      text: '#FFF2EB'
+    transition:
+      effect: glitch
+      duration_ms: 170
+  fx:
+    effect: wave
+    timeline:
+      loop: true
+      duration_ms: 1400
+      keyframes:
+      - at_ms: 0
+        effect: wave
+        speed_ms: 260
+        theme:
+          bg: '#24090C'
+          accent: '#FF6A52'
+          text: '#FFF2EB'
+      - at_ms: 700
+        effect: blink
+        speed_ms: 180
+        theme:
+          bg: '#2F1014'
+          accent: '#FF8C73'
+          text: '#FFF8F5'
+      - at_ms: 1400
+        effect: wave
+        speed_ms: 320
+        theme:
+          bg: '#24090C'
+          accent: '#FF6A52'
+          text: '#FFF2EB'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
+- scene_id: SCENE_TEST_LAB
+  screen_json: hardware/firmware/data/story/screens/SCENE_TEST_LAB.json
+  default_audio_pack_id: ''
+  runtime_step_ids: []
+  lvgl:
+    title: MIRE COULEUR
+    subtitle: NOIR | BLANC | ROUGE | VERT | BLEU | CYAN | MAGENTA | JAUNE
+    symbol: PALETTE
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: false
+      effect_speed_ms: 0
+      waveform:
+        enabled: false
+        sample_count: 0
+        amplitude_pct: 0
+        jitter: false
+    theme:
+      bg: '#000000'
+      accent: '#888888'
+      text: '#FFFFFF'
+    transition:
+      effect: none
+      duration_ms: 0
+  fx:
+    effect: none
+    timeline: {}
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
+- scene_id: SCENE_WIN
+  screen_json: hardware/firmware/data/story/screens/SCENE_WIN.json
+  default_audio_pack_id: ''
+  runtime_step_ids: []
+  lvgl:
+    title: VICTOIRE
+    subtitle: Etape validee
+    symbol: WIN
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 420
+    theme:
+      bg: '#231038'
+      accent: '#F4CB4A'
+      text: '#FFF8E2'
+    transition:
+      effect: zoom
+      duration_ms: 280
+  fx:
+    effect: celebrate
+    timeline:
+      loop: true
+      duration_ms: 1000
+      keyframes:
+      - at_ms: 0
+        effect: celebrate
+        speed_ms: 420
+        theme:
+          bg: '#231038'
+          accent: '#F4CB4A'
+          text: '#FFF8E2'
+      - at_ms: 1000
+        effect: blink
+        speed_ms: 240
+        theme:
+          bg: '#341A4D'
+          accent: '#FFE083'
+          text: '#FFFDF3'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
+- scene_id: SCENE_WINNER
+  screen_json: hardware/firmware/data/story/screens/SCENE_WINNER.json
+  default_audio_pack_id: ''
+  runtime_step_ids: []
+  lvgl:
+    title: WINNER
+    subtitle: ''
+    symbol: RUN
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 680
+    theme:
+      bg: '#07132A'
+      accent: '#2A76FF'
+      text: '#E8F1FF'
+    transition:
+      effect: fade
+      duration_ms: 240
+  fx:
+    effect: pulse
+    timeline:
+      loop: true
+      duration_ms: 1400
+      keyframes:
+      - at_ms: 0
+        effect: pulse
+        speed_ms: 680
+        theme:
+          bg: '#07132A'
+          accent: '#2A76FF'
+          text: '#E8F1FF'
+      - at_ms: 1400
+        effect: blink
+        speed_ms: 360
+        theme:
+          bg: '#0B1F3C'
+          accent: '#5A99FF'
+          text: '#F1F7FF'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true
+- scene_id: SCENE_WIN_ETAPE
+  screen_json: hardware/firmware/data/story/screens/SCENE_WIN_ETAPE.json
+  default_audio_pack_id: ''
+  runtime_step_ids:
+  - RTC_ESP_ETAPE1
+  lvgl:
+    title: VALIDATION HOT-LINE
+    subtitle: En attente de validation distante...
+    symbol: RADIO
+    visual:
+      show_title: true
+      show_subtitle: true
+      show_symbol: true
+      effect_speed_ms: 320
+    theme:
+      bg: '#150B27'
+      accent: '#54E3FF'
+      text: '#F4FBFF'
+    transition:
+      effect: fade
+      duration_ms: 220
+  fx:
+    effect: celebrate
+    timeline:
+      loop: true
+      duration_ms: 1200
+      keyframes:
+      - at_ms: 0
+        effect: celebrate
+        speed_ms: 320
+        theme:
+          bg: '#150B27'
+          accent: '#54E3FF'
+          text: '#F4FBFF'
+      - at_ms: 1200
+        effect: celebrate
+        speed_ms: 280
+        theme:
+          bg: '#1C0F32'
+          accent: '#7CEEFF'
+          text: '#FFFFFF'
+  render:
+    text_backend: lgfx_overlay
+    disable_lvgl_text: true

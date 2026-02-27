@@ -9,6 +9,7 @@ from .generator import (
     default_paths,
     run_generate_bundle,
     run_generate_cpp,
+    run_sync_screens,
     run_validate,
 )
 
@@ -38,6 +39,17 @@ def build_parser() -> argparse.ArgumentParser:
     bundle_p = sub.add_parser("generate-bundle", parents=[common], help="Generate story bundle JSON+sha")
     bundle_p.add_argument("--out-dir", default="", help="Bundle root directory")
     bundle_p.add_argument("--archive", default="", help="Optional .tar.gz archive output")
+
+    sync_screens_p = sub.add_parser(
+        "sync-screens",
+        parents=[common],
+        help="Synchronize data/story/screens and legacy_payloads/fs_excluded/screens from palette",
+    )
+    sync_screens_p.add_argument(
+        "--check",
+        action="store_true",
+        help="Check drift only (no writes); non-zero exit on mismatch",
+    )
 
     deploy_alias = sub.add_parser("deploy", parents=[common], help="Alias of generate-bundle")
     deploy_alias.add_argument("--out-dir", default="", help="Bundle root directory")
@@ -96,6 +108,16 @@ def main(argv: list[str] | None = None) -> int:
             )
             if result["archive"] is not None:
                 print(f"[story-gen] archive={result['archive']}")
+            return 0
+
+        if args.command == "sync-screens":
+            result = run_sync_screens(paths, check_only=bool(args.check))
+            mode = "check" if args.check else "write"
+            print(
+                f"[story-gen] OK sync-screens mode={mode} story={result['story_count']} "
+                f"story_written={result['story_written']} legacy_written={result['legacy_written']} "
+                f"palette={result['palette_path']} legacy_dir={result['legacy_dir']}"
+            )
             return 0
 
         if args.command == "all":

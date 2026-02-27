@@ -14,12 +14,18 @@ bool sameText(const char* lhs, const char* rhs) {
   return strcmp(lhs, rhs) == 0;
 }
 
-bool eventNameMatch(const char* transitionEventName, const char* eventName) {
+bool eventNameMatch(StoryEventType transitionEventType,
+                    const char* transitionEventName,
+                    const char* eventName) {
   if (transitionEventName == nullptr || transitionEventName[0] == '\0') {
     return true;
   }
   if (eventName == nullptr || eventName[0] == '\0') {
     return false;
+  }
+  if (transitionEventType == StoryEventType::kButton &&
+      strcmp(transitionEventName, "ANY") == 0) {
+    return true;
   }
   return strcmp(transitionEventName, eventName) == 0;
 }
@@ -245,7 +251,7 @@ int8_t StoryEngineV2::selectEventTransition(const StoryEvent& event) const {
     if (transition.eventType != event.type) {
       continue;
     }
-    if (!eventNameMatch(transition.eventName, event.name)) {
+    if (!eventNameMatch(transition.eventType, transition.eventName, event.name)) {
       continue;
     }
     if (selected < 0 || transition.priority > selectedPriority) {

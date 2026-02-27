@@ -1,0 +1,75 @@
+{
+  "title": "PROTO U-SON",
+  "subtitle": "Signal brouille",
+  "symbol": "ALERT",
+  "effect": "blink",
+  "effect_speed_ms": 180,
+  "theme": {
+    "bg": "#2A0508",
+    "accent": "#FF4A45",
+    "text": "#FFF1F1"
+  },
+  "transition": {
+    "effect": "glitch",
+    "duration_ms": 160
+  },
+  "timeline": {
+    "loop": true,
+    "duration_ms": 760,
+    "keyframes": [
+      {
+        "at_ms": 0,
+        "effect": "blink",
+        "speed_ms": 180,
+        "theme": {
+          "bg": "#2A0508",
+          "accent": "#FF4A45",
+          "text": "#FFF1F1"
+        }
+      },
+      {
+        "at_ms": 760,
+        "effect": "blink",
+        "speed_ms": 140,
+        "theme": {
+          "bg": "#33070C",
+          "accent": "#FF7A75",
+          "text": "#FFF6F5"
+        }
+      }
+    ]
+  },
+  "id": "SCENE_BROKEN",
+  "text": {
+    "show_title": false,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "title_case": "upper",
+    "subtitle_case": "raw",
+    "title_align": "top",
+    "subtitle_align": "bottom"
+  },
+  "visual": {
+    "show_title": false,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "effect_speed_ms": 180
+  },
+  "framing": {
+    "preset": "center",
+    "x_offset": 0,
+    "y_offset": 0,
+    "scale_pct": 100
+  },
+  "scroll": {
+    "mode": "none",
+    "speed_ms": 4200,
+    "pause_ms": 900,
+    "loop": true
+  },
+  "demo": {
+    "mode": "standard",
+    "particle_count": 4,
+    "strobe_level": 65
+  }
+}

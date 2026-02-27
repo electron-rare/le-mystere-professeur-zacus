@@ -35,10 +35,11 @@ constexpr uint16_t kMicAgcAmbientGateDiv = 10U;
 constexpr uint16_t kMicAgcGainDeadbandQ8 = 18U;
 constexpr uint16_t kMicAgcMaxGainStepUp = 48U;
 constexpr uint16_t kMicAgcMaxGainStepDown = 16U;
+constexpr uint16_t kTunerSpectrumBins[HardwareManager::kMicSpectrumBinCount] = {400U, 420U, 440U, 460U, 480U};
 constexpr HardwareManager::LedPaletteEntry kLedPalette[] = {
     {"SCENE_LOCKED", 255U, 96U, 22U, 88U, true},
     {"SCENE_BROKEN", 255U, 40U, 18U, 86U, true},
-    {"SCENE_U_SON_PROTO", 255U, 40U, 18U, 86U, true},
+    {"SCENE_U_SON_PROTO", 243U, 93U, 255U, 86U, true},
     {"SCENE_WARNING", 255U, 154U, 74U, 78U, true},
     {"SCENE_SIGNAL_SPIKE", 255U, 40U, 18U, 86U, true},
     {"SCENE_LA_DETECTOR", 32U, 224U, 170U, 56U, true},
@@ -56,8 +57,47 @@ constexpr HardwareManager::LedPaletteEntry kLedPalette[] = {
     {"SCENE_PHOTO_MANAGER", 18U, 45U, 95U, 52U, false},
     {"SCENE_CAMERA_SCAN", 18U, 45U, 95U, 52U, false},
     {"SCENE_QR_DETECTOR", 18U, 45U, 95U, 52U, false},
+    {"SCENE_TEST_LAB", 0U, 0U, 0U, 0U, false},
+    {"SCENE_MEDIA_ARCHIVE", 0U, 0U, 0U, 0U, false},
+    {"SCENE_FIREWORKS", 0U, 0U, 0U, 0U, false},
+    {"SCENE_WINNER", 0U, 0U, 0U, 0U, false},
     {"__DEFAULT__", 18U, 45U, 95U, 52U, false},
 };
+
+struct ScenePaletteAlias {
+  const char* alias;
+  const char* scene_id;
+};
+
+constexpr ScenePaletteAlias kLedPaletteAliases[] = {
+    {"SCENE_LA_DETECT", "SCENE_LA_DETECTOR"},
+    {"SCENE_U_SON", "SCENE_U_SON_PROTO"},
+    {"U_SON_PROTO", "SCENE_U_SON_PROTO"},
+    {"SCENE_LE_FOU_DETECTOR", "SCENE_LEFOU_DETECTOR"},
+    {"SCENE_LOCK", "SCENE_LOCKED"},
+    {"LOCKED", "SCENE_LOCKED"},
+    {"LOCK", "SCENE_LOCKED"},
+    {"SCENE_AUDIO_PLAYER", "SCENE_MP3_PLAYER"},
+    {"SCENE_MP3", "SCENE_MP3_PLAYER"},
+};
+
+const char* resolvePaletteSceneId(const char* scene_id) {
+  if (scene_id == nullptr || scene_id[0] == '\0') {
+    return "SCENE_READY";
+  }
+  const char* normalized_scene_id = storyNormalizeScreenSceneId(scene_id);
+  if (normalized_scene_id != nullptr) {
+    return normalized_scene_id;
+  }
+  for (size_t index = 0U; index < (sizeof(kLedPaletteAliases) / sizeof(kLedPaletteAliases[0])); ++index) {
+    const ScenePaletteAlias& alias = kLedPaletteAliases[index];
+    if (std::strcmp(alias.alias, scene_id) == 0) {
+      return alias.scene_id;
+    }
+  }
+  return scene_id;
+}
+
 uint8_t clampU8(int value) {
   if (value < 0) {
     return 0U;
@@ -77,10 +117,56 @@ uint32_t hash32(uint32_t value) {
   return value;
 }
 
+float computeGoertzelPower(const int16_t* samples, size_t sample_count, float target_hz, float sample_rate_hz) {
+  if (samples == nullptr || sample_count == 0U || target_hz <= 0.0f || sample_rate_hz <= 0.0f) {
+    return 0.0f;
+  }
+  const float k = 0.5f + ((static_cast<float>(sample_count) * target_hz) / sample_rate_hz);
+  const float omega = (kTwoPi * k) / static_cast<float>(sample_count);
+  const float coeff = 2.0f * std::cos(omega);
+  float q0 = 0.0f;
+  float q1 = 0.0f;
+  float q2 = 0.0f;
+  for (size_t index = 0U; index < sample_count; ++index) {
+    q0 = coeff * q1 - q2 + static_cast<float>(samples[index]);
+    q2 = q1;
+    q1 = q0;
+  }
+  const float power = q1 * q1 + q2 * q2 - coeff * q1 * q2;
+  return (power > 0.0f) ? power : 0.0f;
+}
+
 uint8_t computeLevelPercent(uint16_t effective_peak, uint16_t den) {
   const uint8_t raw_level =
       static_cast<uint8_t>(std::min<uint32_t>(100U, (static_cast<uint32_t>(effective_peak) * 100U) / den));
   return raw_level;
+}
+
+const char* ledModeName(HardwareManager::LedRuntimeMode mode) {
+  switch (mode) {
+    case HardwareManager::LedRuntimeMode::kBroken:
+      return "broken";
+    case HardwareManager::LedRuntimeMode::kTuner:
+      return "tuner";
+    case HardwareManager::LedRuntimeMode::kSingleRandomBlink:
+      return "single_random_blink";
+    case HardwareManager::LedRuntimeMode::kDominantBandSingle:
+      return "dominant_band_single";
+    case HardwareManager::LedRuntimeMode::kPalette:
+    default:
+      return "palette";
+  }
+}
+
+void updateLedModeSnapshot(HardwareManager::Snapshot* snapshot,
+                           HardwareManager::LedRuntimeMode mode,
+                           bool one_led_at_a_time) {
+  if (snapshot == nullptr) {
+    return;
+  }
+  snapshot->led_one_at_a_time = one_led_at_a_time;
+  std::strncpy(snapshot->led_mode, ledModeName(mode), sizeof(snapshot->led_mode) - 1U);
+  snapshot->led_mode[sizeof(snapshot->led_mode) - 1U] = '\0';
 }
 
 }  // namespace
@@ -88,6 +174,7 @@ uint8_t computeLevelPercent(uint16_t effective_peak, uint16_t den) {
 HardwareManager::HardwareManager()
     : strip_(FREENOVE_WS2812_COUNT, FREENOVE_WS2812_PIN, NEO_GRB + NEO_KHZ800) {
   snapshot_.led_brightness = kDefaultLedBrightness;
+  updateLedModeSnapshot(&snapshot_, LedRuntimeMode::kPalette, false);
   snapshot_.mic_gain_percent = static_cast<uint16_t>((mic_agc_gain_q8_ * 100U) / 256U);
   snapshot_.mic_noise_floor = mic_noise_floor_raw_;
   setScenePalette("SCENE_READY");
@@ -154,8 +241,7 @@ void HardwareManager::setSceneHint(const char* scene_id) {
   if (scene_id == nullptr || scene_id[0] == '\0') {
     return;
   }
-  const char* normalized_scene_id = storyNormalizeScreenSceneId(scene_id);
-  const char* effective_scene_id = (normalized_scene_id != nullptr) ? normalized_scene_id : scene_id;
+  const char* effective_scene_id = resolvePaletteSceneId(scene_id);
   if (std::strncmp(snapshot_.scene_id, effective_scene_id, sizeof(snapshot_.scene_id) - 1U) == 0) {
     return;
   }
@@ -204,6 +290,8 @@ void HardwareManager::setMicRuntimeEnabled(bool enabled) {
     snapshot_.mic_waveform_count = 0U;
     snapshot_.mic_waveform_head = 0U;
     std::memset(snapshot_.mic_waveform, 0, sizeof(snapshot_.mic_waveform));
+    std::memset(snapshot_.mic_spectrum, 0, sizeof(snapshot_.mic_spectrum));
+    snapshot_.mic_spectrum_peak_hz = 0U;
   } else {
     next_mic_ms_ = 0U;
   }
@@ -211,6 +299,21 @@ void HardwareManager::setMicRuntimeEnabled(bool enabled) {
 
 bool HardwareManager::micRuntimeEnabled() const {
   return mic_enabled_runtime_;
+}
+
+void HardwareManager::setSceneSingleRandomBlink(bool enabled,
+                                                uint8_t r,
+                                                uint8_t g,
+                                                uint8_t b,
+                                                uint8_t brightness,
+                                                bool dominant_band_sync) {
+  scene_single_random_blink_ = enabled;
+  scene_single_blink_r_ = r;
+  scene_single_blink_g_ = g;
+  scene_single_blink_b_ = b;
+  scene_single_blink_brightness_ = brightness;
+  scene_single_blink_dominant_band_ = enabled && dominant_band_sync;
+  next_led_ms_ = 0U;
 }
 
 bool HardwareManager::beginMic() {
@@ -431,6 +534,30 @@ void HardwareManager::updateMic(uint32_t now_ms) {
 
   const uint16_t level_for_display = computeLevelPercent(effective_peak, kMicAgcMinLevelDen);
   const uint16_t level_for_waveform = (effective_peak >= kMicAgcSignalDisplayPeakMin) ? level_for_display : 0U;
+  float spectrum_power[HardwareManager::kMicSpectrumBinCount] = {0.0f};
+  float max_spectrum_power = 0.0f;
+  uint8_t max_spectrum_index = 0U;
+  if (sample_count >= 64U && level_for_display > 0U) {
+    for (uint8_t bin = 0U; bin < HardwareManager::kMicSpectrumBinCount; ++bin) {
+      const float power =
+          computeGoertzelPower(mic_samples_, sample_count, static_cast<float>(kTunerSpectrumBins[bin]), static_cast<float>(kMicSampleRate));
+      spectrum_power[bin] = power;
+      if (power > max_spectrum_power) {
+        max_spectrum_power = power;
+        max_spectrum_index = bin;
+      }
+    }
+  }
+  if (max_spectrum_power > 0.0f) {
+    for (uint8_t bin = 0U; bin < HardwareManager::kMicSpectrumBinCount; ++bin) {
+      const float normalized = std::sqrt(spectrum_power[bin] / max_spectrum_power);
+      snapshot_.mic_spectrum[bin] = clampU8(static_cast<int>(normalized * 100.0f));
+    }
+    snapshot_.mic_spectrum_peak_hz = kTunerSpectrumBins[max_spectrum_index];
+  } else {
+    std::memset(snapshot_.mic_spectrum, 0, sizeof(snapshot_.mic_spectrum));
+    snapshot_.mic_spectrum_peak_hz = 0U;
+  }
   uint8_t level = 0U;
   if (level_for_waveform > 0U) {
     level = static_cast<uint8_t>(std::min<uint16_t>(100U, (static_cast<uint16_t>(snapshot_.mic_level_percent) * 3U + level_for_waveform) / 4U));
@@ -497,8 +624,9 @@ void HardwareManager::updateLed(uint32_t now_ms) {
   uint8_t base_b = scene_b_;
   uint8_t brightness = scene_brightness_;
   bool pulse = led_pulse_;
+  const bool force_scene_palette = false;
 
-  if (manual_led_) {
+  if (manual_led_ && !force_scene_palette) {
     base_r = manual_r_;
     base_g = manual_g_;
     base_b = manual_b_;
@@ -513,13 +641,31 @@ void HardwareManager::updateLed(uint32_t now_ms) {
     pulse = false;
   }
 
-  if (!manual_led_ && button_flash_until_ms_ <= now_ms && isTunerSceneHint()) {
+  if (!manual_led_ && !force_scene_palette && button_flash_until_ms_ <= now_ms && isTunerSceneHint()) {
+    led_runtime_mode_ = LedRuntimeMode::kTuner;
     applyTunerLedPattern(now_ms, base_r, base_g, base_b, brightness);
     return;
   }
 
-  if (!manual_led_ && button_flash_until_ms_ <= now_ms && isBrokenSceneHint()) {
+  if (!manual_led_ && !force_scene_palette && button_flash_until_ms_ <= now_ms && isBrokenSceneHint()) {
+    led_runtime_mode_ = LedRuntimeMode::kBroken;
     applyBrokenLedPattern(now_ms, base_r, base_g, base_b, brightness);
+    return;
+  }
+
+  if (!manual_led_ && !force_scene_palette && button_flash_until_ms_ <= now_ms && scene_single_random_blink_) {
+    const uint8_t blink_brightness =
+        (scene_single_blink_brightness_ != 0U) ? scene_single_blink_brightness_ : brightness;
+    if (scene_single_blink_dominant_band_) {
+      led_runtime_mode_ = LedRuntimeMode::kDominantBandSingle;
+      applyDominantBandSinglePattern(now_ms, blink_brightness);
+    } else {
+      const uint8_t blink_r = (scene_single_blink_r_ != 0U) ? scene_single_blink_r_ : base_r;
+      const uint8_t blink_g = (scene_single_blink_g_ != 0U) ? scene_single_blink_g_ : base_g;
+      const uint8_t blink_b = (scene_single_blink_b_ != 0U) ? scene_single_blink_b_ : base_b;
+      led_runtime_mode_ = LedRuntimeMode::kSingleRandomBlink;
+      applySingleRandomBlinkPattern(now_ms, blink_r, blink_g, blink_b, blink_brightness);
+    }
     return;
   }
 
@@ -542,6 +688,8 @@ void HardwareManager::updateLed(uint32_t now_ms) {
   snapshot_.led_g = out_g;
   snapshot_.led_b = out_b;
   snapshot_.led_brightness = brightness;
+  led_runtime_mode_ = LedRuntimeMode::kPalette;
+  updateLedModeSnapshot(&snapshot_, led_runtime_mode_, false);
 }
 
 bool HardwareManager::isBrokenSceneHint() const {
@@ -574,9 +722,9 @@ void HardwareManager::applyBrokenLedPattern(uint32_t now_ms,
   }
   strip_.setBrightness(clampU8(effective_brightness));
 
-  uint8_t first_r = 0U;
-  uint8_t first_g = 0U;
-  uint8_t first_b = 0U;
+  uint8_t peak_r = 0U;
+  uint8_t peak_g = 0U;
+  uint8_t peak_b = 0U;
 
   const uint32_t slot = now_ms / 46U;
   const uint32_t in_slot = now_ms % 46U;
@@ -628,18 +776,23 @@ void HardwareManager::applyBrokenLedPattern(uint32_t now_ms,
     const uint8_t final_b = clampU8(out_b);
     strip_.setPixelColor(index, final_r, final_g, final_b);
 
-    if (index == 0U) {
-      first_r = final_r;
-      first_g = final_g;
-      first_b = final_b;
+    if (final_r > peak_r) {
+      peak_r = final_r;
+    }
+    if (final_g > peak_g) {
+      peak_g = final_g;
+    }
+    if (final_b > peak_b) {
+      peak_b = final_b;
     }
   }
 
   strip_.show();
-  snapshot_.led_r = first_r;
-  snapshot_.led_g = first_g;
-  snapshot_.led_b = first_b;
+  snapshot_.led_r = peak_r;
+  snapshot_.led_g = peak_g;
+  snapshot_.led_b = peak_b;
   snapshot_.led_brightness = effective_brightness;
+  updateLedModeSnapshot(&snapshot_, LedRuntimeMode::kBroken, false);
 }
 
 void HardwareManager::applyTunerLedPattern(uint32_t now_ms,
@@ -656,9 +809,9 @@ void HardwareManager::applyTunerLedPattern(uint32_t now_ms,
     return;
   }
 
-  uint8_t first_r = 0U;
-  uint8_t first_g = 0U;
-  uint8_t first_b = 0U;
+  uint8_t peak_r = 0U;
+  uint8_t peak_g = 0U;
+  uint8_t peak_b = 0U;
 
   uint8_t tuned_brightness = brightness;
   if (tuned_brightness < 56U) {
@@ -679,10 +832,14 @@ void HardwareManager::applyTunerLedPattern(uint32_t now_ms,
     const uint8_t out_g = clampU8(static_cast<int>(static_cast<float>(green) * scale));
     const uint8_t out_b = clampU8(static_cast<int>(static_cast<float>(blue) * scale));
     strip_.setPixelColor(index, out_r, out_g, out_b);
-    if (index == 0U) {
-      first_r = out_r;
-      first_g = out_g;
-      first_b = out_b;
+    if (out_r > peak_r) {
+      peak_r = out_r;
+    }
+    if (out_g > peak_g) {
+      peak_g = out_g;
+    }
+    if (out_b > peak_b) {
+      peak_b = out_b;
     }
   };
 
@@ -697,10 +854,41 @@ void HardwareManager::applyTunerLedPattern(uint32_t now_ms,
       ((snapshot_.mic_pitch_confidence >= (kTunerDisplayMinConfidence / 2U)) || (snapshot_.mic_freq_hz > 0U));
   if (!has_signal) {
     strip_.show();
-    snapshot_.led_r = first_r;
-    snapshot_.led_g = first_g;
-    snapshot_.led_b = first_b;
+    snapshot_.led_r = peak_r;
+    snapshot_.led_g = peak_g;
+    snapshot_.led_b = peak_b;
     snapshot_.led_brightness = tuned_brightness;
+    return;
+  }
+
+  const uint16_t spectrum_total = static_cast<uint16_t>(snapshot_.mic_spectrum[0]) +
+                                  static_cast<uint16_t>(snapshot_.mic_spectrum[1]) +
+                                  static_cast<uint16_t>(snapshot_.mic_spectrum[2]) +
+                                  static_cast<uint16_t>(snapshot_.mic_spectrum[3]) +
+                                  static_cast<uint16_t>(snapshot_.mic_spectrum[4]);
+  if (led_count >= 4U && spectrum_total > 0U) {
+    const float low_400 = static_cast<float>(snapshot_.mic_spectrum[0]) / 100.0f;
+    const float low_420 = static_cast<float>(snapshot_.mic_spectrum[1]) / 100.0f;
+    const float mid_440 = static_cast<float>(snapshot_.mic_spectrum[2]) / 100.0f;
+    const float high_480 = static_cast<float>(snapshot_.mic_spectrum[4]) / 100.0f;
+    const bool in_tune_center = (std::fabs(static_cast<float>(snapshot_.mic_freq_hz) - kTunerReferenceHz) <= 1.8f) &&
+                                (snapshot_.mic_pitch_confidence >= 40U);
+    const float blink = in_tune_center
+                            ? (0.70f + 0.30f * std::sin(static_cast<float>(now_ms % 420U) * (kTwoPi / 420.0f)))
+                            : 1.0f;
+    setLedScaled(0U, 255U, 18U, 0U, low_400);
+    setLedScaled(1U, 255U, 86U, 0U, low_420);
+    setLedScaled(2U, 24U, 255U, 88U, mid_440 * blink);
+    setLedScaled(3U, 30U, 110U, 255U, high_480);
+    for (uint16_t index = 4U; index < led_count; ++index) {
+      setLedScaled(index, 0U, 0U, 0U, 0.0f);
+    }
+    strip_.show();
+    snapshot_.led_r = peak_r;
+    snapshot_.led_g = peak_g;
+    snapshot_.led_b = peak_b;
+    snapshot_.led_brightness = tuned_brightness;
+    updateLedModeSnapshot(&snapshot_, LedRuntimeMode::kTuner, false);
     return;
   }
 
@@ -708,60 +896,30 @@ void HardwareManager::applyTunerLedPattern(uint32_t now_ms,
   const float pulse = 0.84f + 0.16f * std::sin(static_cast<float>(slot % 180U) * (kTwoPi / 180.0f));
   const float delta_hz = static_cast<float>(snapshot_.mic_freq_hz) - kTunerReferenceHz;
   const float abs_delta_hz = std::fabs(delta_hz);
-
-  auto lerp_u8 = [](uint8_t a, uint8_t b, float t) -> uint8_t {
-    if (t < 0.0f) {
-      t = 0.0f;
-    } else if (t > 1.0f) {
-      t = 1.0f;
-    }
-    const float value = static_cast<float>(a) + (static_cast<float>(b) - static_cast<float>(a)) * t;
-    return clampU8(static_cast<int>(value));
-  };
-
-  // Logical tuner map aligned with UI guidance text:
-  // - "MONTE EN FREQUENCE" (delta < 0) drives the ascend side (near+extreme).
-  // - "DESCENDS EN FREQUENCE" (delta > 0) drives the descend side (near+extreme).
-  const uint16_t idx_descend_extreme = 0U;
-  const uint16_t idx_ascend_extreme = led_count - 1U;
-  const uint16_t idx_descend_near = (led_count >= 4U) ? 1U : idx_descend_extreme;
-  const uint16_t idx_ascend_near = (led_count >= 4U) ? (led_count - 2U) : idx_ascend_extreme;
   const bool in_tune_center = (abs_delta_hz <= 1.8f);
 
-  if (in_tune_center) {
-    setLedScaled(idx_descend_near, 24U, 255U, 88U, pulse);
-    setLedScaled(idx_ascend_near, 24U, 255U, 88U, pulse);
-    setLedScaled(idx_descend_extreme, 255U, 64U, 0U, 0.05f);
-    if (idx_ascend_extreme != idx_descend_extreme) {
-      setLedScaled(idx_ascend_extreme, 255U, 64U, 0U, 0.05f);
-    }
-  } else {
-    const float ratio = std::fmin(1.0f, abs_delta_hz / 10.0f);
-    const float near_scale = 0.24f + 0.76f * std::fmin(1.0f, abs_delta_hz / 6.0f);
-    const float extreme_scale = 0.14f + 0.86f * ratio;
-
-    if (delta_hz < 0.0f) {
-      const uint8_t near_r = lerp_u8(30U, 255U, ratio);
-      const uint8_t near_g = lerp_u8(255U, 110U, ratio);
-      const uint8_t extreme_g = lerp_u8(120U, 0U, ratio);
-      setLedScaled(idx_ascend_near, near_r, near_g, 0U, near_scale);
-      setLedScaled(idx_ascend_extreme, 255U, extreme_g, 0U, extreme_scale);
-      setLedScaled(idx_descend_near, 24U, 255U, 88U, 0.10f);
-    } else {
-      const uint8_t near_r = lerp_u8(30U, 255U, ratio);
-      const uint8_t near_g = lerp_u8(255U, 110U, ratio);
-      const uint8_t extreme_g = lerp_u8(120U, 0U, ratio);
-      setLedScaled(idx_descend_near, near_r, near_g, 0U, near_scale);
-      setLedScaled(idx_descend_extreme, 255U, extreme_g, 0U, extreme_scale);
-      setLedScaled(idx_ascend_near, 24U, 255U, 88U, 0.10f);
-    }
-  }
-
-  if (led_count == 1U) {
+  if (led_count >= 4U) {
+    const uint16_t idx_low_extreme = 0U;
+    const uint16_t idx_low_near = 1U;
+    const uint16_t idx_center = 2U;
+    const uint16_t idx_high_extreme = 3U;
     if (in_tune_center) {
-      setLedScaled(0U, 24U, 255U, 88U, pulse);
+      setLedScaled(idx_center, 24U, 255U, 88U, pulse);
+      setLedScaled(idx_low_near, 255U, 90U, 0U, 0.08f);
+      setLedScaled(idx_high_extreme, 30U, 120U, 255U, 0.08f);
+    } else if (delta_hz < 0.0f) {
+      const float low_ratio = std::fmin(1.0f, abs_delta_hz / 10.0f);
+      setLedScaled(idx_low_extreme, 255U, 28U, 0U, 0.18f + low_ratio * 0.82f);
+      setLedScaled(idx_low_near, 255U, 120U, 0U, 0.10f + low_ratio * 0.64f);
+      setLedScaled(idx_center, 24U, 255U, 88U, 0.10f);
     } else {
-      setLedScaled(0U, 255U, 42U, 0U, 0.95f);
+      const float high_ratio = std::fmin(1.0f, abs_delta_hz / 10.0f);
+      setLedScaled(idx_high_extreme, 26U, 90U, 255U, 0.18f + high_ratio * 0.82f);
+      setLedScaled(idx_center, 30U, 185U, 255U, 0.10f + high_ratio * 0.64f);
+      setLedScaled(idx_low_near, 24U, 255U, 88U, 0.10f);
+    }
+    for (uint16_t index = 4U; index < led_count; ++index) {
+      setLedScaled(index, 0U, 0U, 0U, 0.0f);
     }
   } else if (led_count == 2U) {
     if (in_tune_center) {
@@ -769,18 +927,204 @@ void HardwareManager::applyTunerLedPattern(uint32_t now_ms,
       setLedScaled(1U, 24U, 255U, 88U, pulse);
     } else if (delta_hz < 0.0f) {
       setLedScaled(0U, 255U, 42U, 0U, 0.95f);
-      setLedScaled(1U, 255U, 180U, 0U, 0.55f);
+      setLedScaled(1U, 255U, 140U, 0U, 0.50f);
     } else {
-      setLedScaled(1U, 255U, 42U, 0U, 0.95f);
-      setLedScaled(0U, 255U, 180U, 0U, 0.55f);
+      setLedScaled(1U, 30U, 100U, 255U, 0.95f);
+      setLedScaled(0U, 30U, 140U, 255U, 0.50f);
+    }
+  } else if (led_count == 1U) {
+    if (in_tune_center) {
+      setLedScaled(0U, 24U, 255U, 88U, pulse);
+    } else if (delta_hz < 0.0f) {
+      setLedScaled(0U, 255U, 42U, 0U, 0.95f);
+    } else {
+      setLedScaled(0U, 30U, 100U, 255U, 0.95f);
     }
   }
 
   strip_.show();
-  snapshot_.led_r = first_r;
-  snapshot_.led_g = first_g;
-  snapshot_.led_b = first_b;
+  snapshot_.led_r = peak_r;
+  snapshot_.led_g = peak_g;
+  snapshot_.led_b = peak_b;
   snapshot_.led_brightness = tuned_brightness;
+  updateLedModeSnapshot(&snapshot_, LedRuntimeMode::kTuner, false);
+}
+
+void HardwareManager::applySingleRandomBlinkPattern(uint32_t now_ms,
+                                                    uint8_t base_r,
+                                                    uint8_t base_g,
+                                                    uint8_t base_b,
+                                                    uint8_t brightness) {
+  const uint16_t led_count = FREENOVE_WS2812_COUNT;
+  if (led_count == 0U) {
+    return;
+  }
+
+  uint8_t effective_brightness = brightness;
+  if (effective_brightness < 10U) {
+    effective_brightness = 10U;
+  } else if (effective_brightness > 125U) {
+    effective_brightness = 125U;
+  }
+  strip_.setBrightness(effective_brightness);
+
+  const uint32_t slot = now_ms / 78U;
+  const uint32_t in_slot = now_ms % 78U;
+  const uint32_t slot_noise = hash32(slot * 2246822519UL + 0x9e3779b9UL);
+  const uint16_t active_led = static_cast<uint16_t>(slot_noise % led_count);
+  const uint8_t active_window = static_cast<uint8_t>(5U + ((slot_noise >> 16U) % 9U));
+  const bool active = in_slot < active_window;
+  const float tail = active ? (1.0f - (static_cast<float>(in_slot) / static_cast<float>(active_window))) : 0.0f;
+
+  uint8_t peak_r = 0U;
+  uint8_t peak_g = 0U;
+  uint8_t peak_b = 0U;
+  for (uint16_t index = 0U; index < led_count; ++index) {
+    uint8_t out_r = 0U;
+    uint8_t out_g = 0U;
+    uint8_t out_b = 0U;
+    if (active && index == active_led) {
+      const float boost = 0.72f + (0.58f * tail);
+      out_r = clampU8(static_cast<int>(static_cast<float>(base_r) * boost));
+      out_g = clampU8(static_cast<int>(static_cast<float>(base_g) * boost));
+      out_b = clampU8(static_cast<int>(static_cast<float>(base_b) * boost));
+    }
+    strip_.setPixelColor(index, out_r, out_g, out_b);
+    if (out_r > peak_r) {
+      peak_r = out_r;
+    }
+    if (out_g > peak_g) {
+      peak_g = out_g;
+    }
+    if (out_b > peak_b) {
+      peak_b = out_b;
+    }
+  }
+  strip_.show();
+
+  snapshot_.led_r = peak_r;
+  snapshot_.led_g = peak_g;
+  snapshot_.led_b = peak_b;
+  snapshot_.led_brightness = effective_brightness;
+  updateLedModeSnapshot(&snapshot_, LedRuntimeMode::kSingleRandomBlink, true);
+}
+
+void HardwareManager::applyDominantBandSinglePattern(uint32_t now_ms, uint8_t brightness) {
+  const uint16_t led_count = FREENOVE_WS2812_COUNT;
+  if (led_count == 0U) {
+    return;
+  }
+
+  uint8_t effective_brightness = brightness;
+  if (effective_brightness < 8U) {
+    effective_brightness = 8U;
+  } else if (effective_brightness > 125U) {
+    effective_brightness = 125U;
+  }
+  strip_.setBrightness(effective_brightness);
+  for (uint16_t index = 0U; index < led_count; ++index) {
+    strip_.setPixelColor(index, 0U, 0U, 0U);
+  }
+
+  const bool has_signal =
+      (snapshot_.mic_level_percent >= kTunerDisplayMinLevelPct) &&
+      (snapshot_.mic_peak >= kMicAgcSignalDisplayPeakMin) &&
+      ((snapshot_.mic_pitch_confidence >= (kTunerDisplayMinConfidence / 2U)) || (snapshot_.mic_freq_hz > 0U) ||
+       (snapshot_.mic_spectrum_peak_hz > 0U));
+  if (!has_signal) {
+    strip_.show();
+    snapshot_.led_r = 0U;
+    snapshot_.led_g = 0U;
+    snapshot_.led_b = 0U;
+    snapshot_.led_brightness = effective_brightness;
+    updateLedModeSnapshot(&snapshot_, LedRuntimeMode::kDominantBandSingle, true);
+    return;
+  }
+
+  uint8_t dominant_bin = 0U;
+  uint8_t band_pct = snapshot_.mic_spectrum[0];
+  for (uint8_t bin = 1U; bin < 5U; ++bin) {
+    if (snapshot_.mic_spectrum[bin] > band_pct) {
+      band_pct = snapshot_.mic_spectrum[bin];
+      dominant_bin = bin;
+    }
+  }
+
+  uint16_t dominant_hz_for_noise = 440U;
+  // Prefer FFT bin dominance; fallback to tracked pitch/spectrum peak when bins are flat.
+  if (band_pct < 2U) {
+    uint16_t dominant_hz = snapshot_.mic_spectrum_peak_hz;
+    if (dominant_hz == 0U) {
+      dominant_hz = snapshot_.mic_freq_hz;
+    }
+    dominant_hz_for_noise = dominant_hz;
+    if (dominant_hz <= 410U) {
+      dominant_bin = 0U;
+    } else if (dominant_hz <= 430U) {
+      dominant_bin = 1U;
+    } else if (dominant_hz <= 450U) {
+      dominant_bin = 2U;
+    } else if (dominant_hz <= 470U) {
+      dominant_bin = 3U;
+    } else {
+      dominant_bin = 4U;
+    }
+    band_pct = snapshot_.mic_spectrum[dominant_bin];
+  }
+  if (band_pct >= 2U) {
+    static constexpr uint16_t kBinCenterHz[5] = {400U, 420U, 440U, 460U, 480U};
+    dominant_hz_for_noise = kBinCenterHz[dominant_bin];
+  }
+
+  uint16_t led_index = 0U;
+  uint8_t color_r = 0xFFU;
+  uint8_t color_g = 0x30U;
+  uint8_t color_b = 0x20U;
+  if (dominant_bin == 0U) {
+    led_index = 0U;
+  } else if (dominant_bin == 1U) {
+    led_index = (led_count > 1U) ? 1U : 0U;
+  } else if (dominant_bin == 2U) {
+    led_index = (led_count > 2U) ? 2U : static_cast<uint16_t>(led_count - 1U);
+    color_r = 0x24U;
+    color_g = 0xFFU;
+    color_b = 0x5CU;
+  } else {
+    led_index = (led_count > 3U) ? 3U : static_cast<uint16_t>(led_count - 1U);
+    color_r = 0x2AU;
+    color_g = 0x7EU;
+    color_b = 0xFFU;
+  }
+  if (led_index >= led_count) {
+    led_index = static_cast<uint16_t>(led_count - 1U);
+  }
+
+  const uint8_t level_pct = std::max<uint8_t>(snapshot_.mic_level_percent, band_pct);
+  float intensity = 0.24f + (0.76f * (static_cast<float>(level_pct) / 100.0f));
+  if (level_pct < 6U) {
+    intensity = 0.0f;
+  }
+
+  const uint32_t slot = now_ms / 96U;
+  const uint32_t slot_noise = hash32((slot * 2654435761UL) ^ dominant_hz_for_noise ^ 0x7F4A6C15UL);
+  const bool blink_on = (slot_noise % 100U) >= 24U;
+  if (blink_on && intensity > 0.01f) {
+    const uint8_t out_r = clampU8(static_cast<int>(static_cast<float>(color_r) * intensity));
+    const uint8_t out_g = clampU8(static_cast<int>(static_cast<float>(color_g) * intensity));
+    const uint8_t out_b = clampU8(static_cast<int>(static_cast<float>(color_b) * intensity));
+    strip_.setPixelColor(led_index, out_r, out_g, out_b);
+    snapshot_.led_r = out_r;
+    snapshot_.led_g = out_g;
+    snapshot_.led_b = out_b;
+  } else {
+    snapshot_.led_r = 0U;
+    snapshot_.led_g = 0U;
+    snapshot_.led_b = 0U;
+  }
+
+  strip_.show();
+  snapshot_.led_brightness = effective_brightness;
+  updateLedModeSnapshot(&snapshot_, LedRuntimeMode::kDominantBandSingle, true);
 }
 
 void HardwareManager::estimatePitch(uint16_t& freq_hz, int16_t& cents, uint8_t& confidence, uint16_t& peak_for_window) {
@@ -995,19 +1339,18 @@ void HardwareManager::estimatePitchFromSamples(const int16_t* samples,
 }
 
 void HardwareManager::setScenePalette(const char* scene_id) {
-  if (scene_id == nullptr || scene_id[0] == '\0') {
-    scene_id = "SCENE_READY";
-  }
-  std::strncpy(snapshot_.scene_id, scene_id, sizeof(snapshot_.scene_id) - 1U);
+  const char* effective_scene_id = resolvePaletteSceneId(scene_id);
+  std::strncpy(snapshot_.scene_id, effective_scene_id, sizeof(snapshot_.scene_id) - 1U);
   snapshot_.scene_id[sizeof(snapshot_.scene_id) - 1U] = '\0';
 
-  const LedPaletteEntry* palette = findPaletteForScene(scene_id);
+  const LedPaletteEntry* palette = findPaletteForScene(effective_scene_id);
   if (palette == nullptr) {
     scene_r_ = 50U;
     scene_g_ = 122U;
     scene_b_ = 255U;
     scene_brightness_ = kDefaultLedBrightness;
     led_pulse_ = true;
+    updateLedModeSnapshot(&snapshot_, LedRuntimeMode::kPalette, false);
     return;
   }
   scene_r_ = palette->r;
@@ -1015,10 +1358,12 @@ void HardwareManager::setScenePalette(const char* scene_id) {
   scene_b_ = palette->b;
   scene_brightness_ = palette->brightness;
   led_pulse_ = palette->pulse;
+  updateLedModeSnapshot(&snapshot_, LedRuntimeMode::kPalette, false);
 }
 
 const HardwareManager::LedPaletteEntry* HardwareManager::findPaletteForScene(const char* scene_id) const {
-  if (scene_id == nullptr || scene_id[0] == '\0') {
+  const char* effective_scene_id = resolvePaletteSceneId(scene_id);
+  if (effective_scene_id == nullptr || effective_scene_id[0] == '\0') {
     return &kLedPalette[(sizeof(kLedPalette) / sizeof(kLedPalette[0])) - 1U];
   }
   for (size_t index = 0U; index < (sizeof(kLedPalette) / sizeof(kLedPalette[0])); ++index) {
@@ -1026,7 +1371,7 @@ const HardwareManager::LedPaletteEntry* HardwareManager::findPaletteForScene(con
     if (std::strcmp(entry.scene_id, "__DEFAULT__") == 0) {
       continue;
     }
-    if (std::strcmp(entry.scene_id, scene_id) == 0) {
+    if (std::strcmp(entry.scene_id, effective_scene_id) == 0) {
       return &entry;
     }
   }

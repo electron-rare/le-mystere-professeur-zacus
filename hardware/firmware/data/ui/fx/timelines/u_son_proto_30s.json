@@ -1,0 +1,87 @@
+{
+  "meta": {
+    "title": "U_SON Proto 30s (Tunnel + Rotozoom)",
+    "fps": 50,
+    "bpm": 125,
+    "seed": 252252,
+    "internal": {
+      "w": 160,
+      "h": 120,
+      "fmt": "I8"
+    }
+  },
+  "clips": [
+    {
+      "id": "u_son_tunnel",
+      "t0": 0.0,
+      "t1": 15.0,
+      "track": "BG",
+      "fx": "tunnel3d",
+      "params": {
+        "speed": 0.78,
+        "rotSpeed": 0.1,
+        "palSpeed": 4
+      }
+    },
+    {
+      "id": "u_son_rotozoom",
+      "t0": 15.0,
+      "t1": 30.0,
+      "track": "BG",
+      "fx": "rotozoom",
+      "params": {
+        "rotSpeed": 0.15,
+        "zoomBase": 0.92,
+        "zoomAmp": 0.16,
+        "palSpeed": 3
+      }
+    }
+  ],
+  "mods": [
+    {
+      "clip": "u_son_tunnel",
+      "param": "rotSpeed",
+      "type": "random_hold",
+      "args": {
+        "base": 0.1,
+        "min": 0.06,
+        "max": 0.15,
+        "holdBeats": 1
+      }
+    },
+    {
+      "clip": "u_son_tunnel",
+      "param": "palSpeed",
+      "type": "random_hold",
+      "args": {
+        "base": 4,
+        "min": 2,
+        "max": 8,
+        "holdBeats": 2
+      }
+    },
+    {
+      "clip": "u_son_rotozoom",
+      "param": "zoomAmp",
+      "type": "sine",
+      "args": {
+        "base": 0.16,
+        "amp": 0.04,
+        "freqHz": 0.18,
+        "phase": 0.0
+      }
+    },
+    {
+      "clip": "u_son_rotozoom",
+      "param": "rotSpeed",
+      "type": "random_hold",
+      "args": {
+        "base": 0.15,
+        "min": 0.1,
+        "max": 0.22,
+        "holdBeats": 1
+      }
+    }
+  ],
+  "events": []
+}

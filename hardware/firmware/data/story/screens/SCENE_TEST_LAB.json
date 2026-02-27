@@ -1,0 +1,61 @@
+{
+  "id": "SCENE_TEST_LAB",
+  "title": "MIRE COULEUR",
+  "subtitle": "NOIR | BLANC | ROUGE | VERT | BLEU | CYAN | MAGENTA | JAUNE",
+  "symbol": "PALETTE",
+  "effect": "none",
+  "effect_speed_ms": 0,
+  "theme": {
+    "bg": "#000000",
+    "accent": "#888888",
+    "text": "#FFFFFF"
+  },
+  "transition": {
+    "effect": "none",
+    "duration_ms": 220
+  },
+  "text": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": false,
+    "title_case": "upper",
+    "subtitle_case": "raw",
+    "title_align": "center",
+    "subtitle_align": "center"
+  },
+  "visual": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": false,
+    "effect_speed_ms": 0,
+    "waveform": {
+      "enabled": false,
+      "sample_count": 0,
+      "amplitude_pct": 0,
+      "jitter": false
+    }
+  },
+  "framing": {
+    "preset": "center",
+    "x_offset": 0,
+    "y_offset": 0,
+    "scale_pct": 100
+  },
+  "scroll": {
+    "mode": "none",
+    "speed_ms": 0,
+    "pause_ms": 0,
+    "loop": false,
+    "loop_delay_ms": 0
+  },
+  "demo": {
+    "mode": "standard",
+    "particle_count": 0,
+    "strobe_level": 0,
+    "enable": false
+  },
+  "render": {
+    "text_backend": "lgfx_overlay",
+    "disable_lvgl_text": true
+  }
+}

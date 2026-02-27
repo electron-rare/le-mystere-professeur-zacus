@@ -84,8 +84,11 @@ constexpr uint32_t kFxDmaWaitBudgetUs = 6000U;
 constexpr const char* kTimelineDemo3dPath = "/ui/fx/timelines/demo_3d.json";
 constexpr const char* kTimelineDemoFallbackPath = "/ui/fx/timelines/demo_90s.json";
 constexpr const char* kTimelineWinnerPath = "/ui/fx/timelines/winner.json";
+constexpr const char* kTimelineWinEtape1Path = "/ui/fx/timelines/win_etape1_30s.json";
 constexpr const char* kTimelineFireworksPath = "/ui/fx/timelines/fireworks.json";
 constexpr const char* kTimelineBoingPath = "/ui/fx/timelines/boingball.json";
+constexpr const char* kTimelineUsonProtoPath = "/ui/fx/timelines/u_son_proto_30s.json";
+constexpr const char* kTimelineLaDetectorPath = "/ui/fx/timelines/la_detector_hourglass.json";
 
 class NullJsonParser final : public ::fx::IJsonParser {
  public:
@@ -496,6 +499,14 @@ FxScrollFont FxEngine::scrollFont() const {
   return scroll_font_;
 }
 
+void FxEngine::setScrollerCentered(bool centered) {
+  scroller_centered_ = centered;
+}
+
+bool FxEngine::scrollerCentered() const {
+  return scroller_centered_;
+}
+
 void FxEngine::setBpm(uint16_t bpm) {
   bpm_ = clampValue<uint16_t>(bpm, 60U, 220U);
   fx_sync_init(&sync_, bpm_);
@@ -504,6 +515,8 @@ void FxEngine::setBpm(uint16_t bpm) {
 
 void FxEngine::applyPreset(FxPreset preset) {
   preset_ = preset;
+  v9_loop_period_ms_ = (preset_ == FxPreset::kUsonProto) ? 30000U : 0U;
+  v9_loop_elapsed_ms_ = 0U;
   switch (preset_) {
     case FxPreset::kDemo:
       bg_mode_ = BgMode::kPlasma;
@@ -517,6 +530,13 @@ void FxEngine::applyPreset(FxPreset preset) {
       mid_mode_ = MidMode::kRotoZoom;
       if (!scroll_text_custom_) {
         scroll_font_ = FxScrollFont::kOutline;
+      }
+      break;
+    case FxPreset::kWinEtape1:
+      bg_mode_ = BgMode::kStarfield;
+      mid_mode_ = MidMode::kNone;
+      if (!scroll_text_custom_) {
+        scroll_font_ = FxScrollFont::kBasic;
       }
       break;
     case FxPreset::kFireworks:
@@ -533,6 +553,20 @@ void FxEngine::applyPreset(FxPreset preset) {
         scroll_font_ = FxScrollFont::kItalic;
       }
       break;
+    case FxPreset::kUsonProto:
+      bg_mode_ = BgMode::kStarfield;
+      mid_mode_ = MidMode::kNone;
+      if (!scroll_text_custom_) {
+        scroll_font_ = FxScrollFont::kBasic;
+      }
+      break;
+    case FxPreset::kLaDetector:
+      bg_mode_ = BgMode::kStarfield;
+      mid_mode_ = MidMode::kNone;
+      if (!scroll_text_custom_) {
+        scroll_font_ = FxScrollFont::kBasic;
+      }
+      break;
   }
   ensureDefaultScrollText(preset_);
 }
@@ -546,11 +580,20 @@ void FxEngine::ensureDefaultScrollText(FxPreset preset) {
     case FxPreset::kWinner:
       text = "WINNER! BRAVO BRIGADE Z!   ";
       break;
+    case FxPreset::kWinEtape1:
+      text = "";
+      break;
     case FxPreset::kFireworks:
       text = "FIREWORKS MODE!   VICTOIRE!   ";
       break;
     case FxPreset::kBoingball:
       text = "BOING BALL MODE!   SCENE WIN ETAPE   ";
+      break;
+    case FxPreset::kUsonProto:
+      text = "";
+      break;
+    case FxPreset::kLaDetector:
+      text = "";
       break;
     case FxPreset::kDemo:
     default:
@@ -571,10 +614,16 @@ const char* FxEngine::timelinePathForPreset(FxPreset preset) const {
       return kTimelineDemo3dPath;
     case FxPreset::kWinner:
       return kTimelineWinnerPath;
+    case FxPreset::kWinEtape1:
+      return kTimelineWinEtape1Path;
     case FxPreset::kFireworks:
       return kTimelineFireworksPath;
     case FxPreset::kBoingball:
       return kTimelineBoingPath;
+    case FxPreset::kUsonProto:
+      return kTimelineUsonProtoPath;
+    case FxPreset::kLaDetector:
+      return kTimelineLaDetectorPath;
   }
   return nullptr;
 }
@@ -694,6 +743,7 @@ bool FxEngine::ensureV9TimelineLoaded() {
   v9_engine_.setInternalTarget(v9_internal_rt_);
   v9_engine_.setOutputTarget(v9_output_rt_);
   v9_engine_.init();
+  v9_loop_elapsed_ms_ = 0U;
 
   v9_loaded_preset_ = preset_;
   v9_timeline_dirty_ = false;
@@ -716,6 +766,17 @@ bool FxEngine::renderLowResV9(uint32_t dt_ms) {
   }
   if (dt > 0.12f) {
     dt = 0.12f;
+  }
+  uint32_t dt_for_loop_ms = dt_ms;
+  if (dt_for_loop_ms == 0U) {
+    dt_for_loop_ms = static_cast<uint32_t>(std::max(1.0f, std::round(dt * 1000.0f)));
+  }
+  if (v9_loop_period_ms_ > 0U) {
+    v9_loop_elapsed_ms_ += dt_for_loop_ms;
+    if (v9_loop_elapsed_ms_ >= v9_loop_period_ms_) {
+      v9_loop_elapsed_ms_ %= v9_loop_period_ms_;
+      v9_engine_.init();
+    }
   }
   v9_engine_.tick(dt);
   v9_engine_.render(v9_internal_rt_, v9_output_rt_);
@@ -1823,8 +1884,10 @@ void FxEngine::renderScroller(uint32_t now_ms) {
   }
   const int16_t width = static_cast<int16_t>(config_.sprite_width);
   const int16_t height = static_cast<int16_t>(config_.sprite_height);
-  const int16_t base_y = static_cast<int16_t>(
-      clampValue<int>(height - static_cast<int>(kScrollerBaseYOffset), 12, height - 18));
+  const int16_t base_y = scroller_centered_
+                             ? static_cast<int16_t>(height / 2)
+                             : static_cast<int16_t>(
+                                   clampValue<int>(height - static_cast<int>(kScrollerBaseYOffset), 12, height - 18));
   const int16_t top = static_cast<int16_t>(base_y - kScrollerAmpPx - kSafeBandMarginTop - kSafeFeatherPx);
   const int16_t bottom = static_cast<int16_t>(base_y + kScrollerAmpPx + kScrollerGlyphHeight +
                                               kSafeBandMarginBottom + kSafeFeatherPx);
@@ -1853,6 +1916,14 @@ void FxEngine::renderScroller(uint32_t now_ms) {
   const uint8_t tint = static_cast<uint8_t>(128 + (fx_sin8(ph) >> 1U));
   const uint16_t accent = fx_rgb565(40U, static_cast<uint8_t>(120U + tint / 2U),
                                     static_cast<uint8_t>(180U + tint / 3U));
+  const uint16_t color_cycle[6] = {
+      fx_rgb565(255U, 0U, 0U),     // rouge
+      fx_rgb565(0U, 255U, 0U),     // vert
+      fx_rgb565(0U, 0U, 255U),     // bleu
+      fx_rgb565(0U, 255U, 255U),   // cyan
+      fx_rgb565(255U, 0U, 255U),   // magenta
+      fx_rgb565(255U, 255U, 0U),   // jaune
+  };
 
   const int repeat = (width / total_px) + 3;
   for (int r = 0; r < repeat; ++r) {
@@ -1860,7 +1931,9 @@ void FxEngine::renderScroller(uint32_t now_ms) {
       const int x_char = x0 + static_cast<int>(i * kScrollerCharWidth);
       const int16_t y_off = static_cast<int16_t>(
           (fx_sin8(static_cast<uint8_t>(scroll_wave_phase_ + static_cast<uint8_t>(i * 9U))) * kScrollerAmpPx) / 127);
-      const uint16_t col = ((i & 7U) == 0U) ? accent : base_col;
+      const uint16_t col = scroller_centered_
+                               ? color_cycle[i % 6U]
+                               : (((i & 7U) == 0U) ? accent : base_col);
       drawChar6x8(static_cast<int16_t>(x_char), static_cast<int16_t>(base_y + y_off), scroll_text_[i], col,
                   shadow_col);
     }

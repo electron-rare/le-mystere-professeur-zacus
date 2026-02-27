@@ -18,20 +18,22 @@ except ImportError:
     raise SystemExit(2)
 
 
-STATUS_RE = re.compile(r"\bSTATUS\b.*\bscreen=([A-Z0-9_]+)\b")
+STATUS_RE = re.compile(r"\bSTATUS\b.*\bstep=([A-Z0-9_]+)\b.*\bscreen=([A-Z0-9_]+)\b")
 
 
 @dataclass(frozen=True)
 class StepExpect:
     event_cmd: str
+    expected_step: str
     expected_screen: str
 
 
 STEPS = (
-    StepExpect("SC_EVENT unlock", "SCENE_BROKEN"),
-    StepExpect("SC_EVENT serial BTN_NEXT", "SCENE_LA_DETECTOR"),
-    StepExpect("SC_EVENT serial BTN_NEXT", "SCENE_SIGNAL_SPIKE"),
-    StepExpect("SC_EVENT serial BTN_NEXT", "SCENE_MEDIA_ARCHIVE"),
+    StepExpect("SC_EVENT button ANY", "SCENE_LA_DETECTOR", "SCENE_LA_DETECTOR"),
+    StepExpect("SC_EVENT serial BTN_NEXT", "RTC_ESP_ETAPE1", "SCENE_WIN_ETAPE1"),
+    StepExpect("SC_EVENT serial FORCE_DONE", "WIN_ETAPE1", "SCENE_WIN_ETAPE1"),
+    StepExpect("SC_EVENT serial BTN_NEXT", "STEP_WARNING", "SCENE_WARNING"),
+    StepExpect("SC_EVENT button ANY", "SCENE_LEFOU_DETECTOR", "SCENE_LEFOU_DETECTOR"),
 )
 
 
@@ -83,11 +85,11 @@ def send_and_collect(ser: serial.Serial, cmd: str, timeout_s: float) -> list[str
     return read_lines(ser, timeout_s)
 
 
-def find_status_screen(lines: list[str]) -> str | None:
+def find_status(lines: list[str]) -> tuple[str, str] | None:
     for line in reversed(lines):
         match = STATUS_RE.search(line)
         if match:
-            return match.group(1)
+            return match.group(1), match.group(2)
     return None
 
 
@@ -104,13 +106,13 @@ def run(port: str, baud: int, timeout_s: float, settle_s: float) -> int:
         time.sleep(settle_s)
         ser.reset_input_buffer()
 
-        def fetch_screen(max_attempts: int = 6) -> str | None:
-            screen: str | None = None
+        def fetch_status(max_attempts: int = 6) -> tuple[str, str] | None:
+            status: tuple[str, str] | None = None
             for _ in range(max_attempts):
                 status_lines = send_and_collect(ser, "STATUS", timeout_s)
-                screen = find_status_screen(status_lines)
-                if screen is not None:
-                    return screen
+                status = find_status(status_lines)
+                if status is not None:
+                    return status
                 time.sleep(0.2)
             return None
 
@@ -127,21 +129,25 @@ def run(port: str, baud: int, timeout_s: float, settle_s: float) -> int:
             # Continue with RESET + STATUS, which is sufficient to validate flow.
             print("[warn] SC_LOAD ACK missing, fallback to runtime RESET/STATUS flow")
 
-        screen = fetch_screen()
-        if screen != "SCENE_LOCKED":
-            raise RuntimeError(f"STATUS initial: expected SCENE_LOCKED, got {screen!r}")
-        print("[ok] initial screen=SCENE_LOCKED")
+        status = fetch_status()
+        expected_initial = ("SCENE_U_SON_PROTO", "SCENE_U_SON_PROTO")
+        if status != expected_initial:
+            raise RuntimeError(
+                f"STATUS initial: expected step/screen={expected_initial}, got {status!r}"
+            )
+        print("[ok] initial step/screen=SCENE_U_SON_PROTO")
 
         for step in STEPS:
             event_lines = send_and_collect(ser, step.event_cmd, timeout_s)
             assert_contains(event_lines, "ACK SC_EVENT", step.event_cmd)
 
-            screen = fetch_screen()
-            if screen != step.expected_screen:
+            status = fetch_status()
+            expected_status = (step.expected_step, step.expected_screen)
+            if status != expected_status:
                 raise RuntimeError(
-                    f"{step.event_cmd}: expected {step.expected_screen}, got {screen!r}"
+                    f"{step.event_cmd}: expected step/screen={expected_status}, got {status!r}"
                 )
-            print(f"[ok] {step.event_cmd} -> {screen}")
+            print(f"[ok] {step.event_cmd} -> step={status[0]} screen={status[1]}")
 
     print("[ok] default story flow validated")
     return 0

@@ -1,90 +1,115 @@
-# ESP-NOW API v1 (enveloppe `msg_id/seq/type/payload/ack`)
+# ESP-NOW API v1
 
-Date: 2026-02-21  
-Scope: contrat d'échange entre `RTC_BL_PHONE` (A252) et la seconde carte.
+Date: 2026-02-23
 
-## 1. Objectif
+Ce document est synchronisé avec le contrat opérationnel: `docs/espnow_contract.md`.
 
-Normaliser les trames ESP-NOW pour:
-- corréler requête/réponse,
-- conserver compatibilité legacy,
-- simplifier l'intégration du second repo.
+## Source de vérité
 
-## 2. Requête v1 (nouveau format recommandé)
+- Canonique: `docs/espnow_contract.md`
+- Ce fichier doit rester cohérent avec ce contrat.
+
+## Reprise du contrat (v1)
+
+- Trame recommandée: `type: "command"`, `ack: true`.
+- Corrélation: `msg_id` + `seq`.
+- Corps: objet JSON dans `payload`, ou texte compatible selon parser legacy.
+
+Exemple de demande:
 
 ```json
 {
   "msg_id": "req-001",
-  "seq": 1,
+  "seq": 7,
   "type": "command",
   "ack": true,
   "payload": {
-    "cmd": "STATUS",
-    "args": {}
+    "cmd": "WIFI_STATUS"
   }
 }
 ```
 
-Règles:
-- `msg_id` sert à corréler la réponse.
-- `seq` est un compteur local de trame (recommandé monotone par source).
-- `type=command` déclenche l'exécution côté firmware.
-- `ack=true` demande une réponse corrélée.
-- `payload.cmd` obligatoire pour une commande dispatcher.
-- `payload.args` optionnel; sérialisé puis passé au dispatcher.
-
-## 3. Réponse v1 (ack corrélée)
+Réponse attendue:
 
 ```json
 {
   "msg_id": "req-001",
-  "seq": 1,
+  "seq": 7,
   "type": "ack",
   "ack": true,
   "payload": {
     "ok": true,
-    "code": "STATUS",
-    "data": {},
-    "error": ""
+    "code": "WIFI_STATUS",
+    "error": "",
+    "data": {}
   }
 }
 ```
 
-Règles:
-- `msg_id` et `seq` reprennent la requête.
-- `payload.ok=false` => `payload.error` non vide.
-- `payload.data` contient le JSON de la commande si disponible.
-- fallback possible `payload.data_raw` si la réponse n'est pas JSON.
+## Compatibilité parser (legacy)
 
-## 4. Compatibilité legacy
+- `cmd`, `command`, `action` (root ou `payload`).
+- format texte: `"CMD arg"`.
+- ancien champ `id` au lieu de `msg_id` côté trames historiques.
 
-Le firmware continue d'accepter les formats existants:
-- `{"cmd":"..."}`
-- `{"raw":"..."}`
-- `{"command":"..."}`
-- `{"action":"..."}`
-- variantes imbriquées via `event`, `message`, `payload`
-- format historique `rtcbl/1`:
-  - `{"proto":"rtcbl/1","id":"...","cmd":"...","args":{}}`
-
-## 5. Commandes recommandées v1
+## Commandes supportées
 
 - `STATUS`
-- `RING`
-- `CALL`
-- `HOOK`
-- `LIST_FILES`
-- `PLAY_FILE`
 - `WIFI_STATUS`
-- `MQTT_STATUS`
 - `ESPNOW_STATUS`
+- `UNLOCK`
+- `NEXT`
+- `WIFI_DISCONNECT`
+- `WIFI_RECONNECT`
+- `ESPNOW_ON`
+- `ESPNOW_OFF`
+- `ESPNOW_DISCOVERY` (broadcast + discovery des pairs visibles)
+- `ESPNOW_DISCOVERY_RUNTIME [on|off]` (probe périodique)
+- `ESPNOW_DEVICE_NAME_GET`
+- `ESPNOW_DEVICE_NAME_SET <NAME>`
+- `STORY_REFRESH_SD`
+- `SC_EVENT`
+- `RING`
+- `SCENE <id>`
+  - `SCENE` retourne une erreur `missing_scene_id` si `id` absent
+  - `NEXT` retourne `scene_not_found` si aucune scène n’est active
 
-- `BT_STATUS`
+## Erreurs connues
 
-## 6. Intégration second repo
+- `unsupported_command`
+- `missing_scene_id`
+- `scene_not_found`
+- `WIFI_RECONNECT no_credentials`
+- erreurs réseau: `peer`, `payload` vide, trame > 240
 
-Checklist minimum côté seconde carte:
-1. Émettre `msg_id` unique + `seq` monotone.
-2. Positionner `type=command` et `ack=true` pour obtenir une réponse.
-3. Implémenter timeout de réponse (2-5s) et corréler sur `msg_id`.
-4. Prévoir fallback legacy (`rtcbl/1` + formats `cmd/raw/command/action`) pour compat.
+## Limites runtime
+
+- Trame brute max: `240`
+- Peers: `16`
+- RX queue: `6`
+
+## Device name
+
+- `device_name` est l'identité logique locale (persistée en NVS).
+- Par défaut Freenove: `U_SON`.
+- Visible via `ESPNOW_STATUS` et `STATUS` (`espnow.device_name`).
+
+## Broadcast + discovery
+
+- Mode d'envoi ESP-NOW: `broadcast` (cible unitaire ignorée).
+- `ESPNOW_DISCOVERY` envoie des probes broadcast puis agrège les pairs vus dans le cache (`ESPNOW_PEER_LIST` / `ESPNOW_STATUS.peers`).
+- Runtime périodique activé par défaut (`discovery_runtime=true`, intervalle `15000 ms`), pilotable via `ESPNOW_DISCOVERY_RUNTIME`.
+
+## Script contrôleur (terrain)
+
+- Script prêt à l'emploi: `scripts/espnow_hotline_control.py`
+- Exemples:
+  - `python3 scripts/espnow_hotline_control.py --port /dev/cu.usbserial-0001 --target broadcast --action ring`
+  - `python3 scripts/espnow_hotline_control.py --port /dev/cu.usbserial-0001 --target AA:BB:CC:DD:EE:FF --ensure-peer --action status`
+  - `python3 scripts/espnow_hotline_control.py --port /dev/cu.usbserial-0001 --target broadcast --action hotline1`
+
+## Réception firmware
+
+- `type=command` -> `executeEspNowCommandPayload`
+- `type` non-`command` ignoré pour dispatch de commande
+- `type=ack` ignoré côté dispatch commande

@@ -36,6 +36,9 @@ game/exports/*
 audio/generated/*
 !audio/generated/README.md
 
+# Raw wave audio files (ignore new captures)
+*.wav
+
 # Locally generated printable PDFs (not versioned)
 printables/export/pdf/**
 !printables/export/pdf/zacus_v1/README.md
@@ -54,3 +57,8 @@ prompt a suivre/*
 
 # Ignore macOS app bundle Voicebox (généré localement)
 hardware/firmware/tools/Voicebox.app/
+
+# RTC_SLIC_PHONE local audio/spec assets (not versioned)
+hardware/RTC_SLIC_PHONE/docs/wav_ptt_vintage_8k/
+hardware/RTC_SLIC_PHONE/docs/wav_clean_8k/
+hardware/RTC_SLIC_PHONE/docs/specs/tone_plan_wav_assets/

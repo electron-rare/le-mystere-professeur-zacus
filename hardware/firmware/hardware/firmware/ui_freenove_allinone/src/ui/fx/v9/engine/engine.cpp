@@ -16,6 +16,7 @@
 #include "ui/fx/v9/effects/transition_flash.h"
 #include "ui/fx/v9/effects/tunnel3d.h"
 #include "ui/fx/v9/effects/wirecube.h"
+#include "ui/fx/v9/effects/hourglass.h"
 
 namespace fx {
 
@@ -209,6 +210,13 @@ void applyStaticClipParams(ClipInstance* clip) {
     cube->fov = paramFloat(clip->clip.params, "fov", cube->fov);
     cube->intensity = static_cast<uint8_t>(paramInt(clip->clip.params, "intensity", cube->intensity));
     cube->beatPulse = paramBool(clip->clip.params, "beatPulse", cube->beatPulse);
+    return;
+  }
+
+  if (fx_name == "hourglass") {
+    effects::HourglassFx* hg = static_cast<effects::HourglassFx*>(clip->fx.get());
+    hg->speed = paramFloat(clip->clip.params, "speed", hg->speed);
+    hg->glitch = paramFloat(clip->clip.params, "glitch", hg->glitch);
   }
 }
 
@@ -298,6 +306,17 @@ void applyModulatedParams(ClipInstance* clip) {
     }
     if (findParamValue(clip->params, "rotZ", &value)) {
       cube->rotZ = value;
+    }
+    return;
+  }
+
+  if (fx_name == "hourglass") {
+    effects::HourglassFx* hg = static_cast<effects::HourglassFx*>(clip->fx.get());
+    if (findParamValue(clip->params, "speed", &value)) {
+      hg->speed = value;
+    }
+    if (findParamValue(clip->params, "glitch", &value)) {
+      hg->glitch = value;
     }
   }
 }

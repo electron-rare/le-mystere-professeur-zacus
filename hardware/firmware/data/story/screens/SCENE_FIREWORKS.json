@@ -1,0 +1,79 @@
+{
+  "title": "FIREWORKS",
+  "subtitle": "",
+  "symbol": "RUN",
+  "effect": "pulse",
+  "effect_speed_ms": 680,
+  "theme": {
+    "bg": "#07132A",
+    "accent": "#2A76FF",
+    "text": "#E8F1FF"
+  },
+  "transition": {
+    "effect": "fade",
+    "duration_ms": 240
+  },
+  "timeline": {
+    "loop": true,
+    "duration_ms": 1400,
+    "keyframes": [
+      {
+        "at_ms": 0,
+        "effect": "pulse",
+        "speed_ms": 680,
+        "theme": {
+          "bg": "#07132A",
+          "accent": "#2A76FF",
+          "text": "#E8F1FF"
+        }
+      },
+      {
+        "at_ms": 1400,
+        "effect": "blink",
+        "speed_ms": 360,
+        "theme": {
+          "bg": "#0B1F3C",
+          "accent": "#5A99FF",
+          "text": "#F1F7FF"
+        }
+      }
+    ]
+  },
+  "id": "SCENE_FIREWORKS",
+  "text": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "title_case": "upper",
+    "subtitle_case": "raw",
+    "title_align": "top",
+    "subtitle_align": "bottom"
+  },
+  "visual": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "effect_speed_ms": 680
+  },
+  "framing": {
+    "preset": "center",
+    "x_offset": 0,
+    "y_offset": 0,
+    "scale_pct": 100
+  },
+  "scroll": {
+    "mode": "none",
+    "speed_ms": 4200,
+    "pause_ms": 900,
+    "loop": true
+  },
+  "demo": {
+    "mode": "standard",
+    "particle_count": 4,
+    "strobe_level": 65
+  },
+  "render": {
+    "text_backend": "lgfx_overlay",
+    "disable_lvgl_text": true
+  }
+}

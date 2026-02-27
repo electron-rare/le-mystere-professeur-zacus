@@ -1,23 +1,79 @@
 {
-  "id": "SCENE_WARNING",
-  "title": "WARNING",
-  "subtitle": "Nouvelle phase etape 2",
-  "symbol": "!",
+  "title": "ALERTE",
+  "subtitle": "Signal anormal",
+  "symbol": "WARN",
   "effect": "blink",
+  "effect_speed_ms": 240,
+  "theme": {
+    "bg": "#261209",
+    "accent": "#FF9A4A",
+    "text": "#FFF2E6"
+  },
+  "transition": {
+    "effect": "fade",
+    "duration_ms": 200
+  },
+  "timeline": {
+    "loop": true,
+    "duration_ms": 1400,
+    "keyframes": [
+      {
+        "at_ms": 0,
+        "effect": "blink",
+        "speed_ms": 240,
+        "theme": {
+          "bg": "#261209",
+          "accent": "#FF9A4A",
+          "text": "#FFF2E6"
+        }
+      },
+      {
+        "at_ms": 1400,
+        "effect": "pulse",
+        "speed_ms": 520,
+        "theme": {
+          "bg": "#31170C",
+          "accent": "#FFC071",
+          "text": "#FFF8EF"
+        }
+      }
+    ]
+  },
+  "id": "SCENE_WARNING",
+  "text": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "title_case": "upper",
+    "subtitle_case": "raw",
+    "title_align": "top",
+    "subtitle_align": "bottom"
+  },
   "visual": {
     "show_title": true,
     "show_subtitle": true,
     "show_symbol": true,
-    "effect_speed_ms": 380
+    "effect_speed_ms": 240
   },
-  "theme": {
-    "bg": "#2B140E",
-    "accent": "#FF9D57",
-    "text": "#FFF0E8"
+  "framing": {
+    "preset": "center",
+    "x_offset": 0,
+    "y_offset": 0,
+    "scale_pct": 100
   },
-  "transition": {
-    "effect": "fade",
-    "duration_ms": 180
+  "scroll": {
+    "mode": "none",
+    "speed_ms": 4200,
+    "pause_ms": 900,
+    "loop": true
   },
-  "timeline": {}
+  "demo": {
+    "mode": "standard",
+    "particle_count": 4,
+    "strobe_level": 65
+  },
+  "render": {
+    "text_backend": "lgfx_overlay",
+    "disable_lvgl_text": true
+  }
 }

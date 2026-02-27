@@ -1,18 +1,17 @@
 {
-  "id": "SCENE_SEARCH",
   "title": "RECHERCHE",
   "subtitle": "Analyse des indices",
   "symbol": "SCAN",
   "effect": "scan",
-  "visual": {
-    "show_title": false,
-    "show_symbol": true,
-    "effect_speed_ms": 920
-  },
+  "effect_speed_ms": 920,
   "theme": {
     "bg": "#05261F",
     "accent": "#35E7B0",
     "text": "#EFFFF8"
+  },
+  "transition": {
+    "effect": "glitch",
+    "duration_ms": 230
   },
   "timeline": {
     "loop": true,
@@ -50,8 +49,41 @@
       }
     ]
   },
-  "transition": {
-    "effect": "glitch",
-    "duration_ms": 230
+  "id": "SCENE_SEARCH",
+  "text": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "title_case": "upper",
+    "subtitle_case": "raw",
+    "title_align": "top",
+    "subtitle_align": "bottom"
+  },
+  "visual": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "effect_speed_ms": 920
+  },
+  "framing": {
+    "preset": "center",
+    "x_offset": 0,
+    "y_offset": 0,
+    "scale_pct": 100
+  },
+  "scroll": {
+    "mode": "none",
+    "speed_ms": 4200,
+    "pause_ms": 900,
+    "loop": true
+  },
+  "demo": {
+    "mode": "standard",
+    "particle_count": 4,
+    "strobe_level": 65
+  },
+  "render": {
+    "text_backend": "lgfx_overlay",
+    "disable_lvgl_text": true
   }
 }

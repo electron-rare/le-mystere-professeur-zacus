@@ -1,0 +1,75 @@
+{
+  "title": "FINAL WIN",
+  "subtitle": "Mission accomplie",
+  "symbol": "WIN",
+  "effect": "celebrate",
+  "effect_speed_ms": 320,
+  "theme": {
+    "bg": "#1C0C2E",
+    "accent": "#FFCC5C",
+    "text": "#FFF7E4"
+  },
+  "transition": {
+    "effect": "fade",
+    "duration_ms": 240
+  },
+  "timeline": {
+    "loop": true,
+    "duration_ms": 1400,
+    "keyframes": [
+      {
+        "at_ms": 0,
+        "effect": "celebrate",
+        "speed_ms": 320,
+        "theme": {
+          "bg": "#1C0C2E",
+          "accent": "#FFCC5C",
+          "text": "#FFF7E4"
+        }
+      },
+      {
+        "at_ms": 1400,
+        "effect": "blink",
+        "speed_ms": 220,
+        "theme": {
+          "bg": "#2A1642",
+          "accent": "#FFE18D",
+          "text": "#FFFDF3"
+        }
+      }
+    ]
+  },
+  "id": "SCENE_FINAL_WIN",
+  "text": {
+    "show_title": false,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "title_case": "upper",
+    "subtitle_case": "raw",
+    "title_align": "top",
+    "subtitle_align": "bottom"
+  },
+  "visual": {
+    "show_title": false,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "effect_speed_ms": 320
+  },
+  "framing": {
+    "preset": "center",
+    "x_offset": 0,
+    "y_offset": 0,
+    "scale_pct": 100
+  },
+  "scroll": {
+    "mode": "none",
+    "speed_ms": 4200,
+    "pause_ms": 900,
+    "loop": true
+  },
+  "demo": {
+    "mode": "standard",
+    "particle_count": 4,
+    "strobe_level": 65
+  }
+}

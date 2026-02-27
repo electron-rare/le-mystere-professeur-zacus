@@ -1,0 +1,8 @@
+{
+  "id": "ACTION_ESP_NOW_WAITING",
+  "type": "espnow_send",
+  "config": {
+    "target": "broadcast",
+    "payload": "WAITING_VALIDATION"
+  }
+}

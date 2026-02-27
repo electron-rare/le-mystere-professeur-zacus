@@ -1,0 +1,40 @@
+{
+  "meta": {
+    "title": "WIN_ETAPE1 30s (Tunnel + Rotozoom)",
+    "fps": 50,
+    "bpm": 125,
+    "seed": 252261,
+    "internal": {
+      "w": 160,
+      "h": 120,
+      "fmt": "I8"
+    }
+  },
+  "clips": [
+    {
+      "id": "win_etape1_tunnel",
+      "t0": 0.0,
+      "t1": 15.0,
+      "track": "BG",
+      "fx": "tunnel3d",
+      "params": {
+        "speed": 0.82,
+        "rotSpeed": 0.12
+      }
+    },
+    {
+      "id": "win_etape1_rotozoom",
+      "t0": 15.0,
+      "t1": 30.0,
+      "track": "BG",
+      "fx": "rotozoom",
+      "params": {
+        "rotSpeed": 0.17,
+        "zoomBase": 0.90,
+        "zoomAmp": 0.21
+      }
+    }
+  ],
+  "mods": [],
+  "events": []
+}

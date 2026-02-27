@@ -1,23 +1,126 @@
 {
   "id": "SCENE_U_SON_PROTO",
-  "title": "U-SON PROTO",
-  "subtitle": "Calibration signal en cours",
-  "symbol": "U1",
-  "effect": "pulse",
+  "title": "PROTO U-SON",
+  "subtitle": "Signal brouille / transmission active",
+  "symbol": "ALERT",
+  "effect": "text_glitch",
+  "effect_speed_ms": 220,
+  "theme": {
+    "bg": "#04030A",
+    "accent": "#F35DFF",
+    "text": "#FFFFFF"
+  },
+  "render": {
+    "text_backend": "lgfx_overlay",
+    "disable_lvgl_text": true,
+    "foreground_fx": "text_glitch",
+    "wave": false
+  },
+  "transition": {
+    "effect": "glitch",
+    "duration_ms": 160
+  },
+  "timeline": {
+    "loop": true,
+    "duration_ms": 30000,
+    "keyframes": [
+      {
+        "at_ms": 0,
+        "effect": "tunnel3d",
+        "speed_ms": 15000,
+        "theme": {
+          "bg": "#06040B",
+          "accent": "#F35DFF",
+          "text": "#FFFFFF"
+        }
+      },
+      {
+        "at_ms": 15000,
+        "effect": "rotozoom",
+        "speed_ms": 15000,
+        "theme": {
+          "bg": "#080513",
+          "accent": "#EF7FE7",
+          "text": "#FFFFFF"
+        }
+      }
+    ]
+  },
+  "text": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "title_case": "center",
+    "subtitle_case": "raw",
+    "symbol_align": "top",
+    "title_align": "center",
+    "subtitle_align": "bottom",
+    "title_font_face": "ibm_bold_24",
+    "subtitle_font_face": "ibm_bold_16",
+    "symbol_font_face": "orbitron_28",
+    "glitch": 42,
+    "size": 50
+  },
   "visual": {
     "show_title": true,
     "show_subtitle": true,
     "show_symbol": true,
-    "effect_speed_ms": 540
+    "effect_speed_ms": 220,
+    "waveform": {
+      "enabled": false,
+      "sample_count": 0,
+      "amplitude_pct": 0,
+      "jitter": false
+    }
   },
-  "theme": {
-    "bg": "#0F162A",
-    "accent": "#6FE6FF",
-    "text": "#EAFBFF"
+  "hardware": {
+    "backlight": {
+      "mode": "level_sync",
+      "min": 30,
+      "max": 95,
+      "base": 42,
+      "spike_pct": 16
+    },
+    "ws2812": {
+      "mode": "dominant_band_single",
+      "one_led_at_a_time": true,
+      "level_sync": true,
+      "color_source": "mic.dynamic",
+      "dynamic_color": true,
+      "min_brightness": 4,
+      "max_brightness": 95,
+      "auto": true
+    }
   },
-  "transition": {
-    "effect": "fade",
-    "duration_ms": 200
+  "audio": {
+    "ambient_random": {
+      "enabled": true,
+      "track": "/music/boot_radio.mp3",
+      "non_interruptive": true,
+      "volume_min": 21,
+      "volume_max": 21,
+      "delay_min_ms": 9000,
+      "delay_max_ms": 26000,
+      "eq_profiles": []
+    }
   },
-  "timeline": {}
+  "framing": {
+    "preset": "center",
+    "x_offset": 0,
+    "y_offset": 0,
+    "scale_pct": 100
+  },
+  "scroll": {
+    "mode": "none",
+    "speed_ms": 0,
+    "pause_ms": 0,
+    "loop": false,
+    "loop_delay_ms": 0
+  },
+  "demo": {
+    "mode": "shadebobs",
+    "particle_count": 6,
+    "strobe_level": 3,
+    "enable": false
+  }
 }

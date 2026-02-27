@@ -5,6 +5,7 @@
 #include <lvgl.h>
 
 #include "core/scenario_def.h"
+#include "drivers/display/display_hal.h"
 #include "hardware_manager.h"
 #include "ui/fx/fx_engine.h"
 #include "ui/player_ui_model.h"
@@ -85,6 +86,38 @@ struct UiMemorySnapshot {
   uint16_t conv_pixels_per_ms = 0U;
 };
 
+struct UiSceneStatusSnapshot {
+  bool valid = false;
+  bool audio_playing = false;
+  bool show_title = false;
+  bool show_subtitle = false;
+  bool show_symbol = false;
+  bool lvgl_text_disabled = false;
+  uint32_t payload_crc = 0U;
+  uint16_t effect_speed_ms = 0U;
+  uint8_t text_glitch_pct = 65U;
+  uint8_t text_size_pct = 100U;
+  uint16_t transition_ms = 0U;
+  uint32_t bg_rgb = 0U;
+  uint32_t accent_rgb = 0U;
+  uint32_t text_rgb = 0U;
+  uint32_t overlay_draw_ok = 0U;
+  uint32_t overlay_draw_fail = 0U;
+  uint32_t overlay_startwrite_fail = 0U;
+  uint32_t overlay_skip_busy = 0U;
+  char scenario_id[48] = {0};
+  char step_id[64] = {0};
+  char scene_id[64] = {0};
+  char audio_pack_id[64] = {0};
+  char title[96] = {0};
+  char subtitle[160] = {0};
+  char symbol[48] = {0};
+  char symbol_align[16] = {0};
+  char text_backend[20] = "lvgl";
+  char effect[24] = {0};
+  char transition[24] = {0};
+};
+
 enum class UiStatusTopic : uint8_t {
   kGraphics = 0,
   kMemory,
@@ -111,6 +144,7 @@ class UiManager {
   bool simulateQrPayload(const char* payload);
   void dumpStatus(UiStatusTopic topic) const;
   UiMemorySnapshot memorySnapshot() const;
+  UiSceneStatusSnapshot sceneStatusSnapshot() const;
 
  private:
   void update();
@@ -367,10 +401,11 @@ class UiManager {
   void invalidateFxOverlayObjects();
   void updatePageLine();
   void stopSceneAnimations();
+  void setBaseSceneFxVisible(bool visible);
   void applySceneEffect(SceneEffect effect);
   void applySceneTransition(SceneTransition transition, uint16_t duration_ms);
   void applySceneFraming(int16_t frame_dx, int16_t frame_dy, uint8_t frame_scale_pct, bool split_layout);
-  void applyTextLayout(SceneTextAlign title_align, SceneTextAlign subtitle_align);
+  void applyTextLayout(SceneTextAlign title_align, SceneTextAlign subtitle_align, SceneTextAlign symbol_align);
   void applySubtitleScroll(SceneScrollMode mode, uint16_t speed_ms, uint16_t pause_ms, bool loop);
   void onWinEtapeShowcaseTick(uint16_t elapsed_ms);
   void startWinEtapeCracktroPhase();
@@ -382,13 +417,16 @@ class UiManager {
                        int16_t cents,
                        uint8_t confidence,
                        uint8_t level_pct,
-                       uint8_t stability_pct);
+                       uint8_t stability_pct,
+                       const HardwareManager::Snapshot* snapshot);
   void renderMicrophoneWaveform();
   uint16_t resolveAnimMs(uint16_t fallback_ms) const;
   void applyThemeColors(uint32_t bg_rgb, uint32_t accent_rgb, uint32_t text_rgb);
   static uint32_t hashScenePayload(const char* payload);
   bool shouldApplySceneStaticState(const char* scene_id, const char* payload_json, bool scene_changed) const;
   void applySceneDynamicState(const String& subtitle, bool show_subtitle, bool audio_playing, uint32_t text_rgb);
+  void renderLgfxSceneTextOverlay(uint32_t now_ms);
+  void renderLgfxLaDetectorOverlay(uint32_t now_ms);
   void resetSceneTimeline();
   void onTimelineTick(uint16_t elapsed_ms);
   bool isWinEtapeSceneId(const char* scene_id) const;
@@ -435,6 +473,7 @@ class UiManager {
   FlushContext flush_ctx_;
   BufferConfig buffer_cfg_;
   GraphicsStats graphics_stats_;
+  UiSceneStatusSnapshot scene_status_;
   uint16_t rgb332_to_565_lut_[256] = {};
   bool color_lut_ready_ = false;
   bool dma_requested_ = false;
@@ -510,10 +549,26 @@ class UiManager {
   uint16_t timeline_duration_ms_ = 0U;
   bool timeline_loop_ = true;
   int8_t timeline_effect_index_ = -1;
+  int8_t timeline_segment_cache_index_ = -1;
+  uint16_t timeline_segment_cache_elapsed_ms_ = 0U;
   uint8_t particleIndexForObj(const lv_obj_t* target) const;
   char last_scene_id_[40] = {0};
   uint32_t last_payload_crc_ = 0U;
   bool last_audio_playing_ = false;
+  bool theme_cache_valid_ = false;
+  uint32_t theme_cache_bg_ = 0U;
+  uint32_t theme_cache_accent_ = 0U;
+  uint32_t theme_cache_text_ = 0U;
+  uint8_t text_glitch_pct_ = 65U;
+  uint8_t text_size_pct_ = 100U;
+  bool scene_use_lgfx_text_overlay_ = false;
+  bool scene_disable_lvgl_text_ = false;
+  SceneTextAlign overlay_title_align_ = SceneTextAlign::kCenter;
+  SceneTextAlign overlay_subtitle_align_ = SceneTextAlign::kBottom;
+  SceneTextAlign overlay_symbol_align_ = SceneTextAlign::kTop;
+  drivers::display::OverlayFontFace overlay_title_font_face_ = drivers::display::OverlayFontFace::kIbmBold24;
+  drivers::display::OverlayFontFace overlay_subtitle_font_face_ = drivers::display::OverlayFontFace::kIbmBold16;
+  drivers::display::OverlayFontFace overlay_symbol_font_face_ = drivers::display::OverlayFontFace::kBuiltinLarge;
   uint8_t demo_particle_count_ = 4U;
   uint8_t demo_strobe_level_ = 65U;
   bool win_etape_fireworks_mode_ = false;
@@ -607,6 +662,20 @@ class UiManager {
   uint32_t la_detection_stable_target_ms_ = 0U;
   uint32_t la_detection_gate_elapsed_ms_ = 0U;
   uint32_t la_detection_gate_timeout_ms_ = 0U;
+  bool la_overlay_show_progress_ring_ = true;
+  bool la_overlay_show_hourglass_ = true;
+  bool la_overlay_show_caption_ = true;
+  bool la_overlay_show_pitch_text_ = true;
+  bool la_overlay_meter_bottom_horizontal_ = true;
+  bool la_overlay_hourglass_modern_ = true;
+  drivers::display::OverlayFontFace la_overlay_caption_font_ = drivers::display::OverlayFontFace::kBuiltinSmall;
+  uint8_t la_overlay_caption_size_ = 1U;
+  char la_overlay_caption_[64] = "Recherche d'accordance";
+  bool scene_runtime_lgfx_lock_ = true;
+  uint32_t overlay_draw_ok_count_ = 0U;
+  uint32_t overlay_draw_fail_count_ = 0U;
+  uint32_t overlay_startwrite_fail_count_ = 0U;
+  uint32_t overlay_skip_busy_count_ = 0U;
 
   int16_t touch_x_ = 0;
   int16_t touch_y_ = 0;

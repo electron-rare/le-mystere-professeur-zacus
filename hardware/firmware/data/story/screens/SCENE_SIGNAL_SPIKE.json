@@ -1,0 +1,89 @@
+{
+  "title": "PIC DE SIGNAL",
+  "subtitle": "Interference soudaine detectee",
+  "symbol": "ALERT",
+  "effect": "wave",
+  "effect_speed_ms": 260,
+  "theme": {
+    "bg": "#24090C",
+    "accent": "#FF6A52",
+    "text": "#FFF2EB"
+  },
+  "transition": {
+    "effect": "glitch",
+    "duration_ms": 170
+  },
+  "timeline": {
+    "loop": true,
+    "duration_ms": 1400,
+    "keyframes": [
+      {
+        "at_ms": 0,
+        "effect": "wave",
+        "speed_ms": 260,
+        "theme": {
+          "bg": "#24090C",
+          "accent": "#FF6A52",
+          "text": "#FFF2EB"
+        }
+      },
+      {
+        "at_ms": 700,
+        "effect": "blink",
+        "speed_ms": 180,
+        "theme": {
+          "bg": "#2F1014",
+          "accent": "#FF8C73",
+          "text": "#FFF8F5"
+        }
+      },
+      {
+        "at_ms": 1400,
+        "effect": "wave",
+        "speed_ms": 320,
+        "theme": {
+          "bg": "#24090C",
+          "accent": "#FF6A52",
+          "text": "#FFF2EB"
+        }
+      }
+    ]
+  },
+  "id": "SCENE_SIGNAL_SPIKE",
+  "text": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "title_case": "upper",
+    "subtitle_case": "raw",
+    "title_align": "top",
+    "subtitle_align": "bottom"
+  },
+  "visual": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "effect_speed_ms": 260
+  },
+  "framing": {
+    "preset": "center",
+    "x_offset": 0,
+    "y_offset": 0,
+    "scale_pct": 100
+  },
+  "scroll": {
+    "mode": "none",
+    "speed_ms": 4200,
+    "pause_ms": 900,
+    "loop": true
+  },
+  "demo": {
+    "mode": "standard",
+    "particle_count": 4,
+    "strobe_level": 65
+  },
+  "render": {
+    "text_backend": "lgfx_overlay",
+    "disable_lvgl_text": true
+  }
+}

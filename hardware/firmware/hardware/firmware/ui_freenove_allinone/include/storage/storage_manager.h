@@ -5,6 +5,11 @@
 
 class StorageManager {
  public:
+  struct ScenePayloadMeta {
+    String origin;
+    String source_kind;
+  };
+
   StorageManager() = default;
   ~StorageManager() = default;
   StorageManager(const StorageManager&) = delete;
@@ -24,6 +29,7 @@ class StorageManager {
   bool ensureDefaultStoryBundle();
   bool ensureDefaultScenarioFile(const char* path);
   uint32_t checksum(const char* path) const;
+  ScenePayloadMeta lastScenePayloadMeta() const;
 
  private:
   bool mountSdCard();
@@ -40,9 +46,23 @@ class StorageManager {
   bool copyFileFromSdToLittleFs(const char* src_path, const char* dst_path) const;
   bool copyStoryDirectoryFromSd(const char* relative_dir);
   String resolveReadableAssetPath(const String& absolute_path) const;
+  void invalidateStoryCaches() const;
+  bool isStoryScreenPayloadPresent() const;
   void noteSdAccessFailure(const char* operation, const char* path, int error_code) const;
   void noteSdAccessSuccess() const;
 
   mutable bool sd_ready_ = false;
   mutable uint8_t sd_failure_streak_ = 0U;
+  static constexpr uint8_t kSceneCacheSlots = 3U;
+  static constexpr uint8_t kAudioCacheSlots = 3U;
+  mutable String scene_cache_ids_[kSceneCacheSlots];
+  mutable String scene_cache_payloads_[kSceneCacheSlots];
+  mutable String scene_cache_origins_[kSceneCacheSlots];
+  mutable String scene_cache_source_kinds_[kSceneCacheSlots];
+  mutable uint8_t scene_cache_next_slot_ = 0U;
+  mutable String last_scene_payload_origin_;
+  mutable String last_scene_payload_source_kind_;
+  mutable String audio_cache_pack_ids_[kAudioCacheSlots];
+  mutable String audio_cache_paths_[kAudioCacheSlots];
+  mutable uint8_t audio_cache_next_slot_ = 0U;
 };

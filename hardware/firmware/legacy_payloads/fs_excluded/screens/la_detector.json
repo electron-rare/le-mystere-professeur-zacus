@@ -1,0 +1,75 @@
+{
+  "title": "DETECTION",
+  "subtitle": "Balayage en cours",
+  "symbol": "SCAN",
+  "effect": "scan",
+  "effect_speed_ms": 960,
+  "theme": {
+    "bg": "#041F1B",
+    "accent": "#2CE5A6",
+    "text": "#EFFFF8"
+  },
+  "transition": {
+    "effect": "slide_up",
+    "duration_ms": 220
+  },
+  "timeline": {
+    "loop": true,
+    "duration_ms": 1500,
+    "keyframes": [
+      {
+        "at_ms": 0,
+        "effect": "scan",
+        "speed_ms": 960,
+        "theme": {
+          "bg": "#041F1B",
+          "accent": "#2CE5A6",
+          "text": "#EFFFF8"
+        }
+      },
+      {
+        "at_ms": 1500,
+        "effect": "pulse",
+        "speed_ms": 620,
+        "theme": {
+          "bg": "#062923",
+          "accent": "#63F0C3",
+          "text": "#F3FFFB"
+        }
+      }
+    ]
+  },
+  "id": "SCENE_LA_DETECTOR",
+  "text": {
+    "show_title": false,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "title_case": "upper",
+    "subtitle_case": "raw",
+    "title_align": "top",
+    "subtitle_align": "bottom"
+  },
+  "visual": {
+    "show_title": false,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "effect_speed_ms": 960
+  },
+  "framing": {
+    "preset": "center",
+    "x_offset": 0,
+    "y_offset": 0,
+    "scale_pct": 100
+  },
+  "scroll": {
+    "mode": "none",
+    "speed_ms": 4200,
+    "pause_ms": 900,
+    "loop": true
+  },
+  "demo": {
+    "mode": "standard",
+    "particle_count": 4,
+    "strobe_level": 65
+  }
+}

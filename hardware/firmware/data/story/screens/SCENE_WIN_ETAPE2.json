@@ -1,23 +1,79 @@
 {
-  "id": "SCENE_WIN_ETAPE2",
   "title": "WIN ETAPE 2",
-  "subtitle": "Validation finale distante",
-  "symbol": "W2",
+  "subtitle": "ACK en attente",
+  "symbol": "WIN",
   "effect": "celebrate",
+  "effect_speed_ms": 340,
+  "theme": {
+    "bg": "#220F3A",
+    "accent": "#FFCE62",
+    "text": "#FFF8EA"
+  },
+  "transition": {
+    "effect": "zoom",
+    "duration_ms": 280
+  },
+  "timeline": {
+    "loop": true,
+    "duration_ms": 1200,
+    "keyframes": [
+      {
+        "at_ms": 0,
+        "effect": "celebrate",
+        "speed_ms": 340,
+        "theme": {
+          "bg": "#220F3A",
+          "accent": "#FFCE62",
+          "text": "#FFF8EA"
+        }
+      },
+      {
+        "at_ms": 1200,
+        "effect": "pulse",
+        "speed_ms": 260,
+        "theme": {
+          "bg": "#2E1850",
+          "accent": "#FFE18E",
+          "text": "#FFFDF5"
+        }
+      }
+    ]
+  },
+  "id": "SCENE_WIN_ETAPE2",
+  "text": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "title_case": "upper",
+    "subtitle_case": "raw",
+    "title_align": "top",
+    "subtitle_align": "bottom"
+  },
   "visual": {
     "show_title": true,
     "show_subtitle": true,
     "show_symbol": true,
-    "effect_speed_ms": 300
+    "effect_speed_ms": 340
   },
-  "theme": {
-    "bg": "#24142E",
-    "accent": "#FFD37A",
-    "text": "#FFF8E6"
+  "framing": {
+    "preset": "center",
+    "x_offset": 0,
+    "y_offset": 0,
+    "scale_pct": 100
   },
-  "transition": {
-    "effect": "zoom",
-    "duration_ms": 260
+  "scroll": {
+    "mode": "none",
+    "speed_ms": 4200,
+    "pause_ms": 900,
+    "loop": true
   },
-  "timeline": {}
+  "demo": {
+    "mode": "standard",
+    "particle_count": 4,
+    "strobe_level": 65
+  },
+  "render": {
+    "text_backend": "lgfx_overlay",
+    "disable_lvgl_text": true
+  }
 }

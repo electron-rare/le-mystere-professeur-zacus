@@ -30,10 +30,21 @@ LV_FONT_DECLARE(lv_font_orbitron_40);
 #endif
 LV_FONT_DECLARE(lv_font_ibmplexmono_14);
 LV_FONT_DECLARE(lv_font_ibmplexmono_18);
+LV_FONT_DECLARE(lv_font_ibmplexmono_bold_12);
+LV_FONT_DECLARE(lv_font_ibmplexmono_bold_16);
+LV_FONT_DECLARE(lv_font_ibmplexmono_bold_20);
+LV_FONT_DECLARE(lv_font_ibmplexmono_bold_24);
+LV_FONT_DECLARE(lv_font_ibmplexmono_italic_12);
+LV_FONT_DECLARE(lv_font_ibmplexmono_italic_16);
+LV_FONT_DECLARE(lv_font_ibmplexmono_italic_20);
+LV_FONT_DECLARE(lv_font_ibmplexmono_italic_24);
 #if UI_FONT_PIXEL_ENABLE
 LV_FONT_DECLARE(lv_font_pressstart2p_16);
 LV_FONT_DECLARE(lv_font_pressstart2p_24);
 #endif
+LV_FONT_DECLARE(lv_font_bungee_24);
+LV_FONT_DECLARE(lv_font_monoton_24);
+LV_FONT_DECLARE(lv_font_rubikglitch_24);
 #endif
 
 namespace UiFonts {
@@ -130,6 +141,86 @@ const lv_font_t* fontBodyL() {
 #endif
 }
 
+const lv_font_t* fontIbmRegular14() {
+#if UI_FONT_EXTERNAL_SET
+  return &lv_font_ibmplexmono_14;
+#else
+  return &lv_font_montserrat_14;
+#endif
+}
+
+const lv_font_t* fontIbmRegular18() {
+#if UI_FONT_EXTERNAL_SET
+  return &lv_font_ibmplexmono_18;
+#else
+  return &lv_font_montserrat_18;
+#endif
+}
+
+const lv_font_t* fontBold12() {
+#if UI_FONT_EXTERNAL_SET
+  return &lv_font_ibmplexmono_bold_12;
+#else
+  return &lv_font_montserrat_14;
+#endif
+}
+
+const lv_font_t* fontBold16() {
+#if UI_FONT_EXTERNAL_SET
+  return &lv_font_ibmplexmono_bold_16;
+#else
+  return &lv_font_montserrat_16;
+#endif
+}
+
+const lv_font_t* fontBold20() {
+#if UI_FONT_EXTERNAL_SET
+  return &lv_font_ibmplexmono_bold_20;
+#else
+  return &lv_font_montserrat_20;
+#endif
+}
+
+const lv_font_t* fontBold24() {
+#if UI_FONT_EXTERNAL_SET
+  return &lv_font_ibmplexmono_bold_24;
+#else
+  return &lv_font_montserrat_24;
+#endif
+}
+
+const lv_font_t* fontItalic12() {
+#if UI_FONT_EXTERNAL_SET
+  return &lv_font_ibmplexmono_italic_12;
+#else
+  return &lv_font_montserrat_14;
+#endif
+}
+
+const lv_font_t* fontItalic16() {
+#if UI_FONT_EXTERNAL_SET
+  return &lv_font_ibmplexmono_italic_16;
+#else
+  return &lv_font_montserrat_16;
+#endif
+}
+
+const lv_font_t* fontItalic20() {
+#if UI_FONT_EXTERNAL_SET
+  return &lv_font_ibmplexmono_italic_20;
+#else
+  return &lv_font_montserrat_20;
+#endif
+}
+
+const lv_font_t* fontItalic24() {
+#if UI_FONT_EXTERNAL_SET
+  return &lv_font_ibmplexmono_italic_24;
+#else
+  return &lv_font_montserrat_24;
+#endif
+}
+
 const lv_font_t* fontTitle() {
 #if UI_FONT_EXTERNAL_SET
   return &lv_font_orbitron_28;
@@ -165,6 +256,30 @@ const lv_font_t* fontPixel() {
   return &lv_font_orbitron_28;
 #elif UI_FONT_PIXEL_ENABLE
   return &lv_font_montserrat_24;
+#else
+  return &lv_font_montserrat_24;
+#endif
+}
+
+const lv_font_t* fontFunkyBungee() {
+#if UI_FONT_EXTERNAL_SET
+  return &lv_font_bungee_24;
+#else
+  return &lv_font_montserrat_24;
+#endif
+}
+
+const lv_font_t* fontFunkyMonoton() {
+#if UI_FONT_EXTERNAL_SET
+  return &lv_font_monoton_24;
+#else
+  return &lv_font_montserrat_24;
+#endif
+}
+
+const lv_font_t* fontFunkyRubikGlitch() {
+#if UI_FONT_EXTERNAL_SET
+  return &lv_font_rubikglitch_24;
 #else
   return &lv_font_montserrat_24;
 #endif

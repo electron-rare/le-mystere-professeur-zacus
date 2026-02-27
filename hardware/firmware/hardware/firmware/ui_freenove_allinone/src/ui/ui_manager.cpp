@@ -1333,8 +1333,6 @@ void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
 
   const uint16_t osc_main = color565(0x4DF871UL);
   const uint16_t osc_ring = color565(0x1B4A2FUL);
-  const uint16_t vu_fill = color565(0x8DFF9DUL);
-  const uint16_t vu_peak = color565(0xF8FF6AUL);
   const uint16_t fft_low = color565(0xFF5E52UL);
   const uint16_t fft_mid = color565(0x7DFF7FUL);
   const uint16_t fft_high = color565(0x5A8DFFUL);
@@ -1347,8 +1345,8 @@ void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
   const int16_t jitter_x = (jitter == 0) ? 0 : static_cast<int16_t>(signedNoise(now_ms, 0xA1B2C3UL, jitter));
   const int16_t jitter_y = (jitter == 0) ? 0 : static_cast<int16_t>(signedNoise(now_ms, 0xB4C3D2UL, jitter));
 
-  const int16_t ring_cx = static_cast<int16_t>((width * 36) / 100 + jitter_x);
-  const int16_t ring_cy = static_cast<int16_t>((height * 54) / 100 + jitter_y);
+  const int16_t ring_cx = static_cast<int16_t>((width * 78) / 100 + jitter_x);
+  const int16_t ring_cy = static_cast<int16_t>((height / 2) + jitter_y);
   int16_t ring_radius = static_cast<int16_t>((height * 22) / 100);
   if (ring_radius < 28) {
     ring_radius = 28;
@@ -1368,13 +1366,17 @@ void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
 
   const uint8_t stability_pct = (la_detection_stability_pct_ > 100U) ? 100U : la_detection_stability_pct_;
   if (la_overlay_show_progress_ring_) {
+    uint8_t gauge_pct = stability_pct;
+    if (active_snapshot != nullptr) {
+      gauge_pct = (active_snapshot->mic_level_percent > 100U) ? 100U : active_snapshot->mic_level_percent;
+    }
     const int16_t gauge_outer = static_cast<int16_t>(ring_radius + 12);
     const int16_t gauge_inner = static_cast<int16_t>(gauge_outer - 4);
     const uint16_t gauge_bg = color565(0x1A3E2DUL);
     const uint16_t gauge_fg = color565(0x66FFADUL);
     const uint16_t gauge_tip = color565(0xB7FFE1UL);
     constexpr uint8_t kGaugeSegments = 72U;
-    const uint8_t active_segments = static_cast<uint8_t>((static_cast<uint16_t>(stability_pct) * kGaugeSegments) / 100U);
+    const uint8_t active_segments = static_cast<uint8_t>((static_cast<uint16_t>(gauge_pct) * kGaugeSegments) / 100U);
     for (uint8_t segment = 0U; segment < kGaugeSegments; ++segment) {
       const float phase = static_cast<float>(segment) / static_cast<float>(kGaugeSegments);
       const float angle = (-kHalfPi) + (phase * kTau);
@@ -1430,13 +1432,18 @@ void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
   if (la_overlay_show_hourglass_) {
     const int16_t hg_w = la_overlay_hourglass_modern_ ? 30 : 14;
     const int16_t hg_h = la_overlay_hourglass_modern_ ? 48 : 24;
-    const int16_t hg_x = static_cast<int16_t>(width - hg_w - 10);
-    const int16_t hg_y = la_overlay_hourglass_modern_ ? 6 : 4;
-    const uint16_t hg_border = color565(0x78D3FFUL);
-    const uint16_t hg_fill = color565(0xC8F4FFUL);
-    const uint16_t hg_glow = color565(0x2E6486UL);
+    const int16_t hg_x = 10;
+    const int16_t hg_y = static_cast<int16_t>((height - hg_h) / 2);
+    const uint16_t hg_border = color565(0xF3F9FFUL);
+    const uint16_t hg_bg = color565(0xFFFFFFUL);
+    const uint16_t hg_sand = color565(0x050505UL);
+    const uint16_t hg_glow = color565(0x0E2A3AUL);
     if (la_overlay_hourglass_modern_) {
-      display.drawOverlayRect(static_cast<int16_t>(hg_x - 1), static_cast<int16_t>(hg_y - 1), static_cast<int16_t>(hg_w + 2), static_cast<int16_t>(hg_h + 2), hg_glow);
+      display.drawOverlayRect(static_cast<int16_t>(hg_x - 1),
+                              static_cast<int16_t>(hg_y - 1),
+                              static_cast<int16_t>(hg_w + 2),
+                              static_cast<int16_t>(hg_h + 2),
+                              hg_glow);
     }
     display.drawOverlayRect(hg_x, hg_y, hg_w, hg_h, hg_border);
     display.drawOverlayLine(hg_x + 2, hg_y + 2, hg_x + hg_w - 3, hg_y + hg_h - 3, hg_border);
@@ -1456,6 +1463,34 @@ void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
     }
 
     const int16_t chamber_h = static_cast<int16_t>((hg_h - 8) / 2);
+    const int16_t sand_inset = la_overlay_hourglass_modern_ ? 6 : 4;
+    const int16_t inner_half = static_cast<int16_t>((hg_w / 2) - sand_inset);
+    const int16_t center_x = static_cast<int16_t>(hg_x + (hg_w / 2));
+    const int16_t top_start_y = static_cast<int16_t>(hg_y + 3);
+
+    auto draw_hourglass_fill = [&](bool top, int16_t rows, uint16_t color) {
+      if (rows <= 0 || inner_half <= 0) {
+        return;
+      }
+      if (rows > chamber_h) {
+        rows = chamber_h;
+      }
+      for (int16_t row = 0; row < rows; ++row) {
+        const float t = static_cast<float>(row) / static_cast<float>((chamber_h > 1) ? (chamber_h - 1) : 1);
+        int16_t half = static_cast<int16_t>((1.0f - t) * static_cast<float>(inner_half));
+        if (half < 1) {
+          half = 1;
+        }
+        const int16_t y = top ? static_cast<int16_t>(top_start_y + row)
+                              : static_cast<int16_t>(hg_y + hg_h - 4 - row);
+        display.drawOverlayLine(static_cast<int16_t>(center_x - half),
+                                y,
+                                static_cast<int16_t>(center_x + half),
+                                y,
+                                color);
+      }
+    };
+
     int16_t top_fill = static_cast<int16_t>(remain * static_cast<float>(chamber_h));
     if (top_fill < 0) {
       top_fill = 0;
@@ -1468,44 +1503,21 @@ void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
     } else if (bottom_fill > chamber_h) {
       bottom_fill = chamber_h;
     }
-    const int16_t sand_inset = la_overlay_hourglass_modern_ ? 6 : 4;
-    const int16_t inner_half = static_cast<int16_t>((hg_w / 2) - sand_inset);
-    const int16_t top_start_y = static_cast<int16_t>(hg_y + 3);
-    if (top_fill > 0 && inner_half > 0) {
-      for (int16_t row = 0; row < top_fill; ++row) {
-        const float t = static_cast<float>(row) / static_cast<float>((chamber_h > 1) ? (chamber_h - 1) : 1);
-        int16_t half = static_cast<int16_t>((1.0f - t) * static_cast<float>(inner_half));
-        if (half < 1) {
-          half = 1;
-        }
-        const int16_t y = static_cast<int16_t>(top_start_y + row);
-        display.drawOverlayLine(static_cast<int16_t>(hg_x + (hg_w / 2) - half),
-                                y,
-                                static_cast<int16_t>(hg_x + (hg_w / 2) + half),
-                                y,
-                                hg_fill);
-      }
-    }
-    if (bottom_fill > 0 && inner_half > 0) {
-      for (int16_t row = 0; row < bottom_fill; ++row) {
-        const float t = static_cast<float>(row) / static_cast<float>((chamber_h > 1) ? (chamber_h - 1) : 1);
-        int16_t half = static_cast<int16_t>((1.0f - t) * static_cast<float>(inner_half));
-        if (half < 1) {
-          half = 1;
-        }
-        const int16_t y = static_cast<int16_t>(hg_y + hg_h - 4 - row);
-        display.drawOverlayLine(static_cast<int16_t>(hg_x + (hg_w / 2) - half),
-                                y,
-                                static_cast<int16_t>(hg_x + (hg_w / 2) + half),
-                                y,
-                                hg_fill);
-      }
-    }
+
+    // Inverted hourglass palette: white chambers with black sand.
+    draw_hourglass_fill(true, chamber_h, hg_bg);
+    draw_hourglass_fill(false, chamber_h, hg_bg);
+    draw_hourglass_fill(true, top_fill, hg_sand);
+    draw_hourglass_fill(false, bottom_fill, hg_sand);
+
     if (la_overlay_hourglass_modern_) {
-      const int16_t neck_x = static_cast<int16_t>(hg_x + (hg_w / 2));
       const int16_t neck_y0 = static_cast<int16_t>(hg_y + (hg_h / 2) - 2);
       const int16_t neck_y1 = static_cast<int16_t>(neck_y0 + 5);
-      display.drawOverlayLine(neck_x, neck_y0, neck_x, neck_y1, hg_fill);
+      if (top_fill > 0 || bottom_fill < chamber_h) {
+        display.drawOverlayLine(center_x, neck_y0, center_x, neck_y1, hg_sand);
+      } else {
+        display.drawOverlayLine(center_x, neck_y0, center_x, neck_y1, hg_bg);
+      }
     }
   }
 
@@ -1528,33 +1540,53 @@ void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
     if (count > HardwareManager::kMicWaveformCapacity) {
       count = HardwareManager::kMicWaveformCapacity;
     }
-    const uint8_t max_points = 32U;
+    const uint8_t max_points = 48U;
     uint8_t points = (count < max_points) ? count : max_points;
-    if (points >= 3U) {
+    const int16_t hourglass_w = la_overlay_hourglass_modern_ ? 30 : 14;
+    const int16_t wave_left =
+        static_cast<int16_t>(10 + (la_overlay_show_hourglass_ ? (hourglass_w + 14) : 6));
+    const int16_t wave_right = static_cast<int16_t>(ring_cx - ring_radius - 16);
+    const int16_t wave_w = static_cast<int16_t>(wave_right - wave_left);
+    const int16_t wave_cy = static_cast<int16_t>(height / 2);
+    const int16_t wave_half_h = 30;
+    const uint16_t wave_bg = color565(0x102820UL);
+    const uint16_t wave_axis = color565(0x2F7F61UL);
+    if (wave_w > 32) {
+      display.fillOverlayRect(wave_left,
+                              static_cast<int16_t>(wave_cy - wave_half_h - 4),
+                              wave_w,
+                              static_cast<int16_t>((wave_half_h * 2) + 8),
+                              wave_bg);
+      display.drawOverlayRect(wave_left,
+                              static_cast<int16_t>(wave_cy - wave_half_h - 4),
+                              wave_w,
+                              static_cast<int16_t>((wave_half_h * 2) + 8),
+                              osc_ring);
+      display.drawOverlayLine(wave_left,
+                              wave_cy,
+                              static_cast<int16_t>(wave_left + wave_w - 1),
+                              wave_cy,
+                              wave_axis);
+    }
+    if (points >= 2U && wave_w > 32) {
       const uint8_t head = active_snapshot->mic_waveform_head;
       const uint16_t start = (head >= points) ? static_cast<uint16_t>(head - points)
                                               : static_cast<uint16_t>(head + HardwareManager::kMicWaveformCapacity - points);
-      int16_t prev_x = ring_cx;
-      int16_t prev_y = static_cast<int16_t>(ring_cy - ring_radius);
-      const int16_t amp_radius = static_cast<int16_t>(8 + (active_snapshot->mic_level_percent / 4U));
+      int16_t prev_x = wave_left;
+      int16_t prev_y = wave_cy;
       for (uint8_t index = 0U; index < points; ++index) {
         const uint16_t sample_index = static_cast<uint16_t>(start + index) % HardwareManager::kMicWaveformCapacity;
         uint8_t sample = active_snapshot->mic_waveform[sample_index];
         if (sample > 100U) {
           sample = 100U;
         }
-        const float phase = static_cast<float>(index) / static_cast<float>(points);
-        const float angle = (-kHalfPi) + (phase * kTau);
-        int16_t radius = static_cast<int16_t>(ring_radius + ((static_cast<int16_t>(sample) - 50) * amp_radius) / 60);
-        if (radius < static_cast<int16_t>(ring_radius - amp_radius)) {
-          radius = static_cast<int16_t>(ring_radius - amp_radius);
-        } else if (radius > static_cast<int16_t>(ring_radius + amp_radius)) {
-          radius = static_cast<int16_t>(ring_radius + amp_radius);
-        }
-        int16_t x = static_cast<int16_t>(ring_cx + std::cos(angle) * static_cast<float>(radius));
-        int16_t y = static_cast<int16_t>(ring_cy + std::sin(angle) * static_cast<float>(radius));
+        int16_t x = static_cast<int16_t>(wave_left +
+                                         (static_cast<int32_t>(index) * static_cast<int32_t>(wave_w - 1)) /
+                                             static_cast<int32_t>((points > 1U) ? (points - 1U) : 1U));
+        const int16_t amp = static_cast<int16_t>(((static_cast<int16_t>(sample) - 50) * wave_half_h) / 50);
+        int16_t y = static_cast<int16_t>(wave_cy - amp);
         x = clamp_i16(x, 2, static_cast<int16_t>(width - 3));
-        y = clamp_i16(y, 2, static_cast<int16_t>(height - 3));
+        y = clamp_i16(y, static_cast<int16_t>(wave_cy - wave_half_h), static_cast<int16_t>(wave_cy + wave_half_h));
         if (index > 0U) {
           draw_thick_line(prev_x, prev_y, x, y, osc_main);
         }
@@ -1563,69 +1595,19 @@ void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
       }
     }
 
-    if (la_overlay_meter_bottom_horizontal_) {
-      const int16_t meter_x = 10;
-      const int16_t meter_w = static_cast<int16_t>(width - 20);
-      const int16_t meter_h = 10;
-      const int16_t meter_y = static_cast<int16_t>(height - 14);
-      const uint16_t meter_bg = color565(0x0E2A1BUL);
-      const uint16_t meter_border = color565(0x56B89FUL);
-      if (meter_w > 20) {
-        display.fillOverlayRect(meter_x, meter_y, meter_w, meter_h, meter_bg);
-        display.drawOverlayRect(meter_x, meter_y, meter_w, meter_h, meter_border);
-        const int16_t fill_w =
-            static_cast<int16_t>((static_cast<int32_t>(meter_w - 2) * active_snapshot->mic_level_percent) / 100);
-        if (fill_w > 0) {
-          display.fillOverlayRect(static_cast<int16_t>(meter_x + 1),
-                                  static_cast<int16_t>(meter_y + 1),
-                                  fill_w,
-                                  static_cast<int16_t>(meter_h - 2),
-                                  vu_fill);
-        }
-        const int16_t peak_x = static_cast<int16_t>(
-            meter_x + 1 + (static_cast<int32_t>(meter_w - 2) * active_snapshot->mic_pitch_confidence) / 100);
-        display.drawOverlayLine(peak_x,
-                                static_cast<int16_t>(meter_y - 1),
-                                peak_x,
-                                static_cast<int16_t>(meter_y + meter_h),
-                                vu_peak);
-      }
-    } else {
-      const int16_t vu_x = static_cast<int16_t>(width - 24);
-      const int16_t vu_y = 26;
-      const int16_t vu_w = 10;
-      const int16_t vu_h = static_cast<int16_t>(height - 70);
-      if (vu_h > 20) {
-        display.drawOverlayRect(vu_x, vu_y, vu_w, vu_h, marker);
-        const int16_t fill_h =
-            static_cast<int16_t>((static_cast<int32_t>(vu_h - 2) * active_snapshot->mic_level_percent) / 100);
-        if (fill_h > 0) {
-          const int16_t fy = static_cast<int16_t>(vu_y + vu_h - 1 - fill_h);
-          display.fillOverlayRect(static_cast<int16_t>(vu_x + 1), fy, static_cast<int16_t>(vu_w - 2), fill_h, vu_fill);
-        }
-        const int16_t peak_h =
-            static_cast<int16_t>((static_cast<int32_t>(vu_h - 2) * active_snapshot->mic_pitch_confidence) / 100);
-        if (peak_h > 0) {
-          const int16_t py = static_cast<int16_t>(vu_y + vu_h - 1 - peak_h);
-          display.drawOverlayLine(vu_x, py, static_cast<int16_t>(vu_x + vu_w - 1), py, vu_peak);
-        }
-      }
-    }
-
-    constexpr uint8_t kFftVisualBandCount = 15U;
+    constexpr uint8_t kFftVisualBandCount = 60U;
+    constexpr uint8_t kA4VisualBand = kFftVisualBandCount / 2U;
     const int16_t fft_bottom = la_overlay_meter_bottom_horizontal_ ? static_cast<int16_t>(height - 28)
                                                                     : static_cast<int16_t>(height - 18);
     const int16_t fft_gap = 1;
-    const int16_t fft_area_w = 120;
-    int16_t fft_bar_w = static_cast<int16_t>((fft_area_w - ((kFftVisualBandCount - 1U) * fft_gap)) / kFftVisualBandCount);
-    if (fft_bar_w < 3) {
-      fft_bar_w = 3;
-    }
+    int16_t fft_bar_w = 2;
     const int16_t fft_used_w =
         static_cast<int16_t>((kFftVisualBandCount * fft_bar_w) + ((kFftVisualBandCount - 1U) * fft_gap));
-    int16_t fft_x0 = static_cast<int16_t>(width - fft_used_w - 8);
-    if (fft_x0 < 6) {
-      fft_x0 = 6;
+    int16_t fft_x0 = static_cast<int16_t>((width / 2) - (kA4VisualBand * (fft_bar_w + fft_gap)) - (fft_bar_w / 2));
+    if (fft_x0 < 4) {
+      fft_x0 = 4;
+    } else if (fft_x0 + fft_used_w > width - 4) {
+      fft_x0 = static_cast<int16_t>(width - 4 - fft_used_w);
     }
     const int16_t fft_max_h = 54;
     auto sampleFftBand = [&](uint8_t visual_index) -> uint8_t {
@@ -1636,8 +1618,12 @@ void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
       if (kSourceBands == 1U || kFftVisualBandCount <= 1U) {
         return active_snapshot->mic_spectrum[0];
       }
-      const float pos = (static_cast<float>(visual_index) * static_cast<float>(kSourceBands - 1U)) /
-                        static_cast<float>(kFftVisualBandCount - 1U);
+      const float centered = static_cast<float>(visual_index) - static_cast<float>(kA4VisualBand);
+      const float half_visual = static_cast<float>((kFftVisualBandCount > 2U) ? (kA4VisualBand) : 1U);
+      const float normalized = centered / ((half_visual > 0.0f) ? half_visual : 1.0f);
+      const float source_center = static_cast<float>(kSourceBands - 1U) / 2.0f;
+      const float source_span = source_center;
+      const float pos = source_center + (normalized * source_span);
       uint8_t left = static_cast<uint8_t>(pos);
       if (left >= kSourceBands) {
         left = static_cast<uint8_t>(kSourceBands - 1U);
@@ -1667,17 +1653,16 @@ void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
       const int16_t x = static_cast<int16_t>(fft_x0 + index * (fft_bar_w + fft_gap));
       const int16_t y = static_cast<int16_t>(fft_bottom - h);
       uint16_t c = fft_mid;
-      if (index <= 4U) {
+      if (index < (kFftVisualBandCount / 3U)) {
         c = fft_low;
-      } else if (index >= 10U) {
+      } else if (index >= ((kFftVisualBandCount * 2U) / 3U)) {
         c = fft_high;
       }
       display.fillOverlayRect(x, y, fft_bar_w, h, c);
       display.drawOverlayRect(x, y, fft_bar_w, h, marker);
     }
 
-    const uint8_t a4_band = static_cast<uint8_t>(((440U - 400U) * (kFftVisualBandCount - 1U) + 40U) / 80U);
-    const int16_t marker_x = static_cast<int16_t>(fft_x0 + a4_band * (fft_bar_w + fft_gap) + (fft_bar_w / 2));
+    const int16_t marker_x = static_cast<int16_t>(fft_x0 + kA4VisualBand * (fft_bar_w + fft_gap) + (fft_bar_w / 2));
     display.drawOverlayLine(marker_x, static_cast<int16_t>(fft_bottom - fft_max_h - 4), marker_x, fft_bottom, marker);
 
     if (la_overlay_show_pitch_text_) {
@@ -1690,7 +1675,7 @@ void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
                     static_cast<int>(active_snapshot->mic_pitch_cents));
       drivers::display::OverlayTextCommand text_cmd = {};
       text_cmd.text = pitch_line;
-      text_cmd.x = static_cast<int16_t>(width - 126);
+      text_cmd.x = static_cast<int16_t>(marker_x - 58);
       text_cmd.y = static_cast<int16_t>(height - 24);
       text_cmd.font_face = drivers::display::OverlayFontFace::kBuiltinSmall;
       text_cmd.size = 1U;

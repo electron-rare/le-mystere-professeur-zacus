@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <esp_now.h>
+#include <esp_wifi.h>
 
 #include <cctype>
 #include <cstdio>
@@ -14,6 +15,7 @@ namespace {
 NetworkManager* g_network_instance = nullptr;
 constexpr uint8_t kBroadcastMac[6] = {0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU};
 constexpr char kBroadcastTarget[] = "broadcast";
+constexpr uint8_t kEspNowPreferredChannel = 6U;
 
 void trimAsciiInPlace(char* text) {
   if (text == nullptr) {
@@ -75,6 +77,20 @@ bool isBroadcastMac(const uint8_t mac[6]) {
   return true;
 }
 
+void applyEspNowChannelHint(const char* reason) {
+  if (WiFi.status() == WL_CONNECTED) {
+    // Keep infrastructure channel when STA is associated.
+    return;
+  }
+  const esp_err_t err = esp_wifi_set_channel(kEspNowPreferredChannel, WIFI_SECOND_CHAN_NONE);
+  if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_INIT && err != ESP_ERR_WIFI_NOT_STARTED) {
+    Serial.printf("[NET] esp_wifi_set_channel(%u) failed err=%d reason=%s\n",
+                  static_cast<unsigned>(kEspNowPreferredChannel),
+                  static_cast<int>(err),
+                  (reason != nullptr) ? reason : "n/a");
+  }
+}
+
 const char* inferEnvelopeType(const char* payload) {
   if (payload == nullptr || payload[0] == '\0') {
     return "empty";
@@ -110,6 +126,7 @@ bool NetworkManager::begin(const char* hostname) {
   WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
   WiFi.mode(WIFI_STA);
+  applyEspNowChannelHint("begin");
   if (hostname != nullptr && hostname[0] != '\0') {
     WiFi.setHostname(hostname);
   }
@@ -326,9 +343,9 @@ bool NetworkManager::startApInternal(const char* ssid, const char* password, boo
   WiFi.mode(WIFI_AP_STA);
   bool ok = false;
   if (password != nullptr && password[0] != '\0') {
-    ok = WiFi.softAP(ssid, password);
+    ok = WiFi.softAP(ssid, password, kEspNowPreferredChannel);
   } else {
-    ok = WiFi.softAP(ssid);
+    ok = WiFi.softAP(ssid, nullptr, kEspNowPreferredChannel);
   }
   if (ok) {
     copyText(snapshot_.ap_ssid, sizeof(snapshot_.ap_ssid), ssid);
@@ -340,10 +357,11 @@ bool NetworkManager::startApInternal(const char* ssid, const char* password, boo
     }
   }
   refreshSnapshot();
-  Serial.printf("[NET] AP %s ssid=%s mode=%s\n",
+  Serial.printf("[NET] AP %s ssid=%s mode=%s ch=%u\n",
                 ok ? "on" : "failed",
                 ssid,
-                manual_request ? "manual" : "fallback");
+                manual_request ? "manual" : "fallback",
+                static_cast<unsigned>(WiFi.channel()));
   return ok;
 }
 
@@ -374,6 +392,7 @@ bool NetworkManager::enableEspNow() {
   if (WiFi.getMode() == WIFI_MODE_NULL) {
     WiFi.mode(WIFI_STA);
   }
+  applyEspNowChannelHint("espnow_on");
   if (esp_now_init() != ESP_OK) {
     Serial.println("[NET] esp_now_init failed");
     return false;
@@ -957,6 +976,7 @@ void NetworkManager::refreshSnapshot() {
   const bool fallback_ap_active =
       fallback_ap_active_ && !manual_ap_active_ && ap_enabled && !local_match;
   const int32_t rssi = sta_connected ? WiFi.RSSI() : 0;
+  const int32_t channel = static_cast<int32_t>(WiFi.channel());
 
   char sta_ssid[33] = {0};
   char ap_ssid[33] = {0};
@@ -992,6 +1012,7 @@ void NetworkManager::refreshSnapshot() {
   snapshot_.fallback_ap_active = fallback_ap_active;
   snapshot_.local_retry_paused = local_retry_paused_;
   snapshot_.rssi = rssi;
+  snapshot_.channel = channel;
   copyText(snapshot_.local_target, sizeof(snapshot_.local_target), local_target);
   copyText(snapshot_.mode, sizeof(snapshot_.mode), mode_label);
   copyText(snapshot_.state, sizeof(snapshot_.state), state_label);

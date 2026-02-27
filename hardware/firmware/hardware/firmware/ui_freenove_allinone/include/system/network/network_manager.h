@@ -31,6 +31,7 @@ class NetworkManager {
     char local_target[33] = {0};
     char ip[20] = "0.0.0.0";
     int32_t rssi = 0;
+    int32_t channel = 0;
     uint8_t ap_clients = 0U;
     uint8_t espnow_peer_count = 0U;
     uint32_t espnow_rx_packets = 0U;

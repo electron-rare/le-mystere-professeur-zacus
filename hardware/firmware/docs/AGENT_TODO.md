@@ -1,3 +1,69 @@
+## [2026-02-27] A252 FS_LIST firmware (liste SD/LittleFS paginee)
+
+- Objectif: exposer une commande firmware `FS_LIST` pour inventorier les fichiers depuis la carte A252 sans montage PC.
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260227_164113_wip.patch`
+  - `/tmp/zacus_checkpoint/20260227_164113_status.txt`
+- Implémentation:
+  - `hardware/RTC_SLIC_PHONE/src/main.cpp`: ajout `FS_LIST` (defaults SD, pagination JSON, recursion DFS, filtres dirs/files, shorthand `sd|littlefs|auto`, parse JSON args, codes erreurs `invalid_*`, `mount_failed`, `open_failed`, `not_directory`).
+  - `hardware/RTC_SLIC_PHONE/README.md`: ajout section usage `FS_LIST` (serie/API control, pagination).
+- Build/flash:
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev` -> OK
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001` -> OK
+- Smoke serie:
+  - `FS_LIST` -> JSON valide (`source_requested=SD`, `source_used=SD`, pagination active `has_next/next_page`).
+  - `FS_LIST littlefs` -> JSON valide avec assets locaux (`/welcome.wav`, `/souffle.wav`, `/radio.wav`...).
+  - pagination valide (`page=0/1` disjointe).
+  - erreurs valides: `invalid_source`, `invalid_path`, `invalid_page`, `invalid_page_size`.
+
+## [2026-02-27] Hotfix ESP-NOW bench Freenove/A252 (usbmodem + usbserial)
+
+- Objectif: restaurer le flux HOT-LINE A252 -> Freenove avec `SC_EVENT espnow ACK_*` sur banc PIO local.
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260227_160846_wip.patch`
+  - `/tmp/zacus_checkpoint/20260227_160846_status.txt`
+- Correctifs appliques:
+  - Freenove: alignement canal radio preferentiel `6` (fallback AP + hint ESP-NOW) et exposition du canal dans les statuts.
+  - Freenove: parsing envelope `SC_EVENT` corrige (`args` objet JSON correctement lu).
+  - A252: envoi `HOTLINE_VALIDATE` repasse en `broadcast` et bridge ESP-NOW auto-enregistre le peer (incluant broadcast) avant envoi.
+- Builds/flash:
+  - `pio run -e freenove_esp32s3` -> OK
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` -> OK
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev` -> OK
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001` -> OK
+- Validation E2E serie:
+  - Freenove `ESPNOW_STATUS_JSON` expose `channel=6`, reception `rx_count` incrementee.
+  - Freenove recoit `SC_EVENT ACK_WIN1` depuis A252 et transitionne `RTC_ESP_ETAPE1 -> WIN_ETAPE1`.
+  - Freenove recoit `SC_EVENT ACK_WARNING` et transitionne `WIN_ETAPE1 -> STEP_WARNING`.
+  - Freenove recoit `SC_EVENT ACK_WIN2` et transitionne `RTC_ESP_ETAPE1 -> RTC_ESP_ETAPE2`.
+  - A252 recoit `WAITING_VALIDATION` (last_notify_event=`waiting_validation`, last_notify_ok=`true`).
+
+## [2026-02-27] Focus PIO Freenove usbmodem + A252 usbserial
+
+- Scope: validation ciblee sur deux cartes uniquement (Freenove + A252), sans toucher `hardware/firmware/esp32/`.
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260227_153546_wip.patch`
+  - `/tmp/zacus_checkpoint/20260227_153546_status.txt`
+- Builds/gates executes:
+  - `./tools/dev/story-gen validate` -> OK
+  - `./tools/dev/story-gen generate-bundle` -> OK (`artifacts/story_fs/deploy`)
+  - `pio run -e freenove_esp32s3` -> OK
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev` -> OK
+  - `./build_all.sh` -> FAIL connu sur `ui_rp2040_ili9488` et `ui_rp2040_ili9486` (`input in flex scanner failed`), autres envs OK
+  - `./tools/dev/run_matrix_and_smoke.sh` -> build FAIL (RP2040), port resolve SKIP (CP2102 non distinguables par fingerprint/location dans ce banc)
+- Flash PIO cible:
+  - Freenove (`/dev/cu.usbmodem5AB90753301`): `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` -> OK
+  - A252 (`/dev/cu.usbserial-0001`): `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001` -> OK
+- Probes serie rapides (115200):
+  - Freenove: `UI_LINK_STATUS` retourne `UNKNOWN UI_LINK_STATUS` sur ce binaire.
+  - A252: `HOTLINE_STATUS` retourne JSON attendu.
+  - A252: correctif applique sur `HOTLINE_VALIDATE` pour cibler le premier peer configure (fallback broadcast).
+  - A252: `HOTLINE_VALIDATE WIN1` retourne maintenant `OK HOTLINE_VALIDATE ACK_WIN1`.
+  - E2E actuel: A252 compte `tx_fail` et Freenove garde `rx=0` (paire vue des deux cotes mais message non recu dans ce banc; probable mismatch radio/channel a valider sur setup physique).
+  - A252: `WAITING_VALIDATION` en commande serie directe -> `unsupported_command` (chemin prevu: commande entrante ESP-NOW).
+- Artefacts run matrix:
+  - `artifacts/rc_live/esp32dev_esp32_release_esp8266_oled_ui_rp2040_ili9488_ui_rp2040_ili9486_20260227-145416`
+
 ## [2026-02-27] Sprint global en cours — audit scenes LGFX + audio chain + BL/WS2812 sync (Freenove)
 
 - Scope verrouille: `freenove_esp32s3_full_with_ui`, sans modification `hardware/firmware/esp32/`.
@@ -3500,3 +3566,76 @@
   - commit: `520f98d` (`freenove: publish current story/ui source of truth`)
   - push: `origin/codex/freenove-source-of-truth-20260227`
   - PR: `https://github.com/electron-rare/le-mystere-professeur-zacus/pull/111`
+[20260227-145416] Run artefacts: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/esp32dev_esp32_release_esp8266_oled_ui_rp2040_ili9488_ui_rp2040_ili9486_20260227-145416, logs: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/esp32dev_esp32_release_esp8266_oled_ui_rp2040_ili9488_ui_rp2040_ili9486_20260227-145416/summary.md
+
+## [2026-02-27] A252 hotline SD audio mapping + scene routing (agent)
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260227_165549_wip.patch`
+  - `/tmp/zacus_checkpoint/20260227_165549_status.txt`
+- Scope execute (A252):
+  - mapping hotline force au boot sur SD (`/hotline/menu_dtmf_short.wav`, `/hotline/menu_dtmf.wav`, `/hotline/menu_dtmf_long.wav`) pour les digits `1/2/3`;
+  - `WAITING_VALIDATION` arme maintenant un media pending SD (`/hotline/enter_code_5.wav`) avant sonnerie;
+  - integration scene->audio SD (`/hotline/scene_*` + `fiches-hotline_2`) via commande `SCENE`;
+  - nouvelle commande runtime `HOTLINE_SCENE_PLAY <scene_id>` pour tester/forcer l'audio scene;
+  - web server A252 monte FFat en profile `BOARD_PROFILE_A252` (suppression erreur SPIFFS au boot).
+- Validation effectuee:
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev` -> SUCCESS
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001` -> SUCCESS
+  - Smoke serie:
+    - `STATUS` -> `dial_media_map` confirme les 3 routes SD hotline
+    - `AUDIO_PROBE sd:/hotline/menu_dtmf.wav` -> OK
+    - `AUDIO_PROBE sd:/hotline/enter_code_5.wav` -> OK
+    - `WAITING_VALIDATION` -> OK + `STATUS.telephony.pending_espnow_call_audio=/hotline/enter_code_5.wav`
+    - `SCENE SCENE_WIN_ETAPE1` / `SCENE SCENE_U_SON_PROTO` / `SCENE SCENE_MEDIA_ARCHIVE` -> audio scene mappe et demarre
+    - `HOTLINE_SCENE_PLAY SCENE_CAMERA_SCAN` -> JSON OK (path SD retourne)
+  - Boot logs A252: plus de `SPIFFS mount failed` apres patch WebServerManager (FFat path actif).
+
+## [2026-02-27] A252 MP3 decode integration (agent)
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260227_171026_wip.patch`
+  - `/tmp/zacus_checkpoint/20260227_171026_status.txt`
+- Scope execute:
+  - ajout decode MP3 Helix dans `AudioEngine` (pipeline playback MP3 + WAV);
+  - `AUDIO_PROBE` accepte maintenant les fichiers MP3 (metadata sample-rate/channels via scan header MP3);
+  - tracking runtime playback MP3 dans `STATUS.audio.playback_input_*`/`playback_output_*`;
+  - dependance firmware ajoutee: `arduino-libhelix` dans `hardware/RTC_SLIC_PHONE/platformio.ini`.
+- Validation:
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev` -> SUCCESS
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001` -> SUCCESS
+  - Serie smoke:
+    - `AUDIO_PROBE sd:/hotline/scene_ready_2__fr-FR-DeniseNeural.mp3` -> OK (`input_sample_rate=24000`, `input_channels=1`)
+    - `PLAY sd:/hotline/scene_ready_2__fr-FR-DeniseNeural.mp3` -> `OK PLAY`
+    - `STATUS` pendant lecture MP3 -> `playback_input_sample_rate=24000`, `playing=true`, `storage_last_path` MP3 scene
+    - `SCENE SCENE_U_SON_PROTO` -> audio scene MP3 SD mappe et demarre
+    - `AUDIO_PROBE sd:/hotline/menu_dtmf.wav` et `WAITING_VALIDATION` restent OK (non regression WAV/hotline)
+  - Boot logs A252 verifies:
+    - plus d'erreur `SPIFFS mount failed`, serveur web OK (`[WebServerManager] HTTP server started`).
+
+## [2026-02-27] Sprint Freenove + A252 hotline ESP-NOW + LA overlay (agent)
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260227_173423_wip.patch`
+  - `/tmp/zacus_checkpoint/20260227_173423_status.txt`
+- Scope execute:
+  - Freenove `SCENE_LA_DETECTOR` (LGFX overlay):
+    - sablier unique place a gauche centre Y, palette noir/blanc inversee;
+    - ecoulement sable conserve top->bottom (haut se vide, bas se remplit);
+    - jauge circulaire de niveau micro deplacee a droite centre Y;
+    - waveform micro deplacee en bande centrale (horizontale);
+    - spectre etendu a 60 bandes, hauteur conservee, repere A4 centre en X.
+  - A252 hotline:
+    - `WAITING_VALIDATION` route audio basculee vers MP3 voix SD (`enter_code_5__fr-fr-deniseneural.mp3`);
+    - `HOTLINE_VALIDATE <WIN1|WIN2|WARNING>` declenche un cue local MP3 (scene-aware via scene active, fallback win/broken);
+    - fallback runtime MP3->WAV ajoute (`scene_*__fr-fr-deniseneural.mp3` -> `scene_*.wav`).
+  - Audio policy A252:
+    - gain software lecture remis a 1.0 (`kPlaybackBoostLinear=1.0`);
+    - volume ES8388 force a 100 au boot + via `AUDIO_PATCH` + `VOLUME_SET`.
+- Validation effectuee:
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev` -> SUCCESS
+  - `pio run -e freenove_esp32s3` -> SUCCESS
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001` -> SUCCESS
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` -> SUCCESS
+  - Smoke serie A252:
+    - `VOLUME_GET` -> `{"volume":100}`
+    - `HOTLINE_VALIDATE WIN1 NOACK` -> `OK HOTLINE_VALIDATE ACK_WIN1`
+    - `WAITING_VALIDATION` -> `OK WAITING_VALIDATION`
+    - `STATUS.telephony.pending_espnow_call_audio=/hotline/enter_code_5__fr-fr-deniseneural.mp3`

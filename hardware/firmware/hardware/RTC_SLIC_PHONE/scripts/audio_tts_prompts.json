@@ -1,0 +1,218 @@
+{
+  "SCENE_CAM": {
+    "1.wav": {
+      "profile": "gentle",
+      "text": "Caméra activée.",
+      "voice": "Jacques"
+    },
+    "2.wav": {
+      "profile": "aggressive",
+      "text": "Caméra en cours d'analyse.",
+      "voice": "Thomas"
+    },
+    "3.wav": {
+      "profile": "gentle",
+      "text": "Caméra terminée.",
+      "voice": "Amélie"
+    }
+  },
+  "SCENE_FOU_DETECTOR": {
+    "1.wav": {
+      "profile": "aggressive",
+      "text": "Détecteur FOU actif.",
+      "voice": "Rocko"
+    },
+    "2.wav": {
+      "profile": "gentle",
+      "text": "Détecteur FOU étape deux.",
+      "voice": "Thomas"
+    },
+    "3.wav": {
+      "profile": "aggressive",
+      "text": "Détecteur FOU terminé.",
+      "voice": "Reed"
+    }
+  },
+  "SCENE_LA_DETECTOR": {
+    "1.wav": {
+      "profile": "aggressive",
+      "text": "Détecteur LA actif.",
+      "voice": "Eddy"
+    },
+    "2.wav": {
+      "profile": "gentle",
+      "text": "Détecteur LA étape deux.",
+      "voice": "Grandma"
+    },
+    "3.wav": {
+      "profile": "aggressive",
+      "text": "Détecteur LA terminé.",
+      "voice": "Rocko"
+    }
+  },
+  "SCENE_LA_OK": {
+    "1.wav": {
+      "profile": "gentle",
+      "text": "La détection est validée.",
+      "voice": "Sandy"
+    },
+    "2.wav": {
+      "profile": "gentle",
+      "text": "Étape LA OK suivante.",
+      "voice": "Flo"
+    },
+    "3.wav": {
+      "profile": "aggressive",
+      "text": "Succès LA OK.",
+      "voice": "Rocko"
+    }
+  },
+  "SCENE_LOCKED": {
+    "1.wav": {
+      "profile": "gentle",
+      "text": "Scène verrouillée. Étape 1.",
+      "voice": "Thomas"
+    },
+    "2.wav": {
+      "profile": "aggressive",
+      "text": "Scène verrouillée. Étape 2.",
+      "voice": "Rocko"
+    },
+    "3.wav": {
+      "profile": "gentle",
+      "text": "Scène verrouillée. Étape 3.",
+      "voice": "Sandy"
+    }
+  },
+  "SCENE_WINNER": {
+    "1.wav": {
+      "profile": "aggressive",
+      "text": "Félicitations, vous gagnez.",
+      "voice": "Jacques"
+    },
+    "2.wav": {
+      "profile": "gentle",
+      "text": "Bravo. Prochaine étape.",
+      "voice": "Thomas"
+    },
+    "3.wav": {
+      "profile": "gentle",
+      "text": "Fin de la séquence.",
+      "voice": "Sandy"
+    }
+  },
+  "SCENE_WIN_ETAPE": {
+    "1.wav": {
+      "profile": "aggressive",
+      "text": "Scène WIN étape 1.",
+      "voice": "Thomas"
+    },
+    "2.wav": {
+      "profile": "aggressive",
+      "text": "Scène WIN étape 2.",
+      "voice": "Amélie"
+    },
+    "3.wav": {
+      "profile": "gentle",
+      "text": "Scène WIN étape 3.",
+      "voice": "Reed"
+    }
+  },
+  "global": {
+    "bip.wav": {
+      "profile": "aggressive",
+      "text": "Bip.",
+      "voice": "Thomas"
+    },
+    "la_busy.wav": {
+      "text": "Ligne occupée. Veuillez réessayer.",
+      "voice": "Flo"
+    },
+    "la_ok.wav": {
+      "text": "Message d'acquittement détecté.",
+      "voice": "Amélie"
+    },
+    "musique.wav": {
+      "profile": "aggressive",
+      "text": "Musique d'attente.",
+      "voice": "Reed"
+    },
+    "note.wav": {
+      "profile": "gentle",
+      "text": "Note de service.",
+      "voice": "Jacques"
+    },
+    "radio.wav": {
+      "profile": "gentle",
+      "text": "Signal radio.",
+      "voice": "Rocko"
+    },
+    "souffle.wav": {
+      "profile": "gentle",
+      "text": "Souffle léger.",
+      "voice": "Sandy"
+    },
+    "welcome.wav": {
+      "text": "Bienvenue. Fichier de test audio.",
+      "voice": "Thomas"
+    }
+  },
+  "meta": {
+    "default_channels": 1,
+    "default_profile": "gentle",
+    "default_rate": 180,
+    "default_sample_rate": 16000,
+    "default_voice": "Thomas",
+    "scenes": [
+      "SCENE_LOCKED",
+      "SCENE_LA_DETECTOR",
+      "SCENE_WIN_ETAPE",
+      "SCENE_LA_OK",
+      "SCENE_WINNER",
+      "SCENE_FOU_DETECTOR",
+      "SCENE_CAM"
+    ]
+  },
+  "profiles": {
+    "aggressive": {
+      "post": {
+        "enabled": true,
+        "normalize": true,
+        "normalize_compress": 35,
+        "normalize_framelen_ms": 500,
+        "normalize_max_gain": 18,
+        "normalize_mode": "dynaudnorm",
+        "normalize_peak": 0.97,
+        "normalize_target_rms_db": -16,
+        "trim": true,
+        "trim_start_duration": 0.04,
+        "trim_start_threshold_db": -46,
+        "trim_stop_duration": 0.08,
+        "trim_stop_threshold_db": -46
+      },
+      "rate": 210,
+      "sample_rate": 22050,
+      "voice": "Thomas"
+    },
+    "gentle": {
+      "post": {
+        "enabled": true,
+        "normalize": true,
+        "normalize_compress": 25,
+        "normalize_framelen_ms": 500,
+        "normalize_max_gain": 10,
+        "normalize_mode": "dynaudnorm",
+        "normalize_peak": 0.94,
+        "normalize_target_rms_db": -19,
+        "trim": true,
+        "trim_start_duration": 0.08,
+        "trim_start_threshold_db": -52,
+        "trim_stop_duration": 0.12,
+        "trim_stop_threshold_db": -52
+      },
+      "rate": 170,
+      "sample_rate": 16000,
+      "voice": "Thomas"
+    }
+  }
+}

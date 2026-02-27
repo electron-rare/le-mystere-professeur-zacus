@@ -1778,16 +1778,16 @@ bool executeEspNowCommandPayload(const char* payload_text, uint32_t now_ms, EspN
       if ((cmd == nullptr || cmd[0] == '\0') && root["payload"].is<JsonObjectConst>()) {
         JsonVariantConst nested = root["payload"];
         cmd = nested["cmd"] | nested["command"] | nested["action"] | "";
-        if (nested["args"].is<JsonVariantConst>()) {
+        if (!nested["args"].isNull()) {
           args = nested["args"];
         }
       }
       if (cmd != nullptr && cmd[0] != '\0') {
         command = cmd;
         if (args.isNull()) {
-          if (root["args"].is<JsonVariantConst>()) {
+          if (!root["args"].isNull()) {
             args = root["args"];
-          } else if (root["payload"].is<JsonVariantConst>()) {
+          } else if (!root["payload"].isNull()) {
             args = root["payload"];
           }
         }
@@ -2280,7 +2280,7 @@ void printNetworkStatus() {
   const NetworkManager::Snapshot net = g_network.snapshot();
   Serial.printf("NET_STATUS state=%s mode=%s sta=%u connecting=%u ap=%u fallback_ap=%u espnow=%u espnow_name=%s "
                 "espnow_mode=broadcast+discovery discovery_runtime=%u discovery_interval_ms=%lu ip=%s sta_ssid=%s "
-                "ap_ssid=%s ap_clients=%u local_target=%s local_match=%u local_retry_paused=%u rssi=%ld peers=%u rx=%lu "
+                "ap_ssid=%s ap_clients=%u local_target=%s local_match=%u local_retry_paused=%u rssi=%ld ch=%ld peers=%u rx=%lu "
                 "tx_ok=%lu tx_fail=%lu drop=%lu last_msg=%s seq=%lu type=%s ack=%u\n",
                 net.state,
                 net.mode,
@@ -2300,6 +2300,7 @@ void printNetworkStatus() {
                 net.local_match ? 1U : 0U,
                 net.local_retry_paused ? 1U : 0U,
                 static_cast<long>(net.rssi),
+                static_cast<long>(net.channel),
                 net.espnow_peer_count,
                 static_cast<unsigned long>(net.espnow_rx_packets),
                 static_cast<unsigned long>(net.espnow_tx_ok),
@@ -2342,6 +2343,7 @@ void printEspNowStatusJson() {
   document["discovery"] = true;
   document["discovery_runtime"] = g_espnow_discovery_runtime_enabled;
   document["discovery_interval_ms"] = kEspNowDiscoveryIntervalMs;
+  document["channel"] = net.channel;
   JsonArray peers = document["peers"].to<JsonArray>();
   for (uint8_t index = 0U; index < g_network.espNowPeerCount(); ++index) {
     char peer[18] = {0};

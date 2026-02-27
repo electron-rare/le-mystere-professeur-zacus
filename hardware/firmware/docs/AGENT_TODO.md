@@ -3486,3 +3486,17 @@
 - [2026-02-27 13:17] Build Freenove OK after LGFX text/hourglass fixes (`PLATFORMIO_BUILD_DIR=/tmp/pio_build_zacus pio run -e freenove_esp32s3_full_with_ui`).
 - [2026-02-27 13:19] Upload firmware OK (`pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301`).
 - [2026-02-27 13:20] Upload LittleFS OK (`check_no_duplicate_payload_files` pass + `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301`).
+
+## [2026-02-27] Push GitHub (source of truth requested)
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260227_144640_wip.patch`
+  - `/tmp/zacus_checkpoint/20260227_144640_status.txt`
+- Contexte git:
+  - depot en `HEAD (detached)` avec rebase interactive en cours; push bloque.
+  - resolution push: `git rebase --quit`, creation branche `codex/freenove-source-of-truth-20260227`.
+- Validation effectuee:
+  - `PLATFORMIO_BUILD_DIR=/tmp/pio_build_zacus pio run -e freenove_esp32s3_full_with_ui` -> SUCCESS.
+- Livraison GitHub:
+  - commit: `520f98d` (`freenove: publish current story/ui source of truth`)
+  - push: `origin/codex/freenove-source-of-truth-20260227`
+  - PR: `https://github.com/electron-rare/le-mystere-professeur-zacus/pull/111`

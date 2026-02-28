@@ -153,6 +153,25 @@ void copyTextSafe(char* out, size_t out_size, const char* value) {
   out[out_size - 1U] = '\0';
 }
 
+void trimAsciiWhitespace(char* text) {
+  if (text == nullptr) {
+    return;
+  }
+  size_t start = 0U;
+  while (text[start] != '\0' && std::isspace(static_cast<unsigned char>(text[start])) != 0) {
+    ++start;
+  }
+  size_t end = std::strlen(text);
+  while (end > start && std::isspace(static_cast<unsigned char>(text[end - 1U])) != 0) {
+    --end;
+  }
+  size_t write = 0U;
+  for (size_t index = start; index < end; ++index) {
+    text[write++] = text[index];
+  }
+  text[write] = '\0';
+}
+
 uint32_t pseudoRandom32(uint32_t value) {
   value ^= (value << 13U);
   value ^= (value >> 17U);
@@ -458,9 +477,13 @@ constexpr const char* kWinEtapeFxScrollTextB =
     "WINNER MODE - STAGE B - KEEP THE BEAT - ";
 constexpr const char* kWinEtapeFxScrollTextC =
     "BOINGBALL MODE - SCENE WIN ETAPE - ";
+constexpr uint32_t kWinEtape1CelebrateMs = 20000U;
+constexpr uint32_t kWinEtape1WinnerMs = 20000U;
+constexpr uint32_t kWinEtape1CreditsStartMs = kWinEtape1CelebrateMs + kWinEtape1WinnerMs;
 
 constexpr uint16_t kIntroTickMs = 42U;
 constexpr uint32_t kUiUpdateFrameMs = 42U;
+constexpr uint32_t kUiUpdateFrameMsLaDetectorLgfx = 40U;
 constexpr uint32_t kIntroCracktroMsDefault = 30000U;
 constexpr uint32_t kIntroTransitionMsDefault = 15000U;
 constexpr uint32_t kIntroCleanMsDefault = 20000U;
@@ -854,7 +877,36 @@ bool UiManager::begin() {
   fx_cfg.target_fps = static_cast<uint8_t>(UI_FX_TARGET_FPS);
 #endif
   fx_cfg.lgfx_backend = drivers::display::displayHalUsesLovyanGfx();
-  fx_engine_.begin(fx_cfg);
+  bool fx_ready = fx_engine_.begin(fx_cfg);
+  if (!fx_ready && fx_cfg.lgfx_backend) {
+    // Keep animated scenes alive under memory pressure by retrying with a smaller sprite.
+    ui::fx::FxEngineConfig fallback_cfg = fx_cfg;
+    fallback_cfg.sprite_width = 128U;
+    fallback_cfg.sprite_height = 96U;
+    if (fallback_cfg.target_fps > 15U) {
+      fallback_cfg.target_fps = 15U;
+    }
+    UI_LOGI("FX init failed at %ux%u@%u, retry fallback %ux%u@%u",
+            static_cast<unsigned int>(fx_cfg.sprite_width),
+            static_cast<unsigned int>(fx_cfg.sprite_height),
+            static_cast<unsigned int>(fx_cfg.target_fps),
+            static_cast<unsigned int>(fallback_cfg.sprite_width),
+            static_cast<unsigned int>(fallback_cfg.sprite_height),
+            static_cast<unsigned int>(fallback_cfg.target_fps));
+    fx_ready = fx_engine_.begin(fallback_cfg);
+    if (fx_ready) {
+      fx_cfg = fallback_cfg;
+    }
+  }
+  if (!fx_ready) {
+    fx_engine_.setEnabled(false);
+    UI_LOGI("FX engine disabled: init failed");
+  } else {
+    UI_LOGI("FX engine ready sprite=%ux%u target_fps=%u",
+            static_cast<unsigned int>(fx_cfg.sprite_width),
+            static_cast<unsigned int>(fx_cfg.sprite_height),
+            static_cast<unsigned int>(fx_cfg.target_fps));
+  }
   last_lvgl_tick_ms_ = millis();
   graphics_stats_last_report_ms_ = last_lvgl_tick_ms_;
   ready_ = true;
@@ -923,6 +975,12 @@ void UiManager::update() {
   }
   const uint32_t now_ms = millis();
   const uint32_t elapsed_ms = now_ms - last_lvgl_tick_ms_;
+  const bool lgfx_hard_mode =
+      scene_use_lgfx_text_overlay_ && (scene_lgfx_hard_mode_ || la_detection_scene_);
+  const bool win_etape_overlay_scene =
+      scene_use_lgfx_text_overlay_ && scene_status_.valid && isWinEtapeSceneId(scene_status_.scene_id);
+  const uint32_t frame_period_ms =
+      (lgfx_hard_mode || win_etape_overlay_scene) ? kUiUpdateFrameMsLaDetectorLgfx : kUiUpdateFrameMs;
   const bool needs_trans_buffer = kUseColor256Runtime || buffer_cfg_.draw_in_psram;
   if (!async_flush_enabled_ &&
       dma_requested_ &&
@@ -955,12 +1013,14 @@ void UiManager::update() {
     graphics_stats_.draw_count += 1U;
   };
 
-  if (elapsed_ms >= kUiUpdateFrameMs) {
+  if (elapsed_ms >= frame_period_ms) {
     lv_tick_inc(elapsed_ms);
     last_lvgl_tick_ms_ = now_ms;
   } else {
     if (pending_lvgl_flush_request_ && !flush_busy_now) {
-      run_lvgl_draw();
+      if (!lgfx_hard_mode) {
+        run_lvgl_draw();
+      }
       pending_lvgl_flush_request_ = false;
     }
     pollAsyncFlush();
@@ -974,10 +1034,50 @@ void UiManager::update() {
   pollAsyncFlush();
   const bool flush_busy =
       isDisplayOutputBusy();
+  if (!intro_active_ && scene_status_.valid && fx_engine_.config().lgfx_backend) {
+    const bool la_detector_scene = (std::strcmp(scene_status_.scene_id, "SCENE_LA_DETECTOR") == 0);
+    const bool warning_blocks_direct_fx =
+        warning_gyrophare_enabled_ && warning_gyrophare_disable_direct_fx_ &&
+        (std::strcmp(scene_status_.scene_id, "SCENE_WARNING") == 0);
+    const bool wants_direct_fx_scene =
+        isDirectFxSceneId(scene_status_.scene_id) && !la_detector_scene && !warning_blocks_direct_fx;
+    const bool retry_allowed = (fx_rearm_retry_after_ms_ == 0U) ||
+                               (static_cast<int32_t>(now_ms - fx_rearm_retry_after_ms_) >= 0);
+    if (wants_direct_fx_scene && retry_allowed && (!direct_fx_scene_active_ || !fx_engine_.enabled())) {
+      direct_fx_scene_active_ = true;
+      armDirectFxScene(scene_status_.scene_id,
+                       std::strcmp(scene_status_.scene_id, "SCENE_TEST_LAB") == 0,
+                       scene_status_.title,
+                       scene_status_.subtitle);
+    }
+  }
+  if (direct_fx_scene_active_ && scene_status_.valid && std::strcmp(scene_status_.scene_id, "SCENE_WIN_ETAPE1") == 0) {
+    const uint32_t scene_elapsed_ms =
+        (scene_runtime_started_ms_ == 0U || now_ms < scene_runtime_started_ms_) ? 0U : (now_ms - scene_runtime_started_ms_);
+    ui::fx::FxPreset target_preset = ui::fx::FxPreset::kWinEtape1;
+    if (scene_elapsed_ms < kWinEtape1CelebrateMs) {
+      target_preset = ui::fx::FxPreset::kFireworks;
+    } else if (scene_elapsed_ms < kWinEtape1CreditsStartMs) {
+      target_preset = ui::fx::FxPreset::kWinner;
+    }
+    if (fx_engine_.preset() != target_preset) {
+      fx_engine_.setPreset(target_preset);
+      fx_engine_.setScrollerCentered(false);
+      if (target_preset != ui::fx::FxPreset::kWinEtape1) {
+        fx_engine_.setScrollText(nullptr);
+      }
+    }
+  }
   const bool fx_candidate = (intro_active_ || direct_fx_scene_active_) && fx_engine_.enabled();
+  const bool hold_fx_for_overlay = win_etape_overlay_scene && (overlay_recovery_frames_ > 0U);
+  const bool fx_render_this_frame = fx_candidate && !hold_fx_for_overlay;
+  if (hold_fx_for_overlay) {
+    overlay_recovery_frames_ = static_cast<uint8_t>(overlay_recovery_frames_ - 1U);
+    graphics_stats_.fx_skip_flush_busy += 1U;
+  }
   if (flush_busy) {
     graphics_stats_.flush_blocked_count += 1U;
-    if (fx_candidate) {
+    if (fx_render_this_frame) {
       graphics_stats_.fx_skip_flush_busy += 1U;
     }
     pending_lvgl_flush_request_ = true;
@@ -985,7 +1085,7 @@ void UiManager::update() {
     return;
   }
   // Frame order contract: FX background first, then LVGL flush, then LGFX text/scene overlays on top.
-  if (fx_candidate) {
+  if (fx_render_this_frame) {
     ui::fx::FxScenePhase fx_phase = ui::fx::FxScenePhase::kPhaseC;
     if (intro_active_) {
       fx_phase = ui::fx::FxScenePhase::kIdle;
@@ -1021,36 +1121,50 @@ void UiManager::update() {
       return;
     }
   }
-  run_lvgl_draw();
+  if (!lgfx_hard_mode) {
+    run_lvgl_draw();
+  }
   pending_lvgl_flush_request_ = false;
   pollAsyncFlush();
   // Overlay text must be drawn after LVGL flush; wait briefly for async DMA completion.
   const bool overlay_needed = scene_use_lgfx_text_overlay_ || la_detection_scene_;
+  const uint32_t overlay_wait_budget_us = win_etape_overlay_scene ? 120000U : 50000U;
+  const uint32_t overlay_dma_wait_us = win_etape_overlay_scene ? 4200U : 1800U;
+  const uint32_t overlay_spin_wait_us = win_etape_overlay_scene ? 60U : 120U;
   const uint32_t overlay_wait_started_us = micros();
+  bool overlay_wait_timed_out = false;
   while (isDisplayOutputBusy()) {
     pollAsyncFlush();
     if (!isDisplayOutputBusy()) {
       break;
     }
-    drivers::display::displayHal().waitDmaComplete(1800U);
+    drivers::display::displayHal().waitDmaComplete(overlay_dma_wait_us);
     pollAsyncFlush();
     if (!isDisplayOutputBusy()) {
       break;
     }
-    if ((micros() - overlay_wait_started_us) >= 50000U) {
-      if (overlay_needed) {
-        ++overlay_skip_busy_count_;
-      }
-      return;
+    if ((micros() - overlay_wait_started_us) >= overlay_wait_budget_us) {
+      overlay_wait_timed_out = true;
+      break;
     }
-    delayMicroseconds(120U);
+    delayMicroseconds(overlay_spin_wait_us);
+  }
+  if (overlay_wait_timed_out && win_etape_overlay_scene) {
+    // Give the text overlay one last chance by draining a lingering DMA transaction.
+    drivers::display::displayHal().waitDmaComplete(12000U);
+    pollAsyncFlush();
   }
   if (isDisplayOutputBusy()) {
     if (overlay_needed) {
       ++overlay_skip_busy_count_;
     }
+    if (win_etape_overlay_scene) {
+      overlay_recovery_frames_ = 2U;
+      pending_lvgl_flush_request_ = true;
+    }
     return;
   }
+  overlay_recovery_frames_ = 0U;
   if (scene_use_lgfx_text_overlay_) {
     renderLgfxSceneTextOverlay(now_ms);
   }
@@ -1128,6 +1242,10 @@ void UiManager::renderLgfxSceneTextOverlay(uint32_t now_ms) {
   const uint16_t symbol_color = to565(mixRgb(text_rgb, accent_rgb, 55U));
   const uint16_t subtitle_color = to565(mixRgb(text_rgb, accent_rgb, 30U));
   const bool uson_proto_scene = (std::strcmp(scene_status_.scene_id, "SCENE_U_SON_PROTO") == 0);
+  const bool win_etape1_scene = (std::strcmp(scene_status_.scene_id, "SCENE_WIN_ETAPE1") == 0);
+  const uint32_t scene_elapsed_ms = (scene_runtime_started_ms_ == 0U || now_ms < scene_runtime_started_ms_)
+                                        ? 0U
+                                        : (now_ms - scene_runtime_started_ms_);
   const uint8_t glitch_pct = (scene_status_.text_glitch_pct > 100U) ? 100U : scene_status_.text_glitch_pct;
   int16_t jitter_span = (glitch_pct < 8U) ? 0 : static_cast<int16_t>(1 + (glitch_pct / 18U));
   if (uson_proto_scene && jitter_span > 1) {
@@ -1257,13 +1375,268 @@ void UiManager::renderLgfxSceneTextOverlay(uint32_t now_ms) {
     }
   };
 
-  if (scene_status_.show_symbol) {
+  bool custom_win_etape1_credits = false;
+  if (win_etape1_scene && scene_elapsed_ms >= kWinEtape1CreditsStartMs) {
+    custom_win_etape1_credits = true;
+    text_attempted = true;
+    if (!win_etape_credits_loaded_) {
+      win_etape_credits_loaded_ = true;
+      win_etape_credits_count_ = 0U;
+      std::memset(win_etape_credits_lines_, 0, sizeof(win_etape_credits_lines_));
+      std::memset(win_etape_credits_size_, 0, sizeof(win_etape_credits_size_));
+      std::memset(win_etape_credits_align_, 0, sizeof(win_etape_credits_align_));
+      std::memset(win_etape_credits_pause_ms_, 0, sizeof(win_etape_credits_pause_ms_));
+      win_etape_credits_scroll_px_per_sec_ = 16U;
+      uint8_t current_size_tag = 0U;   // 0=normal 1=big 2=title 3=small
+      uint8_t current_align_tag = 0U;  // 0=center 1=left 2=right
+      auto append_credit_line = [&](const char* raw_line, uint16_t pause_ms, bool preserve_blank) {
+        if (win_etape_credits_count_ >= kWinEtapeCreditsMaxLines) {
+          return;
+        }
+        const String normalized = asciiFallbackForUiText(raw_line != nullptr ? raw_line : "");
+        char cleaned[kWinEtapeCreditsMaxLineChars] = {0};
+        normalized.toCharArray(cleaned, sizeof(cleaned));
+        trimAsciiWhitespace(cleaned);
+        if (cleaned[0] == '\0' && !preserve_blank) {
+          if (win_etape_credits_count_ == 0U) {
+            return;
+          }
+          const uint8_t prev = static_cast<uint8_t>(win_etape_credits_count_ - 1U);
+          const bool prev_blank = (win_etape_credits_lines_[prev][0] == '\0') ||
+                                  (win_etape_credits_lines_[prev][0] == ' ' && win_etape_credits_lines_[prev][1] == '\0');
+          if (prev_blank && win_etape_credits_pause_ms_[prev] == 0U) {
+            return;
+          }
+          copyTextSafe(win_etape_credits_lines_[win_etape_credits_count_], kWinEtapeCreditsMaxLineChars, " ");
+        } else {
+          copyTextSafe(win_etape_credits_lines_[win_etape_credits_count_], kWinEtapeCreditsMaxLineChars, cleaned);
+        }
+        win_etape_credits_size_[win_etape_credits_count_] = current_size_tag;
+        win_etape_credits_align_[win_etape_credits_count_] = current_align_tag;
+        win_etape_credits_pause_ms_[win_etape_credits_count_] = pause_ms;
+        ++win_etape_credits_count_;
+      };
+      const char* const credits_paths[] = {
+          "/ui/fx/texts/credits.txt",
+          "/ui/fx/texts/credits_01.txt",
+          "/ui/scene_win_etape.txt",
+      };
+      bool stop_from_directive = false;
+      for (const char* path : credits_paths) {
+        if (path == nullptr || path[0] == '\0' || !LittleFS.exists(path)) {
+          continue;
+        }
+        File file = LittleFS.open(path, "r");
+        if (!file) {
+          continue;
+        }
+        while (file.available() && win_etape_credits_count_ < kWinEtapeCreditsMaxLines) {
+          String line = file.readStringUntil('\n');
+          line.replace('\r', ' ');
+          char trimmed[kWinEtapeCreditsMaxLineChars] = {0};
+          line.toCharArray(trimmed, sizeof(trimmed));
+          trimAsciiWhitespace(trimmed);
+          if (trimmed[0] == '[') {
+            size_t len = std::strlen(trimmed);
+            if (len > 2U && trimmed[len - 1U] == ']') {
+              trimmed[len - 1U] = '\0';
+              char* command = trimmed + 1;
+              while (*command != '\0' && std::isspace(static_cast<unsigned char>(*command)) != 0) {
+                ++command;
+              }
+              char* arg = command;
+              while (*arg != '\0' && std::isspace(static_cast<unsigned char>(*arg)) == 0) {
+                *arg = static_cast<char>(std::toupper(static_cast<unsigned char>(*arg)));
+                ++arg;
+              }
+              while (*arg != '\0' && std::isspace(static_cast<unsigned char>(*arg)) != 0) {
+                *arg = '\0';
+                ++arg;
+              }
+              for (char* p = arg; *p != '\0'; ++p) {
+                *p = static_cast<char>(std::toupper(static_cast<unsigned char>(*p)));
+              }
+              if (std::strcmp(command, "SPEED") == 0) {
+                const unsigned long speed = std::strtoul(arg, nullptr, 10);
+                win_etape_credits_scroll_px_per_sec_ = static_cast<uint16_t>(std::min<unsigned long>(72UL, std::max<unsigned long>(6UL, speed)));
+                continue;
+              }
+              if (std::strcmp(command, "ALIGN") == 0) {
+                if (std::strcmp(arg, "LEFT") == 0) {
+                  current_align_tag = 1U;
+                } else if (std::strcmp(arg, "RIGHT") == 0) {
+                  current_align_tag = 2U;
+                } else {
+                  current_align_tag = 0U;
+                }
+                continue;
+              }
+              if (std::strcmp(command, "SIZE") == 0) {
+                if (std::strcmp(arg, "BIG") == 0) {
+                  current_size_tag = 1U;
+                } else if (std::strcmp(arg, "TITLE") == 0) {
+                  current_size_tag = 2U;
+                } else if (std::strcmp(arg, "SMALL") == 0) {
+                  current_size_tag = 3U;
+                } else {
+                  current_size_tag = 0U;
+                }
+                continue;
+              }
+              if (std::strcmp(command, "SPACE") == 0) {
+                const unsigned long blanks = std::strtoul(arg, nullptr, 10);
+                const uint8_t blank_count = static_cast<uint8_t>(std::min<unsigned long>(6UL, std::max<unsigned long>(1UL, blanks)));
+                for (uint8_t idx = 0U; idx < blank_count; ++idx) {
+                  append_credit_line(" ", 0U, true);
+                }
+                continue;
+              }
+              if (std::strcmp(command, "PAUSE") == 0) {
+                const unsigned long pause_ms = std::strtoul(arg, nullptr, 10);
+                append_credit_line(" ", static_cast<uint16_t>(std::min<unsigned long>(12000UL, pause_ms)), true);
+                continue;
+              }
+              if (std::strcmp(command, "END") == 0) {
+                stop_from_directive = true;
+                break;
+              }
+            }
+          }
+          append_credit_line(trimmed, 0U, false);
+        }
+        file.close();
+        if (stop_from_directive) {
+          break;
+        }
+        if (win_etape_credits_count_ > 0U) {
+          break;
+        }
+      }
+      if (win_etape_credits_count_ == 0U) {
+        static constexpr const char* kCreditsFallback[] = {
+            "CODE + INTEGRATION",
+            "TEAM ZACUS",
+            " ",
+            "GRAPHICS + FX",
+            "FREENOVE UI CREW",
+            " ",
+            "HOT-LINE AUDIO",
+            "RTC A252 CREW",
+            " ",
+            "SPECIAL THANKS",
+            "BRIGADE Z",
+        };
+        for (size_t i = 0U; i < (sizeof(kCreditsFallback) / sizeof(kCreditsFallback[0])) &&
+                            win_etape_credits_count_ < kWinEtapeCreditsMaxLines;
+             ++i) {
+          copyTextSafe(win_etape_credits_lines_[win_etape_credits_count_],
+                       kWinEtapeCreditsMaxLineChars,
+                       kCreditsFallback[i]);
+          win_etape_credits_size_[win_etape_credits_count_] = 0U;
+          win_etape_credits_align_[win_etape_credits_count_] = 0U;
+          win_etape_credits_pause_ms_[win_etape_credits_count_] = 0U;
+          ++win_etape_credits_count_;
+        }
+      }
+    }
+
+    drivers::display::OverlayTextCommand header = {};
+    header.text = "CREDITS";
+    header.font_face = drivers::display::OverlayFontFace::kIbmBold24;
+    header.size = 1U;
+    header.color565 = symbol_color;
+    const int16_t header_w = display.measureOverlayText(header.text, header.font_face, header.size);
+    header.x = static_cast<int16_t>((width - header_w) / 2);
+    header.y = 6;
+    if (display.drawOverlayText(header)) {
+      text_draw_ok = true;
+    }
+
+    if (win_etape_credits_count_ > 0U) {
+      const uint32_t credits_elapsed_ms = scene_elapsed_ms - kWinEtape1CreditsStartMs;
+      int32_t line_offsets[kWinEtapeCreditsMaxLines] = {0};
+      int32_t total_height = 0;
+      for (uint8_t idx = 0U; idx < win_etape_credits_count_; ++idx) {
+        line_offsets[idx] = total_height;
+        int16_t line_height = 16;
+        int16_t line_gap = 6;
+        if (win_etape_credits_size_[idx] == 1U) {
+          line_height = 20;
+          line_gap = 8;
+        } else if (win_etape_credits_size_[idx] == 2U) {
+          line_height = 24;
+          line_gap = 10;
+        } else if (win_etape_credits_size_[idx] == 3U) {
+          line_height = 12;
+          line_gap = 4;
+        }
+        total_height += static_cast<int32_t>(line_height + line_gap);
+        total_height += static_cast<int32_t>((static_cast<uint32_t>(win_etape_credits_pause_ms_[idx]) *
+                                              static_cast<uint32_t>(win_etape_credits_scroll_px_per_sec_)) /
+                                             1000U);
+      }
+      int32_t loop_span = total_height + static_cast<int32_t>(height) + 28;
+      if (loop_span < 1) {
+        loop_span = 1;
+      }
+      const int32_t scroll_px =
+          static_cast<int32_t>((static_cast<uint64_t>(credits_elapsed_ms) * win_etape_credits_scroll_px_per_sec_) / 1000ULL);
+      const int32_t offset = scroll_px % loop_span;
+      const int32_t base_y = static_cast<int32_t>(height + 14) - offset;
+      for (uint8_t line_index = 0U; line_index < win_etape_credits_count_; ++line_index) {
+        const char* line = win_etape_credits_lines_[line_index];
+        if (line == nullptr) {
+          continue;
+        }
+        int16_t line_height = 16;
+        drivers::display::OverlayFontFace line_font = drivers::display::OverlayFontFace::kIbmBold16;
+        if (win_etape_credits_size_[line_index] == 1U) {
+          line_height = 20;
+          line_font = drivers::display::OverlayFontFace::kIbmBold20;
+        } else if (win_etape_credits_size_[line_index] == 2U) {
+          line_height = 24;
+          line_font = drivers::display::OverlayFontFace::kIbmBold24;
+        } else if (win_etape_credits_size_[line_index] == 3U) {
+          line_height = 12;
+          line_font = drivers::display::OverlayFontFace::kIbmBold12;
+        }
+        const int32_t y32 = base_y + line_offsets[line_index];
+        if (y32 < -line_height || y32 > (height + 6)) {
+          continue;
+        }
+        if (line[0] == '\0' || (line[0] == ' ' && line[1] == '\0')) {
+          continue;
+        }
+        drivers::display::OverlayTextCommand line_cmd = {};
+        line_cmd.text = line;
+        line_cmd.font_face = line_font;
+        line_cmd.size = 1U;
+        line_cmd.color565 = (win_etape_credits_size_[line_index] >= 2U)
+                                ? symbol_color
+                                : (((line_index & 0x01U) == 0U) ? title_color : subtitle_color);
+        const int16_t text_w = display.measureOverlayText(line_cmd.text, line_cmd.font_face, line_cmd.size);
+        if (win_etape_credits_align_[line_index] == 1U) {
+          line_cmd.x = 8;
+        } else if (win_etape_credits_align_[line_index] == 2U) {
+          line_cmd.x = static_cast<int16_t>(width - text_w - 8);
+        } else {
+          line_cmd.x = static_cast<int16_t>((width - text_w) / 2);
+        }
+        line_cmd.y = static_cast<int16_t>(y32);
+        if (display.drawOverlayText(line_cmd)) {
+          text_draw_ok = true;
+        }
+      }
+    }
+  }
+
+  if (!custom_win_etape1_credits && scene_status_.show_symbol) {
     drawLine(scene_status_.symbol, overlay_symbol_align_, 0U, symbol_font, symbol_size, symbol_color, 0x1000U);
   }
-  if (scene_status_.show_title) {
+  if (!custom_win_etape1_credits && scene_status_.show_title) {
     drawLine(scene_status_.title, overlay_title_align_, 1U, title_font, title_size, title_color, 0x2000U);
   }
-  if (scene_status_.show_subtitle) {
+  if (!custom_win_etape1_credits && scene_status_.show_subtitle) {
     drawLine(scene_status_.subtitle, overlay_subtitle_align_, 2U, subtitle_font, subtitle_size, subtitle_color, 0x3000U);
   }
 
@@ -1331,72 +1704,747 @@ void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
                             static_cast<uint8_t>(rgb & 0xFFU));
   };
 
-  const uint16_t osc_main = color565(0x4DF871UL);
-  const uint16_t osc_ring = color565(0x1B4A2FUL);
-  const uint16_t fft_low = color565(0xFF5E52UL);
-  const uint16_t fft_mid = color565(0x7DFF7FUL);
-  const uint16_t fft_high = color565(0x5A8DFFUL);
+  const uint16_t osc_main = color565(0x44FF6EUL);
+  const uint16_t osc_head = color565(0xA8FFC0UL);
+  const uint16_t osc_ring = color565(0x1E5138UL);
   const uint16_t marker = color565(0x6CC9FFUL);
   bool text_attempted = false;
   bool text_draw_ok = false;
 
-  const uint8_t glitch_pct = (scene_status_.text_glitch_pct > 100U) ? 100U : scene_status_.text_glitch_pct;
-  const int16_t jitter = (glitch_pct < 12U) ? 0 : static_cast<int16_t>(1 + (glitch_pct / 28U));
-  const int16_t jitter_x = (jitter == 0) ? 0 : static_cast<int16_t>(signedNoise(now_ms, 0xA1B2C3UL, jitter));
-  const int16_t jitter_y = (jitter == 0) ? 0 : static_cast<int16_t>(signedNoise(now_ms, 0xB4C3D2UL, jitter));
+  const int16_t jitter_x = 0;
+  const int16_t jitter_y = 0;
 
-  const int16_t ring_cx = static_cast<int16_t>((width * 78) / 100 + jitter_x);
-  const int16_t ring_cy = static_cast<int16_t>((height / 2) + jitter_y);
-  int16_t ring_radius = static_cast<int16_t>((height * 22) / 100);
-  if (ring_radius < 28) {
-    ring_radius = 28;
-  }
-  if (ring_radius > 62) {
-    ring_radius = 62;
-  }
   constexpr float kTau = 6.28318530718f;
   constexpr float kHalfPi = 1.57079632679f;
 
-  display.drawOverlayCircle(ring_cx, ring_cy, static_cast<int16_t>(ring_radius + 1), osc_ring);
-  display.drawOverlayCircle(ring_cx, ring_cy, ring_radius, osc_ring);
-  display.drawOverlayCircle(ring_cx, ring_cy, static_cast<int16_t>(ring_radius - 1), osc_ring);
-  display.drawOverlayCircle(ring_cx, ring_cy, static_cast<int16_t>(ring_radius - 4), osc_ring);
-  display.drawOverlayCircle(ring_cx, ring_cy, static_cast<int16_t>(ring_radius - 5), osc_ring);
-  display.drawOverlayCircle(ring_cx, ring_cy, static_cast<int16_t>(ring_radius - 6), osc_ring);
-
   const uint8_t stability_pct = (la_detection_stability_pct_ > 100U) ? 100U : la_detection_stability_pct_;
-  if (la_overlay_show_progress_ring_) {
-    uint8_t gauge_pct = stability_pct;
-    if (active_snapshot != nullptr) {
-      gauge_pct = (active_snapshot->mic_level_percent > 100U) ? 100U : active_snapshot->mic_level_percent;
+  const uint32_t gate_elapsed_ms =
+      (la_detection_gate_elapsed_ms_ > la_detection_gate_timeout_ms_) ? la_detection_gate_timeout_ms_
+                                                                       : la_detection_gate_elapsed_ms_;
+  float gate_remain = 1.0f;
+  if (la_detection_gate_timeout_ms_ > 0U) {
+    gate_remain = 1.0f - (static_cast<float>(gate_elapsed_ms) / static_cast<float>(la_detection_gate_timeout_ms_));
+  }
+  if (gate_remain < 0.0f) {
+    gate_remain = 0.0f;
+  } else if (gate_remain > 1.0f) {
+    gate_remain = 1.0f;
+  }
+  // Hourglass visual timeout is intentionally faster than real gate timeout (80% duration).
+  float hourglass_gate_remain = gate_remain;
+  if (la_detection_gate_timeout_ms_ > 0U) {
+    constexpr float kHourglassTimeoutScale = 0.80f;
+    const float visual_timeout_ms =
+        std::max<float>(1.0f, static_cast<float>(la_detection_gate_timeout_ms_) * kHourglassTimeoutScale);
+    hourglass_gate_remain = 1.0f - (static_cast<float>(gate_elapsed_ms) / visual_timeout_ms);
+    if (hourglass_gate_remain < 0.0f) {
+      hourglass_gate_remain = 0.0f;
+    } else if (hourglass_gate_remain > 1.0f) {
+      hourglass_gate_remain = 1.0f;
     }
-    const int16_t gauge_outer = static_cast<int16_t>(ring_radius + 12);
-    const int16_t gauge_inner = static_cast<int16_t>(gauge_outer - 4);
-    const uint16_t gauge_bg = color565(0x1A3E2DUL);
-    const uint16_t gauge_fg = color565(0x66FFADUL);
-    const uint16_t gauge_tip = color565(0xB7FFE1UL);
-    constexpr uint8_t kGaugeSegments = 72U;
-    const uint8_t active_segments = static_cast<uint8_t>((static_cast<uint16_t>(gauge_pct) * kGaugeSegments) / 100U);
-    for (uint8_t segment = 0U; segment < kGaugeSegments; ++segment) {
-      const float phase = static_cast<float>(segment) / static_cast<float>(kGaugeSegments);
-      const float angle = (-kHalfPi) + (phase * kTau);
-      const int16_t x0 = clamp_i16(static_cast<int16_t>(ring_cx + std::cos(angle) * static_cast<float>(gauge_inner)),
-                                   2,
-                                   static_cast<int16_t>(width - 3));
-      const int16_t y0 = clamp_i16(static_cast<int16_t>(ring_cy + std::sin(angle) * static_cast<float>(gauge_inner)),
-                                   2,
-                                   static_cast<int16_t>(height - 3));
-      const int16_t x1 = clamp_i16(static_cast<int16_t>(ring_cx + std::cos(angle) * static_cast<float>(gauge_outer)),
-                                   2,
-                                   static_cast<int16_t>(width - 3));
-      const int16_t y1 = clamp_i16(static_cast<int16_t>(ring_cy + std::sin(angle) * static_cast<float>(gauge_outer)),
-                                   2,
-                                   static_cast<int16_t>(height - 3));
-      uint16_t gauge_color = (segment < active_segments) ? gauge_fg : gauge_bg;
-      if (segment == active_segments && stability_pct > 0U) {
-        gauge_color = gauge_tip;
+  }
+  const uint8_t mic_level_pct =
+      (active_snapshot != nullptr) ? std::min<uint8_t>(active_snapshot->mic_level_percent, 100U) : 0U;
+  const float mic_level = static_cast<float>(mic_level_pct) / 100.0f;
+  uint32_t dt_ms = 16U;
+  if (la_bg_last_ms_ != 0U && now_ms >= la_bg_last_ms_) {
+    dt_ms = now_ms - la_bg_last_ms_;
+    if (dt_ms > 1000U) {
+      dt_ms = 1000U;
+    }
+  }
+  la_bg_last_ms_ = now_ms;
+  float mic_target = (active_snapshot != nullptr) ? mic_level : 0.15f;
+  if (la_bg_sync_ == LaBackgroundSync::kFixed) {
+    mic_target = 0.15f;
+  }
+  float alpha = static_cast<float>(dt_ms) / (180.0f + static_cast<float>(dt_ms));
+  if (alpha < 0.02f) {
+    alpha = 0.02f;
+  } else if (alpha > 0.35f) {
+    alpha = 0.35f;
+  }
+  la_bg_mic_lpf_ += alpha * (mic_target - la_bg_mic_lpf_);
+  if (la_bg_mic_lpf_ < 0.0f) {
+    la_bg_mic_lpf_ = 0.0f;
+  } else if (la_bg_mic_lpf_ > 1.0f) {
+    la_bg_mic_lpf_ = 1.0f;
+  }
+  float mic_drive = 0.15f;
+  if (la_bg_sync_ == LaBackgroundSync::kMicDirect) {
+    mic_drive = mic_target;
+  } else if (la_bg_sync_ == LaBackgroundSync::kMicSmoothed) {
+    mic_drive = la_bg_mic_lpf_;
+  }
+  if (mic_drive < 0.0f) {
+    mic_drive = 0.0f;
+  } else if (mic_drive > 1.0f) {
+    mic_drive = 1.0f;
+  }
+  const float bg_intensity = static_cast<float>(la_bg_intensity_pct_) / 100.0f;
+  auto scale_rgb = [](uint32_t rgb, float scale) -> uint32_t {
+    if (scale < 0.0f) {
+      scale = 0.0f;
+    } else if (scale > 1.0f) {
+      scale = 1.0f;
+    }
+    const uint8_t r = static_cast<uint8_t>(std::min<int>(255, static_cast<int>(((rgb >> 16U) & 0xFFU) * scale)));
+    const uint8_t g = static_cast<uint8_t>(std::min<int>(255, static_cast<int>(((rgb >> 8U) & 0xFFU) * scale)));
+    const uint8_t b = static_cast<uint8_t>(std::min<int>(255, static_cast<int>((rgb & 0xFFU) * scale)));
+    return (static_cast<uint32_t>(r) << 16U) | (static_cast<uint32_t>(g) << 8U) | static_cast<uint32_t>(b);
+  };
+  const float palette_scale = 0.45f + (0.55f * bg_intensity);
+  const uint16_t la_bg = color565(scale_rgb(0x060F18UL, palette_scale));
+  const uint16_t la_bg_mid = color565(scale_rgb(0x0A1A26UL, palette_scale));
+  const bool uses_fullscreen_sprite_bg = (la_bg_preset_ == LaBackgroundPreset::kHourglassDemosceneUltra);
+  if (!uses_fullscreen_sprite_bg) {
+    display.fillOverlayRect(0, 0, width, height, la_bg);
+    display.fillOverlayRect(0,
+                            static_cast<int16_t>(height / 4),
+                            width,
+                            static_cast<int16_t>(height / 2),
+                            la_bg_mid);
+  }
+
+  if (la_bg_preset_ == LaBackgroundPreset::kHourglassDemosceneUltra) {
+    size_t bg_pixels = 0U;
+    const bool bg_area_ok =
+        runtime::memory::safeMulSize(static_cast<size_t>(width), static_cast<size_t>(height), &bg_pixels);
+    if (bg_area_ok && bg_pixels > 0U) {
+      const bool needs_new_buffer = (la_bg_sprite_buf_ == nullptr) || (la_bg_sprite_pixels_ < bg_pixels) ||
+                                    (la_bg_sprite_w_ != width) || (la_bg_sprite_h_ != height);
+      if (needs_new_buffer) {
+        if (la_bg_sprite_buf_ != nullptr) {
+          runtime::memory::CapsAllocator::release(la_bg_sprite_buf_);
+          la_bg_sprite_buf_ = nullptr;
+          la_bg_sprite_pixels_ = 0U;
+          la_bg_sprite_w_ = 0;
+          la_bg_sprite_h_ = 0;
+        }
+        size_t bg_bytes = 0U;
+        if (runtime::memory::safeMulSize(bg_pixels, sizeof(uint16_t), &bg_bytes)) {
+          la_bg_sprite_buf_ =
+              static_cast<uint16_t*>(runtime::memory::CapsAllocator::allocPsram(bg_bytes, "la_hg_sprite"));
+          if (la_bg_sprite_buf_ != nullptr) {
+            la_bg_sprite_pixels_ = bg_pixels;
+            la_bg_sprite_w_ = width;
+            la_bg_sprite_h_ = height;
+          }
+        }
       }
-      display.drawOverlayLine(x0, y0, x1, y1, gauge_color);
+    }
+
+    if (la_bg_sprite_buf_ != nullptr && la_bg_sprite_w_ == width && la_bg_sprite_h_ == height) {
+      auto hg_xorshift = [this]() -> uint32_t {
+        uint32_t x = la_hg_rng_;
+        x ^= (x << 13U);
+        x ^= (x >> 17U);
+        x ^= (x << 5U);
+        la_hg_rng_ = x;
+        return x;
+      };
+      auto clamp_i32 = [](int32_t value, int32_t lo, int32_t hi) -> int32_t {
+        if (value < lo) {
+          return lo;
+        }
+        if (value > hi) {
+          return hi;
+        }
+        return value;
+      };
+      auto shade565 = [&clamp_i32](uint16_t color, int delta) -> uint16_t {
+        int r = (color >> 11U) & 0x1FU;
+        int g = (color >> 5U) & 0x3FU;
+        int b = color & 0x1FU;
+        r = clamp_i32(r + delta, 0, 31);
+        g = clamp_i32(g + (delta * 2), 0, 63);
+        b = clamp_i32(b + delta, 0, 31);
+        return static_cast<uint16_t>((r << 11U) | (g << 5U) | b);
+      };
+      auto darken565 = [](uint16_t color, uint8_t amount) -> uint16_t {
+        const uint16_t r = (color >> 11U) & 0x1FU;
+        const uint16_t g = (color >> 5U) & 0x3FU;
+        const uint16_t b = color & 0x1FU;
+        const uint16_t scale = static_cast<uint16_t>(255U - amount);
+        const uint16_t rr = static_cast<uint16_t>((static_cast<uint32_t>(r) * scale) / 255U);
+        const uint16_t gg = static_cast<uint16_t>((static_cast<uint32_t>(g) * scale) / 255U);
+        const uint16_t bb = static_cast<uint16_t>((static_cast<uint32_t>(b) * scale) / 255U);
+        return static_cast<uint16_t>((rr << 11U) | (gg << 5U) | bb);
+      };
+      auto lerpChannel = [](uint8_t a, uint8_t b, uint16_t t, uint16_t den) -> uint8_t {
+        const uint32_t aa = static_cast<uint32_t>(a) * static_cast<uint32_t>(den - t);
+        const uint32_t bb = static_cast<uint32_t>(b) * static_cast<uint32_t>(t);
+        return static_cast<uint8_t>((aa + bb) / den);
+      };
+
+      const uint16_t grid_w =
+          static_cast<uint16_t>(std::min<int>(kLaHourglassGridWMax, std::max<int>(56, width / 3)));
+      const uint16_t grid_h =
+          static_cast<uint16_t>(std::min<int>(kLaHourglassGridHMax, std::max<int>(42, height / 3)));
+      if (la_hg_grid_w_ != grid_w || la_hg_grid_h_ != grid_h) {
+        la_hg_grid_w_ = grid_w;
+        la_hg_grid_h_ = grid_h;
+        la_hg_ready_ = false;
+      }
+      const uint16_t active_grid_w = (la_hg_grid_w_ == 0U) ? 56U : la_hg_grid_w_;
+      const uint16_t active_grid_h = (la_hg_grid_h_ == 0U) ? 42U : la_hg_grid_h_;
+      auto hg_idx = [&](uint16_t x, uint16_t y) -> size_t {
+        return static_cast<size_t>(y) * static_cast<size_t>(active_grid_w) + static_cast<size_t>(x);
+      };
+      auto is_source_half = [&](int y) -> bool {
+        const int mid = static_cast<int>(active_grid_h / 2U);
+        return (la_hg_orient_ == 0U) ? (y < mid) : (y >= mid);
+      };
+      auto seed_source = [&]() {
+        std::memset(la_hg_sand_, 0, sizeof(la_hg_sand_));
+        const int mid = static_cast<int>(active_grid_h / 2U);
+        for (uint16_t y = 0U; y < active_grid_h; ++y) {
+          if (!is_source_half(static_cast<int>(y))) {
+            continue;
+          }
+          if ((la_hg_orient_ == 0U && static_cast<int>(y) > mid - 4) ||
+              (la_hg_orient_ != 0U && static_cast<int>(y) < mid + 3)) {
+            continue;
+          }
+          for (uint16_t x = 0U; x < active_grid_w; ++x) {
+            const size_t i = hg_idx(x, y);
+            if (la_hg_mask_[i] == 0U || la_hg_outline_[i] != 0U) {
+              continue;
+            }
+            const uint32_t r = hg_xorshift();
+            uint8_t density = 6U;
+            if ((la_hg_orient_ == 0U && y < 6U) || (la_hg_orient_ != 0U && y > active_grid_h - 7U)) {
+              density = 7U;
+            }
+            if ((r & 0x7U) < density) {
+              la_hg_sand_[i] = 1U;
+            }
+          }
+        }
+      };
+
+      if (!la_hg_ready_) {
+        std::memset(la_hg_mask_, 0, sizeof(la_hg_mask_));
+        std::memset(la_hg_outline_, 0, sizeof(la_hg_outline_));
+        std::memset(la_hg_depth_, 0, sizeof(la_hg_depth_));
+        std::memset(la_hg_halfw_, 0, sizeof(la_hg_halfw_));
+        const int cx = static_cast<int>(active_grid_w / 2U);
+        const float mid = (static_cast<float>(active_grid_h) - 1.0f) * 0.5f;
+        const int max_half = std::max<int>(6, static_cast<int>(active_grid_w / 2U) - 2);
+        const int min_half = 4;
+        const int throat_y0 = static_cast<int>(active_grid_h / 2U) - 1;
+        const int throat_y1 = static_cast<int>(active_grid_h / 2U);
+        const int throat_half = 2;
+        for (uint16_t y = 0U; y < active_grid_h; ++y) {
+          float d = std::fabs(static_cast<float>(y) - mid) / ((mid > 0.0f) ? mid : 1.0f);
+          const float w = static_cast<float>(min_half) +
+                          (static_cast<float>(max_half - min_half) * std::pow(d, 1.35f));
+          int half = static_cast<int>(w + 0.5f);
+          if (static_cast<int>(y) == throat_y0 || static_cast<int>(y) == throat_y1) {
+            half = throat_half;
+          }
+          half = static_cast<int>(clamp_i32(half, 1, max_half));
+          la_hg_halfw_[y] = static_cast<uint8_t>(half);
+          const int x0 = cx - half;
+          const int x1 = cx + half;
+          for (int x = x0; x <= x1; ++x) {
+            if (x >= 0 && x < static_cast<int>(active_grid_w)) {
+              la_hg_mask_[hg_idx(static_cast<uint16_t>(x), y)] = 1U;
+            }
+          }
+        }
+        for (uint16_t y = 1U; y + 1U < active_grid_h; ++y) {
+          for (uint16_t x = 1U; x + 1U < active_grid_w; ++x) {
+            const size_t i = hg_idx(x, y);
+            if (la_hg_mask_[i] == 0U) {
+              continue;
+            }
+            const bool solid = (la_hg_mask_[hg_idx(static_cast<uint16_t>(x - 1U), y)] != 0U) &&
+                               (la_hg_mask_[hg_idx(static_cast<uint16_t>(x + 1U), y)] != 0U) &&
+                               (la_hg_mask_[hg_idx(x, static_cast<uint16_t>(y - 1U))] != 0U) &&
+                               (la_hg_mask_[hg_idx(x, static_cast<uint16_t>(y + 1U))] != 0U);
+            if (!solid) {
+              la_hg_outline_[i] = 1U;
+            }
+          }
+        }
+        for (uint16_t y = 0U; y < active_grid_h; ++y) {
+          const int half = static_cast<int>(la_hg_halfw_[y]);
+          for (uint16_t x = 0U; x < active_grid_w; ++x) {
+            const size_t i = hg_idx(x, y);
+            if (la_hg_mask_[i] == 0U) {
+              continue;
+            }
+            const int ax = static_cast<int>(x) - static_cast<int>(active_grid_w / 2U);
+            float rad = (half > 0) ? (std::fabs(static_cast<float>(ax)) / static_cast<float>(half)) : 1.0f;
+            if (rad > 1.0f) {
+              rad = 1.0f;
+            }
+            const float depth = 1.0f - (rad * rad);
+            int s = static_cast<int>(depth * 18.0f - 9.0f);
+            s += (ax < 0) ? 1 : 0;
+            s += (y < active_grid_h / 2U) ? 1 : 0;
+            if (rad > 0.86f) {
+              s += 2;
+            }
+            la_hg_depth_[i] = static_cast<int8_t>(clamp_i32(s, -16, 16));
+          }
+        }
+        la_hg_theta_ = 0.0f;
+        la_hg_omega_ = 0.0008f;
+        la_hg_timeout_latched_ = false;
+        la_hg_prev_gate_elapsed_ms_ = gate_elapsed_ms;
+        la_hg_prev_gate_valid_ = true;
+        seed_source();
+        la_hg_ready_ = true;
+      }
+
+      auto count_source = [&]() -> int {
+        int count = 0;
+        for (uint16_t y = 0U; y < active_grid_h; ++y) {
+          const bool source_half = is_source_half(static_cast<int>(y));
+          for (uint16_t x = 0U; x < active_grid_w; ++x) {
+            const size_t i = hg_idx(x, y);
+            if (source_half && la_hg_sand_[i] != 0U) {
+              ++count;
+            }
+          }
+        }
+        return count;
+      };
+      auto count_total = [&]() -> int {
+        int count = 0;
+        const size_t limit = static_cast<size_t>(active_grid_w) * static_cast<size_t>(active_grid_h);
+        for (size_t i = 0U; i < limit; ++i) {
+          count += (la_hg_sand_[i] != 0U) ? 1 : 0;
+        }
+        return count;
+      };
+      auto physics_step = [&]() {
+        const int gd = (la_hg_orient_ == 0U) ? 1 : -1;
+        int bias = 0;
+        if (la_hg_theta_ > 0.02f) {
+          bias = 1;
+        } else if (la_hg_theta_ < -0.02f) {
+          bias = -1;
+        }
+        if (la_hg_orient_ != 0U) {
+          bias = -bias;
+        }
+        const int y_start = (gd > 0) ? static_cast<int>(active_grid_h - 2U) : 1;
+        const int y_end = (gd > 0) ? -1 : static_cast<int>(active_grid_h);
+        const int y_step = (gd > 0) ? -1 : 1;
+        for (int y = y_start; y != y_end; y += y_step) {
+          for (uint16_t x = 0U; x < active_grid_w; ++x) {
+            const size_t i = hg_idx(x, static_cast<uint16_t>(y));
+            if (la_hg_sand_[i] == 0U) {
+              continue;
+            }
+            const int yn = y + gd;
+            if (yn < 0 || yn >= static_cast<int>(active_grid_h)) {
+              continue;
+            }
+            const size_t id = hg_idx(x, static_cast<uint16_t>(yn));
+            if (la_hg_mask_[id] != 0U && la_hg_sand_[id] == 0U) {
+              la_hg_sand_[i] = 0U;
+              la_hg_sand_[id] = 1U;
+              continue;
+            }
+            const int x1 = static_cast<int>(x) + bias;
+            const int x2 = static_cast<int>(x) - bias;
+            if (bias != 0 && x1 >= 0 && x1 < static_cast<int>(active_grid_w)) {
+              const size_t id1 = hg_idx(static_cast<uint16_t>(x1), static_cast<uint16_t>(yn));
+              if (la_hg_mask_[id1] != 0U && la_hg_sand_[id1] == 0U) {
+                la_hg_sand_[i] = 0U;
+                la_hg_sand_[id1] = 1U;
+                continue;
+              }
+            }
+            if (x2 >= 0 && x2 < static_cast<int>(active_grid_w)) {
+              const size_t id2 = hg_idx(static_cast<uint16_t>(x2), static_cast<uint16_t>(yn));
+              if (la_hg_mask_[id2] != 0U && la_hg_sand_[id2] == 0U) {
+                la_hg_sand_[i] = 0U;
+                la_hg_sand_[id2] = 1U;
+                continue;
+              }
+            }
+          }
+        }
+      };
+
+      bool timeout_reset_flip = false;
+      if (la_hg_prev_gate_valid_) {
+        const uint32_t min_reset_progress_ms = std::max<uint32_t>(900U, la_detection_gate_timeout_ms_ / 10U);
+        const bool gate_reset_to_zero = (gate_elapsed_ms <= 80U) &&
+                                        (la_hg_prev_gate_elapsed_ms_ >= min_reset_progress_ms) &&
+                                        (la_hg_prev_gate_elapsed_ms_ > (gate_elapsed_ms + 400U));
+        if (gate_reset_to_zero && !la_hg_flipping_) {
+          timeout_reset_flip = true;
+          la_hg_timeout_latched_ = false;
+        }
+      } else {
+        la_hg_prev_gate_valid_ = true;
+      }
+      la_hg_prev_gate_elapsed_ms_ = gate_elapsed_ms;
+
+      if (hourglass_gate_remain > 0.02f) {
+        la_hg_timeout_latched_ = false;
+      }
+      const bool hourglass_timeout_reached = (hourglass_gate_remain <= 0.001f);
+      if (timeout_reset_flip) {
+        la_hg_flipping_ = true;
+        la_hg_flip_started_ms_ = now_ms;
+      }
+      if (la_hg_flip_on_timeout_ && !la_hg_flipping_ && !la_hg_timeout_latched_ && hourglass_timeout_reached) {
+        la_hg_flipping_ = true;
+        la_hg_flip_started_ms_ = now_ms;
+        la_hg_timeout_latched_ = true;
+      }
+      const float dt_s = static_cast<float>(dt_ms) * 0.001f;
+      const float kHourglassFlipDurationMs = static_cast<float>(std::max<uint32_t>(500U, la_hg_flip_duration_ms_));
+      constexpr float kSwingK = 0.080f;       // slower baseline swing
+      constexpr float kSwingDamp = 0.460f;    // much stronger damping
+      constexpr float kSwingFlipDamp = 0.620f;
+      const float max_theta = 0.06109f;  // ~3.5deg max for softer motion
+      float flip_rad = 0.0f;
+      if (la_hg_flipping_) {
+        const float p = static_cast<float>(now_ms - la_hg_flip_started_ms_) / kHourglassFlipDurationMs;
+        float e = p;
+        if (e < 0.0f) {
+          e = 0.0f;
+        } else if (e > 1.0f) {
+          e = 1.0f;
+        }
+        e = e * e * (3.0f - 2.0f * e);
+        flip_rad = e * 3.14159265359f;
+        la_hg_omega_ += ((-kSwingK * la_hg_theta_) - (kSwingFlipDamp * la_hg_omega_)) * dt_s;
+        la_hg_theta_ += la_hg_omega_ * dt_s;
+        if (p >= 1.0f) {
+          la_hg_flipping_ = false;
+          la_hg_orient_ ^= 1U;
+          la_hg_omega_ += ((hg_xorshift() & 1U) != 0U) ? 0.0015f : -0.0015f;
+          seed_source();
+        }
+      } else {
+        const bool freeze_sand = (!la_hg_flip_on_timeout_ && hourglass_timeout_reached);
+        const int total_grains = std::max<int>(1, count_total());
+        const int source_now = count_source();
+        const int source_target =
+            static_cast<int>(std::round(static_cast<float>(total_grains) * hourglass_gate_remain));
+        if (!freeze_sand) {
+          int need_move = source_now - source_target;
+          if (need_move > 0) {
+            need_move = std::min<int>(need_move, 10);
+            const int cx = static_cast<int>(active_grid_w / 2U);
+            const int mid = static_cast<int>(active_grid_h / 2U);
+            const int gd = (la_hg_orient_ == 0U) ? 1 : -1;
+            const int y_from = (gd > 0) ? (mid - 2) : (mid + 1);
+            const int y_to = (gd > 0) ? (mid + 1) : (mid - 2);
+            int bias = 0;
+            if (la_hg_theta_ > 0.02f) {
+              bias = 1;
+            } else if (la_hg_theta_ < -0.02f) {
+              bias = -1;
+            }
+            if (la_hg_orient_ != 0U) {
+              bias = -bias;
+            }
+            for (int moved = 0; moved < need_move; ++moved) {
+              bool done = false;
+              for (int radius = 0; radius <= 6 && !done; ++radius) {
+                for (int dx = -radius; dx <= radius && !done; ++dx) {
+                  const int x = cx + dx;
+                  if (x < 0 || x >= static_cast<int>(active_grid_w)) {
+                    continue;
+                  }
+                  const size_t from = hg_idx(static_cast<uint16_t>(x), static_cast<uint16_t>(y_from));
+                  if (la_hg_mask_[from] == 0U || la_hg_sand_[from] == 0U) {
+                    continue;
+                  }
+                  for (int ddx = -radius; ddx <= radius; ++ddx) {
+                    const int xb = x + ddx + bias;
+                    if (xb < 0 || xb >= static_cast<int>(active_grid_w)) {
+                      continue;
+                    }
+                    const size_t to = hg_idx(static_cast<uint16_t>(xb), static_cast<uint16_t>(y_to));
+                    if (la_hg_mask_[to] == 0U || la_hg_sand_[to] != 0U) {
+                      continue;
+                    }
+                    la_hg_sand_[from] = 0U;
+                    la_hg_sand_[to] = 1U;
+                    done = true;
+                    break;
+                  }
+                }
+              }
+              if (!done) {
+                break;
+              }
+            }
+          }
+        }
+        la_hg_omega_ += (((hg_xorshift() & 1023U) - 512U) * 0.000000010f);
+        la_hg_omega_ += ((-kSwingK * la_hg_theta_) - (kSwingDamp * la_hg_omega_)) * dt_s;
+        la_hg_theta_ += la_hg_omega_ * dt_s;
+        if (la_hg_theta_ > max_theta) {
+          la_hg_theta_ = max_theta;
+          if (la_hg_omega_ > 0.0f) {
+            la_hg_omega_ *= -0.10f;
+          }
+        } else if (la_hg_theta_ < -max_theta) {
+          la_hg_theta_ = -max_theta;
+          if (la_hg_omega_ < 0.0f) {
+            la_hg_omega_ *= -0.10f;
+          }
+        }
+        if (!freeze_sand) {
+          for (uint8_t step = 0U; step < 1U; ++step) {
+            physics_step();
+          }
+        }
+      }
+
+      const uint8_t top_r = static_cast<uint8_t>(2 + (la_bg_intensity_pct_ / 8U));
+      const uint8_t top_g = static_cast<uint8_t>(7 + (la_bg_intensity_pct_ / 6U));
+      const uint8_t top_b = static_cast<uint8_t>(11 + (la_bg_intensity_pct_ / 5U));
+      const uint8_t bot_r = static_cast<uint8_t>(9 + (la_bg_intensity_pct_ / 5U));
+      const uint8_t bot_g = static_cast<uint8_t>(20 + (la_bg_intensity_pct_ / 4U));
+      const uint8_t bot_b = static_cast<uint8_t>(26 + (la_bg_intensity_pct_ / 4U));
+      const uint16_t den = static_cast<uint16_t>(std::max<int16_t>(1, height - 1));
+      for (int16_t y = 0; y < height; ++y) {
+        const uint16_t t = static_cast<uint16_t>(y);
+        const uint8_t rr = lerpChannel(top_r, bot_r, t, den);
+        const uint8_t gg = lerpChannel(top_g, bot_g, t, den);
+        const uint8_t bb = lerpChannel(top_b, bot_b, t, den);
+        const uint16_t row_color = display.color565(rr, gg, bb);
+        uint16_t* row = la_bg_sprite_buf_ + (static_cast<size_t>(y) * static_cast<size_t>(width));
+        runtime::simd::simd_rgb565_fill(row, row_color, static_cast<size_t>(width));
+      }
+
+      const uint16_t glass_base = color565(0x4A9BDAUL);
+      const uint16_t glass_edge = color565(0x9BE3FFUL);
+      const uint16_t sand_base = color565(0xF2D463UL);
+      const uint16_t sand_glow = color565(0xFFF2A9UL);
+      const float target_w = (la_hg_target_width_px_ > 0U)
+                                 ? static_cast<float>(la_hg_target_width_px_)
+                                 : (static_cast<float>(width) * 0.2f);
+      const float target_h = (la_hg_target_height_px_ > 0U)
+                                 ? static_cast<float>(la_hg_target_height_px_)
+                                 : (static_cast<float>(height) * (0.9f / 1.33f) * 0.8f);
+      float center_x = (static_cast<float>(width) * 0.7f) + static_cast<float>(la_hg_x_offset_px_);
+      const float center_y = static_cast<float>(height) * 0.51f;
+      const float min_center_x = target_w * 0.58f;
+      const float max_center_x = static_cast<float>(width) - (target_w * 0.58f);
+      if (center_x < min_center_x) {
+        center_x = min_center_x;
+      } else if (center_x > max_center_x) {
+        center_x = max_center_x;
+      }
+      const float scale_x = target_w / static_cast<float>(active_grid_w);
+      const float scale_y = target_h / static_cast<float>(active_grid_h);
+      const float base_angle = (la_hg_orient_ == 0U) ? 0.0f : 3.14159265359f;
+      const float angle = base_angle + la_hg_theta_ + flip_rad;
+      const float cs = std::cos(angle);
+      const float sn = std::sin(angle);
+      const int block = std::max<int>(1, static_cast<int>(std::round(std::min(scale_x, scale_y) * 0.85f)));
+      const uint8_t glint_phase = static_cast<uint8_t>((now_ms / 1800U) & 0x7FU);
+      for (uint16_t y = 0U; y < active_grid_h; ++y) {
+        for (uint16_t x = 0U; x < active_grid_w; ++x) {
+          const size_t i = hg_idx(x, y);
+          if (la_hg_mask_[i] == 0U) {
+            continue;
+          }
+          uint16_t color = shade565(glass_base, static_cast<int>(la_hg_depth_[i]) - 6);
+          if (la_hg_sand_[i] != 0U) {
+            color = shade565(sand_base, static_cast<int>(la_hg_depth_[i]) / 3);
+          }
+          if (la_hg_outline_[i] != 0U) {
+            color = shade565(glass_edge, static_cast<int>(la_hg_depth_[i]) / 2 + 2);
+          }
+          if (la_hg_outline_[i] != 0U && ((((x * 3U) + (y * 5U) + glint_phase) & 127U) == 0U)) {
+            color = shade565(sand_glow, 1);
+          }
+          const float lx = (static_cast<float>(x) - static_cast<float>(active_grid_w) * 0.5f) * scale_x;
+          // Render each logical row with 3 sub-lines for denser, smoother hourglass lines.
+          for (uint8_t sub_line = 0U; sub_line < 3U; ++sub_line) {
+            const float y_sub = static_cast<float>(y) + (static_cast<float>(sub_line) / 3.0f);
+            const float ly = (y_sub - static_cast<float>(active_grid_h) * 0.5f) * scale_y;
+            const int16_t px = static_cast<int16_t>(std::round(center_x + (lx * cs) - (ly * sn)));
+            const int16_t py = static_cast<int16_t>(std::round(center_y + (lx * sn) + (ly * cs)));
+            for (int dy = 0; dy < block; ++dy) {
+              const int16_t yy = static_cast<int16_t>(py + dy - block / 2);
+              if (yy < 0 || yy >= height) {
+                continue;
+              }
+              uint16_t* row = la_bg_sprite_buf_ + (static_cast<size_t>(yy) * static_cast<size_t>(width));
+              for (int dx = 0; dx < block; ++dx) {
+                const int16_t xx = static_cast<int16_t>(px + dx - block / 2);
+                if (xx < 0 || xx >= width) {
+                  continue;
+                }
+                row[xx] = color;
+              }
+            }
+          }
+        }
+      }
+
+      const int16_t top_guard = std::min<int16_t>(44, static_cast<int16_t>(height / 4));
+      const int16_t bottom_guard_start = std::max<int16_t>(0, static_cast<int16_t>(height - 34));
+      for (int16_t y = 0; y < top_guard; ++y) {
+        uint16_t* row = la_bg_sprite_buf_ + (static_cast<size_t>(y) * static_cast<size_t>(width));
+        for (int16_t x = 0; x < width; ++x) {
+          row[x] = darken565(row[x], 86U);
+        }
+      }
+      for (int16_t y = bottom_guard_start; y < height; ++y) {
+        uint16_t* row = la_bg_sprite_buf_ + (static_cast<size_t>(y) * static_cast<size_t>(width));
+        for (int16_t x = 0; x < width; ++x) {
+          row[x] = darken565(row[x], 72U);
+        }
+      }
+
+      const uint32_t pixel_count = static_cast<uint32_t>(width) * static_cast<uint32_t>(height);
+      // Avoid full-frame DMA from PSRAM in loopTask: stream via CPU path for RTOS stability.
+      display.setAddrWindow(0, 0, width, height);
+      display.pushColors(la_bg_sprite_buf_, pixel_count, true);
+    } else {
+      // Fallback background if sprite allocation failed.
+      display.fillOverlayRect(0, 0, width, height, la_bg);
+      display.fillOverlayRect(0,
+                              static_cast<int16_t>(height / 4),
+                              width,
+                              static_cast<int16_t>(height / 2),
+                              la_bg_mid);
+    }
+  } else if (la_bg_preset_ == LaBackgroundPreset::kWirecubeRotozoomSubtle) {
+    const uint16_t rz_dark = color565(scale_rgb(0x0B1824UL, palette_scale));
+    const uint16_t rz_mid = color565(scale_rgb(0x102536UL, palette_scale));
+    const uint16_t cube_dim = color565(scale_rgb(0x1A3245UL, palette_scale));
+    const uint16_t cube_lit = color565(scale_rgb(0x26506AUL, palette_scale));
+    const int16_t fx_cx = static_cast<int16_t>(width / 2);
+    const int16_t fx_cy = static_cast<int16_t>((height / 2) + 8);
+    const int16_t fx_top_guard = 44;
+    const int16_t fx_bottom_guard = static_cast<int16_t>(height - 30);
+    int16_t fx_extent = static_cast<int16_t>(std::min<int16_t>(width / 2 - 10, height / 2 - 18));
+    if (fx_extent < 26) {
+      fx_extent = 26;
+    }
+    if ((fx_cy - fx_extent) < fx_top_guard) {
+      fx_extent = static_cast<int16_t>(fx_cy - fx_top_guard);
+    }
+    if ((fx_cy + fx_extent) > fx_bottom_guard) {
+      fx_extent = static_cast<int16_t>(fx_bottom_guard - fx_cy);
+    }
+    if (fx_extent < 18) {
+      fx_extent = 18;
+    }
+    auto draw_safe_line = [&](int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color) {
+      display.drawOverlayLine(clamp_i16(x0, 1, static_cast<int16_t>(width - 2)),
+                              clamp_i16(y0, 1, static_cast<int16_t>(height - 2)),
+                              clamp_i16(x1, 1, static_cast<int16_t>(width - 2)),
+                              clamp_i16(y1, 1, static_cast<int16_t>(height - 2)),
+                              color);
+    };
+    auto draw_roto_line = [&](float x0, float y0, float x1, float y1, float c, float s, float z, uint16_t color) {
+      const float rx0 = ((x0 * c) - (y0 * s)) * z;
+      const float ry0 = ((x0 * s) + (y0 * c)) * z;
+      const float rx1 = ((x1 * c) - (y1 * s)) * z;
+      const float ry1 = ((x1 * s) + (y1 * c)) * z;
+      draw_safe_line(static_cast<int16_t>(fx_cx + rx0),
+                     static_cast<int16_t>(fx_cy + ry0),
+                     static_cast<int16_t>(fx_cx + rx1),
+                     static_cast<int16_t>(fx_cy + ry1),
+                     color);
+    };
+
+    const float t = static_cast<float>(now_ms) * 0.001f;
+    const float rz_speed = 0.18f + (0.20f * mic_drive);
+    const float rz_angle = t * rz_speed;
+    const float rz_cos = std::cos(rz_angle);
+    const float rz_sin = std::sin(rz_angle);
+    const float rz_zoom = 1.0f + (0.05f + 0.07f * mic_drive) * std::sin((t * 0.92f) + (mic_drive * 2.0f));
+    int16_t grid_step = static_cast<int16_t>(11 - static_cast<int16_t>(mic_drive * 4.0f));
+    if (grid_step < 6) {
+      grid_step = 6;
+    }
+    for (int16_t offset = static_cast<int16_t>(-fx_extent); offset <= fx_extent;
+         offset = static_cast<int16_t>(offset + grid_step)) {
+      const uint16_t color = (((offset / grid_step) & 0x01) == 0) ? rz_dark : rz_mid;
+      draw_roto_line(static_cast<float>(offset),
+                     static_cast<float>(-fx_extent),
+                     static_cast<float>(offset),
+                     static_cast<float>(fx_extent),
+                     rz_cos,
+                     rz_sin,
+                     rz_zoom,
+                     color);
+      draw_roto_line(static_cast<float>(-fx_extent),
+                     static_cast<float>(offset),
+                     static_cast<float>(fx_extent),
+                     static_cast<float>(offset),
+                     rz_cos,
+                     rz_sin,
+                     rz_zoom,
+                     color);
+    }
+
+    const float yaw = t * (0.40f + mic_drive * 0.24f);
+    const float pitch = t * (0.30f + mic_drive * 0.16f);
+    const float roll = 0.20f * std::sin((t * 0.70f) + (mic_drive * 1.20f));
+    const float sy = std::sin(yaw);
+    const float cy = std::cos(yaw);
+    const float sp = std::sin(pitch);
+    const float cp = std::cos(pitch);
+    const float sr = std::sin(roll);
+    const float cr = std::cos(roll);
+    const float cube_radius = static_cast<float>(std::max<int16_t>(18, fx_extent - 8));
+    const float cube_scale = cube_radius * (0.72f + mic_drive * 0.15f);
+    constexpr float kCubeVerts[8][3] = {{-1.0f, -1.0f, -1.0f},
+                                        {1.0f, -1.0f, -1.0f},
+                                        {1.0f, 1.0f, -1.0f},
+                                        {-1.0f, 1.0f, -1.0f},
+                                        {-1.0f, -1.0f, 1.0f},
+                                        {1.0f, -1.0f, 1.0f},
+                                        {1.0f, 1.0f, 1.0f},
+                                        {-1.0f, 1.0f, 1.0f}};
+    constexpr uint8_t kCubeEdges[12][2] = {{0U, 1U},
+                                           {1U, 2U},
+                                           {2U, 3U},
+                                           {3U, 0U},
+                                           {4U, 5U},
+                                           {5U, 6U},
+                                           {6U, 7U},
+                                           {7U, 4U},
+                                           {0U, 4U},
+                                           {1U, 5U},
+                                           {2U, 6U},
+                                           {3U, 7U}};
+    int16_t px[8] = {0};
+    int16_t py[8] = {0};
+    float pz[8] = {0.0f};
+    for (uint8_t i = 0U; i < 8U; ++i) {
+      float x = kCubeVerts[i][0];
+      float y = kCubeVerts[i][1];
+      float z = kCubeVerts[i][2];
+      const float x1 = (x * cy) - (z * sy);
+      const float z1 = (x * sy) + (z * cy);
+      const float y2 = (y * cp) - (z1 * sp);
+      const float z2 = (y * sp) + (z1 * cp);
+      const float x3 = (x1 * cr) - (y2 * sr);
+      const float y3 = (x1 * sr) + (y2 * cr);
+      const float depth = z2 + 3.2f + (mic_drive * 0.6f);
+      const float proj = cube_scale / depth;
+      px[i] = static_cast<int16_t>(fx_cx + (x3 * proj));
+      py[i] = static_cast<int16_t>(fx_cy + (y3 * proj));
+      pz[i] = z2;
+    }
+    for (uint8_t edge = 0U; edge < 12U; ++edge) {
+      const uint8_t a = kCubeEdges[edge][0];
+      const uint8_t b = kCubeEdges[edge][1];
+      const float z_mix = (pz[a] + pz[b]) * 0.5f;
+      const uint16_t color = (z_mix > 0.0f) ? cube_lit : cube_dim;
+      draw_safe_line(px[a], py[a], px[b], py[b], color);
     }
   }
 
@@ -1429,69 +2477,114 @@ void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
     }
   }
 
-  if (la_overlay_show_hourglass_) {
-    const int16_t hg_w = la_overlay_hourglass_modern_ ? 30 : 14;
-    const int16_t hg_h = la_overlay_hourglass_modern_ ? 48 : 24;
-    const int16_t hg_x = 10;
+  if (la_bg_preset_ == LaBackgroundPreset::kLegacyHourglass && la_overlay_show_hourglass_) {
+    int16_t hg_w = static_cast<int16_t>((width * 38) / 100);
+    hg_w = std::max<int16_t>(56, std::min<int16_t>(hg_w, static_cast<int16_t>(width - 24)));
+    int16_t hg_h = static_cast<int16_t>((height * 62) / 100);
+    hg_h = std::max<int16_t>(72, std::min<int16_t>(hg_h, static_cast<int16_t>(height - 36)));
+    if (la_hg_target_width_px_ > 0U) {
+      hg_w = static_cast<int16_t>(la_hg_target_width_px_);
+    }
+    if (la_hg_target_height_px_ > 0U) {
+      hg_h = static_cast<int16_t>(la_hg_target_height_px_);
+    }
+    hg_w = std::max<int16_t>(36, std::min<int16_t>(hg_w, static_cast<int16_t>(width - 8)));
+    hg_h = std::max<int16_t>(72, std::min<int16_t>(hg_h, static_cast<int16_t>(height - 8)));
+    int16_t hg_x = static_cast<int16_t>(((width - hg_w) / 2) + la_hg_x_offset_px_);
+    hg_x = clamp_i16(hg_x, 2, static_cast<int16_t>(width - hg_w - 2));
     const int16_t hg_y = static_cast<int16_t>((height - hg_h) / 2);
-    const uint16_t hg_border = color565(0xF3F9FFUL);
-    const uint16_t hg_bg = color565(0xFFFFFFUL);
-    const uint16_t hg_sand = color565(0x050505UL);
-    const uint16_t hg_glow = color565(0x0E2A3AUL);
-    if (la_overlay_hourglass_modern_) {
-      display.drawOverlayRect(static_cast<int16_t>(hg_x - 1),
-                              static_cast<int16_t>(hg_y - 1),
-                              static_cast<int16_t>(hg_w + 2),
-                              static_cast<int16_t>(hg_h + 2),
-                              hg_glow);
-    }
-    display.drawOverlayRect(hg_x, hg_y, hg_w, hg_h, hg_border);
-    display.drawOverlayLine(hg_x + 2, hg_y + 2, hg_x + hg_w - 3, hg_y + hg_h - 3, hg_border);
-    display.drawOverlayLine(hg_x + hg_w - 3, hg_y + 2, hg_x + 2, hg_y + hg_h - 3, hg_border);
+    const int16_t hg_mid_x = static_cast<int16_t>(hg_x + (hg_w / 2));
+    const int16_t hg_mid_y = static_cast<int16_t>(hg_y + (hg_h / 2));
+    const int16_t hg_depth = la_overlay_hourglass_modern_ ? 4 : 2;
+    const uint16_t hg_bg = color565(0x070E16UL);
+    const uint16_t hg_inner_bg = color565(0x0A1721UL);
+    const uint16_t hg_far = color565(0x1A3B52UL);
+    const uint16_t hg_near = color565(0x7BE2FFUL);
+    const uint16_t hg_link = color565(0x3F89AEUL);
+    const uint16_t sand_base = color565(0x3DD9B4UL);
+    const uint16_t sand_high = color565(0xB6FFF0UL);
+    const float roto_t = static_cast<float>(now_ms) * 0.0014f;
+    const int16_t rot_dx = static_cast<int16_t>(std::sin(roto_t) * 5.0f);
+    const int16_t rot_dy = static_cast<int16_t>(std::cos(roto_t * 0.73f) * 3.0f);
+    const int16_t back_x_max = static_cast<int16_t>(std::max<int>(1, static_cast<int>(width - hg_w - 2)));
+    const int16_t back_y_max = static_cast<int16_t>(std::max<int>(1, static_cast<int>(height - hg_h - 2)));
+    const int16_t hg_back_x = clamp_i16(static_cast<int16_t>(hg_x + rot_dx - hg_depth), 1, back_x_max);
+    const int16_t hg_back_y = clamp_i16(static_cast<int16_t>(hg_y + rot_dy - hg_depth), 1, back_y_max);
+    const int16_t hg_back_mid_x = static_cast<int16_t>(hg_back_x + (hg_w / 2));
+    const int16_t hg_back_mid_y = static_cast<int16_t>(hg_back_y + (hg_h / 2));
 
-    float remain = 1.0f;
-    if (la_detection_gate_timeout_ms_ > 0U) {
-      const uint32_t elapsed = (la_detection_gate_elapsed_ms_ > la_detection_gate_timeout_ms_)
-                                   ? la_detection_gate_timeout_ms_
-                                   : la_detection_gate_elapsed_ms_;
-      remain = 1.0f - (static_cast<float>(elapsed) / static_cast<float>(la_detection_gate_timeout_ms_));
-    }
-    if (remain < 0.0f) {
-      remain = 0.0f;
-    } else if (remain > 1.0f) {
-      remain = 1.0f;
-    }
-
-    const int16_t chamber_h = static_cast<int16_t>((hg_h - 8) / 2);
-    const int16_t sand_inset = la_overlay_hourglass_modern_ ? 6 : 4;
-    const int16_t inner_half = static_cast<int16_t>((hg_w / 2) - sand_inset);
-    const int16_t center_x = static_cast<int16_t>(hg_x + (hg_w / 2));
-    const int16_t top_start_y = static_cast<int16_t>(hg_y + 3);
-
-    auto draw_hourglass_fill = [&](bool top, int16_t rows, uint16_t color) {
-      if (rows <= 0 || inner_half <= 0) {
-        return;
-      }
-      if (rows > chamber_h) {
-        rows = chamber_h;
-      }
-      for (int16_t row = 0; row < rows; ++row) {
-        const float t = static_cast<float>(row) / static_cast<float>((chamber_h > 1) ? (chamber_h - 1) : 1);
-        int16_t half = static_cast<int16_t>((1.0f - t) * static_cast<float>(inner_half));
-        if (half < 1) {
-          half = 1;
-        }
-        const int16_t y = top ? static_cast<int16_t>(top_start_y + row)
-                              : static_cast<int16_t>(hg_y + hg_h - 4 - row);
-        display.drawOverlayLine(static_cast<int16_t>(center_x - half),
-                                y,
-                                static_cast<int16_t>(center_x + half),
-                                y,
-                                color);
-      }
+    auto draw_clamped_line = [&](int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color) {
+      display.drawOverlayLine(clamp_i16(x0, 1, static_cast<int16_t>(width - 2)),
+                              clamp_i16(y0, 1, static_cast<int16_t>(height - 2)),
+                              clamp_i16(x1, 1, static_cast<int16_t>(width - 2)),
+                              clamp_i16(y1, 1, static_cast<int16_t>(height - 2)),
+                              color);
     };
 
-    int16_t top_fill = static_cast<int16_t>(remain * static_cast<float>(chamber_h));
+    display.fillOverlayRect(hg_x, hg_y, hg_w, hg_h, hg_bg);
+    display.fillOverlayRect(static_cast<int16_t>(hg_x + 2),
+                            static_cast<int16_t>(hg_y + 2),
+                            static_cast<int16_t>(hg_w - 4),
+                            static_cast<int16_t>(hg_h - 4),
+                            hg_inner_bg);
+    display.drawOverlayRect(hg_back_x, hg_back_y, hg_w, hg_h, hg_far);
+    display.drawOverlayRect(hg_x, hg_y, hg_w, hg_h, hg_near);
+    draw_clamped_line(hg_x, hg_y, hg_back_x, hg_back_y, hg_link);
+    draw_clamped_line(static_cast<int16_t>(hg_x + hg_w - 1),
+                      hg_y,
+                      static_cast<int16_t>(hg_back_x + hg_w - 1),
+                      hg_back_y,
+                      hg_link);
+    draw_clamped_line(hg_x,
+                      static_cast<int16_t>(hg_y + hg_h - 1),
+                      hg_back_x,
+                      static_cast<int16_t>(hg_back_y + hg_h - 1),
+                      hg_link);
+    draw_clamped_line(static_cast<int16_t>(hg_x + hg_w - 1),
+                      static_cast<int16_t>(hg_y + hg_h - 1),
+                      static_cast<int16_t>(hg_back_x + hg_w - 1),
+                      static_cast<int16_t>(hg_back_y + hg_h - 1),
+                      hg_link);
+
+    draw_clamped_line(static_cast<int16_t>(hg_x + 2), static_cast<int16_t>(hg_y + 2), hg_mid_x, hg_mid_y, hg_near);
+    draw_clamped_line(static_cast<int16_t>(hg_x + hg_w - 3), static_cast<int16_t>(hg_y + 2), hg_mid_x, hg_mid_y, hg_near);
+    draw_clamped_line(static_cast<int16_t>(hg_x + 2),
+                      static_cast<int16_t>(hg_y + hg_h - 3),
+                      hg_mid_x,
+                      hg_mid_y,
+                      hg_near);
+    draw_clamped_line(static_cast<int16_t>(hg_x + hg_w - 3),
+                      static_cast<int16_t>(hg_y + hg_h - 3),
+                      hg_mid_x,
+                      hg_mid_y,
+                      hg_near);
+
+    draw_clamped_line(static_cast<int16_t>(hg_back_x + 2),
+                      static_cast<int16_t>(hg_back_y + 2),
+                      hg_back_mid_x,
+                      hg_back_mid_y,
+                      hg_far);
+    draw_clamped_line(static_cast<int16_t>(hg_back_x + hg_w - 3),
+                      static_cast<int16_t>(hg_back_y + 2),
+                      hg_back_mid_x,
+                      hg_back_mid_y,
+                      hg_far);
+    draw_clamped_line(static_cast<int16_t>(hg_back_x + 2),
+                      static_cast<int16_t>(hg_back_y + hg_h - 3),
+                      hg_back_mid_x,
+                      hg_back_mid_y,
+                      hg_far);
+    draw_clamped_line(static_cast<int16_t>(hg_back_x + hg_w - 3),
+                      static_cast<int16_t>(hg_back_y + hg_h - 3),
+                      hg_back_mid_x,
+                      hg_back_mid_y,
+                      hg_far);
+    draw_clamped_line(hg_mid_x, hg_mid_y, hg_back_mid_x, hg_back_mid_y, hg_link);
+
+    const int16_t chamber_h = static_cast<int16_t>((hg_h - 12) / 2);
+    const int16_t inner_half = static_cast<int16_t>((hg_w / 2) - (la_overlay_hourglass_modern_ ? 8 : 6));
+    const int16_t top_start_y = static_cast<int16_t>(hg_y + 5);
+    int16_t top_fill = static_cast<int16_t>(hourglass_gate_remain * static_cast<float>(chamber_h));
     if (top_fill < 0) {
       top_fill = 0;
     } else if (top_fill > chamber_h) {
@@ -1504,20 +2597,36 @@ void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
       bottom_fill = chamber_h;
     }
 
-    // Inverted hourglass palette: white chambers with black sand.
-    draw_hourglass_fill(true, chamber_h, hg_bg);
-    draw_hourglass_fill(false, chamber_h, hg_bg);
-    draw_hourglass_fill(true, top_fill, hg_sand);
-    draw_hourglass_fill(false, bottom_fill, hg_sand);
-
-    if (la_overlay_hourglass_modern_) {
-      const int16_t neck_y0 = static_cast<int16_t>(hg_y + (hg_h / 2) - 2);
-      const int16_t neck_y1 = static_cast<int16_t>(neck_y0 + 5);
-      if (top_fill > 0 || bottom_fill < chamber_h) {
-        display.drawOverlayLine(center_x, neck_y0, center_x, neck_y1, hg_sand);
-      } else {
-        display.drawOverlayLine(center_x, neck_y0, center_x, neck_y1, hg_bg);
+    auto drawSandRows = [&](bool top_chamber, int16_t rows) {
+      if (rows <= 0 || inner_half <= 0) {
+        return;
       }
+      for (int16_t row = 0; row < rows; ++row) {
+        const float t = static_cast<float>(row) / static_cast<float>((chamber_h > 1) ? (chamber_h - 1) : 1);
+        int16_t half = static_cast<int16_t>((1.0f - t) * static_cast<float>(inner_half));
+        if (half < 1) {
+          half = 1;
+        }
+        const int16_t y = top_chamber ? static_cast<int16_t>(top_start_y + row)
+                                      : static_cast<int16_t>(hg_y + hg_h - 6 - row);
+        const uint16_t sand = (t < 0.2f || t > 0.82f) ? sand_high : sand_base;
+        display.drawOverlayLine(static_cast<int16_t>(hg_mid_x - half), y, static_cast<int16_t>(hg_mid_x + half), y, sand);
+      }
+    };
+
+    drawSandRows(true, top_fill);
+    drawSandRows(false, bottom_fill);
+
+    const int16_t stream_x = static_cast<int16_t>(hg_mid_x + static_cast<int16_t>(std::sin(roto_t * 2.2f) * 1.0f));
+    const int16_t stream_len = static_cast<int16_t>(5 + ((100U - stability_pct) / 9U));
+    draw_clamped_line(stream_x, static_cast<int16_t>(hg_mid_y - 2), stream_x, static_cast<int16_t>(hg_mid_y + stream_len), sand_high);
+    const int16_t chamber_span = std::max<int16_t>(1, static_cast<int16_t>(chamber_h - 1));
+    const int16_t stream_phase = static_cast<int16_t>((now_ms / 36U) % static_cast<uint32_t>(chamber_span));
+    for (uint8_t bead = 0U; bead < 3U; ++bead) {
+      const int16_t bead_y = static_cast<int16_t>(hg_mid_y + 2 +
+                                                  ((stream_phase + static_cast<int16_t>(bead * (chamber_span / 3 + 1))) %
+                                                   chamber_span));
+      display.fillOverlayRect(stream_x, bead_y, 1, 1, sand_base);
     }
   }
 
@@ -1540,33 +2649,198 @@ void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
     if (count > HardwareManager::kMicWaveformCapacity) {
       count = HardwareManager::kMicWaveformCapacity;
     }
-    const uint8_t max_points = 48U;
+    // Oscilloscope mode: shorter acquisition window for audio-player style responsiveness.
+    uint8_t max_points = 12U;
+    if (la_waveform_audio_player_mode_) {
+      uint8_t dynamic_points = static_cast<uint8_t>(la_waveform_window_ms_ / 20U);
+      if (dynamic_points < 6U) {
+        dynamic_points = 6U;
+      } else if (dynamic_points > 18U) {
+        dynamic_points = 18U;
+      }
+      max_points = dynamic_points;
+    }
     uint8_t points = (count < max_points) ? count : max_points;
-    const int16_t hourglass_w = la_overlay_hourglass_modern_ ? 30 : 14;
-    const int16_t wave_left =
-        static_cast<int16_t>(10 + (la_overlay_show_hourglass_ ? (hourglass_w + 14) : 6));
-    const int16_t wave_right = static_cast<int16_t>(ring_cx - ring_radius - 16);
-    const int16_t wave_w = static_cast<int16_t>(wave_right - wave_left);
+    const int16_t wave_left = 2;
+    int16_t wave_w = static_cast<int16_t>((width * (la_waveform_audio_player_mode_ ? 54 : 60)) / 100);
+    const int16_t wave_w_min = std::min<int16_t>(96, static_cast<int16_t>(width - 8));
+    const int16_t wave_w_max =
+        std::max<int16_t>(wave_w_min, static_cast<int16_t>(width - wave_left - 2));
+    wave_w = clamp_i16(wave_w, wave_w_min, wave_w_max);
     const int16_t wave_cy = static_cast<int16_t>(height / 2);
-    const int16_t wave_half_h = 30;
-    const uint16_t wave_bg = color565(0x102820UL);
-    const uint16_t wave_axis = color565(0x2F7F61UL);
+    int16_t wave_h = static_cast<int16_t>((height * 50) / 100);
+    const int16_t wave_h_min = std::min<int16_t>(56, static_cast<int16_t>(height - 8));
+    const int16_t wave_h_max = std::max<int16_t>(wave_h_min, static_cast<int16_t>(height - 8));
+    wave_h = clamp_i16(wave_h, wave_h_min, wave_h_max);
+    int16_t wave_half_h = static_cast<int16_t>(wave_h / 2 - 4);
+    if (wave_half_h < 16) {
+      wave_half_h = 16;
+    }
+    const int16_t wave_box_y = clamp_i16(static_cast<int16_t>(wave_cy - wave_half_h - 4),
+                                         2,
+                                         static_cast<int16_t>(std::max<int16_t>(2, height - 10)));
+    const int16_t wave_box_h = clamp_i16(static_cast<int16_t>((wave_half_h * 2) + 8),
+                                         8,
+                                         static_cast<int16_t>(std::max<int16_t>(8, height - wave_box_y - 2)));
+    const uint16_t wave_bg_line_a = color565(0x091810UL);
+    const uint16_t wave_bg_line_b = color565(0x0D1F16UL);
+    const uint16_t wave_grid_major = color565(0x1D3A2CUL);
+    const uint16_t wave_grid_minor = color565(0x12271EUL);
+    const uint16_t wave_axis = color565(0x2DC46EUL);
     if (wave_w > 32) {
-      display.fillOverlayRect(wave_left,
-                              static_cast<int16_t>(wave_cy - wave_half_h - 4),
-                              wave_w,
-                              static_cast<int16_t>((wave_half_h * 2) + 8),
-                              wave_bg);
-      display.drawOverlayRect(wave_left,
-                              static_cast<int16_t>(wave_cy - wave_half_h - 4),
-                              wave_w,
-                              static_cast<int16_t>((wave_half_h * 2) + 8),
-                              osc_ring);
+      // Pseudo-alpha oscilloscope background: sparse dark scanlines, keep LA backdrop visible.
+      const int16_t wave_x0 = static_cast<int16_t>(wave_left + 1);
+      const int16_t wave_x1 = static_cast<int16_t>(wave_left + wave_w - 2);
+      const int16_t wave_y0 = static_cast<int16_t>(wave_box_y + 1);
+      const int16_t wave_y1 = static_cast<int16_t>(wave_box_y + wave_box_h - 2);
+      for (int16_t y = wave_y0; y <= wave_y1; y = static_cast<int16_t>(y + 2)) {
+        const uint16_t c = (((y - wave_y0) / 2) & 0x01) ? wave_bg_line_b : wave_bg_line_a;
+        display.drawOverlayLine(wave_x0, y, wave_x1, y, c);
+      }
+
+      const uint32_t osc_window_ms =
+          std::max<uint32_t>(120U, la_waveform_audio_player_mode_ ? la_waveform_window_ms_ : 2000U);
+      constexpr uint32_t kOscDivCount = 10U;
+      const uint32_t osc_ms_per_div = std::max<uint32_t>(10U, osc_window_ms / kOscDivCount);
+      for (uint32_t div = 0U; div <= kOscDivCount; ++div) {
+        const uint32_t t_ms = div * osc_ms_per_div;
+        const int16_t gx = clamp_i16(static_cast<int16_t>(
+                                         wave_left +
+                                         (static_cast<int32_t>(t_ms) * static_cast<int32_t>(wave_w - 1)) /
+                                             static_cast<int32_t>(osc_window_ms)),
+                                     wave_x0,
+                                     wave_x1);
+        display.drawOverlayLine(gx, wave_y0, gx, wave_y1, wave_grid_major);
+      }
+
+      // Voltage base: 1 V/div emulated on 8 vertical divisions.
+      constexpr int16_t kOscVoltDivisions = 8;
+      for (int16_t div = 0; div <= kOscVoltDivisions; ++div) {
+        const int16_t gy = clamp_i16(static_cast<int16_t>(wave_box_y + 1 +
+                                                           (static_cast<int32_t>(div) *
+                                                            static_cast<int32_t>(wave_box_h - 2)) /
+                                                               kOscVoltDivisions),
+                                     wave_y0,
+                                     wave_y1);
+        const uint16_t c =
+            (div == (kOscVoltDivisions / 2)) ? wave_axis : (((div & 0x01) == 0) ? wave_grid_major : wave_grid_minor);
+        display.drawOverlayLine(wave_x0, gy, wave_x1, gy, c);
+      }
+
+      display.drawOverlayRect(wave_left, wave_box_y, wave_w, wave_box_h, osc_ring);
       display.drawOverlayLine(wave_left,
                               wave_cy,
                               static_cast<int16_t>(wave_left + wave_w - 1),
                               wave_cy,
                               wave_axis);
+      if (wave_w >= 140) {
+        char scope_info[28] = {0};
+        std::snprintf(scope_info, sizeof(scope_info), "%lums/div  1V/div", static_cast<unsigned long>(osc_ms_per_div));
+        drivers::display::OverlayTextCommand osc_text = {};
+        osc_text.text = scope_info;
+        osc_text.font_face = drivers::display::OverlayFontFace::kBuiltinSmall;
+        osc_text.size = 1U;
+        osc_text.color565 = color565(0x4EF88DUL);
+        osc_text.x = static_cast<int16_t>(wave_left + 4);
+        osc_text.y = static_cast<int16_t>(wave_box_y + 3);
+        display.drawOverlayText(osc_text);
+      }
+    }
+    if (la_overlay_show_progress_ring_) {
+      int16_t gauge_w = static_cast<int16_t>((width * 30) / 100);
+      int16_t gauge_h = static_cast<int16_t>((height * 50) / 100);
+      const int16_t gauge_w_min = std::min<int16_t>(56, static_cast<int16_t>(width - 8));
+      const int16_t gauge_h_min = std::min<int16_t>(56, static_cast<int16_t>(height - 8));
+      gauge_w = clamp_i16(gauge_w, gauge_w_min, static_cast<int16_t>(std::max<int16_t>(gauge_w_min, width - 8)));
+      gauge_h = clamp_i16(gauge_h, gauge_h_min, static_cast<int16_t>(std::max<int16_t>(gauge_h_min, height - 8)));
+      int16_t gauge_radius = static_cast<int16_t>(std::min<int16_t>(gauge_w, gauge_h) / 2);
+      if (gauge_radius < 12) {
+        gauge_radius = 12;
+      }
+      const int16_t gauge_margin = std::max<int16_t>(6, static_cast<int16_t>(width / 42));
+      const int16_t gauge_cx = clamp_i16(static_cast<int16_t>(width - gauge_margin - gauge_radius + (jitter_x / 2)),
+                                         static_cast<int16_t>(gauge_radius + 2),
+                                         static_cast<int16_t>(width - gauge_radius - 3));
+      const int16_t gauge_cy = clamp_i16(static_cast<int16_t>(wave_cy + (jitter_y / 2)),
+                                         static_cast<int16_t>(gauge_radius + 2),
+                                         static_cast<int16_t>(height - gauge_radius - 3));
+      const int16_t ring_thickness = std::max<int16_t>(3, static_cast<int16_t>(gauge_radius / 6));
+      int16_t timeout_outer = gauge_radius;
+      int16_t timeout_inner = static_cast<int16_t>(timeout_outer - ring_thickness);
+      int16_t stability_outer = static_cast<int16_t>(timeout_inner - 3);
+      int16_t stability_inner = static_cast<int16_t>(stability_outer - ring_thickness);
+      if (timeout_inner >= timeout_outer) {
+        timeout_inner = static_cast<int16_t>(std::max<int16_t>(4, timeout_outer - 3));
+      }
+      if (stability_outer >= timeout_inner) {
+        stability_outer = static_cast<int16_t>(timeout_inner - 2);
+      }
+      if (stability_inner >= stability_outer) {
+        stability_inner = static_cast<int16_t>(std::max<int16_t>(4, stability_outer - 3));
+      }
+
+      const uint16_t timeout_bg = color565(0x1A2F3AUL);
+      const uint16_t timeout_fg = (gate_remain > 0.25f) ? color565(0x58D8FFUL) : color565(0xFFA46AUL);
+      const uint16_t timeout_tip = color565(0xEFFFFFUL);
+      const uint16_t stability_bg = color565(0x1E362EUL);
+      const uint16_t stability_fg = color565(0x76FFB2UL);
+      const uint16_t stability_tip = color565(0xE8FFF4UL);
+      constexpr uint8_t kTimeoutSegments = 96U;
+      constexpr uint8_t kStabilitySegments = 84U;
+      uint8_t timeout_active =
+          static_cast<uint8_t>(std::round(gate_remain * static_cast<float>(kTimeoutSegments)));
+      if (timeout_active > kTimeoutSegments) {
+        timeout_active = kTimeoutSegments;
+      }
+      const uint8_t stability_active =
+          static_cast<uint8_t>((static_cast<uint16_t>(stability_pct) * kStabilitySegments) / 100U);
+      auto drawRing = [&](uint8_t segment_count,
+                          uint8_t active_segments,
+                          int16_t ring_inner,
+                          int16_t ring_outer,
+                          uint16_t active_color,
+                          uint16_t inactive_color,
+                          uint16_t tip_color) {
+        for (uint8_t segment = 0U; segment < segment_count; ++segment) {
+          const float phase = static_cast<float>(segment) / static_cast<float>(segment_count);
+          const float angle = (-kHalfPi) + (phase * kTau);
+          const int16_t x0 =
+              clamp_i16(static_cast<int16_t>(gauge_cx + std::cos(angle) * static_cast<float>(ring_inner)),
+                        2,
+                        static_cast<int16_t>(width - 3));
+          const int16_t y0 =
+              clamp_i16(static_cast<int16_t>(gauge_cy + std::sin(angle) * static_cast<float>(ring_inner)),
+                        2,
+                        static_cast<int16_t>(height - 3));
+          const int16_t x1 =
+              clamp_i16(static_cast<int16_t>(gauge_cx + std::cos(angle) * static_cast<float>(ring_outer)),
+                        2,
+                        static_cast<int16_t>(width - 3));
+          const int16_t y1 =
+              clamp_i16(static_cast<int16_t>(gauge_cy + std::sin(angle) * static_cast<float>(ring_outer)),
+                        2,
+                        static_cast<int16_t>(height - 3));
+          uint16_t ring_color = (segment < active_segments) ? active_color : inactive_color;
+          if (segment == active_segments && active_segments > 0U && active_segments < segment_count) {
+            ring_color = tip_color;
+          }
+          display.drawOverlayLine(x0, y0, x1, y1, ring_color);
+        }
+      };
+      drawRing(kTimeoutSegments,
+               timeout_active,
+               timeout_inner,
+               timeout_outer,
+               timeout_fg,
+               timeout_bg,
+               timeout_tip);
+      drawRing(kStabilitySegments,
+               stability_active,
+               stability_inner,
+               stability_outer,
+               stability_fg,
+               stability_bg,
+               stability_tip);
     }
     if (points >= 2U && wave_w > 32) {
       const uint8_t head = active_snapshot->mic_waveform_head;
@@ -1574,6 +2848,7 @@ void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
                                               : static_cast<uint16_t>(head + HardwareManager::kMicWaveformCapacity - points);
       int16_t prev_x = wave_left;
       int16_t prev_y = wave_cy;
+      int16_t prev_centered = 0;
       for (uint8_t index = 0U; index < points; ++index) {
         const uint16_t sample_index = static_cast<uint16_t>(start + index) % HardwareManager::kMicWaveformCapacity;
         uint8_t sample = active_snapshot->mic_waveform[sample_index];
@@ -1583,33 +2858,49 @@ void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
         int16_t x = static_cast<int16_t>(wave_left +
                                          (static_cast<int32_t>(index) * static_cast<int32_t>(wave_w - 1)) /
                                              static_cast<int32_t>((points > 1U) ? (points - 1U) : 1U));
-        const int16_t amp = static_cast<int16_t>(((static_cast<int16_t>(sample) - 50) * wave_half_h) / 50);
+        int16_t centered = static_cast<int16_t>(sample) - 50;
+        if (la_waveform_audio_player_mode_) {
+          const int16_t delta = static_cast<int16_t>(centered - prev_centered);
+          centered = static_cast<int16_t>(centered + (delta * 2));
+          if (centered < -50) {
+            centered = -50;
+          } else if (centered > 50) {
+            centered = 50;
+          }
+          centered = static_cast<int16_t>((centered * 130) / 100);
+        }
+        const int16_t amp = static_cast<int16_t>((centered * wave_half_h) / 50);
         int16_t y = static_cast<int16_t>(wave_cy - amp);
         x = clamp_i16(x, 2, static_cast<int16_t>(width - 3));
         y = clamp_i16(y, static_cast<int16_t>(wave_cy - wave_half_h), static_cast<int16_t>(wave_cy + wave_half_h));
         if (index > 0U) {
-          draw_thick_line(prev_x, prev_y, x, y, osc_main);
+          const uint16_t seg_color = ((index + 3U) >= points) ? osc_head : osc_main;
+          draw_thick_line(prev_x, prev_y, x, y, seg_color);
         }
         prev_x = x;
         prev_y = y;
+        prev_centered = centered;
       }
+      display.fillOverlayRect(clamp_i16(static_cast<int16_t>(prev_x - 1), 0, static_cast<int16_t>(width - 1)),
+                              clamp_i16(static_cast<int16_t>(prev_y - 1), 0, static_cast<int16_t>(height - 1)),
+                              3,
+                              3,
+                              osc_head);
     }
 
     constexpr uint8_t kFftVisualBandCount = 60U;
     constexpr uint8_t kA4VisualBand = kFftVisualBandCount / 2U;
     const int16_t fft_bottom = la_overlay_meter_bottom_horizontal_ ? static_cast<int16_t>(height - 28)
                                                                     : static_cast<int16_t>(height - 18);
-    const int16_t fft_gap = 1;
-    int16_t fft_bar_w = 2;
-    const int16_t fft_used_w =
-        static_cast<int16_t>((kFftVisualBandCount * fft_bar_w) + ((kFftVisualBandCount - 1U) * fft_gap));
-    int16_t fft_x0 = static_cast<int16_t>((width / 2) - (kA4VisualBand * (fft_bar_w + fft_gap)) - (fft_bar_w / 2));
-    if (fft_x0 < 4) {
-      fft_x0 = 4;
-    } else if (fft_x0 + fft_used_w > width - 4) {
-      fft_x0 = static_cast<int16_t>(width - 4 - fft_used_w);
-    }
     const int16_t fft_max_h = 54;
+    constexpr int16_t kFftMarginX = 2;
+    const int16_t fft_start_x = kFftMarginX;
+    int16_t fft_end_x = static_cast<int16_t>(width - 1 - kFftMarginX);
+    if (fft_end_x < fft_start_x) {
+      fft_end_x = fft_start_x;
+    }
+    const int32_t fft_span = std::max<int32_t>(
+        1, static_cast<int32_t>(fft_end_x) - static_cast<int32_t>(fft_start_x) + 1);
     auto sampleFftBand = [&](uint8_t visual_index) -> uint8_t {
       constexpr uint8_t kSourceBands = HardwareManager::kMicSpectrumBinCount;
       if (kSourceBands == 0U) {
@@ -1640,9 +2931,52 @@ void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
       }
       return static_cast<uint8_t>(value);
     };
+    auto spectrumGradientColor = [&](uint8_t y_pct) -> uint16_t {
+      const uint8_t clamped = (y_pct > 100U) ? 100U : y_pct;
+      uint8_t r = 0U;
+      uint8_t g = 0U;
+      uint8_t b = 0U;
+      if (la_bargraph_blue_palette_) {
+        r = static_cast<uint8_t>(18U + (clamped / 4U));
+        g = static_cast<uint8_t>(70U + ((static_cast<uint16_t>(clamped) * 165U) / 100U));
+        b = static_cast<uint8_t>(168U + ((static_cast<uint16_t>(clamped) * 86U) / 100U));
+      } else {
+        if (clamped <= 50U) {
+          r = static_cast<uint8_t>((static_cast<uint16_t>(clamped) * 255U) / 50U);
+          g = 255U;
+        } else {
+          r = 255U;
+          g = static_cast<uint8_t>((static_cast<uint16_t>(100U - clamped) * 255U) / 50U);
+        }
+        b = 18U;
+      }
+      return display.color565(r, g, b);
+    };
+    const uint16_t fft_edge = color565(la_bargraph_blue_palette_ ? 0xC8ECFFUL : 0xD7F4E8UL);
+    const uint16_t fft_peak = color565(la_bargraph_blue_palette_ ? 0xEEFAFFUL : 0xFFF2C7UL);
+    static uint8_t s_fft_peak_level[kFftVisualBandCount] = {};
+    static uint32_t s_fft_peak_hold_until_ms[kFftVisualBandCount] = {};
+    static uint32_t s_fft_peak_last_ms = 0U;
+    if (s_fft_peak_last_ms == 0U || now_ms < s_fft_peak_last_ms || (now_ms - s_fft_peak_last_ms) > 3500U) {
+      std::memset(s_fft_peak_level, 0, sizeof(s_fft_peak_level));
+      std::memset(s_fft_peak_hold_until_ms, 0, sizeof(s_fft_peak_hold_until_ms));
+      s_fft_peak_last_ms = now_ms;
+    }
+    uint32_t peak_dt_ms = (now_ms >= s_fft_peak_last_ms) ? (now_ms - s_fft_peak_last_ms) : 0U;
+    if (peak_dt_ms > 500U) {
+      peak_dt_ms = 500U;
+    }
+    s_fft_peak_last_ms = now_ms;
+    uint8_t peak_decay_step =
+        static_cast<uint8_t>((static_cast<uint32_t>(la_bargraph_decay_per_s_) * peak_dt_ms) / 1000U);
+    if (peak_decay_step == 0U) {
+      peak_decay_step = 1U;
+    }
 
     for (uint8_t index = 0U; index < kFftVisualBandCount; ++index) {
-      const uint8_t band = sampleFftBand(index);
+      const uint8_t band_raw = sampleFftBand(index);
+      const uint8_t band = static_cast<uint8_t>(
+          std::min<int>(100, (static_cast<int>(band_raw) * 220) / 100 + (static_cast<int>(mic_level_pct) / 3)));
       int16_t h = static_cast<int16_t>(4 + (static_cast<int32_t>(fft_max_h) * band) / 100);
       if (h < 4) {
         h = 4;
@@ -1650,19 +2984,49 @@ void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
       if (h > fft_max_h) {
         h = fft_max_h;
       }
-      const int16_t x = static_cast<int16_t>(fft_x0 + index * (fft_bar_w + fft_gap));
-      const int16_t y = static_cast<int16_t>(fft_bottom - h);
-      uint16_t c = fft_mid;
-      if (index < (kFftVisualBandCount / 3U)) {
-        c = fft_low;
-      } else if (index >= ((kFftVisualBandCount * 2U) / 3U)) {
-        c = fft_high;
+      const int32_t band_x0_raw =
+          static_cast<int32_t>(fft_start_x) +
+          (static_cast<int32_t>(index) * fft_span) / static_cast<int32_t>(kFftVisualBandCount);
+      const int32_t band_x1_raw =
+          static_cast<int32_t>(fft_start_x) +
+          (static_cast<int32_t>(index + 1U) * fft_span) / static_cast<int32_t>(kFftVisualBandCount) - 1;
+      int16_t x0 = clamp_i16(static_cast<int16_t>(band_x0_raw), fft_start_x, fft_end_x);
+      int16_t x1 = clamp_i16(static_cast<int16_t>(band_x1_raw), fft_start_x, fft_end_x);
+      if (x1 < x0) {
+        x1 = x0;
       }
-      display.fillOverlayRect(x, y, fft_bar_w, h, c);
-      display.drawOverlayRect(x, y, fft_bar_w, h, marker);
+      const int16_t bar_w = std::max<int16_t>(1, static_cast<int16_t>(x1 - x0 + 1));
+      const int16_t y = static_cast<int16_t>(fft_bottom - h);
+      const int16_t x_end = static_cast<int16_t>(x0 + bar_w - 1);
+      uint8_t peak_level = s_fft_peak_level[index];
+      if (band >= peak_level) {
+        peak_level = band;
+        s_fft_peak_hold_until_ms[index] = now_ms + la_bargraph_peak_hold_ms_;
+      } else if (now_ms >= s_fft_peak_hold_until_ms[index]) {
+        peak_level = (peak_level > peak_decay_step) ? static_cast<uint8_t>(peak_level - peak_decay_step) : 0U;
+        if (band > peak_level) {
+          peak_level = band;
+        }
+      }
+      s_fft_peak_level[index] = peak_level;
+      for (int16_t row = 0; row < h; ++row) {
+        const uint8_t y_pct = static_cast<uint8_t>(
+            (static_cast<uint32_t>(h - 1 - row) * 100U) / static_cast<uint32_t>(std::max<int16_t>(1, h - 1)));
+        const uint16_t c = spectrumGradientColor(y_pct);
+        const int16_t yy = static_cast<int16_t>(y + row);
+        display.drawOverlayLine(x0, yy, x_end, yy, c);
+      }
+      display.drawOverlayRect(x0, y, bar_w, h, fft_edge);
+      if (peak_level > 0U) {
+        const int16_t peak_h = static_cast<int16_t>(4 + (static_cast<int32_t>(fft_max_h) * peak_level) / 100);
+        const int16_t peak_y = static_cast<int16_t>(fft_bottom - peak_h);
+        if (peak_y >= static_cast<int16_t>(fft_bottom - fft_max_h - 1) && peak_y < fft_bottom) {
+          display.drawOverlayLine(x0, peak_y, x_end, peak_y, fft_peak);
+        }
+      }
     }
 
-    const int16_t marker_x = static_cast<int16_t>(fft_x0 + kA4VisualBand * (fft_bar_w + fft_gap) + (fft_bar_w / 2));
+    const int16_t marker_x = static_cast<int16_t>(width / 2);
     display.drawOverlayLine(marker_x, static_cast<int16_t>(fft_bottom - fft_max_h - 4), marker_x, fft_bottom, marker);
 
     if (la_overlay_show_pitch_text_) {
@@ -1730,7 +3094,7 @@ void UiManager::dumpGraphicsStatus() const {
       (graphics_stats_.draw_count == 0U) ? 0U : (graphics_stats_.draw_time_total_us / graphics_stats_.draw_count);
   const ui::fx::FxEngineStats fx_stats = fx_engine_.stats();
   UI_LOGI(
-      "GFX_STATUS depth=%u mode=%s theme256=%u lines=%u double=%u source=%s full_frame=%u dma_req=%u dma_async=%u trans_px=%u trans_lines=%u pending=%u flush=%lu dma=%lu sync=%lu flush_spi_avg=%lu flush_spi_max=%lu draw_lvgl_avg=%lu draw_lvgl_max=%lu fx_fps=%u fx_frames=%lu fx_blit=%lu/%lu/%lu tail=%lu fx_dma_to=%lu fx_fail=%lu fx_skip_busy=%lu block=%lu ovf=%lu stall=%lu recover=%lu async_fallback=%lu",
+      "GFX_STATUS depth=%u mode=%s theme256=%u lines=%u double=%u source=%s full_frame=%u dma_req=%u dma_async=%u trans_px=%u trans_lines=%u pending=%u flush=%lu dma=%lu sync=%lu flush_spi_avg=%lu flush_spi_max=%lu draw_lvgl_avg=%lu draw_lvgl_max=%lu fx_enabled=%u fx_scene=%u fx_fps=%u fx_frames=%lu fx_blit=%lu/%lu/%lu tail=%lu fx_dma_to=%lu fx_fail=%lu fx_skip_busy=%lu block=%lu ovf=%lu stall=%lu recover=%lu async_fallback=%lu",
       static_cast<unsigned int>(LV_COLOR_DEPTH),
       kUseColor256Runtime ? "RGB332" : "RGB565",
       kUseThemeQuantizeRuntime ? 1U : 0U,
@@ -1750,6 +3114,8 @@ void UiManager::dumpGraphicsStatus() const {
       static_cast<unsigned long>(graphics_stats_.flush_time_max_us),
       static_cast<unsigned long>(draw_avg_us),
       static_cast<unsigned long>(graphics_stats_.draw_time_max_us),
+      fx_engine_.enabled() ? 1U : 0U,
+      direct_fx_scene_active_ ? 1U : 0U,
       static_cast<unsigned int>(fx_stats.fps),
       static_cast<unsigned long>(fx_stats.frame_count),
       static_cast<unsigned long>(fx_stats.blit_cpu_us),
@@ -1957,7 +3323,8 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   const bool static_state_changed = shouldApplySceneStaticState(scene_id, screen_payload_json, scene_changed);
   const bool has_previous_scene = (last_scene_id_[0] != '\0');
   const bool win_etape_intro_scene = false;
-  const bool direct_fx_scene = isDirectFxSceneId(scene_id);
+  const bool la_detector_lgfx_only_scene = (std::strcmp(scene_id, "SCENE_LA_DETECTOR") == 0);
+  const bool direct_fx_scene_runtime = isDirectFxSceneId(scene_id) && !la_detector_lgfx_only_scene;
   const bool test_lab_scene = (std::strcmp(scene_id, "SCENE_TEST_LAB") == 0);
   const bool is_locked_scene = (std::strcmp(scene_id, "SCENE_LOCKED") == 0);
   const bool qr_scene = (std::strcmp(scene_id, "SCENE_CAMERA_SCAN") == 0 ||
@@ -1970,7 +3337,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   if (static_state_changed && !win_etape_intro_scene && intro_active_) {
     stopIntroAndCleanup();
   }
-  if (static_state_changed && !direct_fx_scene) {
+  if (static_state_changed && !direct_fx_scene_runtime) {
     direct_fx_scene_active_ = false;
   }
 
@@ -2230,6 +3597,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   SceneTextAlign symbol_align = SceneTextAlign::kCenter;
   const char* symbol_align_token = "";
   bool use_lgfx_text_overlay = false;
+  bool lgfx_hard_mode = false;
   bool disable_lvgl_text = false;
   int16_t frame_dx = 0;
   int16_t frame_dy = 0;
@@ -2261,6 +3629,27 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   String la_overlay_caption = "Recherche d'accordance";
   bool la_overlay_meter_bottom_horizontal = true;
   bool la_overlay_hourglass_modern = true;
+  LaBackgroundPreset la_bg_preset = LaBackgroundPreset::kLegacyHourglass;
+  LaBackgroundSync la_bg_sync = LaBackgroundSync::kMicSmoothed;
+  uint8_t la_bg_intensity_pct = 32U;
+  bool la_hg_flip_on_timeout = true;
+  uint32_t la_hg_reset_flip_ms = 10000U;
+  int16_t la_hg_x_offset_px = 0;
+  uint16_t la_hg_height_px = 0U;
+  uint16_t la_hg_width_px = 0U;
+  bool la_bargraph_blue_palette = false;
+  uint16_t la_bargraph_peak_hold_ms = 320U;
+  uint16_t la_bargraph_decay_per_s = 120U;
+  bool la_waveform_audio_player_mode = false;
+  uint16_t la_waveform_window_ms = 300U;
+  bool warning_gyrophare_enabled = false;
+  bool warning_gyrophare_disable_direct_fx = false;
+  bool warning_lgfx_only = false;
+  bool warning_siren = false;
+  uint8_t warning_gyrophare_fps = 25U;
+  uint16_t warning_gyrophare_speed_deg_per_sec = 180U;
+  uint16_t warning_gyrophare_beam_width_deg = 70U;
+  String warning_gyrophare_message = "SIGNAL ANORMAL";
   la_detection_scene_ = false;
   uint32_t bg_rgb = 0x07132AUL;
   uint32_t accent_rgb = 0x2A76FFUL;
@@ -2268,6 +3657,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   const bool uson_proto_scene = (std::strcmp(scene_id, "SCENE_U_SON_PROTO") == 0);
   if (uson_proto_scene) {
     use_lgfx_text_overlay = fx_engine_.config().lgfx_backend;
+    lgfx_hard_mode = true;
     disable_lvgl_text = use_lgfx_text_overlay;
     title_align = SceneTextAlign::kCenter;
     subtitle_align = SceneTextAlign::kBottom;
@@ -2331,15 +3721,19 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     effect = SceneEffect::kBlink;
     bg_rgb = 0x261209UL;
     accent_rgb = 0xFF9A4AUL;
-    text_rgb = 0xFFF2E6UL;
+    text_rgb = 0xFFFFFFUL;
+    warning_lgfx_only = true;
+    warning_siren = true;
+    warning_gyrophare_enabled = true;
+    warning_gyrophare_disable_direct_fx = true;
   } else if (std::strcmp(scene_id, "SCENE_LA_DETECTOR") == 0 || std::strcmp(scene_id, "SCENE_SEARCH") == 0) {
     title = "recherche d'accordance";
     subtitle = "Balayage en cours";
     symbol = "";
     effect = SceneEffect::kWave;
     bg_rgb = 0x04141FUL;
-    accent_rgb = 0x49D9FFUL;
-    text_rgb = 0xE7F6FFUL;
+    accent_rgb = 0x4ABEFFUL;
+    text_rgb = 0xFFFFFFUL;
     if (std::strcmp(scene_id, "SCENE_LA_DETECTOR") == 0) {
       bg_rgb = 0x000000UL;
       la_detection_scene_ = true;
@@ -2594,8 +3988,39 @@ void UiManager::renderScene(const ScenarioDef* scenario,
       if (document["render"]["disable_lvgl_text"].is<bool>()) {
         disable_lvgl_text = document["render"]["disable_lvgl_text"].as<bool>();
       }
+      if (document["render"]["lgfx_hard_mode"].is<bool>()) {
+        lgfx_hard_mode = document["render"]["lgfx_hard_mode"].as<bool>();
+      }
       if (document["render"]["wave"].is<bool>() && !document["render"]["wave"].as<bool>()) {
         subtitle_scroll_mode = SceneScrollMode::kNone;
+      }
+      if (document["render"]["warning"]["gyrophare"].is<JsonObjectConst>()) {
+        const JsonObjectConst gyro_render = document["render"]["warning"]["gyrophare"].as<JsonObjectConst>();
+        if (gyro_render["enabled"].is<bool>()) {
+          warning_gyrophare_enabled = gyro_render["enabled"].as<bool>();
+        }
+        if (gyro_render["disable_direct_fx"].is<bool>()) {
+          warning_gyrophare_disable_direct_fx = gyro_render["disable_direct_fx"].as<bool>();
+        }
+        if (gyro_render["fps"].is<unsigned int>()) {
+          warning_gyrophare_fps = static_cast<uint8_t>(gyro_render["fps"].as<unsigned int>());
+        }
+        if (gyro_render["speed_deg_per_sec"].is<unsigned int>()) {
+          warning_gyrophare_speed_deg_per_sec = static_cast<uint16_t>(gyro_render["speed_deg_per_sec"].as<unsigned int>());
+        }
+        if (gyro_render["beam_width_deg"].is<unsigned int>()) {
+          warning_gyrophare_beam_width_deg = static_cast<uint16_t>(gyro_render["beam_width_deg"].as<unsigned int>());
+        }
+        const char* message = gyro_render["message"] | "";
+        if (message[0] != '\0') {
+          warning_gyrophare_message = message;
+        }
+      }
+      if (document["render"]["warning"]["lgfx_only"].is<bool>()) {
+        warning_lgfx_only = document["render"]["warning"]["lgfx_only"].as<bool>();
+      }
+      if (document["render"]["warning"]["siren"].is<bool>()) {
+        warning_siren = document["render"]["warning"]["siren"].as<bool>();
       }
       if (document["render"]["la_detector"].is<JsonObjectConst>()) {
         const JsonObjectConst la_render = document["render"]["la_detector"].as<JsonObjectConst>();
@@ -2641,6 +4066,85 @@ void UiManager::renderScene(const ScenarioDef* scenario,
             token[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(token[i])));
           }
           la_overlay_hourglass_modern = (std::strcmp(token, "modern") == 0);
+        }
+        const char* background_preset = la_render["background_preset"] | "";
+        if (background_preset[0] != '\0') {
+          char token[40] = {0};
+          std::strncpy(token, background_preset, sizeof(token) - 1U);
+          for (size_t i = 0U; token[i] != '\0'; ++i) {
+            token[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(token[i])));
+          }
+          if (std::strcmp(token, "wirecube_rotozoom_subtle") == 0) {
+            la_bg_preset = LaBackgroundPreset::kWirecubeRotozoomSubtle;
+          } else if (std::strcmp(token, "hourglass_demoscene_ultra") == 0) {
+            la_bg_preset = LaBackgroundPreset::kHourglassDemosceneUltra;
+          } else {
+            la_bg_preset = LaBackgroundPreset::kLegacyHourglass;
+          }
+        }
+        const char* background_sync = la_render["background_sync"] | "";
+        if (background_sync[0] != '\0') {
+          char token[24] = {0};
+          std::strncpy(token, background_sync, sizeof(token) - 1U);
+          for (size_t i = 0U; token[i] != '\0'; ++i) {
+            token[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(token[i])));
+          }
+          if (std::strcmp(token, "fixed") == 0) {
+            la_bg_sync = LaBackgroundSync::kFixed;
+          } else if (std::strcmp(token, "mic_direct") == 0) {
+            la_bg_sync = LaBackgroundSync::kMicDirect;
+          } else {
+            la_bg_sync = LaBackgroundSync::kMicSmoothed;
+          }
+        }
+        if (la_render["background_intensity_pct"].is<unsigned int>()) {
+          la_bg_intensity_pct = static_cast<uint8_t>(la_render["background_intensity_pct"].as<unsigned int>());
+        }
+        if (la_render["flip_on_timeout"].is<bool>()) {
+          la_hg_flip_on_timeout = la_render["flip_on_timeout"].as<bool>();
+        }
+        if (la_render["reset_flip_ms"].is<unsigned int>()) {
+          la_hg_reset_flip_ms = la_render["reset_flip_ms"].as<unsigned int>();
+        }
+        if (la_render["hourglass_x_offset_px"].is<int>()) {
+          la_hg_x_offset_px = static_cast<int16_t>(la_render["hourglass_x_offset_px"].as<int>());
+        }
+        if (la_render["hourglass_height_px"].is<unsigned int>()) {
+          la_hg_height_px = static_cast<uint16_t>(la_render["hourglass_height_px"].as<unsigned int>());
+        }
+        if (la_render["hourglass_width_px"].is<unsigned int>()) {
+          la_hg_width_px = static_cast<uint16_t>(la_render["hourglass_width_px"].as<unsigned int>());
+        }
+        const char* bargraph_palette = la_render["bargraph_palette"] | "";
+        if (bargraph_palette[0] != '\0') {
+          char token[16] = {0};
+          std::strncpy(token, bargraph_palette, sizeof(token) - 1U);
+          for (size_t i = 0U; token[i] != '\0'; ++i) {
+            token[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(token[i])));
+          }
+          la_bargraph_blue_palette = (std::strcmp(token, "blue") == 0 ||
+                                      std::strcmp(token, "blue_cyan") == 0 ||
+                                      std::strcmp(token, "cyan") == 0);
+        }
+        if (la_render["bargraph_peak_hold_ms"].is<unsigned int>()) {
+          la_bargraph_peak_hold_ms = static_cast<uint16_t>(la_render["bargraph_peak_hold_ms"].as<unsigned int>());
+        }
+        if (la_render["bargraph_decay_per_s"].is<unsigned int>()) {
+          la_bargraph_decay_per_s = static_cast<uint16_t>(la_render["bargraph_decay_per_s"].as<unsigned int>());
+        }
+        const char* waveform_mode = la_render["waveform_mode"] | "";
+        if (waveform_mode[0] != '\0') {
+          char token[24] = {0};
+          std::strncpy(token, waveform_mode, sizeof(token) - 1U);
+          for (size_t i = 0U; token[i] != '\0'; ++i) {
+            token[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(token[i])));
+          }
+          la_waveform_audio_player_mode = (std::strcmp(token, "audio_player") == 0 ||
+                                           std::strcmp(token, "audio") == 0 ||
+                                           std::strcmp(token, "player") == 0);
+        }
+        if (la_render["waveform_window_ms"].is<unsigned int>()) {
+          la_waveform_window_ms = static_cast<uint16_t>(la_render["waveform_window_ms"].as<unsigned int>());
         }
         if (la_render["caption_font"].is<unsigned int>()) {
           const uint8_t legacy_font = static_cast<uint8_t>(la_render["caption_font"].as<unsigned int>());
@@ -2930,8 +4434,75 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   } else if (la_overlay_caption_size > 3U) {
     la_overlay_caption_size = 3U;
   }
+  if (la_bg_intensity_pct > 100U) {
+    la_bg_intensity_pct = 100U;
+  }
+  if (la_hg_reset_flip_ms < 500U) {
+    la_hg_reset_flip_ms = 500U;
+  } else if (la_hg_reset_flip_ms > 20000U) {
+    la_hg_reset_flip_ms = 20000U;
+  }
+  const int16_t width_px = std::max<int16_t>(1, activeDisplayWidth());
+  const int16_t height_px = std::max<int16_t>(1, activeDisplayHeight());
+  if (la_hg_x_offset_px < static_cast<int16_t>(-width_px)) {
+    la_hg_x_offset_px = static_cast<int16_t>(-width_px);
+  } else if (la_hg_x_offset_px > width_px) {
+    la_hg_x_offset_px = width_px;
+  }
+  if (la_hg_height_px > 0U) {
+    const uint16_t max_h = static_cast<uint16_t>(std::max<int16_t>(72, height_px - 12));
+    if (la_hg_height_px < 72U) {
+      la_hg_height_px = 72U;
+    } else if (la_hg_height_px > max_h) {
+      la_hg_height_px = max_h;
+    }
+  }
+  if (la_hg_width_px > 0U) {
+    const uint16_t max_w = static_cast<uint16_t>(std::max<int16_t>(36, width_px - 8));
+    if (la_hg_width_px < 36U) {
+      la_hg_width_px = 36U;
+    } else if (la_hg_width_px > max_w) {
+      la_hg_width_px = max_w;
+    }
+  }
+  if (la_bargraph_peak_hold_ms < 120U) {
+    la_bargraph_peak_hold_ms = 120U;
+  } else if (la_bargraph_peak_hold_ms > 3500U) {
+    la_bargraph_peak_hold_ms = 3500U;
+  }
+  if (la_bargraph_decay_per_s < 10U) {
+    la_bargraph_decay_per_s = 10U;
+  } else if (la_bargraph_decay_per_s > 600U) {
+    la_bargraph_decay_per_s = 600U;
+  }
+  if (la_waveform_window_ms < 80U) {
+    la_waveform_window_ms = 80U;
+  } else if (la_waveform_window_ms > 1200U) {
+    la_waveform_window_ms = 1200U;
+  }
+  if (warning_gyrophare_fps < 10U) {
+    warning_gyrophare_fps = 10U;
+  } else if (warning_gyrophare_fps > 60U) {
+    warning_gyrophare_fps = 60U;
+  }
+  if (warning_gyrophare_speed_deg_per_sec < 30U) {
+    warning_gyrophare_speed_deg_per_sec = 30U;
+  } else if (warning_gyrophare_speed_deg_per_sec > 600U) {
+    warning_gyrophare_speed_deg_per_sec = 600U;
+  }
+  if (warning_gyrophare_beam_width_deg < 20U) {
+    warning_gyrophare_beam_width_deg = 20U;
+  } else if (warning_gyrophare_beam_width_deg > 120U) {
+    warning_gyrophare_beam_width_deg = 120U;
+  }
   if (la_overlay_caption.isEmpty()) {
     la_overlay_caption = "Recherche d'accordance";
+  }
+  if (warning_lgfx_only && std::strcmp(scene_id, "SCENE_WARNING") == 0) {
+    use_lgfx_text_overlay = fx_engine_.config().lgfx_backend;
+    disable_lvgl_text = use_lgfx_text_overlay;
+    warning_gyrophare_enabled = false;
+    warning_gyrophare_disable_direct_fx = true;
   }
   const bool mic_needed = la_detection_scene_ || waveform_enabled;
   if (hardware_ != nullptr) {
@@ -2970,55 +4541,20 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     effect = SceneEffect::kNone;
   }
   const bool test_lab_lgfx_scroller = test_lab_scene;
-  if (static_state_changed && (direct_fx_scene || test_lab_lgfx_scroller)) {
-    direct_fx_scene_active_ = fx_engine_.config().lgfx_backend;
+  const bool warning_blocks_direct_fx =
+      warning_gyrophare_enabled && warning_gyrophare_disable_direct_fx && (std::strcmp(scene_id, "SCENE_WARNING") == 0);
+  const bool wants_direct_fx = (direct_fx_scene_runtime && !warning_blocks_direct_fx) || test_lab_lgfx_scroller;
+  const bool can_use_direct_fx_backend = fx_engine_.config().lgfx_backend;
+  const uint32_t now_tick_ms = millis();
+  const bool fx_retry_allowed = (fx_rearm_retry_after_ms_ == 0U) ||
+                                (static_cast<int32_t>(now_tick_ms - fx_rearm_retry_after_ms_) >= 0);
+  const bool should_rearm_direct_fx =
+      wants_direct_fx && can_use_direct_fx_backend && fx_retry_allowed &&
+      (static_state_changed || !direct_fx_scene_active_ || !fx_engine_.enabled());
+  if (should_rearm_direct_fx) {
+    direct_fx_scene_active_ = can_use_direct_fx_backend;
     if (direct_fx_scene_active_) {
-      if (test_lab_lgfx_scroller) {
-        direct_fx_scene_preset_ = ui::fx::FxPreset::kDemo;
-      } else if (std::strcmp(scene_id, "SCENE_U_SON_PROTO") == 0) {
-        direct_fx_scene_preset_ = ui::fx::FxPreset::kUsonProto;
-      } else if (std::strcmp(scene_id, "SCENE_LA_DETECTOR") == 0) {
-        direct_fx_scene_preset_ = ui::fx::FxPreset::kLaDetector;
-      } else if (std::strcmp(scene_id, "SCENE_WIN_ETAPE1") == 0) {
-        direct_fx_scene_preset_ = ui::fx::FxPreset::kWinEtape1;
-      } else if (std::strcmp(scene_id, "SCENE_FIREWORKS") == 0) {
-        direct_fx_scene_preset_ = ui::fx::FxPreset::kFireworks;
-      } else if (std::strcmp(scene_id, "SCENE_WIN") == 0 ||
-                 std::strcmp(scene_id, "SCENE_REWARD") == 0 ||
-                 std::strcmp(scene_id, "SCENE_WINNER") == 0 ||
-                 std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0 ||
-                 std::strcmp(scene_id, "SCENE_WIN_ETAPE2") == 0 ||
-                 std::strcmp(scene_id, "SCENE_FINAL_WIN") == 0) {
-        direct_fx_scene_preset_ = ui::fx::FxPreset::kWinner;
-      } else {
-        direct_fx_scene_preset_ = ui::fx::FxPreset::kDemo;
-      }
-      fx_engine_.setEnabled(true);
-      fx_engine_.setPreset(direct_fx_scene_preset_);
-      fx_engine_.setMode(ui::fx::FxMode::kClassic);
-      fx_engine_.setBpm(125U);
-      fx_engine_.setScrollFont(ui::fx::FxScrollFont::kItalic);
-      if (test_lab_lgfx_scroller) {
-        fx_engine_.setScrollerCentered(true);
-        fx_engine_.setScrollText("RVBCMJ -- DEMOMAKING RULEZ ---");
-      } else if (std::strcmp(scene_id, "SCENE_U_SON_PROTO") == 0) {
-        fx_engine_.setScrollerCentered(false);
-        fx_engine_.setScrollText(nullptr);
-      } else if (std::strcmp(scene_id, "SCENE_LA_DETECTOR") == 0) {
-        fx_engine_.setScrollerCentered(false);
-        fx_engine_.setScrollText(nullptr);
-      } else if (std::strcmp(scene_id, "SCENE_WIN_ETAPE1") == 0) {
-        fx_engine_.setScrollerCentered(false);
-        fx_engine_.setScrollText(nullptr);
-      } else {
-        fx_engine_.setScrollerCentered(false);
-        const String fx_scroll_text = asciiFallbackForUiText((subtitle.length() > 0U) ? subtitle.c_str() : title.c_str());
-        if (fx_scroll_text.length() > 0U) {
-          fx_engine_.setScrollText(fx_scroll_text.c_str());
-        } else {
-          fx_engine_.setScrollText(nullptr);
-        }
-      }
+      armDirectFxScene(scene_id, test_lab_lgfx_scroller, title.c_str(), subtitle.c_str());
     }
   } else if (static_state_changed && !win_etape_intro_scene) {
     direct_fx_scene_active_ = false;
@@ -3029,12 +4565,19 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   }
 
   if (static_state_changed) {
+    fx_rearm_retry_after_ms_ = 0U;
+    scene_runtime_started_ms_ = millis();
     overlay_draw_ok_count_ = 0U;
     overlay_draw_fail_count_ = 0U;
     overlay_startwrite_fail_count_ = 0U;
     overlay_skip_busy_count_ = 0U;
+    overlay_recovery_frames_ = 0U;
+    win_etape_credits_loaded_ = false;
+    win_etape_credits_count_ = 0U;
+    std::memset(win_etape_credits_lines_, 0, sizeof(win_etape_credits_lines_));
     stopSceneAnimations();
     scene_use_lgfx_text_overlay_ = use_lgfx_text_overlay;
+    scene_lgfx_hard_mode_ = lgfx_hard_mode;
     scene_disable_lvgl_text_ = disable_lvgl_text && scene_use_lgfx_text_overlay_;
     overlay_title_align_ = title_align;
     overlay_subtitle_align_ = subtitle_align;
@@ -3048,9 +4591,48 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     la_overlay_show_pitch_text_ = la_overlay_show_pitch_text;
     la_overlay_meter_bottom_horizontal_ = la_overlay_meter_bottom_horizontal;
     la_overlay_hourglass_modern_ = la_overlay_hourglass_modern;
+    la_bg_preset_ = la_bg_preset;
+    la_bg_sync_ = la_bg_sync;
+    la_bg_intensity_pct_ = la_bg_intensity_pct;
+    la_hg_flip_on_timeout_ = la_hg_flip_on_timeout;
+    la_hg_flip_duration_ms_ = la_hg_reset_flip_ms;
+    la_hg_x_offset_px_ = la_hg_x_offset_px;
+    la_hg_target_height_px_ = la_hg_height_px;
+    la_hg_target_width_px_ = la_hg_width_px;
+    la_bargraph_blue_palette_ = la_bargraph_blue_palette;
+    la_bargraph_peak_hold_ms_ = la_bargraph_peak_hold_ms;
+    la_bargraph_decay_per_s_ = la_bargraph_decay_per_s;
+    la_waveform_audio_player_mode_ = la_waveform_audio_player_mode;
+    la_waveform_window_ms_ = la_waveform_window_ms;
+    la_bg_mic_lpf_ = 0.15f;
+    la_bg_last_ms_ = 0U;
     la_overlay_caption_font_ = la_overlay_caption_font;
     la_overlay_caption_size_ = la_overlay_caption_size;
     copyTextSafe(la_overlay_caption_, sizeof(la_overlay_caption_), la_overlay_caption.c_str());
+    warning_gyrophare_enabled_ = warning_gyrophare_enabled && (std::strcmp(scene_id, "SCENE_WARNING") == 0);
+    warning_gyrophare_disable_direct_fx_ = warning_gyrophare_disable_direct_fx;
+    warning_lgfx_only_ = warning_lgfx_only && (std::strcmp(scene_id, "SCENE_WARNING") == 0);
+    warning_siren_enabled_ = warning_siren && (std::strcmp(scene_id, "SCENE_WARNING") == 0);
+    if (warning_lgfx_only_) {
+      warning_gyrophare_enabled_ = false;
+    }
+    warning_gyrophare_fps_ = warning_gyrophare_fps;
+    warning_gyrophare_speed_deg_per_sec_ = warning_gyrophare_speed_deg_per_sec;
+    warning_gyrophare_beam_width_deg_ = warning_gyrophare_beam_width_deg;
+    copyTextSafe(warning_gyrophare_message_, sizeof(warning_gyrophare_message_), warning_gyrophare_message.c_str());
+    warning_gyrophare_.destroy();
+    if (warning_gyrophare_enabled_ && scene_root_ != nullptr) {
+      ui::effects::SceneGyrophareConfig gyro_config = {};
+      gyro_config.fps = warning_gyrophare_fps_;
+      gyro_config.speed_deg_per_sec = warning_gyrophare_speed_deg_per_sec_;
+      gyro_config.beam_width_deg = warning_gyrophare_beam_width_deg_;
+      gyro_config.message = warning_gyrophare_message_;
+      const bool created = warning_gyrophare_.create(scene_root_, activeDisplayWidth(), activeDisplayHeight(), gyro_config);
+      if (!created) {
+        warning_gyrophare_enabled_ = false;
+        warning_gyrophare_disable_direct_fx_ = false;
+      }
+    }
     const bool show_base_scene_fx = (!test_lab_scene && effect != SceneEffect::kNone && !scene_use_lgfx_text_overlay_);
     setBaseSceneFxVisible(show_base_scene_fx);
     text_glitch_pct_ = text_glitch_pct;

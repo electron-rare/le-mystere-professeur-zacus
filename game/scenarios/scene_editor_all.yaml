@@ -37,8 +37,8 @@ scenes:
       show_symbol: true
       effect_speed_ms: 220
     theme:
-      bg: '#04030A'
-      accent: '#F35DFF'
+      bg: '#020208'
+      accent: '#FF9C3A'
       text: '#FFFFFF'
     transition:
       effect: glitch
@@ -47,21 +47,21 @@ scenes:
     effect: text_glitch
     timeline:
       loop: true
-      duration_ms: 30000
+      duration_ms: 36000
       keyframes:
       - at_ms: 0
         effect: tunnel3d
-        speed_ms: 15000
+        speed_ms: 18000
         theme:
-          bg: '#06040B'
-          accent: '#F35DFF'
+          bg: '#03030A'
+          accent: '#FF9C3A'
           text: '#FFFFFF'
-      - at_ms: 15000
+      - at_ms: 18000
         effect: rotozoom
-        speed_ms: 15000
+        speed_ms: 18000
         theme:
-          bg: '#080513'
-          accent: '#EF7FE7'
+          bg: '#050510'
+          accent: '#52E67A'
           text: '#FFFFFF'
   text:
     show_title: true
@@ -72,14 +72,15 @@ scenes:
     symbol_align: top
     title_align: center
     subtitle_align: bottom
-    title_font_face: ibm_bold_24
+    title_font_face: bungee_24
     subtitle_font_face: ibm_bold_16
     symbol_font_face: orbitron_28
     glitch: 42
-    size: 50
+    size: 88
   render:
     text_backend: lgfx_overlay
     disable_lvgl_text: true
+    lgfx_hard_mode: true
     foreground_fx: text_glitch
     wave: false
   hardware:
@@ -101,12 +102,14 @@ scenes:
   audio:
     ambient_random:
       enabled: true
+      mode: random_file
+      playlist_root: /music/v8_pack
       track: /music/boot_radio.mp3
       non_interruptive: true
       volume_min: 21
       volume_max: 21
-      delay_min_ms: 9000
-      delay_max_ms: 26000
+      delay_min_ms: 60000
+      delay_max_ms: 240000
       eq_profiles: []
 - scene_id: SCENE_LA_DETECTOR
   screen_json: hardware/firmware/data/story/screens/SCENE_LA_DETECTOR.json
@@ -124,13 +127,13 @@ scenes:
       effect_speed_ms: 960
       waveform:
         enabled: true
-        sample_count: 16
+        sample_count: 12
         amplitude_pct: 95
         jitter: true
     theme:
       bg: '#041F1B'
-      accent: '#2CE5A6'
-      text: '#EFFFF8'
+      accent: '#4ABEFF'
+      text: '#FFFFFF'
     transition:
       effect: slide_up
       duration_ms: 220
@@ -161,7 +164,7 @@ scenes:
     la_detector:
       caption: Balayage en cours
       show_progress_ring: true
-      show_hourglass: true
+      show_hourglass: false
       show_caption: false
       show_pitch_text: false
       caption_font: 1
@@ -170,20 +173,33 @@ scenes:
       progress_layout: ring
       hourglass_style: modern
       caption_font_face: ibm_bold_16
+      flip_on_timeout: false
+      reset_flip_ms: 3000
+      background_preset: hourglass_demoscene_ultra
+      background_sync: mic_smoothed
+      background_intensity_pct: 32
+      hourglass_x_offset_px: -25
+      hourglass_height_px: 150
+      hourglass_width_px: 80
+      bargraph_palette: blue
+      bargraph_peak_hold_ms: 900
+      bargraph_decay_per_s: 90
+      waveform_mode: audio_player
+      waveform_window_ms: 220
 - scene_id: SCENE_WIN_ETAPE1
   screen_json: hardware/firmware/data/story/screens/SCENE_WIN_ETAPE1.json
   default_audio_pack_id: PACK_CONFIRM_WIN_ETAPE1
   runtime_step_ids:
   - WIN_ETAPE1
   lvgl:
-    title: WIN ETAPE 1
+    title: VICTORY
     subtitle: Validation distante confirmee
     symbol: WIN
     visual:
       show_title: true
       show_subtitle: true
       show_symbol: true
-      effect_speed_ms: 260
+      effect_speed_ms: 280
     theme:
       bg: '#0A1027'
       accent: '#6AD4FF'
@@ -192,29 +208,40 @@ scenes:
       effect: fade
       duration_ms: 220
   fx:
-    effect: tunnel3d
+    effect: celebrate
     timeline:
       loop: true
-      duration_ms: 30000
+      duration_ms: 60000
       keyframes:
       - at_ms: 0
-        effect: tunnel3d
-        speed_ms: 15000
+        effect: celebrate
+        speed_ms: 20000
         theme:
           bg: '#0A1027'
           accent: '#6AD4FF'
           text: '#F4FAFF'
-      - at_ms: 15000
-        effect: rotozoom
-        speed_ms: 15000
+      - at_ms: 20000
+        effect: winner
+        speed_ms: 20000
         theme:
           bg: '#11193B'
           accent: '#8DE6FF'
           text: '#FFFFFF'
+      - at_ms: 40000
+        effect: none
+        speed_ms: 20000
+        theme:
+          bg: '#050914'
+          accent: '#7EDBFF'
+          text: '#F4FAFF'
   render:
     text_backend: lgfx_overlay
     disable_lvgl_text: true
     wave: false
+  text:
+    title_font_face: bungee_24
+    subtitle_font_face: ibm_bold_20
+    size: 100
 - scene_id: SCENE_WARNING
   screen_json: hardware/firmware/data/story/screens/SCENE_WARNING.json
   default_audio_pack_id: PACK_BOOT_RADIO
@@ -232,7 +259,7 @@ scenes:
     theme:
       bg: '#261209'
       accent: '#FF9A4A'
-      text: '#FFF2E6'
+      text: '#FFFFFF'
     transition:
       effect: fade
       duration_ms: 200
@@ -259,6 +286,22 @@ scenes:
   render:
     text_backend: lgfx_overlay
     disable_lvgl_text: true
+    warning:
+      lgfx_only: true
+      siren: true
+      gyrophare:
+        enabled: true
+        fps: 25
+        speed_deg_per_sec: 180
+        beam_width_deg: 70
+        message: SIGNAL ANORMAL
+        disable_direct_fx: true
+  text:
+    title_align: center
+    subtitle_align: center
+    title_font_face: bungee_24
+    subtitle_font_face: ibm_bold_20
+    size: 92
 - scene_id: SCENE_LEFOU_DETECTOR
   screen_json: hardware/firmware/data/story/screens/SCENE_LEFOU_DETECTOR.json
   default_audio_pack_id: ''
@@ -303,6 +346,14 @@ scenes:
   render:
     text_backend: lgfx_overlay
     disable_lvgl_text: true
+    lefou_detector:
+      note_sequence_hz:
+      - 440
+      - 880
+      - 330
+      - 349
+      - 147
+      - 98
 - scene_id: SCENE_WIN_ETAPE2
   screen_json: hardware/firmware/data/story/screens/SCENE_WIN_ETAPE2.json
   default_audio_pack_id: PACK_CONFIRM_WIN_ETAPE2

@@ -24,6 +24,8 @@ struct RuntimeNetworkConfig {
 };
 
 struct RuntimeHardwareConfig {
+  static constexpr uint8_t kLaSequenceMaxNotes = 8U;
+
   bool enabled_on_boot = true;
   uint32_t telemetry_period_ms = 2500U;
   bool led_auto_from_scene = true;
@@ -40,6 +42,10 @@ struct RuntimeHardwareConfig {
   uint16_t mic_la_release_ms = 180U;
   uint16_t mic_la_cooldown_ms = 1400U;
   uint32_t mic_la_timeout_ms = 60000U;
+  bool mic_la_sequence_enabled = false;
+  uint8_t mic_la_sequence_count = 0U;
+  uint16_t mic_la_sequence_hz[kLaSequenceMaxNotes] = {};
+  uint16_t mic_la_sequence_note_hold_ms = 350U;
   char mic_la_event_name[32] = "SERIAL:BTN_NEXT";
   bool battery_enabled = true;
   uint8_t battery_low_pct = 20U;
@@ -64,4 +70,7 @@ struct LaTriggerRuntimeState {
   int16_t last_cents = 0;
   uint8_t last_confidence = 0U;
   uint8_t last_level_pct = 0U;
+  uint8_t sequence_index = 0U;
+  uint32_t sequence_note_started_ms = 0U;
+  uint16_t sequence_target_hz = 0U;
 };

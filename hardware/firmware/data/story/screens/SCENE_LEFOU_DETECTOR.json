@@ -74,6 +74,16 @@
   },
   "render": {
     "text_backend": "lgfx_overlay",
-    "disable_lvgl_text": true
+    "disable_lvgl_text": true,
+    "lefou_detector": {
+      "note_sequence_hz": [
+        440,
+        880,
+        330,
+        349,
+        147,
+        98
+      ]
+    }
   }
 }

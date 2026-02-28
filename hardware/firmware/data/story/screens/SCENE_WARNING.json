@@ -7,7 +7,7 @@
   "theme": {
     "bg": "#261209",
     "accent": "#FF9A4A",
-    "text": "#FFF2E6"
+    "text": "#FFFFFF"
   },
   "transition": {
     "effect": "fade",
@@ -46,8 +46,11 @@
     "show_symbol": true,
     "title_case": "upper",
     "subtitle_case": "raw",
-    "title_align": "top",
-    "subtitle_align": "bottom"
+    "title_align": "center",
+    "subtitle_align": "center",
+    "title_font_face": "bungee_24",
+    "subtitle_font_face": "ibm_bold_20",
+    "size": 92
   },
   "visual": {
     "show_title": true,
@@ -74,6 +77,18 @@
   },
   "render": {
     "text_backend": "lgfx_overlay",
-    "disable_lvgl_text": true
+    "disable_lvgl_text": true,
+    "warning": {
+      "lgfx_only": true,
+      "siren": true,
+      "gyrophare": {
+        "enabled": true,
+        "fps": 25,
+        "speed_deg_per_sec": 180,
+        "beam_width_deg": 70,
+        "message": "SIGNAL ANORMAL",
+        "disable_direct_fx": true
+      }
+    }
   }
 }

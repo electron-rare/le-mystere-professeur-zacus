@@ -6,13 +6,14 @@
   "effect": "text_glitch",
   "effect_speed_ms": 220,
   "theme": {
-    "bg": "#04030A",
-    "accent": "#F35DFF",
+    "bg": "#020208",
+    "accent": "#FF9C3A",
     "text": "#FFFFFF"
   },
   "render": {
     "text_backend": "lgfx_overlay",
     "disable_lvgl_text": true,
+    "lgfx_hard_mode": true,
     "foreground_fx": "text_glitch",
     "wave": false
   },
@@ -22,25 +23,25 @@
   },
   "timeline": {
     "loop": true,
-    "duration_ms": 30000,
+    "duration_ms": 36000,
     "keyframes": [
       {
         "at_ms": 0,
         "effect": "tunnel3d",
-        "speed_ms": 15000,
+        "speed_ms": 18000,
         "theme": {
-          "bg": "#06040B",
-          "accent": "#F35DFF",
+          "bg": "#03030A",
+          "accent": "#FF9C3A",
           "text": "#FFFFFF"
         }
       },
       {
-        "at_ms": 15000,
+        "at_ms": 18000,
         "effect": "rotozoom",
-        "speed_ms": 15000,
+        "speed_ms": 18000,
         "theme": {
-          "bg": "#080513",
-          "accent": "#EF7FE7",
+          "bg": "#050510",
+          "accent": "#52E67A",
           "text": "#FFFFFF"
         }
       }
@@ -55,17 +56,17 @@
     "symbol_align": "top",
     "title_align": "center",
     "subtitle_align": "bottom",
-    "title_font_face": "ibm_bold_24",
+    "title_font_face": "bungee_24",
     "subtitle_font_face": "ibm_bold_16",
     "symbol_font_face": "orbitron_28",
     "glitch": 42,
-    "size": 50
+    "size": 88
   },
   "visual": {
     "show_title": true,
     "show_subtitle": true,
     "show_symbol": true,
-    "effect_speed_ms": 220,
+    "effect_speed_ms": 260,
     "waveform": {
       "enabled": false,
       "sample_count": 0,
@@ -95,12 +96,14 @@
   "audio": {
     "ambient_random": {
       "enabled": true,
+      "mode": "random_file",
+      "playlist_root": "/music/v8_pack",
       "track": "/music/boot_radio.mp3",
       "non_interruptive": true,
       "volume_min": 21,
       "volume_max": 21,
-      "delay_min_ms": 9000,
-      "delay_max_ms": 26000,
+      "delay_min_ms": 60000,
+      "delay_max_ms": 240000,
       "eq_profiles": []
     }
   },

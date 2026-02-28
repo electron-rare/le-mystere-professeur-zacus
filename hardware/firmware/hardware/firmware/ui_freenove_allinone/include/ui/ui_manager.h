@@ -8,6 +8,7 @@
 #include "drivers/display/display_hal.h"
 #include "hardware_manager.h"
 #include "ui/fx/fx_engine.h"
+#include "ui/effects/scene_gyrophare.h"
 #include "ui/player_ui_model.h"
 #include "ui/qr/qr_scene_controller.h"
 #include "ui/qr/qr_scan_controller.h"
@@ -196,6 +197,18 @@ class UiManager {
   enum class SceneScrollMode : uint8_t {
     kNone = 0,
     kMarquee,
+  };
+
+  enum class LaBackgroundPreset : uint8_t {
+    kLegacyHourglass = 0,
+    kWirecubeRotozoomSubtle,
+    kHourglassDemosceneUltra,
+  };
+
+  enum class LaBackgroundSync : uint8_t {
+    kFixed = 0,
+    kMicSmoothed,
+    kMicDirect,
   };
 
   enum class IntroState : uint8_t {
@@ -431,6 +444,10 @@ class UiManager {
   void onTimelineTick(uint16_t elapsed_ms);
   bool isWinEtapeSceneId(const char* scene_id) const;
   bool isDirectFxSceneId(const char* scene_id) const;
+  void armDirectFxScene(const char* scene_id,
+                        bool test_lab_lgfx_scroller,
+                        const char* title_text,
+                        const char* subtitle_text);
   void cleanupSceneTransitionAssets(const char* from_scene_id, const char* to_scene_id);
 
   static void displayFlushCb(lv_disp_drv_t* disp, const lv_area_t* area, lv_color_t* color_p);
@@ -562,6 +579,7 @@ class UiManager {
   uint8_t text_glitch_pct_ = 65U;
   uint8_t text_size_pct_ = 100U;
   bool scene_use_lgfx_text_overlay_ = false;
+  bool scene_lgfx_hard_mode_ = false;
   bool scene_disable_lvgl_text_ = false;
   SceneTextAlign overlay_title_align_ = SceneTextAlign::kCenter;
   SceneTextAlign overlay_subtitle_align_ = SceneTextAlign::kBottom;
@@ -668,6 +686,44 @@ class UiManager {
   bool la_overlay_show_pitch_text_ = true;
   bool la_overlay_meter_bottom_horizontal_ = true;
   bool la_overlay_hourglass_modern_ = true;
+  LaBackgroundPreset la_bg_preset_ = LaBackgroundPreset::kLegacyHourglass;
+  LaBackgroundSync la_bg_sync_ = LaBackgroundSync::kMicSmoothed;
+  uint8_t la_bg_intensity_pct_ = 32U;
+  float la_bg_mic_lpf_ = 0.15f;
+  uint32_t la_bg_last_ms_ = 0U;
+  int16_t la_hg_x_offset_px_ = 0;
+  uint16_t la_hg_target_height_px_ = 0U;
+  uint16_t la_hg_target_width_px_ = 0U;
+  bool la_bargraph_blue_palette_ = false;
+  uint16_t la_bargraph_peak_hold_ms_ = 320U;
+  uint16_t la_bargraph_decay_per_s_ = 120U;
+  bool la_waveform_audio_player_mode_ = false;
+  uint16_t la_waveform_window_ms_ = 300U;
+  static constexpr uint16_t kLaHourglassGridWMax = 96U;
+  static constexpr uint16_t kLaHourglassGridHMax = 72U;
+  uint16_t* la_bg_sprite_buf_ = nullptr;
+  size_t la_bg_sprite_pixels_ = 0U;
+  int16_t la_bg_sprite_w_ = 0;
+  int16_t la_bg_sprite_h_ = 0;
+  uint16_t la_hg_grid_w_ = 0U;
+  uint16_t la_hg_grid_h_ = 0U;
+  uint8_t la_hg_orient_ = 0U;
+  bool la_hg_flipping_ = false;
+  bool la_hg_flip_on_timeout_ = true;
+  bool la_hg_timeout_latched_ = false;
+  uint32_t la_hg_flip_started_ms_ = 0U;
+  uint32_t la_hg_flip_duration_ms_ = 10000U;
+  uint32_t la_hg_prev_gate_elapsed_ms_ = 0U;
+  bool la_hg_prev_gate_valid_ = false;
+  float la_hg_theta_ = 0.0f;
+  float la_hg_omega_ = 0.0f;
+  uint32_t la_hg_rng_ = 0xC0FFEE12UL;
+  bool la_hg_ready_ = false;
+  uint8_t la_hg_mask_[kLaHourglassGridWMax * kLaHourglassGridHMax] = {};
+  uint8_t la_hg_outline_[kLaHourglassGridWMax * kLaHourglassGridHMax] = {};
+  int8_t la_hg_depth_[kLaHourglassGridWMax * kLaHourglassGridHMax] = {};
+  uint8_t la_hg_halfw_[kLaHourglassGridHMax] = {};
+  uint8_t la_hg_sand_[kLaHourglassGridWMax * kLaHourglassGridHMax] = {};
   drivers::display::OverlayFontFace la_overlay_caption_font_ = drivers::display::OverlayFontFace::kBuiltinSmall;
   uint8_t la_overlay_caption_size_ = 1U;
   char la_overlay_caption_[64] = "Recherche d'accordance";
@@ -676,6 +732,27 @@ class UiManager {
   uint32_t overlay_draw_fail_count_ = 0U;
   uint32_t overlay_startwrite_fail_count_ = 0U;
   uint32_t overlay_skip_busy_count_ = 0U;
+  uint8_t overlay_recovery_frames_ = 0U;
+  uint32_t fx_rearm_retry_after_ms_ = 0U;
+  uint32_t scene_runtime_started_ms_ = 0U;
+  ui::effects::SceneGyrophare warning_gyrophare_;
+  bool warning_gyrophare_enabled_ = false;
+  bool warning_gyrophare_disable_direct_fx_ = false;
+  bool warning_lgfx_only_ = false;
+  bool warning_siren_enabled_ = false;
+  uint8_t warning_gyrophare_fps_ = 25U;
+  uint16_t warning_gyrophare_speed_deg_per_sec_ = 180U;
+  uint16_t warning_gyrophare_beam_width_deg_ = 70U;
+  char warning_gyrophare_message_[64] = "SIGNAL ANORMAL";
+  static constexpr uint8_t kWinEtapeCreditsMaxLines = 48U;
+  static constexpr uint8_t kWinEtapeCreditsMaxLineChars = 96U;
+  bool win_etape_credits_loaded_ = false;
+  uint8_t win_etape_credits_count_ = 0U;
+  char win_etape_credits_lines_[kWinEtapeCreditsMaxLines][kWinEtapeCreditsMaxLineChars] = {};
+  uint8_t win_etape_credits_size_[kWinEtapeCreditsMaxLines] = {};
+  uint8_t win_etape_credits_align_[kWinEtapeCreditsMaxLines] = {};
+  uint16_t win_etape_credits_pause_ms_[kWinEtapeCreditsMaxLines] = {};
+  uint16_t win_etape_credits_scroll_px_per_sec_ = 16U;
 
   int16_t touch_x_ = 0;
   int16_t touch_y_ = 0;

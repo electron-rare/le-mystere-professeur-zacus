@@ -6,8 +6,8 @@
   "effect_speed_ms": 960,
   "theme": {
     "bg": "#041F1B",
-    "accent": "#2CE5A6",
-    "text": "#EFFFF8"
+    "accent": "#4ABEFF",
+    "text": "#FFFFFF"
   },
   "render": {
     "text_backend": "lgfx_overlay",
@@ -16,14 +16,27 @@
     "la_detector": {
       "caption": "Balayage en cours",
       "show_progress_ring": true,
-      "show_hourglass": true,
+      "show_hourglass": false,
+      "background_preset": "hourglass_demoscene_ultra",
+      "background_sync": "mic_smoothed",
+      "background_intensity_pct": 32,
+      "hourglass_x_offset_px": -25,
+      "hourglass_height_px": 150,
+      "hourglass_width_px": 80,
+      "bargraph_palette": "blue",
+      "bargraph_peak_hold_ms": 900,
+      "bargraph_decay_per_s": 90,
+      "waveform_mode": "audio_player",
+      "waveform_window_ms": 220,
       "show_caption": false,
       "show_pitch_text": false,
       "caption_font_face": "ibm_bold_16",
       "caption_size": 1,
       "meter_layout": "bottom_horizontal",
       "progress_layout": "ring",
-      "hourglass_style": "modern"
+      "hourglass_style": "modern",
+      "flip_on_timeout": false,
+      "reset_flip_ms": 3000
     }
   },
   "transition": {
@@ -66,7 +79,7 @@
     "symbol_align": "top",
     "title_align": "top",
     "subtitle_align": "top",
-    "size": 72
+    "size": 68
   },
   "visual": {
     "show_title": true,
@@ -75,7 +88,7 @@
     "effect_speed_ms": 960,
     "waveform": {
       "enabled": true,
-      "sample_count": 16,
+      "sample_count": 12,
       "amplitude_pct": 95,
       "jitter": true
     }

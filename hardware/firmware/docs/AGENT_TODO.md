@@ -1,3 +1,243 @@
+## [2026-02-28] Freenove scenes + A252 hotline (ringback 5-25s, LEFOU sequence, U_SON playlist root)
+
+- Objectif: appliquer le lot prioritaire du plan global sans toucher `hardware/firmware/esp32/`:
+  - hotline A252: ringback aleatoire 5..25s,
+  - Freenove: playlist random U_SON via `audio.ambient_random.mode=random_file` + `playlist_root`,
+  - LEFOU: validation par sequence de notes configurable (`render.lefou_detector.note_sequence_hz`),
+  - WARNING: nouveaux flags de rendu `render.warning.lgfx_only` + `render.warning.siren`.
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_060439_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_060439_status.txt`
+- Correctifs appliques:
+  - `hardware/RTC_SLIC_PHONE/src/main.cpp`
+    - ringback random ramene a `kHotlineRingbackMinMs=5000`, `kHotlineRingbackMaxMs=25000`.
+  - `hardware/firmware/ui_freenove_allinone/include/runtime/runtime_config_types.h`
+    - ajout config sequence LA/LEFOU (`mic_la_sequence_*`) + etat runtime sequence.
+  - `hardware/firmware/ui_freenove_allinone/src/runtime/la_trigger_service.cpp`
+    - trigger etendu a `SCENE_LEFOU_DETECTOR`,
+    - branche sequence stricte (ordre impose) avec hold par note et progression stable.
+  - `hardware/firmware/ui_freenove_allinone/src/app/main.cpp`
+    - parser `audio.ambient_random.mode`, `playlist_root`, `playlist_recursive`,
+    - scan playlist (LittleFS/SD_MMC) + selection random d'un fichier audio,
+    - fallback robuste sur `track` si playlist vide/invalide,
+    - parser `render.lefou_detector.note_sequence_hz` + `note_hold_ms`,
+    - activation scene LEFOU sans timeout (timeout LA force a 0 sur LEFOU, restore default hors LEFOU),
+    - statut enrichi (`la_trigger.sequence_*`).
+  - `hardware/firmware/ui_freenove_allinone/include/ui/ui_manager.h`
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+    - parser `render.warning.lgfx_only` et `render.warning.siren`,
+    - `SCENE_WARNING` force LGFX overlay (pas de gyrophare LVGL quand `lgfx_only=true`).
+  - Source de verite scene + ecrans:
+    - `../../game/scenarios/scene_editor_all.yaml`
+    - `data/story/screens/SCENE_U_SON_PROTO.json`
+    - `data/story/screens/SCENE_LA_DETECTOR.json`
+    - `data/story/screens/SCENE_WARNING.json`
+    - `data/story/screens/SCENE_LEFOU_DETECTOR.json`
+    - U_SON: `mode=random_file`, `playlist_root=/music/v8_pack`.
+    - LA: `hourglass_x_offset_px=-25`, `hourglass_width_px=80`, `hourglass_height_px=150`, `bargraph_peak_hold_ms=900`.
+    - LEFOU: sequence par defaut `[440, 880, 330, 349, 147, 98]`.
+- Gates executees:
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev` -> OK.
+  - `pio run -e freenove_esp32s3` -> OK.
+  - `python3 ../../tools/scenario/validate_scenario.py ../../game/scenarios/default_unlock_win_etape2.yaml` -> FAIL (schema non compatible avec ce validateur: champs `title/players/...` requis).
+  - `python3 ../../tools/scenario/export_md.py ../../game/scenarios/default_unlock_win_etape2.yaml` -> OK.
+  - `python3 ../../tools/audio/validate_manifest.py ../../audio/manifests/zacus_v1_audio.yaml` -> OK.
+  - `python3 ../../tools/printables/validate_manifest.py ../../printables/manifests/zacus_v1_printables.yaml` -> OK.
+
+## [2026-02-28] A252 hotline - hybrid telco clock + telephony power forced on
+
+- Objectif: garder le SLIC alimente en permanence sur A252 et permettre un playback adaptable a la source (policy hybrid).
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_052436_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_052436_status.txt`
+- Correctifs appliques:
+  - `hardware/RTC_SLIC_PHONE/src/config/A252ConfigStore.h`
+    - defaults A252: `clock_policy=HYBRID_TELCO`, `adc_dsp_enabled=false`, `adc_fft_enabled=false`.
+  - `hardware/RTC_SLIC_PHONE/src/config/A252ConfigStore.cpp`
+    - validation `clock_policy`: accepte `HYBRID_TELCO` et `FIXED_TELCO`.
+  - `hardware/RTC_SLIC_PHONE/src/main.cpp`
+    - ajout helper `isHybridTelcoClockPolicy(...)` et application runtime du policy dans `buildI2sConfig`.
+    - `ensureA252AudioDefaults()` force: capture off, adc dsp/fft off, `clock_policy=HYBRID_TELCO`.
+    - `applyAudioPatch(...)` force aussi ces valeurs sur profil A252.
+  - `hardware/RTC_SLIC_PHONE/src/telephony/TelephonyService.h/.cpp`
+    - policy A252: `slic_power` force `on` (pas de power-down idle/probe).
+- Build execute:
+  - `pio run -e esp32dev` -> OK.
+
+## [2026-02-28] Telephony gating - no boot autoplay (on-hook) + hard stop on hangup
+
+- Objectif: garantir "aucune lecture au boot sauf combine deja decroche" et "stop total audio au raccroche".
+- Correctifs appliques:
+  - `hardware/RTC_SLIC_PHONE/src/telephony/TelephonyService.cpp`
+    - blocage auto-relance dial tone quand un media est deja en cours (`!audio_->isPlaying()` requis),
+    - blocage dial tone instantane a l'entree OFF_HOOK si playback actif.
+    - coupure immediate tone+playback des le premier edge ON_HOOK (avant fin de debounce hangup).
+  - `hardware/RTC_SLIC_PHONE/src/main.cpp`
+    - gate setup: si hook ON_HOOK au boot -> `stopPlayback()` + `stopTone()` + log explicite,
+    - gate loop: `enforceOnHookSilence()` stoppe toute lecture/tonalite des que hook ON_HOOK.
+- Validation:
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev` -> OK
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001` -> OK
+  - log boot observe: `[RTC_BL_PHONE] boot hook=ON_HOOK -> audio autoplay blocked`.
+
+## [2026-02-28] A252 audio - hard-disable auto loudness processing
+
+- Objectif: verrouiller la desactivation du loudness auto (normalize/limiter) au runtime pour eviter toute reactivation via config.
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_032602_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_032602_status.txt`
+- Correctifs appliques:
+  - `hardware/RTC_SLIC_PHONE/src/audio/AudioEngine.cpp`
+    - ajout d'un verrou runtime `kHardDisableAutoLoudnessProcessing=true`,
+    - centralisation de la policy via `wavAutoLoudnessEnabled(...)`,
+    - forçage `wav_auto_normalize_limiter=false` dans `AudioEngine::begin(...)`,
+    - desactivation explicite des chemins analyse loudness dans `prepareWavPlayback`, `analyzeWavLoudnessGainDb` et `probePlaybackFileFromSource`.
+- Effet attendu:
+  - `playback_loudness_auto=false`, `loudness_gain_db=0`, `limiter_active=false` en playback/probe.
+
+## [2026-02-28] A252 HOT-LINE - sync scene ESP-NOW + dial/ringback aleatoires
+
+- Objectif: stabiliser la coherence hotline avec Freenove en ajoutant:
+  - refresh ESP-NOW toutes les 30s,
+  - synchro scene/status Freenove au decroche + periodique,
+  - dial tone aleatoire (FR_FR/ETSI_EU/UK_GB/NA_US),
+  - ringback aleatoire 5..25s avant lecture media hotline.
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_015105_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_015105_status.txt`
+- Correctifs appliques:
+  - `hardware/RTC_SLIC_PHONE/src/telephony/TelephonyService.h/.cpp`
+    - ajout profil dial off-hook aleatoire et relance deterministic du dial tone selectionne.
+  - `hardware/RTC_SLIC_PHONE/src/main.cpp`
+    - interval peer discovery ESP-NOW ramene a 30s,
+    - runtime `scene sync` ESP-NOW (request `UI_SCENE_STATUS`, ack tracking, update `g_active_scene_id/g_active_step_id`, validation state inferee),
+    - trigger scene sync au decroche + periodique,
+    - ajout ringback aleatoire (profil + duree 5..25s) avant `post_ringback_route`,
+    - enrichissement statut hotline/espnow avec telemetrie ringback + scene sync.
+- Build execute:
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev` -> OK.
+
+## [2026-02-27] Hotfix FX rearm + line-buffer fallback (SCENE_U_SON_PROTO)
+
+- Objectif: restaurer le fond anime direct-FX apres regression (`fx_enabled=1` mais `fx_frames=0`) et stopper les boucles d'allocation `fx_line`.
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260227_232630_wip.patch`
+  - `/tmp/zacus_checkpoint/20260227_232630_status.txt`
+- Correctifs appliques:
+  - `hardware/firmware/ui_freenove_allinone/src/ui/fx/fx_engine.cpp`:
+    - fallback line-buffer `allocDefault(...)` quand `UI_FX_DMA_BLIT=0` (CPU blit) si `allocInternalDmaAligned` echoue.
+    - `FxEngine::setEnabled(...)` conditionne a `ready_` + ajout getter `ready()`.
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager_effects.cpp`:
+    - rearm direct-FX avec retry `begin(...)` + fallback sprite compact.
+    - cooldown retry (`fx_rearm_retry_after_ms_`) pour eviter retry every-frame.
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`:
+    - application du cooldown dans les deux chemins de rearm (`update` + `renderScene`).
+    - telemetry `UI_GFX_STATUS` enrichie: `fx_enabled`, `fx_scene`.
+  - `hardware/firmware/ui_freenove_allinone/include/ui/ui_manager.h`:
+    - ajout etat runtime `fx_rearm_retry_after_ms_`.
+- Validation executee:
+  - `pio run -e freenove_esp32s3` -> OK
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` -> OK
+  - Serie:
+    - `SCENE_GOTO SCENE_U_SON_PROTO` puis `UI_GFX_STATUS` -> `fx_enabled=1`, `fx_scene=1`, `fx_frames=121`, `fx_fps=9`.
+    - plus de spam continu `alloc_fail ... fx_line` en regime nominal.
+
+## [2026-02-27] SCENE_WIN_ETAPE - anti-saccade overlay LGFX (DMA busy recovery)
+
+- Objectif: reduire le blink/saccade et les pertes de texte LGFX sur `SCENE_WIN_ETAPE` en cas de contention flush/DMA.
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260227_220518_wip.patch`
+  - `/tmp/zacus_checkpoint/20260227_220518_status.txt`
+- Audit cible:
+  - contention constatee dans `UiManager::update()` entre rendu FX, flush LVGL et overlay LGFX (timeouts `overlay_skip_busy_count_`).
+  - mode `SCENE_WIN_ETAPE` detecte comme scene sensible en `text_backend=lgfx_overlay`.
+- Correctifs appliques:
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`:
+    - cadence frame WIN_ETAPE LGFX alignee a 25 FPS via `kUiUpdateFrameMsLaDetectorLgfx` (40 ms),
+    - ajout d'un mode priorite overlay WIN_ETAPE (budget attente DMA augmente + retry drain DMA final),
+    - ajout d'un mecanisme de recovery court: suspension FX sur 2 frames apres timeout overlay pour restaurer la lisibilite texte,
+    - conservation stricte de l'ordre de rendu (FX -> LVGL -> overlay LGFX).
+  - `hardware/firmware/ui_freenove_allinone/include/ui/ui_manager.h`:
+    - ajout etat runtime `overlay_recovery_frames_`.
+- Gates executees:
+  - `pio run -e freenove_esp32s3` -> OK
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` -> OK
+  - `python3 tools/dev/serial_smoke.py --role esp32 --port /dev/cu.usbmodem5AB90753301 --timeout 3` -> PASS (`PING/PONG` stable)
+- Limitation / suite:
+  - validation visuelle et serie hardware encore a confirmer sur banc (`UI_GFX_STATUS`, `overlay_skip_busy`, perception blink).
+  - injection scene manuelle `SCENE SCENE_WIN_ETAPE` non disponible sur ce binaire (retour serie: `UNKNOWN SCENE SCENE_WIN_ETAPE`).
+
+## [2026-02-27] SCENE_LA_DETECTOR — preset reutilisable wirecube+rotozoom (LGFX)
+
+- Objectif: remplacer le fond sablier de `SCENE_LA_DETECTOR` par un preset fond demoscene subtil (`wirecube + rotozoom`) avec sync micro lissee, en restant retro-compatible.
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260227_191811_wip.patch`
+  - `/tmp/zacus_checkpoint/20260227_191811_status.txt`
+- Correctifs appliques:
+  - `hardware/firmware/hardware/firmware/ui_freenove_allinone/include/ui/ui_manager.h`:
+    - ajout enums `LaBackgroundPreset` / `LaBackgroundSync`,
+    - ajout etats runtime `la_bg_preset_`, `la_bg_sync_`, `la_bg_intensity_pct_`, `la_bg_mic_lpf_`, `la_bg_last_ms_`.
+  - `hardware/firmware/hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`:
+    - parsing JSON `render.la_detector.background_preset|background_sync|background_intensity_pct`,
+    - clamp strict `background_intensity_pct` (`0..100`),
+    - branche rendu `kLegacyHourglass` vs `kWirecubeRotozoomSubtle`,
+    - sync micro lissee (LPF) + mode `fixed`/`mic_smoothed`/`mic_direct`,
+    - sablier legacy affiche uniquement si preset legacy.
+  - `hardware/firmware/data/story/screens/SCENE_LA_DETECTOR.json`:
+    - `show_hourglass=false`,
+    - activation preset: `background_preset=wirecube_rotozoom_subtle`,
+    - sync: `background_sync=mic_smoothed`,
+    - intensite: `background_intensity_pct=32`.
+  - `hardware/firmware/data/ui/fx/demoscene_fx_manifest.v1.json`:
+    - version `1.3.3`,
+    - notes preset `la_detector` maj (wirecube+rotozoom + fallback legacy),
+    - ajout `overlay_fx_types.la_detector_bg_wirecube_rotozoom` avec contrat payload.
+- Gates executees:
+  - `python3 /Users/cils/.codex/skills/demoscene-fx-creator/scripts/fx_inventory.py --repo-root /Users/cils/Documents/Enfants/anniv isaac 10a/le-mystere-professeur-zacus --check-manifest --strict` -> OK
+  - `pio run -e freenove_esp32s3` -> OK
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` -> OK
+- Artefacts trackes scan:
+  - aucun fichier tracke detecte dans `.pio`, `.platformio`, `logs`, `dist`, `build`, `node_modules`, `.venv`.
+
+## [2026-02-27] SCENE_LA_DETECTOR — fond demoscene wirecube+rotozoom discret (LGFX)
+
+- Objectif: renforcer le fond sablier en style demoscene (wirecube + rotozoom), sombre et non intrusif, avec modulation sur niveau micro.
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260227_185939_wip.patch`
+  - `/tmp/zacus_checkpoint/20260227_185939_status.txt`
+- Correctifs appliques:
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`:
+    - fond plein ecran sombre explicite sur overlay LGFX (evite rendu parasite LVGL visible),
+    - waveform LA recadree (zone cible ~75% largeur / ~50% hauteur, centree en Y),
+    - jauge circulaire recadree a droite (diametre derive de 30% largeur / 50% hauteur, centree en Y),
+    - ajout fond demoscene discret: grille rotozoom sombre + wirecube filaire, vitesse/intensite liees a `mic_level_percent`,
+    - aucun glitch/jitter ajoute.
+- Gates executees:
+  - `pio run -e freenove_esp32s3` -> OK
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` -> OK
+- Artefacts trackes scan:
+  - aucun fichier tracke detecte dans `.pio`, `.platformio`, `logs`, `dist`, `build`, `node_modules`, `.venv`.
+
+## [2026-02-27] SCENE_LA_DETECTOR LGFX only (sans glitch) + double jauge
+
+- Objectif: rendre `SCENE_LA_DETECTOR` en overlay LovyanGFX visible-only (LVGL masque), sans effet glitch, avec sablier wireframe 3D timeout + double anneau timeout/stabilite + spectre vert->rouge.
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260227_184236_wip.patch`
+  - `/tmp/zacus_checkpoint/20260227_184236_status.txt`
+- Correctifs appliques:
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`:
+    - desactivation runtime du preset FX direct pour `SCENE_LA_DETECTOR` (`direct_fx_scene_runtime` exclut LA detector),
+    - overlay LA refondu sans jitter/glitch local,
+    - sablier wireframe pseudo-3D anime (roto doux) pilote par `gate_remain`,
+    - double anneau circulaire (externe timeout 96 segments, interne stabilite 84 segments),
+    - spectre 60 bandes conserve en pleine largeur, couleur mappee par amplitude vert->jaune->rouge.
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager_effects.cpp`:
+    - masquage explicite des widgets LVGL de base (`setBaseSceneFxVisible(false)`) quand LA detector est en `lgfx_overlay`.
+- Gate executee:
+  - `pio run -e freenove_esp32s3` -> OK
+- Artefacts trackes scan:
+  - aucun fichier tracke detecte dans `.pio`, `.platformio`, `logs`, `dist`, `build`, `node_modules`, `.venv`.
+
 ## [2026-02-27] A252 FS_LIST firmware (liste SD/LittleFS paginee)
 
 - Objectif: exposer une commande firmware `FS_LIST` pour inventorier les fichiers depuis la carte A252 sans montage PC.
@@ -3639,3 +3879,378 @@
     - `HOTLINE_VALIDATE WIN1 NOACK` -> `OK HOTLINE_VALIDATE ACK_WIN1`
     - `WAITING_VALIDATION` -> `OK WAITING_VALIDATION`
     - `STATUS.telephony.pending_espnow_call_audio=/hotline/enter_code_5__fr-fr-deniseneural.mp3`
+
+## [2026-02-27] Freenove LA detector: FFT full-width LGFX (agent)
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260227_181016_wip.patch`
+  - `/tmp/zacus_checkpoint/20260227_181016_status.txt`
+- Scope execute:
+  - `SCENE_LA_DETECTOR` overlay LGFX: bargraphe spectre 60 bandes passe en mapping pleine largeur ecran (marges 2px, clamp anti-debordement), sans changer la hauteur FFT.
+  - marqueur A4 force au centre X (`marker_x = width / 2`).
+- Validation:
+  - `pio run -e freenove_esp32s3` -> SUCCESS
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` -> SUCCESS
+
+## [2026-02-27] Freenove LA detector: demoscene hourglass background + circular progress gauge (agent)
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260227_181016_wip.patch`
+  - `/tmp/zacus_checkpoint/20260227_181016_status.txt`
+- Scope execute:
+  - `SCENE_LA_DETECTOR` LGFX overlay: suppression du petit sablier lateral;
+  - ajout d'un sablier de fond style demoscene/3D (wireframe + profondeur + flux de sable anime);
+  - ajout d'une jauge circulaire d'incrementation autour de la waveform micro centrale (progression detection);
+  - maintien FFT 60 bandes pleine largeur + marqueur A4 centre X.
+- Validation:
+  - `pio run -e freenove_esp32s3` -> SUCCESS
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` -> SUCCESS
+
+## [2026-02-27] Freenove LA detector: hourglass_demoscene_ultra + oscilloscope 200ms/div (agent)
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260227_194435_wip.patch`
+  - `/tmp/zacus_checkpoint/20260227_194435_status.txt`
+- Scope execute:
+  - ajout preset `hourglass_demoscene_ultra` (parser + runtime) dans `ui_manager` pour `render.la_detector.background_preset`;
+  - remplacement fond LA detector par sablier demoscene LGFX offscreen (`pushImageDma`) avec simulation sable, swing amorti, flip 180deg sur timeout;
+  - waveform oscilloscope: base temps verrouillee 200ms/div x10 divisions, trace plus reactive avec head highlight;
+  - bargraph FFT: degrade vertical par barre vert->jaune->rouge conserve;
+  - scene data/manifeste mis a jour (`SCENE_LA_DETECTOR` preset ultra + contrat manifest).
+- Validation:
+  - `pio run -e freenove_esp32s3` -> SUCCESS
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` -> SUCCESS
+  - `pio run -e freenove_esp32s3 -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` -> SUCCESS
+
+## 2026-02-27 20:40 — RTOS triage + U_SON ambient constraints (Codex)
+- Scope: `ui_freenove_allinone` crash triage on `SCENE_LA_DETECTOR` and ambient audio policy lock for `SCENE_U_SON_PROTO`.
+- Changes:
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`: replaced full-frame `pushImageDma(...)` for hourglass ultra background with `setAddrWindow + pushColors(...)` to avoid PSRAM DMA instability in loopTask.
+  - `hardware/firmware/ui_freenove_allinone/src/app/main.cpp`: removed U_SON ambient audio FX forcing/restoration; keep track playback non-interruptive only.
+  - `hardware/firmware/ui_freenove_allinone/src/app/main.cpp`: enforced U_SON ambient defaults/floor/ceiling: track `/music/boot_radio.mp3`, volume fixed 21, delay window 60000..240000 ms.
+  - `data/story/screens/SCENE_U_SON_PROTO.json` and builtin mirror in `hardware/firmware/ui_freenove_allinone/src/storage_manager.cpp`: delay window set to 60000..240000.
+- Evidence:
+  - Build: `pio run -e freenove_esp32s3` PASS.
+  - Flash: `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` PASS.
+  - FS: `pio run -e freenove_esp32s3 -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` PASS.
+  - Serial triage: 55s after `SCENE_GOTO SCENE_LA_DETECTOR` => `PANIC_COUNT=0` (no stack canary / guru seen in capture window).
+- Remaining risk:
+  - `post_upload_checklist.sh` still reports missing explicit `SCENE_GOTO` ACK in sampled window; functional scene transition logs present.
+
+## 2026-02-27 20:55 — ESP-NOW only boot mode + display visibility guard (Codex)
+- Boot network policy updated in `ui_freenove_allinone/src/app/main.cpp`:
+  - `kBootEspNowOnlyMode=true`.
+  - Disable AP/STA/web boot paths while keeping `g_network.begin(...)` and `g_network.enableEspNow()`.
+  - Explicit logs: `[NET] wifi+web disabled (espnow_only_mode=1)` and `[WEB] disabled (espnow_only_mode=1)`.
+- Display visibility guard:
+  - default backlight raised from 30 to 80 at boot globals.
+- Validation:
+  - Build PASS: `pio run -e freenove_esp32s3`.
+  - Flash PASS: `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301`.
+  - Serial checks:
+    - `STATUS/NET_STATUS`: `mode=STA sta=0 ap=0 espnow=1 ip=0.0.0.0`.
+    - `LCD_BACKLIGHT level=80`.
+    - `SCENE_GOTO` returns `ACK ... ok=1` with `[UI] render ...` logs.
+    - panic scan on LA scene: `panic_hits=0`.
+
+## 2026-02-27 21:01 — LA detector hourglass timing/placement/reactivity tuning (Codex)
+- Scope: `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+- Changes:
+  - Hourglass flip duration now 10s (`kHourglassFlipDurationMs=10000.0f`) when timeout reaches zero.
+  - Swing slowed x10 (initial omega, damping/stiffness path, jitter impulse, flip kick reduced).
+  - Hourglass shifted right by +20% screen width (`center_x = width * 0.7f`).
+  - Waveform temporal window made faster (`max_points` reduced to 20, oscilloscope now `100ms/div` over 10 divisions).
+  - FFT bargraph made more reactive with stronger amplitude gain from live spectrum + mic level.
+- LA timeout source sync:
+  - `runtime_config_service.cpp` now reads `/story/apps/APP_LA.json` `config.timeout_ms` and maps it to `mic_la_timeout_ms` so hourglass/timer use scene APP_LA timeout.
+- Validation:
+  - Build PASS: `pio run -e freenove_esp32s3`.
+  - Flash PASS: `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301`.
+  - Serial evidence:
+    - `HW_STATUS ... la_timeout_ms=30000 ... scene=SCENE_LA_DETECTOR`.
+    - Timeout observed at ~30008ms then routed to `SCENE_U_SON_PROTO` (`la_timeout_recovery`).
+
+## 2026-02-27 21:10 — LA detector hourglass/waveform retune v2 (Codex)
+- Scope: `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+- Changes:
+  - Hourglass swing oscillator normalized to ~12s period (inside requested 10..15s), with softer damping.
+  - Timeout reset flip kept at 10s (`kHourglassFlipDurationMs=10000`).
+  - Hourglass height reduced by `/1.33` from prior setting (`scale_y = 0.9/1.33`).
+  - Hourglass render density increased by x3 vertical sub-lines per logical row.
+  - Hourglass position shifted right by +20% (`center_x = width * 0.7f`).
+  - Waveform acquisition window shortened further (`max_points=12`) and timescale tightened (`50ms/div`) for fast audio-player-like trace.
+  - FFT bargraph reactivity boosted again (stronger gain mapping from live spectrum + mic level).
+- Validation:
+  - Build PASS: `pio run -e freenove_esp32s3`.
+  - Flash PASS: `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301`.
+  - Serial check PASS:
+    - `HW_STATUS` alive.
+    - `UI_GFX_STATUS` stable (no panic/overflow/stall/recover increments in sampled output).
+
+## 2026-02-27 21:19 — LA detector hourglass timeout mapping + reset flip (Codex)
+- Scope:
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+  - `hardware/firmware/ui_freenove_allinone/include/ui/ui_manager.h`
+- Changes:
+  - Hourglass visual depletion stays mapped to 80% of real timeout (`kHourglassTimeoutScale=0.80f`) so the visual hourglass finishes earlier.
+  - Added timeout-reset detection (`gate_elapsed` drop to ~0 after prior progress) and trigger a 10s hourglass return flip animation (`kHourglassFlipDurationMs=10000.0f`).
+  - Added runtime state to track previous gate elapsed for reset-edge detection (`la_hg_prev_gate_elapsed_ms_`, `la_hg_prev_gate_valid_`).
+- Validation:
+  - Build PASS: `pio run -e freenove_esp32s3`.
+  - Flash PASS: `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301`.
+- Notes:
+  - No FS payload changed in this pass, so no `uploadfs` required.
+
+## 2026-02-27 21:27 — LA hourglass damping retune + reset flip hardening (Codex)
+- Scope:
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+- Changes:
+  - Hourglass swing made much more damped: reduced startup omega, reduced max angle, stronger damping in normal and flip phases.
+  - Reduced post-flip impulse and edge rebound to avoid visible overshoot/oscillation.
+  - Reset detection hardened (dynamic min progress threshold + wider near-zero window) and flip restart is now always forced on reset edge.
+  - 10s flip/rotation path kept unchanged (`kHourglassFlipDurationMs=10000`).
+- Validation:
+  - Build PASS: `pio run -e freenove_esp32s3`.
+  - Flash PASS: `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301`.
+- Notes:
+  - No FS changes in this pass (`uploadfs` not required).
+
+## 2026-02-27 21:32 — LA detector flip lock during active 10s animation (Codex)
+- Scope:
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+- Change:
+  - Reset-triggered flip now arms only when `!la_hg_flipping_`, preventing relaunch while a 10s flip is already running.
+  - No post-flip cooldown added (new flip allowed immediately after animation end).
+- Validation:
+  - Build PASS: `pio run -e freenove_esp32s3`.
+  - Flash PASS: `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301`.
+- Notes:
+  - No FS/story data changes in this pass.
+
+## [2026-02-27] Hotline MP3 etat-jeu + synchro scene Freenove->A252 (agent)
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260227_214828_wip.patch`
+  - `/tmp/zacus_checkpoint/20260227_214828_status.txt`
+- Scope execute:
+  - A252 (`hardware/RTC_SLIC_PHONE/src/main.cpp`):
+    - ajout contexte hotline runtime `scene/step/validation_state` (none|waiting|granted|refused);
+    - `SCENE` accepte maintenant JSON enrichi (`id/scene_id`, `step_id`, `validation_state`) et met a jour le contexte;
+    - `WAITING_VALIDATION` route un prompt MP3 contextualise avec fallback (`enter_code_5`);
+    - `HOTLINE_VALIDATE` met a jour l'etat validation et choisit des cues MP3 contextualises (granted/refused) avec fallback;
+    - `HOTLINE_TRIGGER 1/2/3` tente d'abord des MP3 d'indice contextuels scene+etat, puis fallback sur map hotline WAV existante;
+    - `STATUS` + `HOTLINE_STATUS` exposent `active_step` et `hotline_validation_state`.
+  - Freenove (`hardware/firmware/ui_freenove_allinone/src/app/main.cpp`):
+    - synchro automatique de contexte hotline a chaque changement de scene via ESP-NOW:
+      - payload `SCENE {"id","step_id","validation_state"}`;
+      - `validation_state` infere depuis `step_id/screen_scene_id` (waiting/granted/refused/none).
+  - Doc A252 (`hardware/RTC_SLIC_PHONE/README.md`) mise a jour pour le contrat scene/hotline contextualise.
+- Validation effectuee:
+  - Build:
+    - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev` -> SUCCESS
+    - `pio run -e freenove_esp32s3` -> SUCCESS
+  - Flash:
+    - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001` -> SUCCESS
+    - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` -> SUCCESS
+  - Smoke serie A252:
+    - `SCENE {"id":"SCENE_LA_DETECTOR","step_id":"RTC_ESP_ETAPE1","validation_state":"waiting"}` -> JSON `validation_state=waiting`
+    - `HOTLINE_STATUS` -> expose `scene`, `step`, `validation_state`
+    - `SCENE {"id":"SCENE_WARNING","step_id":"STEP_WARNING"}` -> JSON `validation_state=refused`
+    - `WAITING_VALIDATION` -> `OK WAITING_VALIDATION`
+  - Smoke serie Freenove:
+    - `SCENE_GOTO SCENE_WARNING` -> log `HOTLINE_SYNC scene=SCENE_WARNING step=STEP_WARNING validation=refused ok=1`.
+  - Note bench dual-board:
+    - `HOTLINE_STATUS` cote A252 reste `scene=""` sur ce run; necessite verification radio/channel peer en conditions E2E ESPNOW pour confirmer la reception live de la synchro scene.
+
+## [2026-02-28] HOT-LINE MP3 etat/scene: contextualisation WAITING_VALIDATION (agent)
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_005032_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_005032_status.txt`
+- Scope execute:
+  - `hardware/firmware/ui_freenove_allinone/src/app/main.cpp`
+    - enrichissement automatique du payload `WAITING_VALIDATION` vers:
+      - `WAITING_VALIDATION {"scene_id":"...","step_id":"...","validation_state":"waiting"}`
+    - conserve le format legacy `WAITING_VALIDATION` (non-breaking).
+  - `hardware/RTC_SLIC_PHONE/src/main.cpp`
+    - `WAITING_VALIDATION` accepte maintenant les args JSON scene/step/validation.
+    - mise a jour du contexte hotline (`g_active_scene_id`, `g_active_step_id`) avant resolution route MP3.
+    - route toujours forcee sur l'etat `waiting` pour cette commande.
+  - `hardware/RTC_SLIC_PHONE/README.md`
+    - doc de la variante `WAITING_VALIDATION {...}`.
+- Validation effectuee:
+  - Build Freenove PASS: `pio run -e freenove_esp32s3`
+  - Build A252 PASS: `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev`
+
+## [2026-02-28] Hotline ringback 2s + debug lecture MP3 telephone (agent)
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_022430_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_022430_status.txt`
+- Checkpoint securite (lot suivant):
+  - `/tmp/zacus_checkpoint/20260228_023407_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_023407_status.txt`
+- Objectif lot:
+  - forcer provisoirement la sonnerie/ringback hotline a 2 secondes;
+  - corriger la lecture MP3 A252 (priorite SD) quand le telephone est en appel hotline.
+- Modifications appliquees:
+  - `hardware/RTC_SLIC_PHONE/src/main.cpp`
+    - ringback hotline force a 2s (temporaire).
+    - rescan du catalogue de suffixes voix quand la SD devient disponible apres boot.
+    - fallback de routage hotline vers `scene_route` (MP3 de scene) avant `dial_map` WAV si les hints ne sont pas trouves.
+    - montage SD pour scan hotline/`FS_LIST` avec fallback SPI (pins A1S) si `SD_MMC` echoue.
+    - log hotline SD numerote dans `/hotline/log.txt` (events route/ringback/sync/errors) pour debug terrain.
+    - fallback MP3 global (`default_voice_fallback`) si scene/hints indisponibles (evite silence sur numerotation).
+    - couverture scene->stem hotline ajoutee pour `SCENE_CREDITS` et `SCENE_POLICE_CHASE_ARCADE`.
+  - `hardware/RTC_SLIC_PHONE/src/audio/AudioEngine.cpp`
+    - remount SD/LittleFS avec retry periodique (au lieu d'un seul essai au boot).
+    - fallback montage SD en SPI (`SD.begin(...)`) quand `SD_MMC.begin()` echoue.
+  - `hardware/RTC_SLIC_PHONE/src/audio/AudioEngine.h`
+    - pointeur `sd_fs_` pour ouvrir les medias SD sur backend actif (`SD_MMC` ou `SD` SPI).
+  - `hardware/firmware/ui_freenove_allinone/src/app/main.cpp`
+    - commande ESP-NOW `UI_SCENE_STATUS` exposee dans l'ack JSON (`scene_id`, `step_id`, `validation_state`) pour synchronisation hotline A252.
+- Validation executee:
+  - Build PASS: `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev`.
+  - Flash PASS: `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001`.
+  - Build/flash Freenove PASS:
+    - `pio run -e freenove_esp32s3`
+    - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301`
+  - Runtime:
+    - `HOTLINE_TRIGGER 1` -> log `ringback ... duration_ms=2000`.
+    - `FS_LIST {"source":"sd","path":"/hotline","page_size":200}` -> OK (`count=116`, `mp3=100`), SD accessible.
+    - `AUDIO_PROBE sd:/hotline/fiches-hotline_2__fr-fr-deniseneural.mp3` -> OK (decodage MP3 valide).
+    - `SCENE {"id":"SCENE_U_SON_PROTO"...}` -> `audio_started=true` avec route MP3 SD.
+    - `/hotline/log.txt` detecte sur SD et taille incrementee apres numerotation hotline (evidence debug).
+
+## [2026-02-28] Hotline scene list explicite (U_SON/LA/WIN/WARNING/QR/LEFOU/POLICE/CREDITS) (agent)
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_025723_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_025723_status.txt`
+- Modifications:
+  - `hardware/RTC_SLIC_PHONE/src/main.cpp`
+    - ajout d'une table explicite `scene_key -> stem` pour:
+      - `SCENE_U_SON_PROTO`
+      - `SCENE_LA_DETECTOR`
+      - `SCENE_WIN_ETAPE`
+      - `SCENE_WARNING`
+      - `SCENE_CREDITS`
+      - `SCENE_WIN_ETAPE1`
+      - `SCENE_WIN_ETAPE2`
+      - `SCENE_QR_DETECTOR`
+      - `SCENE_LEFOU_DETECTOR`
+      - `SCENE_POLICE_CHASE_ARCADE`
+    - lookup explicite applique avant les fallbacks historiques.
+  - `hardware/RTC_SLIC_PHONE/README.md`
+    - documentation de la table de mapping scene hotline.
+- Validation:
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev` -> SUCCESS.
+
+## [2026-02-28] Upload A252 apres mapping scenes hotline (agent)
+- Flash execute:
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001` -> SUCCESS.
+- Verification serie immediate:
+  - `STATUS` lu sur `/dev/cu.usbserial-0001` (115200) -> firmware repondu, `espnow.scene_sync_enabled=true`, `active_scene=""` au boot.
+
+## [2026-02-28] Triage qualite audio MP3 hotline (agent)
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_031139_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_031139_status.txt`
+- Diagnostic runtime:
+  - `AUDIO_PROBE sd:/hotline/fiches-hotline_2__fr-fr-deniseneural.mp3` remontait:
+    - `input_sample_rate=24000`,
+    - `output_sample_rate=22050`,
+    - `resampler_active=true`.
+  - Pendant `PLAY ...mp3`: spam erreurs `[E] ResampleStream.h : 191 - write error 0 vs ...` (artefacts audio).
+- Cause racine:
+  - 24 kHz n'etait pas considere stable dans `kStableRatesHz`; la chaine forçait un resampling inutile `24k -> 22.05k`.
+- Correctif:
+  - `hardware/RTC_SLIC_PHONE/src/audio/AudioEngine.cpp`
+    - ajout de `24000` dans `kStableRatesHz` pour eviter le resampling inutile des prompts TTS hotline.
+- Validation:
+  - Build PASS: `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev`.
+  - Flash PASS: `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001`.
+  - `AUDIO_PROBE` apres fix:
+    - `input_sample_rate=24000`,
+    - `output_sample_rate=24000`,
+    - `resampler_active=false`.
+  - Re-test `PLAY ...mp3` sur meme fichier: plus de logs `ResampleStream write error`.
+
+## [2026-02-28] A252 MP3 white-noise triage - decoder pacing + fixed I2S output rate lock
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_035946_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_035946_status.txt`
+- Skills utilises:
+  - `rtc-audio-stack`
+  - `firmware-embedded-audio-player-expert`
+  - `rtc-a252-bitrate-adaptive`
+  - `esp32-audio-runtime-gating`
+  - nouveau skill cree: `~/.codex/skills/compressed-audio-decoder-libs/SKILL.md`
+- Correctifs appliques:
+  - `hardware/RTC_SLIC_PHONE/src/audio/AudioEngine.cpp`
+    - ajout stockage bitrate MP3 parse (`playback_mp3_bitrate_bps_`) pour timing de chunk MP3,
+    - pacing MP3 corrige: calcul delay base sur bitrate compresse (bits/s),
+    - reset bitrate MP3 sur init/stop,
+    - lock format sortie A252 sur sample rate I2S base (`_config.sample_rate`) pour stabilite ES8388,
+    - log decode MP3 enrichi avec bitrate detecte.
+  - `hardware/RTC_SLIC_PHONE/src/audio/AudioEngine.h`
+    - ajout champ runtime `playback_mp3_bitrate_bps_`.
+- Validation:
+  - Build PASS: `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev`
+  - Flash PASS: `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001`
+  - Commandes runtime envoyees: `TONE_STOP`, `PLAY sd:/hotline/fiches-hotline_2__fr-fr-deniseneural.mp3` -> `OK`.
+  - Etat observe ensuite: `hook=ON_HOOK`, donc playback auto-stop conforme policy on-hook.
+  - Watch OFF_HOOK 45s lance pour auto-play direct: timeout (pas de decroche pendant la fenetre).
+
+## [2026-02-28] A252 MP3 white-noise hotfix follow-up (resampler error loop)
+
+- Symptom observee sur banc:
+  - `ResampleStream write error 0 vs ...` en boucle pendant lecture hotline,
+  - `STATUS.audio`: `playback_input_sample_rate=24000`, `playback_output_sample_rate=8000`, `playback_resampler_active=true`.
+- Cause:
+  - lock sortie I2S a 8 kHz sur A252 forcait un resampling MP3 24k->8k et degradait la chaine.
+- Correctif applique:
+  - `hardware/RTC_SLIC_PHONE/src/audio/AudioEngine.cpp`
+    - suppression du lock force 8k dans `resolvePlaybackFormat(...)`, retour policy HYBRID_TELCO (24k stable conserve),
+    - conservation du fix pacing MP3 base bitrate.
+- Validation:
+  - Build PASS: `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev`
+  - Flash PASS: `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001`
+  - Runtime (serial): `HOTLINE_TRIGGER 2` -> logs:
+    - `mp3 header parsed ... out_sr=24000 ... resampler=false`
+    - `play mp3 from SD ...`
+
+## [2026-02-28] A252 MP3 white-noise deep triage v2 (agent)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_042005_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_042005_status.txt`
+- Scope cible:
+  - `hardware/RTC_SLIC_PHONE/src/audio/AudioEngine.cpp`
+  - `hardware/RTC_SLIC_PHONE/src/audio/AudioEngine.h`
+  - `hardware/RTC_SLIC_PHONE/src/audio/AudioOutput.*` (si necessaire)
+- Objectif:
+  - eliminer bruit blanc en lecture MP3 SD avec verification decode->buffer->I2S,
+  - conserver policy: stop playback immediat ON_HOOK.
+
+## [2026-02-28] A252 switch MP3 decode path to ESP8266Audio
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_044901_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_044901_status.txt`
+- Scope:
+  - `hardware/RTC_SLIC_PHONE/src/audio/AudioEngine.cpp`
+  - `hardware/RTC_SLIC_PHONE/src/audio/AudioEngine.h`
+  - `hardware/RTC_SLIC_PHONE/platformio.ini`
+- Actions:
+  - remplacement du decodeur MP3 Helix AudioTools par `AudioGeneratorMP3` (ESP8266Audio) sur la pile A252,
+  - ajout d'un bridge `AudioOutput` ESP8266Audio -> pipeline AudioTools (resample/channel-convert/volume existants),
+  - activation de la dependance `earlephilhower/ESP8266Audio` sur les env A252.
+- Validation:
+  - Build PASS: `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev`.
+
+## [2026-02-28] A252 MP3 playback verification crash (ESP8266Audio path)
+- Actions:
+  - Flashed `hardware/RTC_SLIC_PHONE` on A252 (`esp32dev`, port `/dev/cu.usbserial-0001`).
+  - Verified SD catalog with `FS_LIST` under `/hotline_tts/SCENE_U_SON_PROTO` (MP3 files present).
+  - Forced MP3 playback test: `PLAY sd:/hotline_tts/SCENE_U_SON_PROTO/attente_validation_mystere_denise.mp3`.
+- Evidence:
+  - Decoder start log observed: `mp3 header parsed sr=22050 ch=1 bits=16 bitrate=64000`.
+  - Immediate runtime crash after `OK PLAY`: `Guru Meditation Error: Core 1 panic'ed (LoadProhibited)` followed by reboot.
+- Status:
+  - STOP condition raised (`build/test regression not fixed quickly`).
+  - See `docs/STOP_REQUIRED.md` for required decision.

@@ -1,6 +1,7 @@
 // main.cpp - Freenove ESP32-S3 all-in-one runtime loop.
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <FS.h>
 #include <LittleFS.h>
 #include <Preferences.h>
 #include <WebServer.h>
@@ -10,9 +11,18 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 #if defined(ARDUINO_ARCH_ESP32)
 #include <esp_heap_caps.h>
+#if __has_include(<SD_MMC.h>)
+#include <SD_MMC.h>
+#define ZACUS_HAS_SD_AUDIO 1
+#else
+#define ZACUS_HAS_SD_AUDIO 0
+#endif
+#else
+#define ZACUS_HAS_SD_AUDIO 0
 #endif
 
 #include "audio_manager.h"
@@ -60,10 +70,12 @@ constexpr const char* kDefaultScenarioFile = "/story/scenarios/DEFAULT.json";
 constexpr const char* kFirmwareName = "freenove_esp32s3";
 constexpr const char* kDiagAudioFile = "/music/boot_radio.mp3";
 constexpr const char* kUsonAmbientTrack = "/music/boot_radio.mp3";
-constexpr uint8_t kUsonAmbientVolumeMin = FREENOVE_AUDIO_MAX_VOLUME;
-constexpr uint8_t kUsonAmbientVolumeMax = FREENOVE_AUDIO_MAX_VOLUME;
-constexpr uint32_t kUsonAmbientDelayMinMs = 9000U;
-constexpr uint32_t kUsonAmbientDelayMaxMs = 26000U;
+constexpr uint8_t kUsonAmbientVolumeFixed = 21U;
+constexpr uint8_t kUsonAmbientVolumeMin =
+    (kUsonAmbientVolumeFixed > FREENOVE_AUDIO_MAX_VOLUME) ? FREENOVE_AUDIO_MAX_VOLUME : kUsonAmbientVolumeFixed;
+constexpr uint8_t kUsonAmbientVolumeMax = kUsonAmbientVolumeMin;
+constexpr uint32_t kUsonAmbientDelayMinMs = 60000U;
+constexpr uint32_t kUsonAmbientDelayMaxMs = 240000U;
 constexpr size_t kSerialLineCapacity = 192U;
 constexpr bool kBootDiagnosticTone = true;
 constexpr const char* kEspNowBroadcastTarget = "broadcast";
@@ -89,6 +101,7 @@ constexpr const char* kCameraSceneId = "SCENE_PHOTO_MANAGER";
 constexpr const char* kMediaManagerSceneId = "SCENE_MEDIA_MANAGER";
 constexpr const char* kTestLabSceneId = "SCENE_TEST_LAB";
 constexpr const char* kDefaultBootSceneId = "SCENE_U_SON_PROTO";
+constexpr bool kBootEspNowOnlyMode = true;
 constexpr const char* kTestLabLockStepId = "TEST_LAB_LOCK";
 constexpr bool kLockNvsMediaManagerMode = true;
 constexpr bool kForceTestLabSceneLock = false;
@@ -123,7 +136,10 @@ struct SceneWs2812FxState {
 struct SceneAmbientAudioFxState {
   bool enabled = false;
   bool non_interruptive = true;
+  char mode[24] = "single_track";
   char track[64] = "/music/boot_radio.mp3";
+  char playlist_root[96] = "";
+  bool playlist_recursive = true;
   uint8_t volume_min = kUsonAmbientVolumeMin;
   uint8_t volume_max = kUsonAmbientVolumeMax;
   uint32_t delay_min_ms = kUsonAmbientDelayMinMs;
@@ -165,8 +181,8 @@ bool g_la_dispatch_in_progress = false;
 bool g_has_ring_sent_for_win_etape = false;
 bool g_win_etape_ui_refresh_pending = false;
 bool g_boot_media_manager_mode = false;
-uint8_t g_lcd_backlight_level = 30U;
-uint8_t g_lcd_backlight_base_level = 30U;
+uint8_t g_lcd_backlight_level = 80U;
+uint8_t g_lcd_backlight_base_level = 80U;
 bool g_setup_mode = true;
 bool g_web_auth_required = false;
 bool g_resource_profile_auto = true;
@@ -192,7 +208,6 @@ uint8_t g_scene_ws2812_runtime_brightness = 0U;
 uint32_t g_scene_ws2812_runtime_next_update_ms = 0U;
 bool g_uson_ambient_audio_active = false;
 uint8_t g_uson_ambient_restore_volume = FREENOVE_AUDIO_MAX_VOLUME;
-uint8_t g_uson_ambient_restore_fx_profile = 0U;
 uint32_t g_uson_ambient_next_play_ms = 0U;
 #if defined(USE_AUDIO) && (USE_AUDIO != 0)
 ui::audio::AmigaAudioPlayer g_amp_player;
@@ -239,6 +254,52 @@ const char* scenarioIdFromSnapshot(const ScenarioSnapshot& snapshot) {
 
 const char* stepIdFromSnapshot(const ScenarioSnapshot& snapshot) {
   return (snapshot.step != nullptr && snapshot.step->id != nullptr) ? snapshot.step->id : "n/a";
+}
+
+const char* inferHotlineValidationStateTag(const ScenarioSnapshot& snapshot) {
+  const char* step_id = (snapshot.step != nullptr && snapshot.step->id != nullptr) ? snapshot.step->id : "";
+  const char* scene_id = (snapshot.screen_scene_id != nullptr) ? snapshot.screen_scene_id : "";
+
+  if (std::strstr(scene_id, "WARNING") != nullptr || std::strstr(step_id, "WARNING") != nullptr) {
+    return "refused";
+  }
+  if (std::strstr(step_id, "RTC_ESP_ETAPE") != nullptr ||
+      std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0 ||
+      std::strcmp(scene_id, "SCENE_WIN_ETAPE2") == 0) {
+    return "waiting";
+  }
+  if (std::strstr(scene_id, "WIN") != nullptr || std::strstr(step_id, "WIN") != nullptr ||
+      std::strstr(scene_id, "FINAL") != nullptr || std::strstr(step_id, "FINAL") != nullptr ||
+      std::strstr(scene_id, "REWARD") != nullptr) {
+    return "granted";
+  }
+  return "none";
+}
+
+void syncHotlineSceneState(const ScenarioSnapshot& snapshot) {
+  if (snapshot.screen_scene_id == nullptr || snapshot.screen_scene_id[0] == '\0') {
+    return;
+  }
+
+  StaticJsonDocument<224> scene_state_doc;
+  scene_state_doc["id"] = snapshot.screen_scene_id;
+  if (snapshot.step != nullptr && snapshot.step->id != nullptr && snapshot.step->id[0] != '\0') {
+    scene_state_doc["step_id"] = snapshot.step->id;
+  }
+  const char* validation_state = inferHotlineValidationStateTag(snapshot);
+  scene_state_doc["validation_state"] = validation_state;
+
+  String args_json;
+  serializeJson(scene_state_doc, args_json);
+  String payload = "SCENE ";
+  payload += args_json;
+
+  const bool ok = g_network.sendEspNowTarget(kEspNowBroadcastTarget, payload.c_str());
+  Serial.printf("[HOTLINE_SYNC] scene=%s step=%s validation=%s ok=%u\n",
+                snapshot.screen_scene_id,
+                (snapshot.step != nullptr && snapshot.step->id != nullptr) ? snapshot.step->id : "n/a",
+                validation_state,
+                ok ? 1U : 0U);
 }
 
 bool isFixedTestSceneActive(const ScenarioSnapshot& snapshot) {
@@ -488,6 +549,145 @@ bool parseHexRgbColor(const char* text, uint32_t* out_rgb) {
   return true;
 }
 
+bool isAmbientRandomFileModeToken(const char* token) {
+  if (token == nullptr || token[0] == '\0') {
+    return false;
+  }
+  String mode = token;
+  mode.trim();
+  mode.toLowerCase();
+  return (mode == "random_file" || mode == "playlist" || mode == "random");
+}
+
+bool isAmbientAudioFilePath(const String& path) {
+  String lower = path;
+  lower.toLowerCase();
+  return lower.endsWith(".mp3") || lower.endsWith(".wav") || lower.endsWith(".aac") ||
+         lower.endsWith(".m4a") || lower.endsWith(".flac");
+}
+
+bool resolveAmbientRootFs(const char* raw_root, fs::FS** out_fs, String* out_root, bool* out_use_sd) {
+  if (out_fs == nullptr || out_root == nullptr || out_use_sd == nullptr) {
+    return false;
+  }
+  *out_fs = &LittleFS;
+  *out_use_sd = false;
+  out_root->remove(0);
+
+  if (raw_root == nullptr || raw_root[0] == '\0') {
+    return false;
+  }
+
+  String root = raw_root;
+  root.trim();
+  if (root.isEmpty()) {
+    return false;
+  }
+
+#if ZACUS_HAS_SD_AUDIO
+  if (root.startsWith("sd:/")) {
+    *out_fs = &SD_MMC;
+    *out_use_sd = true;
+    root.remove(0, 3);
+  } else if (root.startsWith("/sd/")) {
+    *out_fs = &SD_MMC;
+    *out_use_sd = true;
+    root.remove(0, 3);
+  }
+#endif
+  if (root.startsWith("littlefs:/")) {
+    root.remove(0, 9);
+  } else if (root.startsWith("/littlefs/")) {
+    root.remove(0, 9);
+  }
+
+  if (!root.startsWith("/")) {
+    root = "/" + root;
+  }
+  while (root.length() > 1U && root.endsWith("/")) {
+    root.remove(root.length() - 1U);
+  }
+  if (root.isEmpty()) {
+    root = "/";
+  }
+
+  *out_root = root;
+  return true;
+}
+
+void collectAmbientPlaylistFiles(fs::FS& file_system,
+                                 const String& root,
+                                 bool recursive,
+                                 uint8_t depth,
+                                 std::vector<String>* out_files) {
+  if (out_files == nullptr) {
+    return;
+  }
+  if (out_files->size() >= 128U) {
+    return;
+  }
+  File dir = file_system.open(root.c_str(), "r");
+  if (!dir || !dir.isDirectory()) {
+    return;
+  }
+
+  File entry = dir.openNextFile();
+  while (entry) {
+    String entry_name = entry.name();
+    if (!entry_name.startsWith("/")) {
+      entry_name = "/" + entry_name;
+    }
+    if (entry.isDirectory()) {
+      if (recursive && depth < 6U) {
+        collectAmbientPlaylistFiles(file_system, entry_name, recursive, static_cast<uint8_t>(depth + 1U), out_files);
+      }
+    } else if (isAmbientAudioFilePath(entry_name)) {
+      out_files->push_back(entry_name);
+      if (out_files->size() >= 128U) {
+        entry.close();
+        break;
+      }
+    }
+    entry.close();
+    entry = dir.openNextFile();
+  }
+  dir.close();
+}
+
+bool chooseAmbientPlaylistTrack(const SceneAmbientAudioFxState& ambient, uint32_t now_ms, String* out_track) {
+  if (out_track == nullptr) {
+    return false;
+  }
+  out_track->remove(0);
+  if (!isAmbientRandomFileModeToken(ambient.mode)) {
+    return false;
+  }
+
+  fs::FS* file_system = nullptr;
+  String root;
+  bool use_sd = false;
+  if (!resolveAmbientRootFs(ambient.playlist_root, &file_system, &root, &use_sd) || file_system == nullptr) {
+    return false;
+  }
+
+  std::vector<String> files;
+  files.reserve(24U);
+  collectAmbientPlaylistFiles(*file_system, root, ambient.playlist_recursive, 0U, &files);
+  if (files.empty()) {
+    return false;
+  }
+
+  const uint32_t seed = hashSceneFxSeed(now_ms ^ 0x59A31BUL ^ static_cast<uint32_t>(files.size()));
+  const size_t index = static_cast<size_t>(seed % static_cast<uint32_t>(files.size()));
+  const String selected = files[index];
+  if (use_sd) {
+    *out_track = String("/sd") + selected;
+  } else {
+    *out_track = selected;
+  }
+  return true;
+}
+
 void applyLcdBacklightEffective(uint8_t level) {
 #if (FREENOVE_TFT_BL >= 0)
   g_lcd_backlight_level = level;
@@ -510,6 +710,8 @@ void applyLcdBacklight(uint8_t level) {
 
 void configureSceneVisualHardwareHints(const char* scene_id, const String& payload_json) {
   const bool is_u_son_proto = (scene_id != nullptr) && (std::strcmp(scene_id, "SCENE_U_SON_PROTO") == 0);
+  const bool is_lefou_scene = (scene_id != nullptr) && (std::strcmp(scene_id, "SCENE_LEFOU_DETECTOR") == 0);
+  static constexpr uint16_t kLefouDefaultSequenceHz[] = {440U, 880U, 330U, 349U, 147U, 98U};
 
   SceneBacklightFxState backlight = {};
   backlight.enabled = is_u_son_proto;
@@ -536,8 +738,25 @@ void configureSceneVisualHardwareHints(const char* scene_id, const String& paylo
   SceneAmbientAudioFxState ambient = {};
   ambient.enabled = is_u_son_proto;
   ambient.non_interruptive = true;
+  std::strncpy(ambient.mode, is_u_son_proto ? "random_file" : "single_track", sizeof(ambient.mode) - 1U);
+  ambient.mode[sizeof(ambient.mode) - 1U] = '\0';
   std::strncpy(ambient.track, kUsonAmbientTrack, sizeof(ambient.track) - 1U);
   ambient.track[sizeof(ambient.track) - 1U] = '\0';
+  std::strncpy(ambient.playlist_root, is_u_son_proto ? "/music/v8_pack" : "", sizeof(ambient.playlist_root) - 1U);
+  ambient.playlist_root[sizeof(ambient.playlist_root) - 1U] = '\0';
+  ambient.playlist_recursive = true;
+  uint16_t lefou_sequence_hz[RuntimeHardwareConfig::kLaSequenceMaxNotes] = {};
+  uint8_t lefou_sequence_count = 0U;
+  uint16_t lefou_note_hold_ms = 350U;
+  if (is_lefou_scene) {
+    lefou_sequence_count = static_cast<uint8_t>(sizeof(kLefouDefaultSequenceHz) / sizeof(kLefouDefaultSequenceHz[0]));
+    if (lefou_sequence_count > RuntimeHardwareConfig::kLaSequenceMaxNotes) {
+      lefou_sequence_count = RuntimeHardwareConfig::kLaSequenceMaxNotes;
+    }
+    for (uint8_t idx = 0U; idx < lefou_sequence_count; ++idx) {
+      lefou_sequence_hz[idx] = kLefouDefaultSequenceHz[idx];
+    }
+  }
 
   uint32_t accent_rgb = 0x6FD8FFUL;
   bool ws_use_theme_accent = ws.single_random_blink;
@@ -671,10 +890,23 @@ void configureSceneVisualHardwareHints(const char* scene_id, const String& paylo
         if (ambient_cfg["non_interruptive"].is<bool>()) {
           ambient.non_interruptive = ambient_cfg["non_interruptive"].as<bool>();
         }
+        const char* mode = ambient_cfg["mode"] | "";
+        if (mode[0] != '\0') {
+          std::strncpy(ambient.mode, mode, sizeof(ambient.mode) - 1U);
+          ambient.mode[sizeof(ambient.mode) - 1U] = '\0';
+        }
         const char* track = ambient_cfg["track"] | "";
         if (track[0] != '\0') {
           std::strncpy(ambient.track, track, sizeof(ambient.track) - 1U);
           ambient.track[sizeof(ambient.track) - 1U] = '\0';
+        }
+        const char* playlist_root = ambient_cfg["playlist_root"] | "";
+        if (playlist_root[0] != '\0') {
+          std::strncpy(ambient.playlist_root, playlist_root, sizeof(ambient.playlist_root) - 1U);
+          ambient.playlist_root[sizeof(ambient.playlist_root) - 1U] = '\0';
+        }
+        if (ambient_cfg["playlist_recursive"].is<bool>()) {
+          ambient.playlist_recursive = ambient_cfg["playlist_recursive"].as<bool>();
         }
         if (ambient_cfg["volume_min"].is<unsigned int>()) {
           uint32_t parsed = ambient_cfg["volume_min"].as<uint32_t>();
@@ -695,6 +927,34 @@ void configureSceneVisualHardwareHints(const char* scene_id, const String& paylo
         }
         if (ambient_cfg["delay_max_ms"].is<unsigned int>()) {
           ambient.delay_max_ms = ambient_cfg["delay_max_ms"].as<uint32_t>();
+        }
+      }
+
+      if (is_lefou_scene && document["render"]["lefou_detector"].is<JsonObjectConst>()) {
+        const JsonObjectConst lefou_render = document["render"]["lefou_detector"].as<JsonObjectConst>();
+        if (lefou_render["note_sequence_hz"].is<JsonArrayConst>()) {
+          const JsonArrayConst note_sequence = lefou_render["note_sequence_hz"].as<JsonArrayConst>();
+          uint8_t note_count = 0U;
+          for (uint8_t idx = 0U; idx < RuntimeHardwareConfig::kLaSequenceMaxNotes; ++idx) {
+            lefou_sequence_hz[idx] = 0U;
+          }
+          for (JsonVariantConst note_node : note_sequence) {
+            if (!note_node.is<unsigned int>()) {
+              continue;
+            }
+            const uint32_t parsed_hz = note_node.as<uint32_t>();
+            if (parsed_hz < 40U || parsed_hz > 3000U) {
+              continue;
+            }
+            if (note_count >= RuntimeHardwareConfig::kLaSequenceMaxNotes) {
+              break;
+            }
+            lefou_sequence_hz[note_count++] = static_cast<uint16_t>(parsed_hz);
+          }
+          lefou_sequence_count = note_count;
+        }
+        if (lefou_render["note_hold_ms"].is<unsigned int>()) {
+          lefou_note_hold_ms = static_cast<uint16_t>(lefou_render["note_hold_ms"].as<uint32_t>());
         }
       }
     }
@@ -748,14 +1008,81 @@ void configureSceneVisualHardwareHints(const char* scene_id, const String& paylo
   if (ambient.volume_min > ambient.volume_max) {
     ambient.volume_min = ambient.volume_max;
   }
+  {
+    String mode = ambient.mode;
+    mode.trim();
+    mode.toLowerCase();
+    if (mode.isEmpty()) {
+      mode = "single_track";
+    }
+    std::strncpy(ambient.mode, mode.c_str(), sizeof(ambient.mode) - 1U);
+    ambient.mode[sizeof(ambient.mode) - 1U] = '\0';
+  }
+  if (is_u_son_proto) {
+    ambient.enabled = true;
+    ambient.non_interruptive = true;
+    if (ambient.track[0] == '\0') {
+      std::strncpy(ambient.track, kUsonAmbientTrack, sizeof(ambient.track) - 1U);
+      ambient.track[sizeof(ambient.track) - 1U] = '\0';
+    }
+    if (!isAmbientRandomFileModeToken(ambient.mode)) {
+      std::strncpy(ambient.mode, "random_file", sizeof(ambient.mode) - 1U);
+      ambient.mode[sizeof(ambient.mode) - 1U] = '\0';
+    }
+    if (ambient.playlist_root[0] == '\0') {
+      std::strncpy(ambient.playlist_root, "/music/v8_pack", sizeof(ambient.playlist_root) - 1U);
+      ambient.playlist_root[sizeof(ambient.playlist_root) - 1U] = '\0';
+    }
+    ambient.volume_min = kUsonAmbientVolumeMin;
+    ambient.volume_max = kUsonAmbientVolumeMax;
+    if (ambient.delay_min_ms < kUsonAmbientDelayMinMs) {
+      ambient.delay_min_ms = kUsonAmbientDelayMinMs;
+    }
+    if (ambient.delay_max_ms > kUsonAmbientDelayMaxMs) {
+      ambient.delay_max_ms = kUsonAmbientDelayMaxMs;
+    }
+  }
   if (ambient.delay_min_ms < 1000U) {
     ambient.delay_min_ms = 1000U;
   }
   if (ambient.delay_max_ms < ambient.delay_min_ms) {
     ambient.delay_max_ms = ambient.delay_min_ms;
   }
-  if (ambient.delay_max_ms > 120000U) {
-    ambient.delay_max_ms = 120000U;
+  if (ambient.delay_max_ms > kUsonAmbientDelayMaxMs) {
+    ambient.delay_max_ms = kUsonAmbientDelayMaxMs;
+  }
+  if (!isAmbientRandomFileModeToken(ambient.mode)) {
+    ambient.playlist_root[0] = '\0';
+  }
+
+  g_hardware_cfg.mic_la_sequence_enabled = false;
+  g_hardware_cfg.mic_la_sequence_count = 0U;
+  g_hardware_cfg.mic_la_sequence_note_hold_ms = 350U;
+  for (uint8_t idx = 0U; idx < RuntimeHardwareConfig::kLaSequenceMaxNotes; ++idx) {
+    g_hardware_cfg.mic_la_sequence_hz[idx] = 0U;
+  }
+  if (is_lefou_scene) {
+    g_hardware_cfg.mic_la_timeout_ms = 0U;
+    if (lefou_note_hold_ms < 100U) {
+      lefou_note_hold_ms = 100U;
+    } else if (lefou_note_hold_ms > 3000U) {
+      lefou_note_hold_ms = 3000U;
+    }
+    g_hardware_cfg.mic_la_sequence_note_hold_ms = lefou_note_hold_ms;
+    if (lefou_sequence_count > RuntimeHardwareConfig::kLaSequenceMaxNotes) {
+      lefou_sequence_count = RuntimeHardwareConfig::kLaSequenceMaxNotes;
+    }
+    g_hardware_cfg.mic_la_sequence_count = lefou_sequence_count;
+    g_hardware_cfg.mic_la_sequence_enabled = (lefou_sequence_count > 0U);
+    for (uint8_t idx = 0U; idx < lefou_sequence_count; ++idx) {
+      g_hardware_cfg.mic_la_sequence_hz[idx] = lefou_sequence_hz[idx];
+    }
+    if (g_hardware_cfg.mic_la_sequence_count > 0U) {
+      g_hardware_cfg.mic_la_target_hz = g_hardware_cfg.mic_la_sequence_hz[0];
+    }
+  } else if (g_hardware_cfg.mic_la_timeout_ms == 0U) {
+    // SCENE_LEFOU disables timeout; restore the default timeout on other scenes.
+    g_hardware_cfg.mic_la_timeout_ms = RuntimeHardwareConfig().mic_la_timeout_ms;
   }
 
   g_scene_backlight_fx = backlight;
@@ -1013,7 +1340,6 @@ void updateUsonProtoAmbientAudio(const ScenarioSnapshot& snapshot, uint32_t now_
   if (!uson_scene_active) {
     if (g_uson_ambient_audio_active) {
       g_audio.setVolume(g_uson_ambient_restore_volume);
-      g_audio.setFxProfile(g_uson_ambient_restore_fx_profile);
       g_uson_ambient_audio_active = false;
       g_uson_ambient_next_play_ms = 0U;
     }
@@ -1023,11 +1349,9 @@ void updateUsonProtoAmbientAudio(const ScenarioSnapshot& snapshot, uint32_t now_
   if (!g_uson_ambient_audio_active) {
     g_uson_ambient_audio_active = true;
     g_uson_ambient_restore_volume = g_audio.volume();
-    g_uson_ambient_restore_fx_profile = g_audio.fxProfile();
     if (!g_scene_ambient_audio_fx.non_interruptive && g_audio.isPlaying()) {
       g_audio.stop();
     }
-    g_audio.setFxProfile(0U);
     g_uson_ambient_next_play_ms = now_ms;
   }
 
@@ -1042,21 +1366,24 @@ void updateUsonProtoAmbientAudio(const ScenarioSnapshot& snapshot, uint32_t now_
     g_audio.stop();
   }
 
-  g_audio.setFxProfile(0U);
   const uint8_t volume = chooseAmbientVolume(0x0091A24UL);
   g_audio.setVolume(volume);
-  const char* ambient_track = (g_scene_ambient_audio_fx.track[0] != '\0') ? g_scene_ambient_audio_fx.track : kUsonAmbientTrack;
-  const bool ok = g_audio.play(ambient_track);
+  String ambient_track_path;
+  if (!chooseAmbientPlaylistTrack(g_scene_ambient_audio_fx, now_ms, &ambient_track_path)) {
+    ambient_track_path =
+        (g_scene_ambient_audio_fx.track[0] != '\0') ? String(g_scene_ambient_audio_fx.track) : String(kUsonAmbientTrack);
+  }
+  const bool ok = g_audio.play(ambient_track_path.c_str());
   if (!ok) {
     g_uson_ambient_next_play_ms = now_ms + 4000U;
-    Serial.printf("[AUDIO] uson ambient missing/failed track=%s\n", ambient_track);
+    Serial.printf("[AUDIO] uson ambient missing/failed track=%s\n", ambient_track_path.c_str());
     return;
   }
 
   const uint32_t next_delay_ms = chooseAmbientDelayMs(0x007A3B2UL);
   g_uson_ambient_next_play_ms = now_ms + next_delay_ms;
   Serial.printf("[AUDIO] uson ambient play track=%s volume=%u non_interruptive=%u next_in_ms=%lu\n",
-                ambient_track,
+                ambient_track_path.c_str(),
                 static_cast<unsigned int>(volume),
                 g_scene_ambient_audio_fx.non_interruptive ? 1U : 0U,
                 static_cast<unsigned long>(next_delay_ms));
@@ -1822,6 +2149,47 @@ bool executeEspNowCommandPayload(const char* payload_text, uint32_t now_ms, EspN
   if (command == "STATUS") {
     StaticJsonDocument<512> response;
     appendCompactRuntimeStatus(response.to<JsonObject>());
+    serializeJson(response, out_result->data_json);
+    out_result->ok = true;
+    return true;
+  }
+  if (command == "UI_SCENE_STATUS") {
+    const UiSceneStatusSnapshot ui = g_ui.sceneStatusSnapshot();
+    String scene_id = ui.scene_id;
+    String step_id = ui.step_id;
+    String scene_upper = scene_id;
+    String step_upper = step_id;
+    scene_upper.toUpperCase();
+    step_upper.toUpperCase();
+
+    const char* validation_state = "none";
+    if (step_upper.indexOf("RTC_ESP_ETAPE") >= 0 ||
+        step_upper.indexOf("WAITING") >= 0 ||
+        step_upper.indexOf("PENDING") >= 0 ||
+        scene_upper == "SCENE_WIN_ETAPE" ||
+        scene_upper == "SCENE_WIN_ETAPE2") {
+      validation_state = "waiting";
+    } else if (step_upper.indexOf("WARNING") >= 0 ||
+               step_upper.indexOf("REFUS") >= 0 ||
+               step_upper.indexOf("BROKEN") >= 0 ||
+               scene_upper == "SCENE_WARNING" ||
+               scene_upper == "SCENE_BROKEN") {
+      validation_state = "refused";
+    } else if (step_upper.indexOf("WIN") >= 0 ||
+               step_upper.indexOf("FINAL") >= 0 ||
+               step_upper.indexOf("REWARD") >= 0 ||
+               scene_upper == "SCENE_WIN_ETAPE1" ||
+               scene_upper == "SCENE_WIN" ||
+               scene_upper == "SCENE_REWARD") {
+      validation_state = "granted";
+    }
+
+    StaticJsonDocument<320> response;
+    response["valid"] = ui.valid;
+    response["scenario_id"] = ui.scenario_id;
+    response["scene_id"] = ui.scene_id;
+    response["step_id"] = ui.step_id;
+    response["validation_state"] = validation_state;
     serializeJson(response, out_result->data_json);
     out_result->ok = true;
     return true;
@@ -3311,6 +3679,15 @@ void webFillHardwareStatus(JsonObject out) {
   la_trigger["release_ms"] = g_hardware_cfg.mic_la_release_ms;
   la_trigger["cooldown_ms"] = g_hardware_cfg.mic_la_cooldown_ms;
   la_trigger["timeout_ms"] = g_hardware_cfg.mic_la_timeout_ms;
+  la_trigger["sequence_enabled"] = g_hardware_cfg.mic_la_sequence_enabled;
+  la_trigger["sequence_note_hold_ms"] = g_hardware_cfg.mic_la_sequence_note_hold_ms;
+  la_trigger["sequence_count"] = g_hardware_cfg.mic_la_sequence_count;
+  JsonArray sequence = la_trigger["sequence_hz"].to<JsonArray>();
+  for (uint8_t idx = 0U; idx < g_hardware_cfg.mic_la_sequence_count &&
+                         idx < RuntimeHardwareConfig::kLaSequenceMaxNotes;
+       ++idx) {
+    sequence.add(g_hardware_cfg.mic_la_sequence_hz[idx]);
+  }
   la_trigger["event_name"] = g_hardware_cfg.mic_la_event_name;
   la_trigger["gate_active"] = g_la_trigger.gate_active;
   la_trigger["sample_match"] = g_la_trigger.sample_match;
@@ -3318,6 +3695,8 @@ void webFillHardwareStatus(JsonObject out) {
   la_trigger["timeout_pending"] = g_la_trigger.timeout_pending;
   la_trigger["stable_now_ms"] = g_la_trigger.stable_ms;
   la_trigger["stable_pct"] = laStablePercent();
+  la_trigger["sequence_index"] = g_la_trigger.sequence_index;
+  la_trigger["sequence_target_hz"] = g_la_trigger.sequence_target_hz;
   out["battery_enabled"] = g_hardware_cfg.battery_enabled;
   out["battery_low_pct"] = g_hardware_cfg.battery_low_pct;
   out["battery_pct"] = hw.battery_percent;
@@ -3699,7 +4078,7 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
       std::strcmp(action_type, "espnow_send") == 0) {
     const char* target = action_doc["config"]["target"] | action_doc["config"]["peer"] | "broadcast";
     const char* payload = action_doc["config"]["payload"] | "";
-    String fallback_payload;
+    String payload_text;
     if (payload[0] == '\0') {
       const char* inferred = "WAITING_VALIDATION";
       if (std::strstr(action_id, "ETAPE2") != nullptr) {
@@ -3707,8 +4086,23 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
       } else if (std::strstr(action_id, "ETAPE1") != nullptr) {
         inferred = "ACK_WIN1";
       }
-      fallback_payload = inferred;
-      payload = fallback_payload.c_str();
+      payload_text = inferred;
+      payload = payload_text.c_str();
+    } else {
+      payload_text = payload;
+    }
+
+    if ((std::strcmp(action_id, "ACTION_ESP_NOW_WAITING") == 0 ||
+         std::strcmp(action_id, "ACTION_ESP_NOW_WAITING_VALIDATION") == 0 || payload_text == "WAITING_VALIDATION") &&
+        !payload_text.startsWith("WAITING_VALIDATION {")) {
+      StaticJsonDocument<192> waiting_doc;
+      waiting_doc["scene_id"] = snapshot.screen_scene_id != nullptr ? snapshot.screen_scene_id : "";
+      waiting_doc["step_id"] = stepIdFromSnapshot(snapshot);
+      waiting_doc["validation_state"] = "waiting";
+      String waiting_args;
+      serializeJson(waiting_doc, waiting_args);
+      payload_text = String("WAITING_VALIDATION ") + waiting_args;
+      payload = payload_text.c_str();
     }
     const bool ok = g_network.sendEspNowTarget(target, payload);
     Serial.printf("[ACTION] ESPNOW_SEND id=%s target=%s payload=%s ok=%u\n",
@@ -5268,6 +5662,10 @@ void refreshSceneIfNeededImpl(bool force_render) {
     }
   }
 
+  if (transition.scene_changed && !kForceTestLabSceneLock) {
+    syncHotlineSceneState(snapshot);
+  }
+
   const char* led_scene_id = snapshot.screen_scene_id;
   if (kForceTestLabSceneLock) {
     led_scene_id = kTestLabSceneId;
@@ -6350,20 +6748,26 @@ void setup() {
   g_buttons.begin();
   g_touch.begin();
   g_network.begin(g_network_cfg.hostname);
-  g_network.configureFallbackAp(g_network_cfg.ap_default_ssid, g_network_cfg.ap_default_password);
-  g_network.configureLocalPolicy(g_network_cfg.local_ssid,
-                                 g_network_cfg.local_password,
-                                 g_network_cfg.force_ap_if_not_local,
-                                 g_network_cfg.local_retry_ms,
-                                 g_network_cfg.pause_local_retry_when_ap_client);
-  if (g_setup_mode && g_network_cfg.ap_default_ssid[0] != '\0') {
-    g_network.startAp(g_network_cfg.ap_default_ssid, g_network_cfg.ap_default_password);
-  }
-  if (g_network_cfg.local_ssid[0] != '\0') {
-    const bool connect_started = g_network.connectSta(g_network_cfg.local_ssid, g_network_cfg.local_password);
-    Serial.printf("[NET] boot wifi target=%s started=%u\n",
-                  g_network_cfg.local_ssid,
-                  connect_started ? 1U : 0U);
+  if (kBootEspNowOnlyMode) {
+    g_network.configureFallbackAp("", "");
+    g_network.configureLocalPolicy("", "", false, g_network_cfg.local_retry_ms, false);
+    Serial.println("[NET] wifi+web disabled (espnow_only_mode=1)");
+  } else {
+    g_network.configureFallbackAp(g_network_cfg.ap_default_ssid, g_network_cfg.ap_default_password);
+    g_network.configureLocalPolicy(g_network_cfg.local_ssid,
+                                   g_network_cfg.local_password,
+                                   g_network_cfg.force_ap_if_not_local,
+                                   g_network_cfg.local_retry_ms,
+                                   g_network_cfg.pause_local_retry_when_ap_client);
+    if (g_setup_mode && g_network_cfg.ap_default_ssid[0] != '\0') {
+      g_network.startAp(g_network_cfg.ap_default_ssid, g_network_cfg.ap_default_password);
+    }
+    if (g_network_cfg.local_ssid[0] != '\0') {
+      const bool connect_started = g_network.connectSta(g_network_cfg.local_ssid, g_network_cfg.local_password);
+      Serial.printf("[NET] boot wifi target=%s started=%u\n",
+                    g_network_cfg.local_ssid,
+                    connect_started ? 1U : 0U);
+    }
   }
   if (g_network_cfg.espnow_enabled_on_boot) {
     if (g_network.enableEspNow()) {
@@ -6380,7 +6784,11 @@ void setup() {
     Serial.println("[NET] ESP-NOW boot disabled by APP_ESPNOW config");
   }
   g_next_espnow_discovery_ms = millis() + 2000U;
-  setupWebUi();
+  if (!kBootEspNowOnlyMode) {
+    setupWebUi();
+  } else {
+    Serial.println("[WEB] disabled (espnow_only_mode=1)");
+  }
   g_audio.begin();
   Serial.printf("[MAIN] audio profile=%u:%s count=%u\n",
                 g_audio.outputProfile(),

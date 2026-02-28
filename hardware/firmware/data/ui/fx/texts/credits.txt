@@ -1,0 +1,102 @@
+[SPEED 26]
+[ALIGN center]
+[SIZE title]
+LES 10 ANS D'ISAAC
+[SIZE normal]
+GÉNÉRIQUE DÉMOSCENE NARRATIF
+
+[SPACE 2]
+[SIZE big]
+CREDITS
+[SIZE normal]
+
+Code & Design
+Clément Saillant
+
+[SPACE 1]
+Audio
+Electron Rare Lab
+
+[SPACE 2]
+[PAUSE 1200]
+[SIZE big]
+MERCI À TOUS !
+[SIZE normal]
+
+Il était une fois, dans une galaxie pas si lointaine...
+Un jeune Jedi nommé ISAAC fêtait ses 10 ans.
+Autour de lui, une équipe de héros, de magiciens, de bricoleurs et de chatons farceurs, prêts à coder la fête la plus épique de l’année !
+
+ISAAC SAILLANT
+Le héros du jour, capable de transformer chaque bug en aventure et chaque goûter en expédition intergalactique.
+LISAEL SAILLANT
+La magicienne des solutions, qui fait disparaître les problèmes plus vite qu’un scroll texte sur Amiga.
+VALERIE GALVAN
+La chef d’orchestre des goûters, qui synchronise enfants, gâteaux et chatons comme personne.
+FRANCK SAILLANT
+Le MacGyver du fer à souder, qui a déjà sauvé plus d’un HotAMP en pleine démo party.
+LES CHAT J'AI PETER
+Les crash-testeurs officiels, experts en reboot sauvage et en câlins imprévus.
+LES CODEX
+Les gardiens du savoir, toujours prêts à sortir un cheat code ou une astuce venue d’une autre dimension.
+LE HOTAMP
+L’ampli légendaire, qui chauffe plus vite que la musique ne démarre, et qui a survécu à toutes les jams.
+LA SCENE
+Le théâtre des rêves, où tout devient possible, même les plus grands fous rires.
+POUET
+Le cri de ralliement des scenerz, et le site culte où l’on partage ses exploits : https://www.pouet.net/
+AMIGA POWAAA
+L’ordi mythique, vénéré par tous, qui refuse de mourir et fait tourner les plus belles démos.
+BOOBS
+Toujours là pour détendre l’atmosphère, même dans les compos wild.
+WODK
+Le carburant des nuits blanches, à consommer avec modération (ou pas).
+L'ELECTON FOU
+Celui qui fait des étincelles, parfois littéralement, surtout en live coding.
+PIERRICK
+Le roi des blagues à deux balles, et des intros 4K qui plantent au dernier moment.
+PASCALINE
+Celle qui trouve toujours la solution, même quand le bug est "feature".
+ERIC SAILLANT
+Le chef d’orchestre des réunions de famille, et des jams improvisés.
+JEROME STRAZZULA
+L’homme aux mille anecdotes, dont la moitié sont vraies, l’autre moitié sont des démos.
+LA VIE QUOI
+Parce qu’il faut bien vivre, et parfois survivre à une release party.
+ET
+TOI
+MON
+FILS
+ISAAC
+Celui qui pose les questions les plus inattendues, comme "c’est quoi une 64K intro ?"
+QUI GRANDIT
+ET ENSEMBLE
+ON GRANDIT
+ET ON
+CONSTRUIT
+NOS VIE
+ALORS
+VIVONS
+CETTE
+VIE !!!!
+
+MERCI À VOUS :
+IRIS, JOANE, SOANE, GABRIEL, GABRIEL
+La bande qui transforme chaque goûter en expédition.
+et chaque bug en fou rire.
+ROMANE, TOM, AXEL, SVEN, ROSE
+Toujours partants pour une nouvelle aventure.
+et une démo sur Amiga.
+MARC-ANTOINE, MAHOME, JOANE
+Les experts en bêtises et en fous rires.
+et capables de coder un scroll texte à la main.
+
+Et puis, il y a...
+TON DRÔLE DE PAPA
+Avec ses problèmes cérébriques, ses idées folles, ses circuits improbables,
+un Electron rare ou fou, qui t’aime plus que tout.
+
+[SPACE 2]
+[SIZE big]
+Que la fête commence !
+[END]

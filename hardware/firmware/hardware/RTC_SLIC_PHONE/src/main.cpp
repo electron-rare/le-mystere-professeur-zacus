@@ -62,7 +62,7 @@ constexpr uint32_t kInterludeMinDelayMs = 15UL * 60UL * 1000UL;
 constexpr uint32_t kInterludeMaxDelayMs = 30UL * 60UL * 1000UL;
 constexpr uint32_t kInterludeRetryDelayMs = 120000UL;
 constexpr uint32_t kWarningSirenBeatTimeoutMs = 6000UL;
-constexpr uint8_t kA252CodecMaxVolumePercent = 100U;
+constexpr uint8_t kA252CodecMaxVolumePercent = 60U;  // Reduced from 100% to prevent audio saturation
 
 #ifndef RTC_FIRMWARE_GIT_SHA
 #define RTC_FIRMWARE_GIT_SHA "unknown"
@@ -301,7 +301,7 @@ void ensureA252AudioDefaults() {
   bool updated = false;
 
   if (g_audio_cfg.volume != kA252CodecMaxVolumePercent) {
-    Serial.printf("[RTC_BL_PHONE] correcting A252 audio volume %u -> %u (ES8388 max)\n",
+    Serial.printf("[RTC_BL_PHONE] correcting A252 audio volume %u -> %u (optimized tel level)\n",
                   static_cast<unsigned>(g_audio_cfg.volume),
                   static_cast<unsigned>(kA252CodecMaxVolumePercent));
     g_audio_cfg.volume = kA252CodecMaxVolumePercent;
@@ -740,7 +740,7 @@ void tickEspNowPeerDiscoveryRuntime() {
     const String msg_id = String("peerdisc-") + String(now) + "-" + String(probe_index);
     const uint32_t seq = now;
 
-    JsonDocument doc;
+    DynamicJsonDocument doc(1024);
     doc["msg_id"] = msg_id;
     doc["seq"] = seq;
     doc["type"] = "command";
@@ -796,7 +796,7 @@ bool requestSceneSyncFromFreenove(const char* reason, bool force_now) {
     const String msg_id = String("scene-sync-") + String(now) + "-" + String(request_index);
     const uint32_t seq = now;
 
-    JsonDocument doc;
+    DynamicJsonDocument doc(1024);
     doc["msg_id"] = msg_id;
     doc["seq"] = seq;
     doc["type"] = "command";
@@ -1324,7 +1324,7 @@ bool parseFsListOptions(const String& args, FsListOptions& out_options, String& 
     }
 
     if (work.startsWith("{")) {
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         if (deserializeJson(doc, work) != DeserializationError::Ok || !doc.is<JsonObjectConst>()) {
             out_error = "invalid_args";
             return false;
@@ -1544,7 +1544,7 @@ DispatchResponse dispatchFsListCommand(const String& args) {
     }
     directory.close();
 
-    JsonDocument doc;
+    DynamicJsonDocument doc(1024);
     JsonObject root = doc.to<JsonObject>();
     root["source_requested"] = mediaSourceToString(options.source);
     root["source_used"] = mediaSourceToString(result.source_used);
@@ -1561,7 +1561,7 @@ DispatchResponse dispatchFsListCommand(const String& args) {
 
     JsonArray entries = root["entries"].to<JsonArray>();
     for (const FsListEntry& entry : result.entries) {
-        JsonObject item = entries.add<JsonObject>();
+        JsonObject item = entries.createNestedObject();
         item["path"] = entry.path;
         item["type"] = entry.is_dir ? "dir" : "file";
         item["size"] = static_cast<uint32_t>(entry.size);
@@ -2855,7 +2855,7 @@ bool parseMediaRouteFromArgs(const String& args, MediaRouteEntry& out_route, boo
     }
 
     if (work.startsWith("{")) {
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         if (deserializeJson(doc, work) != DeserializationError::Ok || !doc.is<JsonObject>()) {
             return false;
         }
@@ -3032,7 +3032,7 @@ bool sendHotlineNotify(const char* state, const String& digit_key, const String&
     constexpr size_t kHotlineNotifyPayloadBudget = 220U;
     constexpr size_t kEspNowPayloadHardLimit = 240U;
 
-    JsonDocument doc;
+    DynamicJsonDocument doc(1024);
     doc["proto"] = "rtcbl/1";
     doc["type"] = "event";
     doc["event"] = "hotline_script";
@@ -3066,7 +3066,7 @@ bool sendHotlineNotify(const char* state, const String& digit_key, const String&
     serializeJson(doc, wire);
 
     if (wire.length() > kHotlineNotifyPayloadBudget) {
-        JsonDocument compact_doc;
+        DynamicJsonDocument compact_doc(1024);
         compact_doc["proto"] = "rtcbl/1";
         compact_doc["event"] = "hotline_script";
         JsonObject compact_payload = compact_doc["payload"].to<JsonObject>();
@@ -3094,7 +3094,7 @@ bool sendHotlineNotify(const char* state, const String& digit_key, const String&
         wire = "";
         serializeJson(compact_doc, wire);
         if (wire.length() > kEspNowPayloadHardLimit) {
-            JsonDocument minimal_doc;
+            DynamicJsonDocument minimal_doc(1024);
             minimal_doc["e"] = "hotline_script";
             minimal_doc["s"] = state == nullptr ? "" : state;
             minimal_doc["k"] = digit_key;
@@ -3244,6 +3244,20 @@ void stopHotlineForHangup() {
     }
     g_audio.stopPlayback();
     g_audio.stopTone();
+    
+    // CRITICAL FIX: Verify audio actually stopped (prevent race condition)
+    uint32_t audio_stop_timeout = millis() + 100U;
+    while ((g_audio.isPlaying() || g_audio.isToneRenderingActive()) && 
+           static_cast<int32_t>(millis() - audio_stop_timeout) < 0) {
+        delayMicroseconds(1000);  // Spin briefly for audio engine to catch up
+    }
+    if (g_audio.isPlaying() || g_audio.isToneRenderingActive()) {
+        Serial.println("[RTC_BL_PHONE] WARNING: audio still active after hangup, forcing stop");
+        // Force immediate stop if audio engine didn't respond
+        g_audio.stopPlayback();
+        g_audio.stopTone();
+    }
+    
     sendHotlineNotify(
         "stopped_hangup",
         g_hotline.current_key,
@@ -3684,7 +3698,7 @@ MediaRouteEntry resolveEspNowMediaRoute(const String& message, const String& arg
 
 DispatchResponse makeEspNowCallResponse(bool ok, const String& message, const MediaRouteEntry& route, bool pending) {
     DispatchResponse res = makeResponse(ok, ok ? (pending ? "ESPNOW_CALL_RINGING" : "ESPNOW_CALL_PLAY") : "ESPNOW_CALL_FAILED");
-    JsonDocument payload;
+    DynamicJsonDocument payload(1024);
     payload["call"] = message;
     JsonObject audio = payload["audio"].to<JsonObject>();
     audio["kind"] = mediaRouteKindToString(route.kind);
@@ -3740,7 +3754,7 @@ bool sendHotlineValidationAckEvent(const char* ack_event_name, bool ack_requeste
         return false;
     }
 
-    JsonDocument frame;
+    DynamicJsonDocument frame(1024);
     frame["msg_id"] = String("hv-") + String(millis());
     frame["seq"] = static_cast<uint32_t>(millis());
     frame["type"] = "command";
@@ -3976,7 +3990,7 @@ DispatchResponse dispatchWarningSirenCommand(const String& args) {
     action.toUpperCase();
 
     if (action == "STATUS") {
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         JsonObject root = doc.to<JsonObject>();
         root["enabled"] = g_warning_siren.enabled;
         root["tone_owned"] = g_warning_siren.tone_owned;
@@ -4223,7 +4237,7 @@ bool parseSceneIdFromArgs(const String& args,
     }
 
     if (normalized[0] == '{') {
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         if (deserializeJson(doc, normalized) == DeserializationError::Ok && doc.is<JsonObject>()) {
             scene_id = doc["id"] | doc["scene_id"] | doc["scene"] | "";
             scene_id.trim();
@@ -4769,7 +4783,7 @@ bool applyAudioPatch(JsonVariantConst patch, A252AudioConfig& target, String& er
         next.sample_rate = 8000U;
         next.bits_per_sample = 16U;
         next.wav_loudness_policy = "FIXED_GAIN_ONLY";
-        next.volume = kA252CodecMaxVolumePercent;
+        next.volume = kA252CodecMaxVolumePercent;  // 60% to prevent saturation
         next.adc_dsp_enabled = false;
         next.adc_fft_enabled = false;
     }
@@ -4878,7 +4892,7 @@ DispatchResponse applyEspNowCallMapSetImpl(const String& args, bool persist, con
         return makeResponse(false, command + " invalid_json");
     }
 
-    JsonDocument doc;
+    DynamicJsonDocument doc(1024);
     if (deserializeJson(doc, args) != DeserializationError::Ok || !doc.is<JsonObject>()) {
         return makeResponse(false, command + " invalid_json");
     }
@@ -4942,7 +4956,7 @@ DispatchResponse applyDialMediaMapSetImpl(const String& args, bool persist, cons
         return makeResponse(false, command + " invalid_json");
     }
 
-    JsonDocument doc;
+    DynamicJsonDocument doc(1024);
     if (deserializeJson(doc, args) != DeserializationError::Ok || !doc.is<JsonObject>()) {
         return makeResponse(false, command + " invalid_json");
     }
@@ -5032,7 +5046,7 @@ void registerCommands() {
     });
 
     g_dispatcher.registerCommand("STATUS", [](const String&) {
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         fillStatusSnapshot(doc.to<JsonObject>());
         return jsonResponse(doc);
     });
@@ -5048,7 +5062,7 @@ void registerCommands() {
     });
 
     g_dispatcher.registerCommand("WIFI_STATUS", [](const String&) {
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         JsonObject root = doc.to<JsonObject>();
         const wl_status_t status = WiFi.status();
         const bool connected = status == WL_CONNECTED;
@@ -5097,7 +5111,7 @@ void registerCommands() {
     });
 
     g_dispatcher.registerCommand("WIFI_SCAN", [](const String&) {
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         JsonArray networks = doc.to<JsonArray>();
         g_wifi.scanToJson(networks, 20);
         return jsonResponse(doc);
@@ -5132,7 +5146,7 @@ void registerCommands() {
     });
 
     g_dispatcher.registerCommand("SLIC_PD_STATUS", [](const String&) {
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         JsonObject root = doc.to<JsonObject>();
         root["power_down"] = g_slic.isPowerDownEnabled();
         root["telephony_powered"] = g_telephony.isTelephonyPowered();
@@ -5195,7 +5209,7 @@ void registerCommands() {
             }
         }
 
-        JsonDocument out;
+        DynamicJsonDocument out(1024);
         JsonObject root = out.to<JsonObject>();
         root["ok"] = true;
         root["code"] = "SCENE";
@@ -5260,7 +5274,7 @@ void registerCommands() {
     });
 
     g_dispatcher.registerCommand("OSC_STATUS", [](const String&) {
-        JsonDocument out;
+        DynamicJsonDocument out(1024);
         JsonObject scope = out.to<JsonObject>();
         scope["supported"] = g_scope_display.supported();
         scope["enabled"] = g_scope_display.enabled();
@@ -5425,7 +5439,7 @@ void registerCommands() {
     });
 
     g_dispatcher.registerCommand("VOLUME_GET", [](const String&) {
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         doc["volume"] = g_audio_cfg.volume;
         return jsonResponse(doc);
     });
@@ -5495,7 +5509,7 @@ void registerCommands() {
     });
 
     g_dispatcher.registerCommand("ESPNOW_PEER_LIST", [](const String&) {
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         JsonObject root = doc.to<JsonObject>();
         root["device_name"] = g_espnow.deviceName();
         JsonArray peers = root["peers"].to<JsonArray>();
@@ -5506,13 +5520,13 @@ void registerCommands() {
     });
 
     g_dispatcher.registerCommand("ESPNOW_STATUS", [](const String&) {
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         g_espnow.statusToJson(doc.to<JsonObject>());
         return jsonResponse(doc);
     });
 
     g_dispatcher.registerCommand("ESPNOW_DEVICE_NAME_GET", [](const String&) {
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         doc["device_name"] = g_espnow.deviceName();
         return jsonResponse(doc);
     });
@@ -5540,7 +5554,7 @@ void registerCommands() {
     });
 
     g_dispatcher.registerCommand("ESPNOW_CALL_MAP_GET", [](const String&) {
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         JsonObject map = doc.to<JsonObject>();
         A252ConfigStore::espNowCallMapToJson(g_espnow_call_map, map);
         return jsonResponse(doc);
@@ -5568,7 +5582,7 @@ void registerCommands() {
     });
 
     g_dispatcher.registerCommand("DIAL_MEDIA_MAP_GET", [](const String&) {
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         JsonObject map = doc.to<JsonObject>();
         A252ConfigStore::dialMediaMapToJson(g_dial_media_map, map);
         return jsonResponse(doc);
@@ -5596,7 +5610,7 @@ void registerCommands() {
     });
 
     g_dispatcher.registerCommand("HOTLINE_STATUS", [](const String&) {
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         JsonObject root = doc.to<JsonObject>();
         root["active"] = g_hotline.active;
         root["scene"] = g_active_scene_id;
@@ -5723,7 +5737,7 @@ void registerCommands() {
             return makeResponse(false, "HOTLINE_SCENE_PLAY play_failed");
         }
 
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         JsonObject root = doc.to<JsonObject>();
         root["ok"] = true;
         root["code"] = "HOTLINE_SCENE_PLAY";
@@ -5738,7 +5752,7 @@ void registerCommands() {
     });
 
     g_dispatcher.registerCommand("SLIC_CONFIG_GET", [](const String&) {
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         A252ConfigStore::pinsToJson(g_pins_cfg, doc.to<JsonObject>());
         return jsonResponse(doc);
     });
@@ -5748,7 +5762,7 @@ void registerCommands() {
             return makeResponse(false, "SLIC_CONFIG_SET invalid_json");
         }
 
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         if (deserializeJson(doc, args) != DeserializationError::Ok) {
             return makeResponse(false, "SLIC_CONFIG_SET invalid_json");
         }
@@ -5770,13 +5784,13 @@ void registerCommands() {
             return makeResponse(false, "SLIC_CONFIG_SET apply_failed");
         }
 
-        JsonDocument out;
+        DynamicJsonDocument out(1024);
         A252ConfigStore::pinsToJson(g_pins_cfg, out.to<JsonObject>());
         return jsonResponse(out);
     });
 
     g_dispatcher.registerCommand("AUDIO_CONFIG_GET", [](const String&) {
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         A252ConfigStore::audioToJson(g_audio_cfg, doc.to<JsonObject>());
         return jsonResponse(doc);
     });
@@ -5786,7 +5800,7 @@ void registerCommands() {
             return makeResponse(false, "AUDIO_CONFIG_SET invalid_json");
         }
 
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         if (deserializeJson(doc, args) != DeserializationError::Ok) {
             return makeResponse(false, "AUDIO_CONFIG_SET invalid_json");
         }
@@ -5812,7 +5826,7 @@ void registerCommands() {
     });
 
     g_dispatcher.registerCommand("AUDIO_POLICY_GET", [](const String&) {
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         JsonObject root = doc.to<JsonObject>();
         root["clock_policy"] = g_audio_cfg.clock_policy;
         root["wav_loudness_policy"] = g_audio_cfg.wav_loudness_policy;
@@ -5828,7 +5842,7 @@ void registerCommands() {
             return makeResponse(false, "AUDIO_POLICY_SET invalid_json");
         }
 
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         if (deserializeJson(doc, args) != DeserializationError::Ok) {
             return makeResponse(false, "AUDIO_POLICY_SET invalid_json");
         }
@@ -5865,7 +5879,7 @@ void registerCommands() {
             return makeResponse(false, "AUDIO_PROBE " + (probe.error.isEmpty() ? String("failed") : probe.error));
         }
 
-        JsonDocument doc;
+        DynamicJsonDocument doc(1024);
         JsonObject root = doc.to<JsonObject>();
         root["ok"] = probe.ok;
         root["path"] = probe.path;
@@ -5927,7 +5941,7 @@ void processInboundBridgeCommand(const String& source, const JsonVariantConst& p
         }
 
         if (response_payload.length() > kEspNowResponseBudget) {
-            JsonDocument minimal;
+            DynamicJsonDocument minimal(1024);
             if (envelope_mode) {
                 minimal["msg_id"] = request_id.isEmpty() ? String(millis()) : request_id;
                 minimal["seq"] = request_seq;
@@ -5954,7 +5968,7 @@ void processInboundBridgeCommand(const String& source, const JsonVariantConst& p
     DispatchResponse result;
     if (handleIncomingEspNowCallCommand(cmd, result)) {
         if (is_envelope_v2 && request_ack && isMacAddressString(source)) {
-            JsonDocument response;
+            DynamicJsonDocument response(1024);
             response["msg_id"] = request_id.isEmpty() ? String(millis()) : request_id;
             response["seq"] = request_seq;
             response["type"] = "ack";
@@ -5965,7 +5979,7 @@ void processInboundBridgeCommand(const String& source, const JsonVariantConst& p
             ack_payload["error"] = result.ok ? "" : (result.code.isEmpty() ? result.raw : result.code);
 
             if (!result.json.isEmpty()) {
-                JsonDocument parsed;
+                DynamicJsonDocument parsed(1024);
                 if (deserializeJson(parsed, result.json) == DeserializationError::Ok) {
                     ack_payload["data"].set(parsed.as<JsonVariantConst>());
                 } else {
@@ -5983,7 +5997,7 @@ void processInboundBridgeCommand(const String& source, const JsonVariantConst& p
             return;
         }
 
-        JsonDocument response;
+        DynamicJsonDocument response(1024);
         response["proto"] = "rtcbl/1";
         response["id"] = request_id;
         response["ok"] = result.ok;
@@ -5991,7 +6005,7 @@ void processInboundBridgeCommand(const String& source, const JsonVariantConst& p
         response["error"] = result.ok ? "" : (result.code.isEmpty() ? result.raw : result.code);
 
         if (!result.json.isEmpty()) {
-            JsonDocument parsed;
+            DynamicJsonDocument parsed(1024);
             if (deserializeJson(parsed, result.json) == DeserializationError::Ok) {
                 JsonVariant data = response["data"];
                 data.set(parsed.as<JsonVariantConst>());
@@ -6009,7 +6023,7 @@ void processInboundBridgeCommand(const String& source, const JsonVariantConst& p
     result = executeCommandLine(cmd);
 
     if (is_envelope_v2 && request_ack && isMacAddressString(source)) {
-        JsonDocument response;
+        DynamicJsonDocument response(1024);
         response["msg_id"] = request_id.isEmpty() ? String(millis()) : request_id;
         response["seq"] = request_seq;
         response["type"] = "ack";
@@ -6021,7 +6035,7 @@ void processInboundBridgeCommand(const String& source, const JsonVariantConst& p
         ack_payload["error"] = result.ok ? "" : (result.code.isEmpty() ? result.raw : result.code);
 
         if (!result.json.isEmpty()) {
-            JsonDocument parsed;
+            DynamicJsonDocument parsed(1024);
             if (deserializeJson(parsed, result.json) == DeserializationError::Ok) {
                 ack_payload["data"].set(parsed.as<JsonVariantConst>());
             } else {
@@ -6039,7 +6053,7 @@ void processInboundBridgeCommand(const String& source, const JsonVariantConst& p
         return;
     }
 
-    JsonDocument response;
+    DynamicJsonDocument response(1024);
     response["proto"] = "rtcbl/1";
     response["id"] = request_id;
     response["ok"] = result.ok;
@@ -6047,7 +6061,7 @@ void processInboundBridgeCommand(const String& source, const JsonVariantConst& p
     response["error"] = result.ok ? "" : (result.code.isEmpty() ? result.raw : result.code);
 
     if (!result.json.isEmpty()) {
-        JsonDocument parsed;
+        DynamicJsonDocument parsed(1024);
         if (deserializeJson(parsed, result.json) == DeserializationError::Ok) {
             JsonVariant data = response["data"];
             data.set(parsed.as<JsonVariantConst>());

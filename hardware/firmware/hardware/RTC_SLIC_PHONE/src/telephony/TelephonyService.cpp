@@ -2,7 +2,7 @@
 
 namespace {
 constexpr uint16_t kDtmfFrameSamples = 160U;
-constexpr uint32_t kHookHangupMs = 300U;
+constexpr uint32_t kHookHangupMs = 50U;  // Reduced from 300ms for cleaner state transitions
 constexpr uint32_t kHookStabilizeMs = 40U;
 constexpr uint32_t kPulseInterDigitGapMs = 700U;
 constexpr uint32_t kPulseEdgeDebounceMs = 22U;

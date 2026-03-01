@@ -1,7 +1,0 @@
-# Include
-
-Headers partages du firmware (si necessaire).
-
-Etat actuel:
-- pas de headers custom obligatoires pour build (`src/main.cpp` et `src/main_esp8266_oled.cpp` sont autonomes).
-- ajouter ici les `.h` communs si un refactor le necessite.

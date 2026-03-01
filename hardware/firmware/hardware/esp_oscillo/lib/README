@@ -1,7 +1,0 @@
-# Lib
-
-Bibliotheques locales privees du projet.
-
-Etat actuel:
-- aucune lib locale active.
-- les dependances sont gerees via `platformio.ini` (`lib_deps`).

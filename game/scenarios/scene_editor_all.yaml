@@ -24,7 +24,7 @@ meta:
 scenes:
 - scene_id: SCENE_U_SON_PROTO
   screen_json: hardware/firmware/data/story/screens/SCENE_U_SON_PROTO.json
-  default_audio_pack_id: PACK_BOOT_RADIO
+  default_audio_pack_id: ''
   runtime_step_ids:
   - SCENE_U_SON_PROTO
   lvgl:
@@ -175,6 +175,7 @@ scenes:
       caption_font_face: ibm_bold_16
       flip_on_timeout: false
       reset_flip_ms: 3000
+      full_turn_flip_ms: 2000
       background_preset: hourglass_demoscene_ultra
       background_sync: mic_smoothed
       background_intensity_pct: 32
@@ -244,7 +245,7 @@ scenes:
     size: 100
 - scene_id: SCENE_WARNING
   screen_json: hardware/firmware/data/story/screens/SCENE_WARNING.json
-  default_audio_pack_id: PACK_BOOT_RADIO
+  default_audio_pack_id: ''
   runtime_step_ids:
   - STEP_WARNING
   lvgl:

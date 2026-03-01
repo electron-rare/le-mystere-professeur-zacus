@@ -1,4 +1,4 @@
-# SCENARIO BRIEF — DEFAULT
+# SCENARIO BRIEF — None
 
 ## Stats
 

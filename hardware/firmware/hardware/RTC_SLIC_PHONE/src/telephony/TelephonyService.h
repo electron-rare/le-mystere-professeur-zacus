@@ -59,6 +59,7 @@ public:
     bool dialingStarted() const;
 
 private:
+    bool forcePowerOnPolicy() const;
     void setTelephonyPower(bool enabled);
     void applyPowerPolicyPreTick(uint32_t now);
     void applyPowerPolicyPostTick(bool hook_off, uint32_t now);
@@ -67,6 +68,8 @@ private:
     void evaluateDialBuffer(uint32_t now, const char* reason);
     void commitDialBuffer(const char* reason);
     void clearDialSession();
+    void selectRandomDialProfile();
+    bool startSelectedDialTone();
 
     BoardProfile profile_;
     FeatureMatrix features_;
@@ -110,6 +113,7 @@ private:
     uint32_t dial_exact_pending_since_ms_;
     String last_dial_error_;
     const char* message_path_;
+    ToneProfile off_hook_dial_profile_;
 };
 
 #endif  // TELEPHONY_SERVICE_H

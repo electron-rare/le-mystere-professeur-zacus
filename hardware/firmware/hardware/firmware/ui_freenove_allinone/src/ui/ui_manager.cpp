@@ -477,9 +477,21 @@ constexpr const char* kWinEtapeFxScrollTextB =
     "WINNER MODE - STAGE B - KEEP THE BEAT - ";
 constexpr const char* kWinEtapeFxScrollTextC =
     "BOINGBALL MODE - SCENE WIN ETAPE - ";
-constexpr uint32_t kWinEtape1CelebrateMs = 20000U;
-constexpr uint32_t kWinEtape1WinnerMs = 20000U;
-constexpr uint32_t kWinEtape1CreditsStartMs = kWinEtape1CelebrateMs + kWinEtape1WinnerMs;
+constexpr const char* kWinEtape1BoingScrollText =
+    " -- dedicace a Franck Saillant ---";
+constexpr const char* kWinEtape1FireworksScrollText =
+    "Bravo a vous brigade Z";
+constexpr uint32_t kWinEtape1Demo3dMs = 30000U;
+constexpr uint32_t kWinEtape1BoingballMs = 20000U;
+constexpr uint32_t kWinEtape1FireworksMs = 20000U;
+constexpr uint32_t kWinEtape1Demo90sMs = 30000U;
+constexpr uint32_t kWinEtape1CreditsStartMs =
+    kWinEtape1Demo3dMs + kWinEtape1BoingballMs + kWinEtape1FireworksMs + kWinEtape1Demo90sMs;
+constexpr uint32_t kCreditsBootPhaseMs = 15000U;
+constexpr uint32_t kCreditsHoloPhaseMs = 15000U;
+constexpr uint32_t kCreditsStarWarsStartMs = kCreditsBootPhaseMs + kCreditsHoloPhaseMs;
+constexpr bool kForceFxAllScenesRuntime = true;
+constexpr int8_t kCreditsScrollDirectionY = -1;  // -1 = bottom->top, +1 = top->bottom.
 
 constexpr uint16_t kIntroTickMs = 42U;
 constexpr uint32_t kUiUpdateFrameMs = 42U;
@@ -1035,12 +1047,9 @@ void UiManager::update() {
   const bool flush_busy =
       isDisplayOutputBusy();
   if (!intro_active_ && scene_status_.valid && fx_engine_.config().lgfx_backend) {
-    const bool la_detector_scene = (std::strcmp(scene_status_.scene_id, "SCENE_LA_DETECTOR") == 0);
-    const bool warning_blocks_direct_fx =
-        warning_gyrophare_enabled_ && warning_gyrophare_disable_direct_fx_ &&
-        (std::strcmp(scene_status_.scene_id, "SCENE_WARNING") == 0);
+    const bool is_story_scene_id = (std::strncmp(scene_status_.scene_id, "SCENE_", 6U) == 0);
     const bool wants_direct_fx_scene =
-        isDirectFxSceneId(scene_status_.scene_id) && !la_detector_scene && !warning_blocks_direct_fx;
+        (kForceFxAllScenesRuntime && is_story_scene_id) || isDirectFxSceneId(scene_status_.scene_id);
     const bool retry_allowed = (fx_rearm_retry_after_ms_ == 0U) ||
                                (static_cast<int32_t>(now_ms - fx_rearm_retry_after_ms_) >= 0);
     if (wants_direct_fx_scene && retry_allowed && (!direct_fx_scene_active_ || !fx_engine_.enabled())) {
@@ -1051,21 +1060,58 @@ void UiManager::update() {
                        scene_status_.subtitle);
     }
   }
-  if (direct_fx_scene_active_ && scene_status_.valid && std::strcmp(scene_status_.scene_id, "SCENE_WIN_ETAPE1") == 0) {
+  const bool fx_win_etape1_scene = scene_status_.valid && std::strcmp(scene_status_.scene_id, "SCENE_WIN_ETAPE1") == 0;
+  const bool fx_credits_scene = scene_status_.valid &&
+                                (std::strcmp(scene_status_.scene_id, "SCENE_CREDITS") == 0 ||
+                                 std::strcmp(scene_status_.scene_id, "SCENE_CREDIT") == 0);
+  if (direct_fx_scene_active_ && (fx_win_etape1_scene || fx_credits_scene)) {
     const uint32_t scene_elapsed_ms =
         (scene_runtime_started_ms_ == 0U || now_ms < scene_runtime_started_ms_) ? 0U : (now_ms - scene_runtime_started_ms_);
-    ui::fx::FxPreset target_preset = ui::fx::FxPreset::kWinEtape1;
-    if (scene_elapsed_ms < kWinEtape1CelebrateMs) {
-      target_preset = ui::fx::FxPreset::kFireworks;
-    } else if (scene_elapsed_ms < kWinEtape1CreditsStartMs) {
-      target_preset = ui::fx::FxPreset::kWinner;
+    String fallback_scroll_text = asciiFallbackForUiText(scene_status_.subtitle);
+    if (fallback_scroll_text.length() == 0U) {
+      fallback_scroll_text = asciiFallbackForUiText(scene_status_.title);
+    }
+    ui::fx::FxPreset target_preset = fx_credits_scene ? ui::fx::FxPreset::kUsonProto : ui::fx::FxPreset::kWinEtape1;
+    ui::fx::FxMode target_mode = ui::fx::FxMode::kClassic;
+    uint16_t target_bpm = 125U;
+    bool scroller_centered = false;
+    const char* forced_scroll = nullptr;
+    if (fx_credits_scene) {
+      (void)scene_elapsed_ms;
+      // Keep the background animated but leave text crawl rendering to StarWars overlay only.
+      target_preset = ui::fx::FxPreset::kUsonProto;
+      target_mode = ui::fx::FxMode::kStarfield3D;
+      target_bpm = 108U;
+    } else {
+      if (scene_elapsed_ms < kWinEtape1Demo3dMs) {
+        target_preset = ui::fx::FxPreset::kDemo;
+      } else if (scene_elapsed_ms < (kWinEtape1Demo3dMs + kWinEtape1BoingballMs)) {
+        target_preset = ui::fx::FxPreset::kBoingball;
+        forced_scroll = kWinEtape1BoingScrollText;
+      } else if (scene_elapsed_ms < (kWinEtape1Demo3dMs + kWinEtape1BoingballMs + kWinEtape1FireworksMs)) {
+        target_preset = ui::fx::FxPreset::kFireworks;
+        forced_scroll = kWinEtape1FireworksScrollText;
+        scroller_centered = true;
+      } else if (scene_elapsed_ms < kWinEtape1CreditsStartMs) {
+        target_preset = ui::fx::FxPreset::kWinner;
+      }
     }
     if (fx_engine_.preset() != target_preset) {
       fx_engine_.setPreset(target_preset);
-      fx_engine_.setScrollerCentered(false);
-      if (target_preset != ui::fx::FxPreset::kWinEtape1) {
-        fx_engine_.setScrollText(nullptr);
-      }
+    }
+    if (fx_engine_.mode() != target_mode) {
+      fx_engine_.setMode(target_mode);
+    }
+    fx_engine_.setBpm(target_bpm);
+    fx_engine_.setScrollerCentered(scroller_centered);
+    if (fx_credits_scene) {
+      fx_engine_.setScrollText(nullptr);
+    } else if (forced_scroll != nullptr) {
+      fx_engine_.setScrollText(forced_scroll);
+    } else if (fallback_scroll_text.length() > 0U) {
+      fx_engine_.setScrollText(fallback_scroll_text.c_str());
+    } else {
+      fx_engine_.setScrollText(" -- mode demo fx ---");
     }
   }
   const bool fx_candidate = (intro_active_ || direct_fx_scene_active_) && fx_engine_.enabled();
@@ -1243,6 +1289,16 @@ void UiManager::renderLgfxSceneTextOverlay(uint32_t now_ms) {
   const uint16_t subtitle_color = to565(mixRgb(text_rgb, accent_rgb, 30U));
   const bool uson_proto_scene = (std::strcmp(scene_status_.scene_id, "SCENE_U_SON_PROTO") == 0);
   const bool win_etape1_scene = (std::strcmp(scene_status_.scene_id, "SCENE_WIN_ETAPE1") == 0);
+  const bool credits_scene = (std::strcmp(scene_status_.scene_id, "SCENE_CREDITS") == 0) ||
+                             (std::strcmp(scene_status_.scene_id, "SCENE_CREDIT") == 0);
+  const bool warning_scene =
+      warning_lgfx_only_ && (std::strcmp(scene_status_.scene_id, "SCENE_WARNING") == 0);
+  if (warning_scene) {
+    renderLgfxWarningOverlay(display, now_ms);
+    ++overlay_draw_ok_count_;
+    display.endWrite();
+    return;
+  }
   const uint32_t scene_elapsed_ms = (scene_runtime_started_ms_ == 0U || now_ms < scene_runtime_started_ms_)
                                         ? 0U
                                         : (now_ms - scene_runtime_started_ms_);
@@ -1310,7 +1366,7 @@ void UiManager::renderLgfxSceneTextOverlay(uint32_t now_ms) {
       default:
         y = (slot == 0U) ? static_cast<int16_t>((height / 2) - 76)
                          : (slot == 1U ? static_cast<int16_t>((height / 2) - 10)
-                                       : static_cast<int16_t>((height / 2) + 42));
+                                       : static_cast<int16_t>((height / 2) - 8));
         break;
     }
     if (y < 2) {
@@ -1375,9 +1431,116 @@ void UiManager::renderLgfxSceneTextOverlay(uint32_t now_ms) {
     }
   };
 
-  bool custom_win_etape1_credits = false;
-  if (win_etape1_scene && scene_elapsed_ms >= kWinEtape1CreditsStartMs) {
-    custom_win_etape1_credits = true;
+  bool custom_lgfx_timeline_scene = false;
+  const bool credits_boot_phase = false;
+  const bool credits_holo_phase = false;
+  const bool credits_roll_started =
+      credits_scene || (win_etape1_scene && scene_elapsed_ms >= kWinEtape1CreditsStartMs);
+
+  if (credits_boot_phase) {
+    custom_lgfx_timeline_scene = true;
+    text_attempted = true;
+    static constexpr const char* kBootLines[] = {
+        "BOOTING CREDITS MODULE...",
+        "LOAD FS:/credits.txt",
+        "INIT STARWARS CRAWL...",
+        "STATUS: READY",
+    };
+    const uint32_t chars_per_sec = 34U;
+    uint32_t chars_budget = (scene_elapsed_ms * chars_per_sec) / 1000U;
+    uint16_t y = 16U;
+    for (size_t idx = 0U; idx < (sizeof(kBootLines) / sizeof(kBootLines[0])); ++idx) {
+      const char* source = kBootLines[idx];
+      const size_t line_len = std::strlen(source);
+      const size_t draw_len = std::min<size_t>(line_len, chars_budget);
+      char line[80] = {0};
+      std::memcpy(line, source, draw_len);
+
+      drivers::display::OverlayTextCommand cmd = {};
+      cmd.text = line;
+      cmd.font_face = drivers::display::OverlayFontFace::kIbmBold12;
+      cmd.size = 1U;
+      cmd.color565 = to565(0x58FF9CUL);
+      cmd.x = 8;
+      cmd.y = static_cast<int16_t>(y);
+      if (draw_len > 0U && display.drawOverlayText(cmd)) {
+        text_draw_ok = true;
+      }
+      if (draw_len < line_len && ((scene_elapsed_ms / 350U) & 1U) != 0U) {
+        drivers::display::OverlayTextCommand cursor = cmd;
+        cursor.text = "_";
+        const int16_t partial_w = display.measureOverlayText(line, cmd.font_face, cmd.size);
+        cursor.x = static_cast<int16_t>(cmd.x + partial_w + 2);
+        if (display.drawOverlayText(cursor)) {
+          text_draw_ok = true;
+        }
+      }
+      if (chars_budget > line_len) {
+        chars_budget -= static_cast<uint32_t>(line_len);
+      } else {
+        chars_budget = 0U;
+      }
+      y = static_cast<uint16_t>(y + 18U);
+    }
+  } else if (credits_holo_phase) {
+    custom_lgfx_timeline_scene = true;
+    text_attempted = true;
+
+    const uint32_t holo_elapsed = scene_elapsed_ms - kCreditsBootPhaseMs;
+    const int16_t scanline_y = static_cast<int16_t>((holo_elapsed / 6U) % static_cast<uint32_t>(height + 26)) - 26;
+    display.fillOverlayRect(0, scanline_y, width, 26, to565(0x0E2E34UL));
+
+    int16_t gx = static_cast<int16_t>(static_cast<int32_t>(pseudoRandom32(seed ^ 0xA531U) % 9U) - 4);
+    int16_t gy = static_cast<int16_t>(static_cast<int32_t>(pseudoRandom32(seed ^ 0x9E11U) % 5U) - 2);
+    if ((pseudoRandom32(seed ^ 0x51U) & 0x7FU) == 0U) {
+      gx = static_cast<int16_t>(static_cast<int32_t>(pseudoRandom32(seed ^ 0xA53CU) % 21U) - 10);
+      gy = static_cast<int16_t>(static_cast<int32_t>(pseudoRandom32(seed ^ 0x4A17U) % 9U) - 4);
+    }
+    const uint32_t line1_rgb = 0x66F0FFUL;
+    const uint32_t line2_rgb = 0x7AFFE2UL;
+    const uint16_t magenta = to565(0xFF3CD9UL);
+    const uint16_t blue = to565(0x4A7BFFUL);
+    const uint8_t base_fade_pct = static_cast<uint8_t>(75U + ((holo_elapsed / 40U) % 20U));
+
+    auto draw_holo_line = [&](const char* txt, int16_t base_y, uint32_t base_rgb) {
+      if (txt == nullptr || txt[0] == '\0') {
+        return;
+      }
+      drivers::display::OverlayTextCommand cmd = {};
+      cmd.text = txt;
+      cmd.font_face = drivers::display::OverlayFontFace::kIbmBold24;
+      cmd.size = 1U;
+      const int16_t w = display.measureOverlayText(txt, cmd.font_face, cmd.size);
+      const int16_t x = static_cast<int16_t>((width - w) / 2);
+
+      cmd.color565 = magenta;
+      cmd.x = static_cast<int16_t>(x - 1 + gx);
+      cmd.y = static_cast<int16_t>(base_y + gy);
+      if (display.drawOverlayText(cmd)) {
+        text_draw_ok = true;
+      }
+
+      cmd.color565 = blue;
+      cmd.x = static_cast<int16_t>(x + 1 - gx);
+      cmd.y = static_cast<int16_t>(base_y - gy);
+      if (display.drawOverlayText(cmd)) {
+        text_draw_ok = true;
+      }
+
+      cmd.color565 = to565(mixRgb(0x000000UL, base_rgb, base_fade_pct));
+      cmd.x = x;
+      cmd.y = base_y;
+      if (display.drawOverlayText(cmd)) {
+        text_draw_ok = true;
+      }
+    };
+
+    draw_holo_line("Electron Rare Lab", static_cast<int16_t>((height / 2) - 26), line1_rgb);
+    draw_holo_line("Unstable by Design", static_cast<int16_t>((height / 2) + 10), line2_rgb);
+  }
+
+  if (credits_roll_started) {
+    custom_lgfx_timeline_scene = true;
     text_attempted = true;
     if (!win_etape_credits_loaded_) {
       win_etape_credits_loaded_ = true;
@@ -1389,6 +1552,18 @@ void UiManager::renderLgfxSceneTextOverlay(uint32_t now_ms) {
       win_etape_credits_scroll_px_per_sec_ = 16U;
       uint8_t current_size_tag = 0U;   // 0=normal 1=big 2=title 3=small
       uint8_t current_align_tag = 0U;  // 0=center 1=left 2=right
+      auto credit_font_for_size = [](uint8_t size_tag) -> drivers::display::OverlayFontFace {
+        if (size_tag == 1U) {
+          return drivers::display::OverlayFontFace::kIbmBold20;
+        }
+        if (size_tag == 2U) {
+          return drivers::display::OverlayFontFace::kIbmBold24;
+        }
+        if (size_tag == 3U) {
+          return drivers::display::OverlayFontFace::kIbmBold12;
+        }
+        return drivers::display::OverlayFontFace::kIbmBold16;
+      };
       auto append_credit_line = [&](const char* raw_line, uint16_t pause_ms, bool preserve_blank) {
         if (win_etape_credits_count_ >= kWinEtapeCreditsMaxLines) {
           return;
@@ -1416,7 +1591,107 @@ void UiManager::renderLgfxSceneTextOverlay(uint32_t now_ms) {
         win_etape_credits_pause_ms_[win_etape_credits_count_] = pause_ms;
         ++win_etape_credits_count_;
       };
+      auto append_credit_line_wrapped = [&](const char* raw_line, uint16_t pause_ms, bool preserve_blank) {
+        if (raw_line == nullptr) {
+          append_credit_line("", pause_ms, preserve_blank);
+          return;
+        }
+
+        const String normalized = asciiFallbackForUiText(raw_line);
+        char cleaned[kWinEtapeCreditsMaxLineChars] = {0};
+        normalized.toCharArray(cleaned, sizeof(cleaned));
+        trimAsciiWhitespace(cleaned);
+        if (cleaned[0] == '\0') {
+          append_credit_line(cleaned, pause_ms, preserve_blank);
+          return;
+        }
+
+        const drivers::display::OverlayFontFace wrap_font = credit_font_for_size(current_size_tag);
+        const int16_t max_text_w = static_cast<int16_t>(width - 16);
+        if (max_text_w < 24 || display.measureOverlayText(cleaned, wrap_font, 1U) <= max_text_w) {
+          append_credit_line(cleaned, pause_ms, preserve_blank);
+          return;
+        }
+
+        String pending = cleaned;
+        String line;
+        auto flush_line = [&](uint16_t line_pause_ms) {
+          if (line.length() == 0U) {
+            return;
+          }
+          append_credit_line(line.c_str(), line_pause_ms, false);
+          line = "";
+        };
+
+        while (pending.length() > 0U && win_etape_credits_count_ < kWinEtapeCreditsMaxLines) {
+          while (pending.length() > 0U && pending[0] == ' ') {
+            pending.remove(0U, 1U);
+          }
+          if (pending.length() == 0U) {
+            break;
+          }
+
+          const int space_index = pending.indexOf(' ');
+          String word = (space_index < 0) ? pending : pending.substring(0, static_cast<unsigned int>(space_index));
+          pending = (space_index < 0) ? String("") : pending.substring(static_cast<unsigned int>(space_index + 1U));
+          if (word.length() == 0U) {
+            continue;
+          }
+
+          String candidate = line;
+          if (candidate.length() > 0U) {
+            candidate += ' ';
+          }
+          candidate += word;
+          if (display.measureOverlayText(candidate.c_str(), wrap_font, 1U) <= max_text_w) {
+            line = candidate;
+            continue;
+          }
+
+          if (line.length() > 0U) {
+            flush_line(0U);
+          }
+
+          if (display.measureOverlayText(word.c_str(), wrap_font, 1U) <= max_text_w) {
+            line = word;
+            continue;
+          }
+
+          String long_word = word;
+          while (long_word.length() > 0U && win_etape_credits_count_ < kWinEtapeCreditsMaxLines) {
+            size_t split = long_word.length();
+            while (split > 1U) {
+              const String probe = long_word.substring(0, static_cast<unsigned int>(split));
+              if (display.measureOverlayText(probe.c_str(), wrap_font, 1U) <= max_text_w) {
+                break;
+              }
+              --split;
+            }
+            if (split == 0U) {
+              split = 1U;
+            }
+            if (split >= long_word.length()) {
+              line = long_word;
+              long_word = "";
+              break;
+            }
+            const String head = long_word.substring(0, static_cast<unsigned int>(split));
+            append_credit_line(head.c_str(), 0U, false);
+            long_word = long_word.substring(static_cast<unsigned int>(split));
+          }
+          if (line.length() == 0U && long_word.length() > 0U) {
+            line = long_word;
+          }
+        }
+
+        if (line.length() > 0U) {
+          append_credit_line(line.c_str(), pause_ms, false);
+        } else if (pause_ms > 0U) {
+          append_credit_line(" ", pause_ms, true);
+        }
+      };
       const char* const credits_paths[] = {
+          "/credits.txt",
           "/ui/fx/texts/credits.txt",
           "/ui/fx/texts/credits_01.txt",
           "/ui/scene_win_etape.txt",
@@ -1502,7 +1777,7 @@ void UiManager::renderLgfxSceneTextOverlay(uint32_t now_ms) {
               }
             }
           }
-          append_credit_line(trimmed, 0U, false);
+          append_credit_line_wrapped(trimmed, 0U, false);
         }
         file.close();
         if (stop_from_directive) {
@@ -1529,31 +1804,30 @@ void UiManager::renderLgfxSceneTextOverlay(uint32_t now_ms) {
         for (size_t i = 0U; i < (sizeof(kCreditsFallback) / sizeof(kCreditsFallback[0])) &&
                             win_etape_credits_count_ < kWinEtapeCreditsMaxLines;
              ++i) {
-          copyTextSafe(win_etape_credits_lines_[win_etape_credits_count_],
-                       kWinEtapeCreditsMaxLineChars,
-                       kCreditsFallback[i]);
-          win_etape_credits_size_[win_etape_credits_count_] = 0U;
-          win_etape_credits_align_[win_etape_credits_count_] = 0U;
-          win_etape_credits_pause_ms_[win_etape_credits_count_] = 0U;
-          ++win_etape_credits_count_;
+          append_credit_line_wrapped(kCreditsFallback[i], 0U, false);
         }
       }
     }
 
-    drivers::display::OverlayTextCommand header = {};
-    header.text = "CREDITS";
-    header.font_face = drivers::display::OverlayFontFace::kIbmBold24;
-    header.size = 1U;
-    header.color565 = symbol_color;
-    const int16_t header_w = display.measureOverlayText(header.text, header.font_face, header.size);
-    header.x = static_cast<int16_t>((width - header_w) / 2);
-    header.y = 6;
-    if (display.drawOverlayText(header)) {
-      text_draw_ok = true;
+    if (!credits_scene) {
+      drivers::display::OverlayTextCommand header = {};
+      header.text = "CREDITS";
+      header.font_face = drivers::display::OverlayFontFace::kIbmBold24;
+      header.size = 1U;
+      header.color565 = symbol_color;
+      const int16_t header_w = display.measureOverlayText(header.text, header.font_face, header.size);
+      header.x = static_cast<int16_t>((width - header_w) / 2);
+      header.y = 6;
+      if (display.drawOverlayText(header)) {
+        text_draw_ok = true;
+      }
     }
 
     if (win_etape_credits_count_ > 0U) {
-      const uint32_t credits_elapsed_ms = scene_elapsed_ms - kWinEtape1CreditsStartMs;
+      const bool starwars_mode = credits_scene;
+      bool credits_any_line_visible = false;
+      const uint32_t credits_elapsed_ms =
+          credits_scene ? scene_elapsed_ms : (scene_elapsed_ms - kWinEtape1CreditsStartMs);
       int32_t line_offsets[kWinEtapeCreditsMaxLines] = {0};
       int32_t total_height = 0;
       for (uint8_t idx = 0U; idx < win_etape_credits_count_; ++idx) {
@@ -1581,8 +1855,14 @@ void UiManager::renderLgfxSceneTextOverlay(uint32_t now_ms) {
       }
       const int32_t scroll_px =
           static_cast<int32_t>((static_cast<uint64_t>(credits_elapsed_ms) * win_etape_credits_scroll_px_per_sec_) / 1000ULL);
-      const int32_t offset = scroll_px % loop_span;
-      const int32_t base_y = static_cast<int32_t>(height + 14) - offset;
+      // Credits crawl runs in loop continuously.
+      int32_t offset = scroll_px % loop_span;
+      const int32_t base_y = (kCreditsScrollDirectionY < 0)
+                                 ? (static_cast<int32_t>(height + 14) - offset)
+                                 : (static_cast<int32_t>(-14) + offset);
+      const int16_t starwars_horizon_y = static_cast<int16_t>(height / 5);
+      const int16_t starwars_depth_span = static_cast<int16_t>((height > starwars_horizon_y) ? (height - starwars_horizon_y) : 1);
+      const int16_t starwars_center_x = static_cast<int16_t>(width / 2);
       for (uint8_t line_index = 0U; line_index < win_etape_credits_count_; ++line_index) {
         const char* line = win_etape_credits_lines_[line_index];
         if (line == nullptr) {
@@ -1600,8 +1880,21 @@ void UiManager::renderLgfxSceneTextOverlay(uint32_t now_ms) {
           line_height = 12;
           line_font = drivers::display::OverlayFontFace::kIbmBold12;
         }
-        const int32_t y32 = base_y + line_offsets[line_index];
+        if (starwars_mode) {
+          // Built-in faces are the most stable path across all LGFX targets.
+          if (win_etape_credits_size_[line_index] >= 2U) {
+            line_font = drivers::display::OverlayFontFace::kBuiltinLarge;
+          } else if (win_etape_credits_size_[line_index] == 3U) {
+            line_font = drivers::display::OverlayFontFace::kBuiltinSmall;
+          } else {
+            line_font = drivers::display::OverlayFontFace::kBuiltinMedium;
+          }
+        }
+        int32_t y32 = base_y + line_offsets[line_index];
         if (y32 < -line_height || y32 > (height + 6)) {
+          continue;
+        }
+        if (starwars_mode && y32 < starwars_horizon_y) {
           continue;
         }
         if (line[0] == '\0' || (line[0] == ' ' && line[1] == '\0')) {
@@ -1611,11 +1904,65 @@ void UiManager::renderLgfxSceneTextOverlay(uint32_t now_ms) {
         line_cmd.text = line;
         line_cmd.font_face = line_font;
         line_cmd.size = 1U;
-        line_cmd.color565 = (win_etape_credits_size_[line_index] >= 2U)
-                                ? symbol_color
-                                : (((line_index & 0x01U) == 0U) ? title_color : subtitle_color);
-        const int16_t text_w = display.measureOverlayText(line_cmd.text, line_cmd.font_face, line_cmd.size);
-        if (win_etape_credits_align_[line_index] == 1U) {
+        const uint32_t base_line_rgb = starwars_mode
+                                           ? 0xFFD34AUL
+                                           : ((win_etape_credits_size_[line_index] >= 2U)
+                                                  ? accent_rgb
+                                                  : (((line_index & 0x01U) == 0U) ? text_rgb : mixRgb(text_rgb, accent_rgb, 30U)));
+        int32_t rel_depth_px = 0;
+        uint8_t depth_pct = 0U;
+        if (starwars_mode) {
+          rel_depth_px = y32 - static_cast<int32_t>(starwars_horizon_y);
+          if (rel_depth_px < 0) {
+            rel_depth_px = 0;
+          }
+          if (rel_depth_px > starwars_depth_span) {
+            rel_depth_px = starwars_depth_span;
+          }
+
+          depth_pct = static_cast<uint8_t>((rel_depth_px * 100) / (starwars_depth_span > 0 ? starwars_depth_span : 1));
+          if (depth_pct > 100U) {
+            depth_pct = 100U;
+          }
+
+          if (depth_pct > 86U) {
+            line_cmd.size = 4U;
+          } else if (depth_pct > 58U) {
+            line_cmd.size = 3U;
+          } else {
+            line_cmd.size = 2U;
+          }
+
+          const uint8_t fade_pct = static_cast<uint8_t>(46U + ((depth_pct * 54U) / 100U));
+          line_cmd.color565 = to565(mixRgb(0x000000UL, base_line_rgb, fade_pct));
+
+          // Cubic projection increases the "towards horizon" perspective compression.
+          const int32_t depth_span_sq = static_cast<int32_t>(starwars_depth_span) * static_cast<int32_t>(starwars_depth_span);
+          const int32_t projected_rel =
+              (rel_depth_px * rel_depth_px * rel_depth_px + (depth_span_sq / 2)) /
+              (depth_span_sq > 0 ? depth_span_sq : 1);
+          y32 = static_cast<int32_t>(starwars_horizon_y) + projected_rel;
+        } else {
+          line_cmd.color565 = to565(base_line_rgb);
+        }
+
+        int16_t text_w = display.measureOverlayText(line_cmd.text, line_cmd.font_face, line_cmd.size);
+        int16_t lane_w = width;
+        if (starwars_mode) {
+          const int16_t min_lane = 24;
+          int16_t rel_depth = static_cast<int16_t>(rel_depth_px);
+          if (rel_depth < 0) {
+            rel_depth = 0;
+          }
+          lane_w = static_cast<int16_t>(min_lane +
+                                        ((static_cast<int32_t>(width - min_lane) * static_cast<int32_t>(rel_depth)) /
+                                         (starwars_depth_span > 0 ? starwars_depth_span : 1)));
+          if (text_w > lane_w && line_cmd.size > 1U) {
+            line_cmd.size = 1U;
+            text_w = display.measureOverlayText(line_cmd.text, line_cmd.font_face, line_cmd.size);
+          }
+          line_cmd.x = static_cast<int16_t>((width - text_w) / 2);
+        } else if (win_etape_credits_align_[line_index] == 1U) {
           line_cmd.x = 8;
         } else if (win_etape_credits_align_[line_index] == 2U) {
           line_cmd.x = static_cast<int16_t>(width - text_w - 8);
@@ -1623,20 +1970,106 @@ void UiManager::renderLgfxSceneTextOverlay(uint32_t now_ms) {
           line_cmd.x = static_cast<int16_t>((width - text_w) / 2);
         }
         line_cmd.y = static_cast<int16_t>(y32);
-        if (display.drawOverlayText(line_cmd)) {
+
+        bool line_drawn = false;
+        if (starwars_mode && text_w > 0) {
+          // Stronger StarWars look: squeeze each line horizontally as it goes to the horizon.
+          const uint8_t squeeze_pct = static_cast<uint8_t>(52U + ((static_cast<uint16_t>(depth_pct) * 48U) / 100U));
+          int16_t target_w = static_cast<int16_t>((static_cast<int32_t>(text_w) * squeeze_pct) / 100);
+          if (target_w < 12) {
+            target_w = 12;
+          }
+          if (target_w > lane_w) {
+            target_w = lane_w;
+          }
+          int32_t stretch_q8 = (static_cast<int32_t>(target_w) << 8) / text_w;
+          if (stretch_q8 < 32) {
+            stretch_q8 = 32;
+          }
+          int32_t pen_x_q8 = static_cast<int32_t>((width - target_w) / 2) << 8;
+          const int16_t y_draw = static_cast<int16_t>(line_cmd.y - static_cast<int16_t>((100U - depth_pct) / 8U));
+          char glyph_text[2] = {0, 0};
+          for (const char* cursor = line; cursor != nullptr && *cursor != '\0'; ++cursor) {
+            glyph_text[0] = *cursor;
+            int16_t glyph_w = display.measureOverlayText(glyph_text, line_cmd.font_face, line_cmd.size);
+            if (glyph_w < 1) {
+              glyph_w = 1;
+            }
+            if (glyph_text[0] != ' ') {
+              drivers::display::OverlayTextCommand glyph_cmd = line_cmd;
+              glyph_cmd.text = glyph_text;
+              glyph_cmd.x = static_cast<int16_t>(pen_x_q8 >> 8);
+              int32_t dx = static_cast<int32_t>(glyph_cmd.x) - static_cast<int32_t>(starwars_center_x);
+              if (dx < 0) {
+                dx = -dx;
+              }
+              int16_t tilt_up = static_cast<int16_t>((dx * static_cast<int32_t>(100U - depth_pct)) / (width > 0 ? width : 1));
+              if (tilt_up > 24) {
+                tilt_up = 24;
+              }
+              glyph_cmd.y = static_cast<int16_t>(y_draw - tilt_up);
+              if (display.drawOverlayText(glyph_cmd)) {
+                line_drawn = true;
+              }
+              // One extra shifted pass to make the crawl visually bolder.
+              drivers::display::OverlayTextCommand glyph_bold = glyph_cmd;
+              glyph_bold.x = static_cast<int16_t>(glyph_bold.x + 1);
+              if (display.drawOverlayText(glyph_bold)) {
+                line_drawn = true;
+              }
+            }
+            pen_x_q8 += static_cast<int32_t>(glyph_w) * stretch_q8;
+          }
+        }
+        if (!line_drawn && display.drawOverlayText(line_cmd)) {
           text_draw_ok = true;
+          line_drawn = true;
+        } else if (line_drawn) {
+          text_draw_ok = true;
+        }
+        if (line_drawn) {
+          credits_any_line_visible = true;
+        }
+      }
+      if (starwars_mode && !credits_any_line_visible) {
+        const char* fallback_line = nullptr;
+        for (uint8_t idx = 0U; idx < win_etape_credits_count_; ++idx) {
+          const char* candidate = win_etape_credits_lines_[idx];
+          if (candidate != nullptr && candidate[0] != '\0' &&
+              !(candidate[0] == ' ' && candidate[1] == '\0')) {
+            fallback_line = candidate;
+            break;
+          }
+        }
+        if (fallback_line != nullptr) {
+          drivers::display::OverlayTextCommand fallback_cmd = {};
+          fallback_cmd.text = fallback_line;
+          fallback_cmd.font_face = drivers::display::OverlayFontFace::kBuiltinMedium;
+          fallback_cmd.size = 1U;
+          fallback_cmd.color565 = to565(mixRgb(0x000000UL, text_rgb, 88U));
+          const int16_t fallback_w =
+              display.measureOverlayText(fallback_cmd.text, fallback_cmd.font_face, fallback_cmd.size);
+          fallback_cmd.x = static_cast<int16_t>((width - fallback_w) / 2);
+          int16_t fallback_y = static_cast<int16_t>(height - 44);
+          if (fallback_y < static_cast<int16_t>(starwars_horizon_y + 8)) {
+            fallback_y = static_cast<int16_t>(starwars_horizon_y + 8);
+          }
+          fallback_cmd.y = fallback_y;
+          if (display.drawOverlayText(fallback_cmd)) {
+            text_draw_ok = true;
+          }
         }
       }
     }
   }
 
-  if (!custom_win_etape1_credits && scene_status_.show_symbol) {
+  if (!custom_lgfx_timeline_scene && scene_status_.show_symbol) {
     drawLine(scene_status_.symbol, overlay_symbol_align_, 0U, symbol_font, symbol_size, symbol_color, 0x1000U);
   }
-  if (!custom_win_etape1_credits && scene_status_.show_title) {
+  if (!custom_lgfx_timeline_scene && scene_status_.show_title) {
     drawLine(scene_status_.title, overlay_title_align_, 1U, title_font, title_size, title_color, 0x2000U);
   }
-  if (!custom_win_etape1_credits && scene_status_.show_subtitle) {
+  if (!custom_lgfx_timeline_scene && scene_status_.show_subtitle) {
     drawLine(scene_status_.subtitle, overlay_subtitle_align_, 2U, subtitle_font, subtitle_size, subtitle_color, 0x3000U);
   }
 
@@ -1648,6 +2081,78 @@ void UiManager::renderLgfxSceneTextOverlay(uint32_t now_ms) {
     }
   }
   display.endWrite();
+}
+
+void UiManager::renderLgfxWarningOverlay(drivers::display::DisplayHal& display, uint32_t now_ms) {
+  if (!scene_status_.valid) {
+    return;
+  }
+  const int16_t width = activeDisplayWidth();
+  const int16_t height = activeDisplayHeight();
+  if (width <= 0 || height <= 0) {
+    return;
+  }
+
+  if (warning_lgfx_started_ms_ == 0U || now_ms < warning_lgfx_started_ms_) {
+    warning_lgfx_started_ms_ = now_ms;
+  }
+  const uint32_t elapsed_ms = now_ms - warning_lgfx_started_ms_;
+  const bool alt = ((elapsed_ms / 700U) & 1U) != 0U;
+  const bool blink = ((elapsed_ms / 220U) & 1U) == 0U;
+  const uint16_t col_primary = display.color565(255, 52, 52);
+  const uint16_t col_secondary = display.color565(255, 255, 255);
+  const uint16_t col_beam_a = display.color565(70, 170, 255);
+  const uint16_t col_beam_b = display.color565(255, 165, 60);
+  const uint16_t col_beam = alt ? col_beam_a : col_beam_b;
+  const uint16_t col_beam_alt = alt ? col_beam_b : col_beam_a;
+  const uint16_t col_border = display.color565(255, 120, 120);
+
+  for (int16_t y = 0; y < height; y = static_cast<int16_t>(y + 14)) {
+    const uint16_t scan_col = ((y / 14) & 1) == 0 ? display.color565(86, 0, 0) : display.color565(42, 0, 0);
+    display.drawOverlayLine(0, y, static_cast<int16_t>(width - 1), y, scan_col);
+  }
+
+  const int16_t sweep_x = static_cast<int16_t>((elapsed_ms / 6U) % static_cast<uint32_t>(width));
+  const int16_t sweep_x_b = static_cast<int16_t>((width - 1) - sweep_x);
+  display.drawOverlayLine(sweep_x, 0, sweep_x, static_cast<int16_t>(height - 1), col_beam);
+  display.drawOverlayLine(sweep_x_b, 0, sweep_x_b, static_cast<int16_t>(height - 1), col_beam_alt);
+
+  const int16_t band_h = static_cast<int16_t>(height / 6);
+  const int16_t band_y = static_cast<int16_t>((height / 2) - (band_h / 2));
+  if (band_h > 4) {
+    display.fillOverlayRect(0, band_y, width, band_h, display.color565(34, 0, 0));
+    display.drawOverlayRect(0, band_y, width, band_h, col_border);
+  }
+
+  const char* warning_text = (warning_gyrophare_message_[0] != '\0') ? warning_gyrophare_message_ : "SIGNAL ANORMAL";
+  drivers::display::OverlayTextCommand text = {};
+  text.text = warning_text;
+  text.font_face = drivers::display::OverlayFontFace::kIbmBold24;
+  text.size = blink ? 2U : 1U;
+  text.opaque_bg = false;
+  int16_t text_w = display.measureOverlayText(text.text, text.font_face, text.size);
+  if (text_w < 0) {
+    text_w = 0;
+  } else if (text_w > width) {
+    text_w = width;
+  }
+  const int16_t text_x = static_cast<int16_t>((width - text_w) / 2);
+  const int16_t text_y = static_cast<int16_t>((height / 2) - 14);
+
+  text.color565 = col_secondary;
+  text.x = static_cast<int16_t>(text_x - 1);
+  text.y = text_y;
+  display.drawOverlayText(text);
+  text.x = static_cast<int16_t>(text_x + 1);
+  display.drawOverlayText(text);
+  text.x = text_x;
+  text.y = static_cast<int16_t>(text_y - 1);
+  display.drawOverlayText(text);
+
+  text.color565 = blink ? col_primary : col_border;
+  text.x = text_x;
+  text.y = text_y;
+  display.drawOverlayText(text);
 }
 
 void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
@@ -2092,10 +2597,12 @@ void UiManager::renderLgfxLaDetectorOverlay(uint32_t now_ms) {
       }
       const bool hourglass_timeout_reached = (hourglass_gate_remain <= 0.001f);
       if (timeout_reset_flip) {
+        la_hg_flip_duration_ms_ = std::max<uint32_t>(500U, la_hg_reset_flip_duration_ms_);
         la_hg_flipping_ = true;
         la_hg_flip_started_ms_ = now_ms;
       }
       if (la_hg_flip_on_timeout_ && !la_hg_flipping_ && !la_hg_timeout_latched_ && hourglass_timeout_reached) {
+        la_hg_flip_duration_ms_ = std::max<uint32_t>(500U, la_hg_full_turn_flip_duration_ms_);
         la_hg_flipping_ = true;
         la_hg_flip_started_ms_ = now_ms;
         la_hg_timeout_latched_ = true;
@@ -3213,7 +3720,13 @@ UiMemorySnapshot UiManager::memorySnapshot() const {
 }
 
 UiSceneStatusSnapshot UiManager::sceneStatusSnapshot() const {
-  return scene_status_;
+  UiSceneStatusSnapshot snapshot = scene_status_;
+  // Keep these counters live for diagnostics even between renderScene() updates.
+  snapshot.overlay_draw_ok = overlay_draw_ok_count_;
+  snapshot.overlay_draw_fail = overlay_draw_fail_count_;
+  snapshot.overlay_startwrite_fail = overlay_startwrite_fail_count_;
+  snapshot.overlay_skip_busy = overlay_skip_busy_count_;
+  return snapshot;
 }
 
 void UiManager::dumpMemoryStatus() const {
@@ -3323,8 +3836,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   const bool static_state_changed = shouldApplySceneStaticState(scene_id, screen_payload_json, scene_changed);
   const bool has_previous_scene = (last_scene_id_[0] != '\0');
   const bool win_etape_intro_scene = false;
-  const bool la_detector_lgfx_only_scene = (std::strcmp(scene_id, "SCENE_LA_DETECTOR") == 0);
-  const bool direct_fx_scene_runtime = isDirectFxSceneId(scene_id) && !la_detector_lgfx_only_scene;
+  const bool direct_fx_scene_runtime = isDirectFxSceneId(scene_id);
   const bool test_lab_scene = (std::strcmp(scene_id, "SCENE_TEST_LAB") == 0);
   const bool is_locked_scene = (std::strcmp(scene_id, "SCENE_LOCKED") == 0);
   const bool qr_scene = (std::strcmp(scene_id, "SCENE_CAMERA_SCAN") == 0 ||
@@ -3634,6 +4146,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   uint8_t la_bg_intensity_pct = 32U;
   bool la_hg_flip_on_timeout = true;
   uint32_t la_hg_reset_flip_ms = 10000U;
+  uint32_t la_hg_full_turn_flip_ms = 2000U;
   int16_t la_hg_x_offset_px = 0;
   uint16_t la_hg_height_px = 0U;
   uint16_t la_hg_width_px = 0U;
@@ -3839,7 +4352,13 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     title = "BRAVO!";
     subtitle = audio_playing ? "Validation en cours..." : kWinEtapeWaitingSubtitle;
     symbol = "WIN";
-    effect = (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0) ? SceneEffect::kCelebrate : SceneEffect::kNone;
+    if (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0) {
+      effect = SceneEffect::kCelebrate;
+    } else if (std::strcmp(scene_id, "SCENE_WIN_ETAPE1") == 0) {
+      effect = SceneEffect::kCelebrate;
+    } else {
+      effect = SceneEffect::kCelebrate;
+    }
     transition = SceneTransition::kFade;
     transition_ms = 220U;
     bg_rgb = 0x000022UL;
@@ -3850,6 +4369,24 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     show_symbol = true;
     win_etape_fireworks = false;
     subtitle_scroll_mode = SceneScrollMode::kNone;
+    if (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0) {
+      subtitle_align = SceneTextAlign::kCenter;
+    }
+  } else if (std::strcmp(scene_id, "SCENE_CREDITS") == 0 ||
+             std::strcmp(scene_id, "SCENE_CREDIT") == 0) {
+    title = "CREDITS";
+    subtitle = "Merci Brigade Z";
+    symbol = "BRAVO";
+    effect = SceneEffect::kCelebrate;
+    transition = SceneTransition::kFade;
+    transition_ms = 220U;
+    bg_rgb = 0x050914UL;
+    accent_rgb = 0x66D9FFUL;
+    text_rgb = 0xFFFFFFUL;
+    show_title = true;
+    show_subtitle = true;
+    show_symbol = true;
+    subtitle_align = SceneTextAlign::kCenter;
   } else if (std::strcmp(scene_id, "SCENE_FINAL_WIN") == 0) {
     title = "FINAL WIN";
     subtitle = "Mission accomplie";
@@ -4105,6 +4642,9 @@ void UiManager::renderScene(const ScenarioDef* scenario,
         }
         if (la_render["reset_flip_ms"].is<unsigned int>()) {
           la_hg_reset_flip_ms = la_render["reset_flip_ms"].as<unsigned int>();
+        }
+        if (la_render["full_turn_flip_ms"].is<unsigned int>()) {
+          la_hg_full_turn_flip_ms = la_render["full_turn_flip_ms"].as<unsigned int>();
         }
         if (la_render["hourglass_x_offset_px"].is<int>()) {
           la_hg_x_offset_px = static_cast<int16_t>(la_render["hourglass_x_offset_px"].as<int>());
@@ -4442,6 +4982,11 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   } else if (la_hg_reset_flip_ms > 20000U) {
     la_hg_reset_flip_ms = 20000U;
   }
+  if (la_hg_full_turn_flip_ms < 500U) {
+    la_hg_full_turn_flip_ms = 500U;
+  } else if (la_hg_full_turn_flip_ms > 20000U) {
+    la_hg_full_turn_flip_ms = 20000U;
+  }
   const int16_t width_px = std::max<int16_t>(1, activeDisplayWidth());
   const int16_t height_px = std::max<int16_t>(1, activeDisplayHeight());
   if (la_hg_x_offset_px < static_cast<int16_t>(-width_px)) {
@@ -4504,6 +5049,17 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     warning_gyrophare_enabled = false;
     warning_gyrophare_disable_direct_fx = true;
   }
+  const bool is_story_scene_id = (scene_id != nullptr && std::strncmp(scene_id, "SCENE_", 6U) == 0);
+  const bool force_lgfx_only_scene =
+      (kForceFxAllScenesRuntime && is_story_scene_id) ||
+      (std::strcmp(scene_id, "SCENE_WIN_ETAPE1") == 0) ||
+      (std::strcmp(scene_id, "SCENE_CREDITS") == 0) ||
+      (std::strcmp(scene_id, "SCENE_CREDIT") == 0);
+  if (force_lgfx_only_scene) {
+    use_lgfx_text_overlay = fx_engine_.config().lgfx_backend;
+    disable_lvgl_text = use_lgfx_text_overlay;
+    lgfx_hard_mode = use_lgfx_text_overlay;
+  }
   const bool mic_needed = la_detection_scene_ || waveform_enabled;
   if (hardware_ != nullptr) {
     // Runtime mic ownership is centralized in main.cpp resource policy.
@@ -4542,8 +5098,11 @@ void UiManager::renderScene(const ScenarioDef* scenario,
   }
   const bool test_lab_lgfx_scroller = test_lab_scene;
   const bool warning_blocks_direct_fx =
-      warning_gyrophare_enabled && warning_gyrophare_disable_direct_fx && (std::strcmp(scene_id, "SCENE_WARNING") == 0);
-  const bool wants_direct_fx = (direct_fx_scene_runtime && !warning_blocks_direct_fx) || test_lab_lgfx_scroller;
+      (std::strcmp(scene_id, "SCENE_WARNING") == 0) &&
+      (warning_gyrophare_disable_direct_fx || warning_lgfx_only);
+  const bool force_all_scene_fx = kForceFxAllScenesRuntime && is_story_scene_id;
+  const bool wants_direct_fx =
+      force_all_scene_fx || (direct_fx_scene_runtime && !warning_blocks_direct_fx) || test_lab_lgfx_scroller;
   const bool can_use_direct_fx_backend = fx_engine_.config().lgfx_backend;
   const uint32_t now_tick_ms = millis();
   const bool fx_retry_allowed = (fx_rearm_retry_after_ms_ == 0U) ||
@@ -4595,7 +5154,9 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     la_bg_sync_ = la_bg_sync;
     la_bg_intensity_pct_ = la_bg_intensity_pct;
     la_hg_flip_on_timeout_ = la_hg_flip_on_timeout;
-    la_hg_flip_duration_ms_ = la_hg_reset_flip_ms;
+    la_hg_reset_flip_duration_ms_ = la_hg_reset_flip_ms;
+    la_hg_full_turn_flip_duration_ms_ = la_hg_full_turn_flip_ms;
+    la_hg_flip_duration_ms_ = la_hg_full_turn_flip_duration_ms_;
     la_hg_x_offset_px_ = la_hg_x_offset_px;
     la_hg_target_height_px_ = la_hg_height_px;
     la_hg_target_width_px_ = la_hg_width_px;
@@ -4613,6 +5174,7 @@ void UiManager::renderScene(const ScenarioDef* scenario,
     warning_gyrophare_disable_direct_fx_ = warning_gyrophare_disable_direct_fx;
     warning_lgfx_only_ = warning_lgfx_only && (std::strcmp(scene_id, "SCENE_WARNING") == 0);
     warning_siren_enabled_ = warning_siren && (std::strcmp(scene_id, "SCENE_WARNING") == 0);
+    warning_lgfx_started_ms_ = warning_lgfx_only_ ? millis() : 0U;
     if (warning_lgfx_only_) {
       warning_gyrophare_enabled_ = false;
     }

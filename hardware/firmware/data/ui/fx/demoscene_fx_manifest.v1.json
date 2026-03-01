@@ -1,6 +1,6 @@
 {
   "manifest_id": "demoscene_fx_manifest_v1",
-  "version": "1.3.2",
+  "version": "1.3.4",
   "updated_at": "2026-02-27",
   "owner": "ui_freenove_allinone",
   "source_of_truth": {
@@ -83,8 +83,8 @@
         "SCENE_WIN_ETAPE1"
       ],
       "notes": [
-        "tunnel3d then rotozoom",
-        "gfx direct overlay"
+        "60s runtime profile: celebrate (0-20s), winner (20-40s), credits (40-60s)",
+        "credits crawl uses textId=credits with LGFX overlay fallback for readability"
       ]
     },
     {
@@ -112,8 +112,11 @@
         "SCENE_LA_DETECTOR"
       ],
       "notes": [
-        "hourglass demoscene background",
-        "foreground keeps LA analyzer overlay"
+        "hourglass demoscene ultra background preset",
+        "wirecube+rotozoom subtle preset still available",
+        "legacy hourglass still available via render.la_detector.background_preset",
+        "foreground keeps LA analyzer overlay",
+        "timeout flip policy configurable (flip_on_timeout/reset_flip_ms)"
       ]
     }
   ],
@@ -232,6 +235,30 @@
     }
   ],
   "overlay_fx_types": [
+    {
+      "id": "la_detector_bg_wirecube_rotozoom",
+      "runtime_effect_token": "la_detector_bg",
+      "family": "background_overlay",
+      "deterministic": true,
+      "payload_contract": {
+        "render.la_detector.background_preset": "legacy_hourglass|wirecube_rotozoom_subtle|hourglass_demoscene_ultra",
+        "render.la_detector.background_sync": "fixed|mic_smoothed|mic_direct",
+        "render.la_detector.background_intensity_pct": "0..100",
+        "render.la_detector.flip_on_timeout": "true|false",
+        "render.la_detector.reset_flip_ms": "500..20000"
+      },
+      "defaults": {
+        "render.la_detector.background_preset": "legacy_hourglass",
+        "render.la_detector.background_sync": "mic_smoothed",
+        "render.la_detector.background_intensity_pct": 32,
+        "render.la_detector.flip_on_timeout": true,
+        "render.la_detector.reset_flip_ms": 10000
+      },
+      "runtime_support": {
+        "parser_file": "hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp",
+        "effect_file": "hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp"
+      }
+    },
     {
       "id": "text_glitch",
       "runtime_effect_token": "glitch",

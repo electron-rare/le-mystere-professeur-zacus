@@ -37,8 +37,9 @@ constexpr bool kPrintHelpOnBoot = false;
 constexpr uint32_t kToneOffSuppressionMs = 1500U;
 constexpr uint32_t kHotlineDefaultLoopPauseMs = 3000U;
 constexpr uint16_t kHotlineMaxPauseMs = 10000U;
-constexpr uint32_t kHotlineRingbackMinMs = 5000U;
-constexpr uint32_t kHotlineRingbackMaxMs = 25000U;
+constexpr uint32_t kHotlineRingbackMinMs = 2000U;
+constexpr uint32_t kHotlineRingbackMaxMs = 10000U;
+constexpr uint32_t kOffHookAutoRandomDelayMs = 2000U;
 constexpr uint16_t kFsListDefaultPageSize = 100U;
 constexpr uint16_t kFsListMaxPageSize = 200U;
 constexpr uint32_t kFsListMaxPage = 100000U;
@@ -52,9 +53,16 @@ constexpr char kFirmwareBuildId[] = __DATE__ " " __TIME__;
 constexpr char kHotlineAssetsRoot[] = "/hotline";
 constexpr char kHotlineTtsAssetsRoot[] = "/hotline_tts";
 constexpr char kHotlineTtsNestedAssetsRoot[] = "/hotline/hotline_tts";
-constexpr char kHotlineDefaultVoiceSuffix[] = "__fr-fr-deniseneural.mp3";
+constexpr char kInterludeTtsAssetsRoot[] = "/interlude_tts";
+constexpr char kHotlineDefaultVoiceSuffix[] = "__fr-fr-deniseneural.wav";
+constexpr char kHotlineDefaultVoiceSuffixLegacyMp3[] = "__fr-fr-deniseneural.mp3";
 constexpr char kHotlineWaitingPromptStem[] = "enter_code_5";
 constexpr char kHotlineLogPath[] = "/hotline/log.txt";
+constexpr uint32_t kInterludeMinDelayMs = 15UL * 60UL * 1000UL;
+constexpr uint32_t kInterludeMaxDelayMs = 30UL * 60UL * 1000UL;
+constexpr uint32_t kInterludeRetryDelayMs = 120000UL;
+constexpr uint32_t kWarningSirenBeatTimeoutMs = 6000UL;
+constexpr uint8_t kA252CodecMaxVolumePercent = 100U;
 
 #ifndef RTC_FIRMWARE_GIT_SHA
 #define RTC_FIRMWARE_GIT_SHA "unknown"
@@ -143,6 +151,43 @@ struct HotlineRuntimeState {
 
 HotlineRuntimeState g_hotline;
 
+struct WarningSirenRuntimeState {
+    bool enabled = false;
+    bool tone_owned = false;
+    uint8_t phase = 0U;
+    uint8_t strength = 220U;
+    ToneProfile profile = ToneProfile::FR_FR;
+    ToneEvent event = ToneEvent::RINGBACK;
+    uint32_t started_ms = 0U;
+    uint32_t last_control_ms = 0U;
+    uint32_t next_toggle_ms = 0U;
+    uint32_t toggle_period_ms = 560U;
+    String last_error;
+};
+
+WarningSirenRuntimeState g_warning_siren;
+
+struct HotlineInterludeRuntimeState {
+    bool enabled = true;
+    uint32_t next_due_ms = 0U;
+    uint32_t last_trigger_ms = 0U;
+    String last_file;
+    String last_error;
+};
+
+HotlineInterludeRuntimeState g_hotline_interlude;
+
+struct OffHookAutoRandomPlaybackState {
+    bool armed = false;
+    uint32_t play_after_ms = 0U;
+    MediaRouteEntry route;
+    String selected_path;
+    String last_error;
+};
+
+OffHookAutoRandomPlaybackState g_offhook_autoplay;
+
+
 struct EspNowPeerDiscoveryRuntimeState {
     bool enabled = true;
     uint32_t interval_ms = kEspNowPeerDiscoveryIntervalMs;
@@ -188,7 +233,8 @@ std::vector<String> g_hotline_voice_suffix_catalog;
 bool g_hotline_voice_catalog_scanned = false;
 bool g_hotline_voice_catalog_sd_scanned = false;
 uint32_t g_hotline_log_counter = 0U;
-bool g_busy_tone_after_mp3_pending = false;
+bool g_busy_tone_after_media_pending = false;
+bool g_win_etape_validation_after_media_pending = false;
 bool g_prev_audio_playing = false;
 
 void setAmpEnabled(bool enabled) {
@@ -205,6 +251,7 @@ bool sendHotlineNotify(const char* state,
                        const String& source,
                        const MediaRouteEntry& route);
 void clearHotlineRuntimeState();
+void clearPendingEspNowCallRoute(const char* reason = nullptr);
 void queueHotlineRoute(const String& digit_key,
                        const String& digits,
                        const String& source,
@@ -215,6 +262,10 @@ bool startHotlineRouteNow(const String& digit_key,
                           const MediaRouteEntry& route);
 void stopHotlineForHangup();
 void tickHotlineRuntime();
+void tickHotlineInterludeRuntime();
+void tickOffHookAutoRandomPlayback(uint32_t now_ms);
+void armOffHookAutoRandomPlayback(uint32_t now_ms);
+void clearOffHookAutoRandomPlayback();
 void tickPlaybackCompletionBusyTone();
 void ensureEspNowDeviceName();
 void initEspNowPeerDiscoveryRuntime();
@@ -224,6 +275,7 @@ void initEspNowSceneSyncRuntime();
 void tickEspNowSceneSyncRuntime();
 bool requestSceneSyncFromFreenove(const char* reason, bool force_now = false);
 bool maybeTrackEspNowSceneSyncAck(const String& source, const JsonVariantConst& payload);
+DispatchResponse dispatchWarningSirenCommand(const String& args);
 String normalizeHotlineSceneKey(const String& raw_scene_id);
 HotlineValidationState inferHotlineValidationStateFromSceneKey(const String& scene_key);
 bool resolveHotlineSceneDirectoryRoute(const String& scene_key,
@@ -242,20 +294,19 @@ bool isHybridTelcoClockPolicy(const String& raw_policy) {
 }
 
 void ensureA252AudioDefaults() {
-    if (g_profile != BoardProfile::ESP32_A252) {
-        return;
-    }
+  if (g_profile != BoardProfile::ESP32_A252) {
+    return;
+  }
 
-    constexpr uint8_t kA252CodecMaxVolumePercent = 100;
-    bool updated = false;
+  bool updated = false;
 
-    if (g_audio_cfg.volume != kA252CodecMaxVolumePercent) {
-        Serial.printf("[RTC_BL_PHONE] correcting A252 audio volume %u -> %u (ES8388 max)\n",
-                      static_cast<unsigned>(g_audio_cfg.volume),
-                      static_cast<unsigned>(kA252CodecMaxVolumePercent));
-        g_audio_cfg.volume = kA252CodecMaxVolumePercent;
-        updated = true;
-    }
+  if (g_audio_cfg.volume != kA252CodecMaxVolumePercent) {
+    Serial.printf("[RTC_BL_PHONE] correcting A252 audio volume %u -> %u (ES8388 max)\n",
+                  static_cast<unsigned>(g_audio_cfg.volume),
+                  static_cast<unsigned>(kA252CodecMaxVolumePercent));
+    g_audio_cfg.volume = kA252CodecMaxVolumePercent;
+    updated = true;
+  }
 
     if (g_audio_cfg.sample_rate != 8000U) {
         Serial.printf("[RTC_BL_PHONE] correcting A252 sample_rate %u -> 8000Hz for tone-plan compatibility\n",
@@ -408,6 +459,11 @@ uint32_t pickRandomRingbackDurationMs() {
     return kHotlineRingbackMinMs + (nextHotlineRandom32() % span);
 }
 
+uint32_t pickRandomInterludeDelayMs() {
+    const uint32_t span = (kInterludeMaxDelayMs - kInterludeMinDelayMs) + 1U;
+    return kInterludeMinDelayMs + (nextHotlineRandom32() % span);
+}
+
 String normalizeHotlineVoiceSuffix(const String& raw_suffix) {
     String suffix = raw_suffix;
     suffix.trim();
@@ -417,7 +473,8 @@ String normalizeHotlineVoiceSuffix(const String& raw_suffix) {
 
     String lower = suffix;
     lower.toLowerCase();
-    if (!lower.endsWith(".mp3")) {
+    const bool supported_ext = lower.endsWith(".mp3") || lower.endsWith(".wav");
+    if (!supported_ext) {
         return "";
     }
     const int marker = suffix.indexOf("__");
@@ -467,6 +524,12 @@ void appendHotlineLogLine(const char* event, const String& details = String()) {
     if (!ensureHotlineSdMounted(sd_fs) || sd_fs == nullptr) {
         return;
     }
+    if (!sd_fs->exists(kHotlineAssetsRoot)) {
+        if (!sd_fs->mkdir(kHotlineAssetsRoot)) {
+            Serial.printf("[RTC_BL_PHONE] hotline log mkdir failed path=%s\n", kHotlineAssetsRoot);
+            return;
+        }
+    }
     File log_file = sd_fs->open(kHotlineLogPath, FILE_APPEND);
     if (!log_file) {
         return;
@@ -484,6 +547,7 @@ void appendHotlineLogLine(const char* event, const String& details = String()) {
 void refreshHotlineVoiceSuffixCatalog() {
     g_hotline_voice_suffix_catalog.clear();
     appendHotlineVoiceSuffixCatalog(kHotlineDefaultVoiceSuffix);
+    appendHotlineVoiceSuffixCatalog(kHotlineDefaultVoiceSuffixLegacyMp3);
     g_hotline_voice_catalog_sd_scanned = false;
 
     if (!g_audio.isSdReady()) {
@@ -1617,6 +1681,37 @@ bool isMp3MediaPath(const String& path) {
     return normalized.endsWith(".mp3");
 }
 
+bool isWavMediaPath(const String& path) {
+    String normalized = sanitizeMediaPath(path);
+    if (normalized.isEmpty()) {
+        return false;
+    }
+    normalized.toLowerCase();
+    return normalized.endsWith(".wav");
+}
+
+bool isPlayableMediaPath(const String& path) {
+    return isMp3MediaPath(path) || isWavMediaPath(path);
+}
+
+bool mediaPathExistsForProbe(const String& path, MediaSource source) {
+    const String normalized = sanitizeMediaPath(path);
+    if (normalized.isEmpty()) {
+        return false;
+    }
+
+    if (source != MediaSource::SD) {
+        // Keep non-SD sources untouched by this fast-path guard.
+        return true;
+    }
+
+    fs::FS* sd_fs = nullptr;
+    if (!ensureHotlineSdMounted(sd_fs) || sd_fs == nullptr) {
+        return false;
+    }
+    return sd_fs->exists(normalized.c_str());
+}
+
 String normalizeHotlineSceneKey(const String& raw_scene_id) {
     String key = raw_scene_id;
     key.trim();
@@ -1785,6 +1880,10 @@ void noteHotlineRouteResolution(const String& lookup_key, const String& method, 
     g_hotline.last_route_lookup_key = lookup_key;
     g_hotline.last_route_resolution = method;
     g_hotline.last_route_target = describeMediaRouteTarget(route);
+    Serial.printf("[HotlineRoute] key=%s method=%s target=%s\n",
+                  g_hotline.last_route_lookup_key.c_str(),
+                  g_hotline.last_route_resolution.c_str(),
+                  g_hotline.last_route_target.c_str());
 }
 
 bool parseHotlineValidationStateToken(const String& raw_token, HotlineValidationState* out_state) {
@@ -1899,6 +1998,255 @@ void appendHotlineStemVariants(const String& scene_stem,
     }
 }
 
+bool resolveHotlineSceneDirectoryVariantRoute(const String& candidate_path,
+                                              MediaRouteEntry& out_route,
+                                              String* out_matched_file) {
+    out_route = MediaRouteEntry{};
+    if (candidate_path.isEmpty()) {
+        return false;
+    }
+
+    const int slash = candidate_path.lastIndexOf('/');
+    if (slash <= 0 || static_cast<size_t>(slash + 1) >= candidate_path.length()) {
+        return false;
+    }
+    const String dir_path = candidate_path.substring(0U, static_cast<unsigned int>(slash));
+    const String base_name = candidate_path.substring(static_cast<unsigned int>(slash + 1));
+
+    const int dot = base_name.lastIndexOf('.');
+    if (dot <= 0 || static_cast<size_t>(dot) >= base_name.length()) {
+        return false;
+    }
+    const String base_stem = base_name.substring(0U, static_cast<unsigned int>(dot));
+    String base_ext = base_name.substring(static_cast<unsigned int>(dot));
+    base_ext.toLowerCase();
+    if (base_stem.isEmpty() || base_ext.isEmpty()) {
+        return false;
+    }
+
+    fs::FS* sd_fs = nullptr;
+    if (!ensureSdMountedForList(sd_fs) || sd_fs == nullptr) {
+        return false;
+    }
+    if (!sd_fs->exists(dir_path.c_str())) {
+        return false;
+    }
+    File directory = sd_fs->open(dir_path, FILE_READ);
+    if (!directory || !directory.isDirectory()) {
+        if (directory) {
+            directory.close();
+        }
+        return false;
+    }
+
+    String match_paths[32];
+    size_t match_count = 0U;
+    File entry = directory.openNextFile();
+    while (entry) {
+        if (!entry.isDirectory()) {
+            String name = entry.name();
+            const int entry_slash = name.lastIndexOf('/');
+            if (entry_slash >= 0 && static_cast<size_t>(entry_slash + 1) < name.length()) {
+                name = name.substring(static_cast<unsigned int>(entry_slash + 1));
+            }
+            const int entry_dot = name.lastIndexOf('.');
+            if (entry_dot > 0 && static_cast<size_t>(entry_dot) < name.length()) {
+                String entry_ext = name.substring(static_cast<unsigned int>(entry_dot));
+                entry_ext.toLowerCase();
+                if (entry_ext == base_ext) {
+                    const String entry_stem = name.substring(0U, static_cast<unsigned int>(entry_dot));
+                    if (entry_stem.equalsIgnoreCase(base_stem) ||
+                        entry_stem.startsWith(base_stem + "_")) {
+                        appendHotlineStemCandidate(buildFsListEntryPath(dir_path, name),
+                                                   match_paths,
+                                                   32U,
+                                                   &match_count);
+                    }
+                }
+            }
+        }
+        entry.close();
+        entry = directory.openNextFile();
+    }
+    directory.close();
+
+    if (match_count == 0U) {
+        return false;
+    }
+
+    AudioPlaybackProbeResult probe;
+    const size_t start = static_cast<size_t>(nextHotlineRandom32() % static_cast<uint32_t>(match_count));
+    for (size_t pass = 0U; pass < match_count; ++pass) {
+        const size_t index = (start + pass) % match_count;
+        MediaRouteEntry route = buildHotlineSdFileRoute(match_paths[index], false, 0U);
+        if (!mediaRouteHasPayload(route)) {
+            continue;
+        }
+        if (!mediaPathExistsForProbe(route.path, route.source)) {
+            continue;
+        }
+        if (g_audio.probePlaybackFileFromSource(route.path.c_str(), route.source, probe)) {
+            out_route = route;
+            if (out_matched_file != nullptr) {
+                *out_matched_file = route.path;
+            }
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool sceneKeyPrefersWarningStem(const String& scene_key) {
+    return scene_key == "U_SON_PROTO" || scene_key == "POLICE_CHASE_ARCADE";
+}
+
+bool sceneKeyPrefersIndiceStem(const String& scene_key) {
+    return scene_key == "LA_DETECTOR" || scene_key == "WARNING" ||
+           scene_key == "QR_DETECTOR" || scene_key == "LEFOU_DETECTOR";
+}
+
+bool sceneKeyPrefersBravoStem(const String& scene_key) {
+    return scene_key == "CREDITS" || scene_key == "WIN_ETAPE1" || scene_key == "WIN_ETAPE2";
+}
+
+bool resolveHotlineSceneStemRoute(const String& raw_scene_key,
+                                  const String& raw_stem,
+                                  MediaRouteEntry& out_route,
+                                  String* out_matched_file) {
+    out_route = MediaRouteEntry{};
+    if (out_matched_file != nullptr) {
+        *out_matched_file = "";
+    }
+
+    String scene_key = normalizeHotlineSceneKey(raw_scene_key);
+    if (scene_key.isEmpty()) {
+        return false;
+    }
+
+    String stem = raw_stem;
+    stem.trim();
+    stem.toLowerCase();
+    if (stem.isEmpty()) {
+        return false;
+    }
+
+    fs::FS* sd_fs = nullptr;
+    if (!ensureHotlineSdMounted(sd_fs) || sd_fs == nullptr) {
+        return false;
+    }
+
+    const String scene_dir = String("SCENE_") + scene_key;
+    const String roots[2] = {
+        String(kHotlineTtsAssetsRoot) + "/" + scene_dir,
+        String(kHotlineTtsNestedAssetsRoot) + "/" + scene_dir,
+    };
+
+    String wav_paths[48];
+    size_t wav_count = 0U;
+    String mp3_paths[48];
+    size_t mp3_count = 0U;
+
+    auto append_path = [](String* bucket, size_t capacity, size_t* inout_count, const String& candidate) {
+        if (bucket == nullptr || inout_count == nullptr || *inout_count >= capacity || candidate.isEmpty()) {
+            return;
+        }
+        for (size_t idx = 0U; idx < *inout_count; ++idx) {
+            if (bucket[idx].equalsIgnoreCase(candidate)) {
+                return;
+            }
+        }
+        bucket[*inout_count] = candidate;
+        ++(*inout_count);
+    };
+
+    for (const String& root : roots) {
+        if (!sd_fs->exists(root.c_str())) {
+            continue;
+        }
+        File directory = sd_fs->open(root.c_str(), FILE_READ);
+        if (!directory || !directory.isDirectory()) {
+            if (directory) {
+                directory.close();
+            }
+            continue;
+        }
+
+        File entry = directory.openNextFile();
+        while (entry) {
+            if (!entry.isDirectory()) {
+                String name = entry.name();
+                const int entry_slash = name.lastIndexOf('/');
+                if (entry_slash >= 0 && static_cast<size_t>(entry_slash + 1) < name.length()) {
+                    name = name.substring(static_cast<unsigned int>(entry_slash + 1));
+                }
+                const int entry_dot = name.lastIndexOf('.');
+                if (entry_dot > 0 && static_cast<size_t>(entry_dot) < name.length()) {
+                    String entry_stem = name.substring(0U, static_cast<unsigned int>(entry_dot));
+                    String entry_stem_lower = entry_stem;
+                    entry_stem_lower.toLowerCase();
+
+                    String entry_ext = name.substring(static_cast<unsigned int>(entry_dot));
+                    entry_ext.toLowerCase();
+
+                    bool stem_match = entry_stem_lower == stem;
+                    if (!stem_match && entry_stem_lower.startsWith(stem)) {
+                        const size_t stem_len = stem.length();
+                        if (stem_len < entry_stem_lower.length()) {
+                            const char next = entry_stem_lower.charAt(static_cast<unsigned int>(stem_len));
+                            stem_match = (next == '_' || next == '-' || next == '.' ||
+                                          (next >= 'a' && next <= 'z'));
+                        }
+                    }
+                    if (stem_match) {
+                        const String full_path = buildFsListEntryPath(root, name);
+                        if (entry_ext == ".wav") {
+                            append_path(wav_paths, 48U, &wav_count, full_path);
+                        } else if (entry_ext == ".mp3") {
+                            append_path(mp3_paths, 48U, &mp3_count, full_path);
+                        }
+                    }
+                }
+            }
+            entry.close();
+            entry = directory.openNextFile();
+        }
+        directory.close();
+    }
+
+    AudioPlaybackProbeResult probe;
+    auto try_bucket = [&](String* bucket, size_t count) -> bool {
+        if (bucket == nullptr || count == 0U) {
+            return false;
+        }
+        const size_t start = static_cast<size_t>(nextHotlineRandom32() % static_cast<uint32_t>(count));
+        for (size_t pass = 0U; pass < count; ++pass) {
+            const size_t idx = (start + pass) % count;
+            const String& candidate = bucket[idx];
+            MediaRouteEntry route = buildHotlineSdFileRoute(candidate, false, 0U);
+            if (!mediaRouteHasPayload(route)) {
+                continue;
+            }
+            if (!mediaPathExistsForProbe(route.path, route.source)) {
+                continue;
+            }
+            if (g_audio.probePlaybackFileFromSource(route.path.c_str(), route.source, probe)) {
+                out_route = route;
+                if (out_matched_file != nullptr) {
+                    *out_matched_file = route.path;
+                }
+                return true;
+            }
+        }
+        return false;
+    };
+
+    if (try_bucket(wav_paths, wav_count)) {
+        return true;
+    }
+    return try_bucket(mp3_paths, mp3_count);
+}
+
 bool resolveHotlineSceneDirectoryRoute(const String& raw_scene_key,
                                        HotlineValidationState state,
                                        const String& digit_key,
@@ -1926,6 +2274,12 @@ bool resolveHotlineSceneDirectoryRoute(const String& raw_scene_key,
     const bool scene_is_win =
         scene_key == "WIN_ETAPE" || scene_key == "WIN_ETAPE1" || scene_key == "WIN_ETAPE2" || scene_key == "CREDITS";
     const bool scene_is_warning = scene_key == "WARNING";
+    const bool scene_prefers_warning_hint =
+        scene_key == "U_SON_PROTO" || scene_key == "POLICE_CHASE_ARCADE";
+    const bool scene_prefers_indice_hint =
+        scene_key == "LA_DETECTOR" || scene_key == "WARNING" || scene_key == "QR_DETECTOR" ||
+        scene_key == "LEFOU_DETECTOR";
+    const bool scene_prefers_bravo_hint = scene_is_win;
 
     auto append_scene_file = [&](const String& file_name, String* out_paths, size_t capacity, size_t* inout_count) {
         String clean_file = file_name;
@@ -1934,23 +2288,51 @@ bool resolveHotlineSceneDirectoryRoute(const String& raw_scene_key,
             return;
         }
 
-        String path_primary = String(kHotlineTtsAssetsRoot) + "/" + scene_dir + "/" + clean_file;
-        appendHotlineStemCandidate(path_primary, out_paths, capacity, inout_count);
+        auto append_for_file = [&](const String& candidate_file) {
+            String path_primary = String(kHotlineTtsAssetsRoot) + "/" + scene_dir + "/" + candidate_file;
+            appendHotlineStemCandidate(path_primary, out_paths, capacity, inout_count);
 
-        String path_nested = String(kHotlineTtsNestedAssetsRoot) + "/" + scene_dir + "/" + clean_file;
-        appendHotlineStemCandidate(path_nested, out_paths, capacity, inout_count);
+            String path_nested = String(kHotlineTtsNestedAssetsRoot) + "/" + scene_dir + "/" + candidate_file;
+            appendHotlineStemCandidate(path_nested, out_paths, capacity, inout_count);
+        };
+
+        String lower = clean_file;
+        lower.toLowerCase();
+        if (lower.endsWith(".mp3")) {
+            String wav_file = clean_file.substring(0U, clean_file.length() - 4U) + ".wav";
+            append_for_file(wav_file);
+            append_for_file(clean_file);
+            return;
+        }
+        if (lower.endsWith(".wav")) {
+            append_for_file(clean_file);
+            String mp3_file = clean_file.substring(0U, clean_file.length() - 4U) + ".mp3";
+            append_for_file(mp3_file);
+            return;
+        }
+
+        append_for_file(clean_file + ".wav");
+        append_for_file(clean_file + ".mp3");
     };
 
     String paths[32];
     size_t path_count = 0U;
 
     if (has_hint_digit) {
-        append_scene_file(String("indice_") + normalized_digit + ".mp3", paths, 32U, &path_count);
+        if (scene_prefers_warning_hint) {
+            append_scene_file(String("warning_") + normalized_digit + ".mp3", paths, 32U, &path_count);
+        }
+        if (scene_prefers_bravo_hint) {
+            append_scene_file(String("bravo_") + normalized_digit + ".mp3", paths, 32U, &path_count);
+        }
+        if (scene_prefers_indice_hint || (!scene_prefers_warning_hint && !scene_prefers_bravo_hint)) {
+            append_scene_file(String("indice_") + normalized_digit + ".mp3", paths, 32U, &path_count);
+        }
         append_scene_file(String("hint_") + normalized_digit + ".mp3", paths, 32U, &path_count);
         if (scene_is_warning || state == HotlineValidationState::kRefused) {
             append_scene_file(String("warning_") + normalized_digit + ".mp3", paths, 32U, &path_count);
         }
-        if (scene_is_win || state == HotlineValidationState::kGranted) {
+        if (scene_prefers_bravo_hint || state == HotlineValidationState::kGranted) {
             append_scene_file(String("bravo_") + normalized_digit + ".mp3", paths, 32U, &path_count);
         }
     }
@@ -1968,6 +2350,12 @@ bool resolveHotlineSceneDirectoryRoute(const String& raw_scene_key,
                 append_scene_file("bravo_1.mp3", paths, 32U, &path_count);
                 break;
             case HotlineValidationState::kRefused:
+                if (scene_prefers_indice_hint) {
+                    append_scene_file("indice_1.mp3", paths, 32U, &path_count);
+                }
+                if (scene_prefers_warning_hint) {
+                    append_scene_file("warning_1.mp3", paths, 32U, &path_count);
+                }
                 append_scene_file("validation_ko.mp3", paths, 32U, &path_count);
                 append_scene_file("validation_refused.mp3", paths, 32U, &path_count);
                 append_scene_file("validation_warning.mp3", paths, 32U, &path_count);
@@ -1975,10 +2363,19 @@ bool resolveHotlineSceneDirectoryRoute(const String& raw_scene_key,
                 break;
             case HotlineValidationState::kNone:
             default:
-                append_scene_file("attente_validation.mp3", paths, 32U, &path_count);
-                append_scene_file("indice_1.mp3", paths, 32U, &path_count);
-                if (scene_is_win) {
+                if (scene_prefers_warning_hint) {
+                    append_scene_file("warning_1.mp3", paths, 32U, &path_count);
+                }
+                if (scene_prefers_indice_hint) {
+                    append_scene_file("indice_1.mp3", paths, 32U, &path_count);
+                }
+                if (scene_prefers_bravo_hint) {
                     append_scene_file("bravo_1.mp3", paths, 32U, &path_count);
+                    append_scene_file("attente_validation.mp3", paths, 32U, &path_count);
+                }
+                if (!scene_prefers_warning_hint && !scene_prefers_indice_hint && !scene_prefers_bravo_hint) {
+                    append_scene_file("indice_1.mp3", paths, 32U, &path_count);
+                    append_scene_file("attente_validation.mp3", paths, 32U, &path_count);
                 }
                 break;
         }
@@ -1999,6 +2396,9 @@ bool resolveHotlineSceneDirectoryRoute(const String& raw_scene_key,
         if (!mediaRouteHasPayload(route)) {
             continue;
         }
+        if (!mediaPathExistsForProbe(route.path, route.source)) {
+            continue;
+        }
         if (g_audio.probePlaybackFileFromSource(route.path.c_str(), route.source, probe)) {
             out_route = route;
             if (out_matched_file != nullptr) {
@@ -2007,12 +2407,26 @@ bool resolveHotlineSceneDirectoryRoute(const String& raw_scene_key,
             return true;
         }
 
+        MediaRouteEntry variant_route;
+        if (resolveHotlineSceneDirectoryVariantRoute(route.path, variant_route, out_matched_file)) {
+            out_route = variant_route;
+            return true;
+        }
+
         const String fallback_wav = buildMp3FallbackWavPath(route.path);
-        if (!fallback_wav.isEmpty() && g_audio.probePlaybackFileFromSource(fallback_wav.c_str(), route.source, probe)) {
-            out_route = route;
+        if (!fallback_wav.isEmpty() && mediaPathExistsForProbe(fallback_wav, route.source) &&
+            g_audio.probePlaybackFileFromSource(fallback_wav.c_str(), route.source, probe)) {
+            out_route = buildHotlineSdFileRoute(fallback_wav, false, 0U);
             if (out_matched_file != nullptr) {
                 *out_matched_file = fallback_wav;
             }
+            return true;
+        }
+
+        MediaRouteEntry wav_variant_route;
+        if (!fallback_wav.isEmpty() &&
+            resolveHotlineSceneDirectoryVariantRoute(fallback_wav, wav_variant_route, out_matched_file)) {
+            out_route = wav_variant_route;
             return true;
         }
     }
@@ -2039,6 +2453,50 @@ bool resolveHotlineExplicitRoute(const String& scene_key,
             *out_matched_suffix = String("scene_tts_dir:") + matched_scene_file;
         }
         return true;
+    }
+
+    if (normalized_digit == "none") {
+        String state_stem;
+        if (state == HotlineValidationState::kWaiting) {
+            state_stem = "attente_validation";
+        } else if (state == HotlineValidationState::kGranted) {
+            state_stem = "validation_ok";
+        } else if (state == HotlineValidationState::kRefused) {
+            state_stem = "validation_ko";
+        } else if (sceneKeyPrefersWarningStem(scene_key)) {
+            state_stem = "warning_1";
+        } else if (sceneKeyPrefersIndiceStem(scene_key)) {
+            state_stem = "indice_1";
+        } else if (sceneKeyPrefersBravoStem(scene_key)) {
+            state_stem = "bravo_1";
+        }
+
+        if (!state_stem.isEmpty() &&
+            resolveHotlineSceneStemRoute(scene_key, state_stem, out_route, &matched_scene_file)) {
+            if (out_matched_suffix != nullptr) {
+                *out_matched_suffix = String("scene_tts_stem:") + matched_scene_file;
+            }
+            return true;
+        }
+    } else if (normalized_digit.length() == 1U &&
+               normalized_digit[0] >= '1' &&
+               normalized_digit[0] <= '3') {
+        String hint_stem;
+        if (sceneKeyPrefersWarningStem(scene_key)) {
+            hint_stem = String("warning_") + normalized_digit;
+        } else if (sceneKeyPrefersIndiceStem(scene_key)) {
+            hint_stem = String("indice_") + normalized_digit;
+        } else if (sceneKeyPrefersBravoStem(scene_key)) {
+            hint_stem = String("bravo_") + normalized_digit;
+        }
+
+        if (!hint_stem.isEmpty() &&
+            resolveHotlineSceneStemRoute(scene_key, hint_stem, out_route, &matched_scene_file)) {
+            if (out_matched_suffix != nullptr) {
+                *out_matched_suffix = String("scene_tts_stem:") + matched_scene_file;
+            }
+            return true;
+        }
     }
 
     const String scene_stem = hotlineSceneStemFromKey(scene_key);
@@ -2077,6 +2535,7 @@ bool resolveHotlineVoiceRouteFromStemCandidates(const String* stems, size_t stem
     }
     if (g_hotline_voice_suffix_catalog.empty()) {
         appendHotlineVoiceSuffixCatalog(kHotlineDefaultVoiceSuffix);
+        appendHotlineVoiceSuffixCatalog(kHotlineDefaultVoiceSuffixLegacyMp3);
     }
 
     auto try_resolve_from_catalog = [&](MediaRouteEntry& resolved_route) -> bool {
@@ -2099,15 +2558,18 @@ bool resolveHotlineVoiceRouteFromStemCandidates(const String* stems, size_t stem
                 if (!mediaRouteHasPayload(route)) {
                     continue;
                 }
+                if (!mediaPathExistsForProbe(route.path, route.source)) {
+                    continue;
+                }
                 if (g_audio.probePlaybackFileFromSource(route.path.c_str(), route.source, probe)) {
                     resolved_route = route;
                     return true;
                 }
 
                 const String fallback_wav = buildMp3FallbackWavPath(route.path);
-                if (!fallback_wav.isEmpty() &&
+                if (!fallback_wav.isEmpty() && mediaPathExistsForProbe(fallback_wav, route.source) &&
                     g_audio.probePlaybackFileFromSource(fallback_wav.c_str(), route.source, probe)) {
-                    resolved_route = route;
+                    resolved_route = buildHotlineSdFileRoute(fallback_wav, false, 0U);
                     return true;
                 }
             }
@@ -2123,6 +2585,7 @@ bool resolveHotlineVoiceRouteFromStemCandidates(const String* stems, size_t stem
         refreshHotlineVoiceSuffixCatalog();
         if (g_hotline_voice_suffix_catalog.empty()) {
             appendHotlineVoiceSuffixCatalog(kHotlineDefaultVoiceSuffix);
+            appendHotlineVoiceSuffixCatalog(kHotlineDefaultVoiceSuffixLegacyMp3);
         }
         return try_resolve_from_catalog(out_route);
     }
@@ -2347,8 +2810,9 @@ bool triggerHotlineRouteForDigits(const String& digits, bool from_pulse, String*
         }
         return false;
     }
-    if (route.kind == MediaRouteKind::FILE) {
-        // Hotline file routes are cyclic until hangup: play file, wait, replay.
+    if (route.kind == MediaRouteKind::FILE && !routed_from_scene_hint) {
+        // Keep legacy dial-map routes cyclic, but preserve one-shot behavior
+        // for scene-linked hotline prompts (needed for busy tone + 440 ACK flow).
         route.playback.loop = true;
         route.playback.pause_ms = static_cast<uint16_t>(kHotlineDefaultLoopPauseMs);
     }
@@ -2362,6 +2826,8 @@ bool triggerHotlineRouteForDigits(const String& digits, bool from_pulse, String*
                          String("digits=") + digits + " scene=" + scene_key + " state=" +
                              hotlineValidationStateToString(g_hotline_validation_state) + " method=" + resolution_method +
                              " target=" + describeMediaRouteTarget(route));
+    // HOTLINE_TRIGGER must override stale WAITING_VALIDATION pending answer media.
+    clearPendingEspNowCallRoute("dial_trigger");
     if (g_hotline.active) {
         queueHotlineRoute(digits, digits, source, route);
         if (out_state != nullptr) {
@@ -2501,28 +2967,41 @@ bool playMediaRoute(const MediaRouteEntry& route) {
         return false;
     }
     bool started = false;
-    bool started_mp3 = false;
+    bool started_media_file = false;
+    String started_path = route.path;
     if (g_audio.playFileFromSource(route.path.c_str(), route.source)) {
         started = true;
-        started_mp3 = isMp3MediaPath(route.path);
+        started_media_file = isPlayableMediaPath(route.path);
     } else {
         const String fallback_wav = buildMp3FallbackWavPath(route.path);
         if (!fallback_wav.isEmpty() && fallback_wav != route.path) {
             Serial.printf("[RTC_BL_PHONE] media fallback %s -> %s\n", route.path.c_str(), fallback_wav.c_str());
             if (g_audio.playFileFromSource(fallback_wav.c_str(), route.source)) {
                 started = true;
-                started_mp3 = isMp3MediaPath(fallback_wav);
+                started_media_file = isPlayableMediaPath(fallback_wav);
+                started_path = fallback_wav;
             }
         }
     }
 
     if (!started) {
-        g_busy_tone_after_mp3_pending = false;
+        g_busy_tone_after_media_pending = false;
         return false;
     }
 
-    // For one-shot MP3 routes, play a busy tone when playback completes.
-    g_busy_tone_after_mp3_pending = (!route.playback.loop) && started_mp3;
+    // For one-shot scene media routes, play a busy tone when playback completes.
+    g_busy_tone_after_media_pending = (!route.playback.loop) && started_media_file;
+    const String active_scene_key = normalizeHotlineSceneKey(g_active_scene_id);
+    g_win_etape_validation_after_media_pending =
+        (active_scene_key == "WIN_ETAPE") &&
+        (route.kind == MediaRouteKind::FILE) &&
+        (!route.playback.loop) &&
+        started_media_file;
+    if (g_win_etape_validation_after_media_pending) {
+        appendHotlineLogLine("WIN_ETAPE_440_ARMED", String("route=") + started_path);
+        Serial.printf("[RTC_BL_PHONE] WIN_ETAPE media armed for auto 440 validation (%s)\n",
+                      started_path.c_str());
+    }
     g_prev_audio_playing = g_audio.isPlaying();
     return true;
 }
@@ -2531,7 +3010,28 @@ String dialSourceText(bool from_pulse) {
     return from_pulse ? "PULSE" : "DTMF";
 }
 
+String compactHotlineNotifyPath(const String& raw_path) {
+    String path = sanitizeMediaPath(raw_path);
+    if (path.isEmpty()) {
+        return "";
+    }
+
+    const int slash = path.lastIndexOf('/');
+    if (slash >= 0 && static_cast<size_t>(slash + 1) < path.length()) {
+        path = path.substring(static_cast<unsigned int>(slash + 1));
+    }
+
+    constexpr size_t kNotifyPathMaxLen = 64U;
+    if (path.length() > kNotifyPathMaxLen) {
+        path = path.substring(path.length() - kNotifyPathMaxLen);
+    }
+    return path;
+}
+
 bool sendHotlineNotify(const char* state, const String& digit_key, const String& digits, const String& source, const MediaRouteEntry& route) {
+    constexpr size_t kHotlineNotifyPayloadBudget = 220U;
+    constexpr size_t kEspNowPayloadHardLimit = 240U;
+
     JsonDocument doc;
     doc["proto"] = "rtcbl/1";
     doc["type"] = "event";
@@ -2549,15 +3049,61 @@ bool sendHotlineNotify(const char* state, const String& digit_key, const String&
         out_route["profile"] = toneProfileToString(route.tone.profile);
         out_route["event"] = toneEventToString(route.tone.event);
     } else {
-        out_route["path"] = route.path;
+        out_route["path"] = compactHotlineNotifyPath(route.path);
         out_route["source"] = mediaSourceToString(route.source);
-        JsonObject playback = out_route["playback"].to<JsonObject>();
-        playback["loop"] = route.playback.loop;
-        playback["pause_ms"] = route.playback.pause_ms;
+        if (route.playback.loop || route.playback.pause_ms > 0U) {
+            JsonObject playback = out_route["playback"].to<JsonObject>();
+            if (route.playback.loop) {
+                playback["loop"] = true;
+            }
+            if (route.playback.pause_ms > 0U) {
+                playback["pause_ms"] = route.playback.pause_ms;
+            }
+        }
     }
 
     String wire;
     serializeJson(doc, wire);
+
+    if (wire.length() > kHotlineNotifyPayloadBudget) {
+        JsonDocument compact_doc;
+        compact_doc["proto"] = "rtcbl/1";
+        compact_doc["event"] = "hotline_script";
+        JsonObject compact_payload = compact_doc["payload"].to<JsonObject>();
+        compact_payload["s"] = state == nullptr ? "" : state;
+        compact_payload["k"] = digit_key;
+        compact_payload["d"] = digits;
+        compact_payload["src"] = source;
+
+        if (route.kind == MediaRouteKind::TONE) {
+            compact_payload["rk"] = "tone";
+            compact_payload["tp"] = toneProfileToString(route.tone.profile);
+            compact_payload["te"] = toneEventToString(route.tone.event);
+        } else {
+            compact_payload["rk"] = "file";
+            compact_payload["rp"] = compactHotlineNotifyPath(route.path);
+            compact_payload["rs"] = mediaSourceToString(route.source);
+            if (route.playback.loop) {
+                compact_payload["l"] = true;
+            }
+            if (route.playback.pause_ms > 0U) {
+                compact_payload["p"] = route.playback.pause_ms;
+            }
+        }
+
+        wire = "";
+        serializeJson(compact_doc, wire);
+        if (wire.length() > kEspNowPayloadHardLimit) {
+            JsonDocument minimal_doc;
+            minimal_doc["e"] = "hotline_script";
+            minimal_doc["s"] = state == nullptr ? "" : state;
+            minimal_doc["k"] = digit_key;
+            minimal_doc["d"] = digits;
+            wire = "";
+            serializeJson(minimal_doc, wire);
+        }
+    }
+
     const bool ok = g_espnow.sendJson("broadcast", wire);
     g_hotline.last_notify_event = state == nullptr ? "" : state;
     g_hotline.last_notify_ok = ok;
@@ -2565,6 +3111,57 @@ bool sendHotlineNotify(const char* state, const String& digit_key, const String&
         Serial.printf("[Hotline] notify failed state=%s\n", state == nullptr ? "" : state);
     }
     return ok;
+}
+
+bool warningSirenAudioBusy() {
+    return g_hotline.active || g_hotline.queued || g_hotline.pending_restart || g_hotline.ringback_active ||
+           g_pending_espnow_call || g_slic.isHookOff() ||
+           g_telephony.state() == TelephonyState::OFF_HOOK ||
+           g_telephony.state() == TelephonyState::PLAYING_MESSAGE;
+}
+
+uint32_t warningSirenTogglePeriodMs(uint8_t strength) {
+    uint32_t period_ms = 920U;
+    if (strength > 0U) {
+        period_ms = 920U - static_cast<uint32_t>(strength) * 2U;
+    }
+    if (period_ms < 260U) {
+        period_ms = 260U;
+    } else if (period_ms > 980U) {
+        period_ms = 980U;
+    }
+    return period_ms;
+}
+
+bool startWarningSirenTone(uint32_t now_ms, bool retune) {
+    if (warningSirenAudioBusy()) {
+        g_warning_siren.tone_owned = false;
+        g_warning_siren.last_error = "busy";
+        return false;
+    }
+
+    if (!retune && g_warning_siren.tone_owned && g_audio.isToneRenderingActive()) {
+        return true;
+    }
+
+    const uint8_t phase = g_warning_siren.phase;
+    ToneEvent event = ToneEvent::RINGBACK;
+    if ((phase & 1U) == 0U) {
+        event = (g_warning_siren.strength >= 220U) ? ToneEvent::CONGESTION : ToneEvent::BUSY;
+    }
+    const bool ok = g_audio.playTone(g_warning_siren.profile, event);
+    if (!ok) {
+        g_warning_siren.last_error = "tone_start_failed";
+        g_warning_siren.tone_owned = false;
+        return false;
+    }
+
+    g_warning_siren.event = event;
+    g_warning_siren.toggle_period_ms = warningSirenTogglePeriodMs(g_warning_siren.strength);
+    g_warning_siren.next_toggle_ms = now_ms + g_warning_siren.toggle_period_ms;
+    g_warning_siren.tone_owned = true;
+    g_warning_siren.last_error = "";
+    return true;
 }
 
 void clearHotlineRuntimeState() {
@@ -2579,6 +3176,17 @@ void clearHotlineRuntimeState() {
     g_hotline.last_route_lookup_key = last_lookup_key;
     g_hotline.last_route_resolution = last_resolution;
     g_hotline.last_route_target = last_target;
+    g_win_etape_validation_after_media_pending = false;
+}
+
+void clearPendingEspNowCallRoute(const char* reason) {
+    if (g_pending_espnow_call || mediaRouteHasPayload(g_pending_espnow_call_media)) {
+        Serial.printf("[Hotline] pending espnow route cleared reason=%s target=%s\n",
+                      reason == nullptr ? "" : reason,
+                      describeMediaRouteTarget(g_pending_espnow_call_media).c_str());
+    }
+    g_pending_espnow_call_media = MediaRouteEntry{};
+    g_pending_espnow_call = false;
 }
 
 void queueHotlineRoute(const String& digit_key, const String& digits, const String& source, const MediaRouteEntry& route) {
@@ -2752,6 +3360,294 @@ void tickHotlineRuntime() {
     g_hotline.next_restart_ms = 0U;
 }
 
+void scheduleNextHotlineInterlude(uint32_t now_ms) {
+    g_hotline_interlude.next_due_ms = now_ms + pickRandomInterludeDelayMs();
+}
+
+bool pickRandomInterludeRoute(MediaRouteEntry& out_route, String* out_path, String* out_error) {
+    out_route = MediaRouteEntry{};
+    if (out_path != nullptr) {
+        *out_path = "";
+    }
+    if (out_error != nullptr) {
+        *out_error = "";
+    }
+
+    fs::FS* sd_fs = nullptr;
+    if (!ensureHotlineSdMounted(sd_fs) || sd_fs == nullptr) {
+        if (out_error != nullptr) {
+            *out_error = "sd_unavailable";
+        }
+        return false;
+    }
+
+    File dir = sd_fs->open(kInterludeTtsAssetsRoot);
+    if (!dir || !dir.isDirectory()) {
+        if (out_error != nullptr) {
+            *out_error = "interlude_dir_missing";
+        }
+        if (dir) {
+            dir.close();
+        }
+        return false;
+    }
+
+    AudioPlaybackProbeResult probe;
+    size_t candidate_count = 0U;
+    String selected_path;
+    MediaRouteEntry selected_route;
+
+    while (true) {
+        File entry = dir.openNextFile();
+        if (!entry) {
+            break;
+        }
+        if (entry.isDirectory()) {
+            entry.close();
+            continue;
+        }
+        const String path = entry.path();
+        entry.close();
+        if (path.isEmpty()) {
+            continue;
+        }
+        String lower = path;
+        lower.toLowerCase();
+        if (!lower.endsWith(".mp3") && !lower.endsWith(".wav")) {
+            continue;
+        }
+
+        const MediaRouteEntry route = buildHotlineSdFileRoute(path, false, 0U);
+        if (!mediaRouteHasPayload(route)) {
+            continue;
+        }
+        MediaRouteEntry resolved_route = route;
+        String resolved_path = route.path;
+
+        bool playable = false;
+        if (mediaPathExistsForProbe(route.path, route.source)) {
+            playable = g_audio.probePlaybackFileFromSource(route.path.c_str(), route.source, probe);
+        }
+        if (!playable) {
+            const String fallback_wav = buildMp3FallbackWavPath(route.path);
+            if (!fallback_wav.isEmpty() &&
+                mediaPathExistsForProbe(fallback_wav, route.source) &&
+                g_audio.probePlaybackFileFromSource(fallback_wav.c_str(), route.source, probe)) {
+                resolved_route = buildHotlineSdFileRoute(fallback_wav, false, 0U);
+                resolved_path = fallback_wav;
+                playable = true;
+            }
+        }
+        if (!playable) {
+            continue;
+        }
+
+        ++candidate_count;
+        if ((nextHotlineRandom32() % static_cast<uint32_t>(candidate_count)) == 0U) {
+            selected_route = resolved_route;
+            selected_path = resolved_path;
+        }
+    }
+    dir.close();
+
+    if (candidate_count == 0U || !mediaRouteHasPayload(selected_route)) {
+        if (out_error != nullptr) {
+            *out_error = "interlude_no_playable_file";
+        }
+        return false;
+    }
+
+    out_route = selected_route;
+    if (out_path != nullptr) {
+        *out_path = selected_path;
+    }
+    return true;
+}
+
+void clearOffHookAutoRandomPlayback() {
+    g_offhook_autoplay.armed = false;
+    g_offhook_autoplay.play_after_ms = 0U;
+    g_offhook_autoplay.route = MediaRouteEntry{};
+    g_offhook_autoplay.selected_path = "";
+}
+
+void armOffHookAutoRandomPlayback(uint32_t now_ms) {
+    clearOffHookAutoRandomPlayback();
+    g_offhook_autoplay.last_error = "";
+
+    if (g_pending_espnow_call || g_hotline.active || g_hotline.queued || g_hotline.pending_restart ||
+        g_hotline.ringback_active) {
+        g_offhook_autoplay.last_error = "busy";
+        return;
+    }
+    if (g_audio.isPlaying()) {
+        g_offhook_autoplay.last_error = "audio_playing";
+        return;
+    }
+    if (g_audio.isToneRenderingActive() && !g_audio.isDialToneActive()) {
+        g_offhook_autoplay.last_error = "tone_busy";
+        return;
+    }
+    if (g_telephony.dialingStarted() || !g_telephony.dialBuffer().isEmpty()) {
+        g_offhook_autoplay.last_error = "dialing";
+        return;
+    }
+
+    MediaRouteEntry route;
+    String selected_path;
+    String resolve_error;
+    if (!pickRandomInterludeRoute(route, &selected_path, &resolve_error) || !mediaRouteHasPayload(route)) {
+        g_offhook_autoplay.last_error = resolve_error.isEmpty() ? "no_random_file" : resolve_error;
+        Serial.printf("[RTC_BL_PHONE] off_hook auto random skipped reason=%s\n",
+                      g_offhook_autoplay.last_error.c_str());
+        return;
+    }
+
+    g_offhook_autoplay.armed = true;
+    g_offhook_autoplay.play_after_ms = now_ms + kOffHookAutoRandomDelayMs;
+    g_offhook_autoplay.route = route;
+    g_offhook_autoplay.selected_path = selected_path;
+    Serial.printf("[RTC_BL_PHONE] off_hook auto random armed delay_ms=%lu file=%s\n",
+                  static_cast<unsigned long>(kOffHookAutoRandomDelayMs),
+                  selected_path.c_str());
+}
+
+void tickOffHookAutoRandomPlayback(uint32_t now_ms) {
+    if (!g_offhook_autoplay.armed) {
+        return;
+    }
+
+    if (g_telephony.state() != TelephonyState::OFF_HOOK || !g_slic.isHookOff()) {
+        clearOffHookAutoRandomPlayback();
+        return;
+    }
+
+    if (g_telephony.dialingStarted() || !g_telephony.dialBuffer().isEmpty()) {
+        g_offhook_autoplay.last_error = "dialing";
+        clearOffHookAutoRandomPlayback();
+        return;
+    }
+
+    if (static_cast<int32_t>(now_ms - g_offhook_autoplay.play_after_ms) < 0) {
+        return;
+    }
+
+    if (g_audio.isDialToneActive()) {
+        g_audio.stopDialTone();
+    }
+    if (g_audio.isToneRenderingActive()) {
+        g_audio.stopTone();
+    }
+
+    const MediaRouteEntry route = g_offhook_autoplay.route;
+    const String selected_path = g_offhook_autoplay.selected_path;
+    clearOffHookAutoRandomPlayback();
+
+    const bool ok = playMediaRoute(route);
+    if (ok) {
+        // This auto-play should not arm hotline busy/validation chains.
+        g_busy_tone_after_media_pending = false;
+        g_win_etape_validation_after_media_pending = false;
+    }
+    Serial.printf("[RTC_BL_PHONE] off_hook auto random play file=%s ok=%u\n",
+                  selected_path.c_str(),
+                  ok ? 1U : 0U);
+}
+
+bool triggerHotlineInterludeNow(const char* reason) {
+    const uint32_t now_ms = millis();
+    if (!g_hotline_interlude.enabled) {
+        return false;
+    }
+
+    if (g_hotline.active || g_hotline.queued || g_hotline.pending_restart || g_pending_espnow_call ||
+        g_telephony.state() == TelephonyState::OFF_HOOK || g_telephony.state() == TelephonyState::PLAYING_MESSAGE ||
+        g_slic.isHookOff()) {
+        g_hotline_interlude.last_error = "busy";
+        appendHotlineLogLine("INTERLUDE_SKIP_BUSY", String("reason=") + (reason == nullptr ? "" : reason));
+        g_hotline_interlude.next_due_ms = now_ms + kInterludeRetryDelayMs;
+        return false;
+    }
+
+    MediaRouteEntry route;
+    String selected_path;
+    String resolve_error;
+    if (!pickRandomInterludeRoute(route, &selected_path, &resolve_error)) {
+        g_hotline_interlude.last_error = resolve_error;
+        appendHotlineLogLine("INTERLUDE_RESOLVE_FAIL",
+                             String("reason=") + (reason == nullptr ? "" : reason) + " err=" + resolve_error);
+        g_hotline_interlude.next_due_ms = now_ms + kInterludeRetryDelayMs;
+        return false;
+    }
+
+    g_pending_espnow_call_media = route;
+    g_pending_espnow_call = true;
+    g_telephony.triggerIncomingRing();
+
+    g_hotline_interlude.last_file = selected_path;
+    g_hotline_interlude.last_trigger_ms = now_ms;
+    g_hotline_interlude.last_error = "";
+    appendHotlineLogLine("INTERLUDE_RING",
+                         String("reason=") + (reason == nullptr ? "" : reason) + " file=" + selected_path);
+    scheduleNextHotlineInterlude(now_ms);
+    Serial.printf("[RTC_BL_PHONE] interlude ring reason=%s file=%s next_due_ms=%lu\n",
+                  reason == nullptr ? "" : reason,
+                  selected_path.c_str(),
+                  static_cast<unsigned long>(g_hotline_interlude.next_due_ms));
+    return true;
+}
+
+void tickHotlineInterludeRuntime() {
+    if (!g_hotline_interlude.enabled) {
+        return;
+    }
+    const uint32_t now_ms = millis();
+    if (g_hotline_interlude.next_due_ms == 0U) {
+        scheduleNextHotlineInterlude(now_ms);
+        return;
+    }
+    if (static_cast<int32_t>(now_ms - g_hotline_interlude.next_due_ms) < 0) {
+        return;
+    }
+    triggerHotlineInterludeNow("timer");
+}
+
+void tickWarningSirenRuntime() {
+    if (!g_warning_siren.enabled) {
+        return;
+    }
+
+    const uint32_t now_ms = millis();
+    if (static_cast<int32_t>(now_ms - g_warning_siren.last_control_ms) > static_cast<int32_t>(kWarningSirenBeatTimeoutMs)) {
+        g_warning_siren.enabled = false;
+        g_warning_siren.tone_owned = false;
+        g_warning_siren.last_error = "control_timeout";
+        Serial.println("[RTC_BL_PHONE] warning siren auto-stop timeout");
+        return;
+    }
+
+    if (warningSirenAudioBusy()) {
+        if (g_warning_siren.tone_owned &&
+            !g_hotline.active &&
+            !g_hotline.ringback_active &&
+            !g_pending_espnow_call) {
+            g_audio.stopTone();
+        }
+        g_warning_siren.tone_owned = false;
+        return;
+    }
+
+    if (!g_warning_siren.tone_owned) {
+        startWarningSirenTone(now_ms, true);
+        return;
+    }
+    if (static_cast<int32_t>(now_ms - g_warning_siren.next_toggle_ms) < 0) {
+        return;
+    }
+    ++g_warning_siren.phase;
+    startWarningSirenTone(now_ms, true);
+}
+
 MediaRouteEntry resolveEspNowMediaRoute(const String& message, const String& args) {
     MediaRouteEntry route;
     route.kind = MediaRouteKind::FILE;
@@ -2833,6 +3729,40 @@ bool mapHotlineValidationToAckEvent(const String& raw_state, const char** out_ev
         return true;
     }
     return false;
+}
+
+bool sendHotlineValidationAckEvent(const char* ack_event_name, bool ack_requested, const char* source_tag) {
+    if (ack_event_name == nullptr || ack_event_name[0] == '\0') {
+        return false;
+    }
+    if (!g_espnow.isReady()) {
+        Serial.printf("[RTC_BL_PHONE] validation ack skipped (espnow not ready) event=%s\n", ack_event_name);
+        return false;
+    }
+
+    JsonDocument frame;
+    frame["msg_id"] = String("hv-") + String(millis());
+    frame["seq"] = static_cast<uint32_t>(millis());
+    frame["type"] = "command";
+    frame["ack"] = ack_requested;
+    JsonObject payload = frame["payload"].to<JsonObject>();
+    payload["cmd"] = "SC_EVENT";
+    JsonObject event_args = payload["args"].to<JsonObject>();
+    event_args["event_type"] = "espnow";
+    event_args["event_name"] = ack_event_name;
+    if (source_tag != nullptr && source_tag[0] != '\0') {
+        event_args["source"] = source_tag;
+    }
+
+    String wire;
+    serializeJson(frame, wire);
+    const bool sent = g_espnow.sendJson("broadcast", wire);
+    g_hotline.last_notify_event = String("validate_") + ack_event_name;
+    g_hotline.last_notify_ok = sent;
+    if (!sent) {
+        Serial.printf("[RTC_BL_PHONE] validation ack send_failed event=%s\n", ack_event_name);
+    }
+    return sent;
 }
 
 HotlineValidationState hotlineValidationStateFromAckEvent(const char* ack_event_name) {
@@ -2978,22 +3908,7 @@ DispatchResponse dispatchHotlineValidateCommand(const String& args) {
         return makeResponse(false, "HOTLINE_VALIDATE espnow_not_ready");
     }
 
-    JsonDocument frame;
-    frame["msg_id"] = String("hv-") + String(millis());
-    frame["seq"] = static_cast<uint32_t>(millis());
-    frame["type"] = "command";
-    frame["ack"] = ack_requested;
-    JsonObject payload = frame["payload"].to<JsonObject>();
-    payload["cmd"] = "SC_EVENT";
-    JsonObject event_args = payload["args"].to<JsonObject>();
-    event_args["event_type"] = "espnow";
-    event_args["event_name"] = ack_event_name;
-
-    String wire;
-    serializeJson(frame, wire);
-    const bool sent = g_espnow.sendJson("broadcast", wire);
-    g_hotline.last_notify_event = String("validate_") + ack_event_name;
-    g_hotline.last_notify_ok = sent;
+    const bool sent = sendHotlineValidationAckEvent(ack_event_name, ack_requested, "manual");
     if (!sent) {
         return makeResponse(false, "HOTLINE_VALIDATE send_failed");
     }
@@ -3044,6 +3959,92 @@ DispatchResponse dispatchWaitingValidationCommand(const String& args) {
     g_hotline.last_notify_event = "waiting_validation";
     g_hotline.last_notify_ok = true;
     return makeResponse(true, "WAITING_VALIDATION");
+}
+
+DispatchResponse dispatchWarningSirenCommand(const String& args) {
+    String action;
+    String trailing;
+    if (!args.isEmpty()) {
+        if (!splitFirstToken(args, action, trailing)) {
+            action = args;
+            trailing = "";
+        }
+    } else {
+        action = "STATUS";
+    }
+    action.trim();
+    action.toUpperCase();
+
+    if (action == "STATUS") {
+        JsonDocument doc;
+        JsonObject root = doc.to<JsonObject>();
+        root["enabled"] = g_warning_siren.enabled;
+        root["tone_owned"] = g_warning_siren.tone_owned;
+        root["profile"] = toneProfileToString(g_warning_siren.profile);
+        root["event"] = toneEventToString(g_warning_siren.event);
+        root["strength"] = g_warning_siren.strength;
+        root["phase"] = g_warning_siren.phase;
+        root["started_ms"] = g_warning_siren.started_ms;
+        root["last_control_ms"] = g_warning_siren.last_control_ms;
+        root["next_toggle_ms"] = g_warning_siren.next_toggle_ms;
+        root["toggle_period_ms"] = g_warning_siren.toggle_period_ms;
+        root["last_error"] = g_warning_siren.last_error;
+        return jsonResponse(doc);
+    }
+
+    uint8_t strength = g_warning_siren.strength;
+    if (!trailing.isEmpty()) {
+        String strength_token;
+        String leftover;
+        if (!splitFirstToken(trailing, strength_token, leftover) || !leftover.isEmpty()) {
+            return makeResponse(false, "WARNING_SIREN invalid_args");
+        }
+        const int parsed = strength_token.toInt();
+        if (parsed < 0 || parsed > 255) {
+            return makeResponse(false, "WARNING_SIREN invalid_strength");
+        }
+        strength = static_cast<uint8_t>(parsed);
+    }
+
+    const uint32_t now_ms = millis();
+    if (action == "START" || action == "BEAT") {
+        if (action == "START") {
+            g_warning_siren.profile = pickRandomToneProfile();
+            g_warning_siren.phase = 0U;
+            g_warning_siren.started_ms = now_ms;
+        } else {
+            ++g_warning_siren.phase;
+        }
+        g_warning_siren.enabled = true;
+        g_warning_siren.strength = strength;
+        g_warning_siren.last_control_ms = now_ms;
+        g_warning_siren.toggle_period_ms = warningSirenTogglePeriodMs(strength);
+        g_warning_siren.next_toggle_ms = now_ms;
+        g_warning_siren.last_error = "";
+        startWarningSirenTone(now_ms, true);
+        if (action == "START") {
+            appendHotlineLogLine("WARN_SIREN_START",
+                                 String("profile=") + toneProfileToString(g_warning_siren.profile) +
+                                     " strength=" + String(strength));
+        }
+        return makeResponse(true, String("WARNING_SIREN ") + action);
+    }
+
+    if (action == "STOP") {
+        const bool busy = warningSirenAudioBusy();
+        if (g_warning_siren.tone_owned && !busy) {
+            g_audio.stopTone();
+        }
+        g_warning_siren.enabled = false;
+        g_warning_siren.tone_owned = false;
+        g_warning_siren.last_control_ms = now_ms;
+        g_warning_siren.next_toggle_ms = 0U;
+        g_warning_siren.last_error = "";
+        appendHotlineLogLine("WARN_SIREN_STOP", "");
+        return makeResponse(true, "WARNING_SIREN STOP");
+    }
+
+    return makeResponse(false, "WARNING_SIREN invalid_action");
 }
 
 bool handleIncomingEspNowCallCommand(const String& command_line, DispatchResponse& out) {
@@ -3480,6 +4481,14 @@ void fillStatusSnapshot(JsonObject root) {
     telephony["hotline_ringback_until_ms"] = g_hotline.ringback_until_ms;
     telephony["hotline_ringback_profile"] = toneProfileToString(g_hotline.ringback_profile);
     telephony["hotline_validation_state"] = hotlineValidationStateToString(g_hotline_validation_state);
+    telephony["interlude_enabled"] = g_hotline_interlude.enabled;
+    telephony["interlude_next_due_ms"] = g_hotline_interlude.next_due_ms;
+    telephony["interlude_last_file"] = g_hotline_interlude.last_file;
+    telephony["interlude_last_trigger_ms"] = g_hotline_interlude.last_trigger_ms;
+    telephony["warning_siren_enabled"] = g_warning_siren.enabled;
+    telephony["warning_siren_profile"] = toneProfileToString(g_warning_siren.profile);
+    telephony["warning_siren_event"] = toneEventToString(g_warning_siren.event);
+    telephony["warning_siren_strength"] = g_warning_siren.strength;
     telephony["pending_espnow_call"] = g_pending_espnow_call;
     telephony["pending_espnow_call_kind"] = mediaRouteKindToString(g_pending_espnow_call_media.kind);
     if (g_pending_espnow_call_media.kind == MediaRouteKind::TONE) {
@@ -3760,7 +4769,7 @@ bool applyAudioPatch(JsonVariantConst patch, A252AudioConfig& target, String& er
         next.sample_rate = 8000U;
         next.bits_per_sample = 16U;
         next.wav_loudness_policy = "FIXED_GAIN_ONLY";
-        next.volume = 100U;
+        next.volume = kA252CodecMaxVolumePercent;
         next.adc_dsp_enabled = false;
         next.adc_fft_enabled = false;
     }
@@ -4397,10 +5406,11 @@ void registerCommands() {
         A252AudioConfig next = g_audio_cfg;
         long applied_value = value;
         if (g_profile == BoardProfile::ESP32_A252) {
-            if (value != 100L) {
-                Serial.printf("[RTC_BL_PHONE] forcing ES8388 volume to 100 (requested=%ld)\n", value);
+            if (value != static_cast<long>(kA252CodecMaxVolumePercent)) {
+                Serial.printf("[RTC_BL_PHONE] forcing ES8388 volume to 100 (requested=%ld)\n",
+                              value);
             }
-            applied_value = 100L;
+            applied_value = static_cast<long>(kA252CodecMaxVolumePercent);
         }
         next.volume = static_cast<uint8_t>(applied_value);
 
@@ -4620,6 +5630,16 @@ void registerCommands() {
         root["scene_sync_last_error"] = g_espnow_scene_sync.last_error;
         root["scene_sync_last_source"] = g_espnow_scene_sync.last_source;
         root["scene_sync_last_update_ms"] = g_espnow_scene_sync.last_update_ms;
+        root["interlude_enabled"] = g_hotline_interlude.enabled;
+        root["interlude_next_due_ms"] = g_hotline_interlude.next_due_ms;
+        root["interlude_last_file"] = g_hotline_interlude.last_file;
+        root["interlude_last_trigger_ms"] = g_hotline_interlude.last_trigger_ms;
+        root["interlude_last_error"] = g_hotline_interlude.last_error;
+        root["warning_siren_enabled"] = g_warning_siren.enabled;
+        root["warning_siren_tone_owned"] = g_warning_siren.tone_owned;
+        root["warning_siren_profile"] = toneProfileToString(g_warning_siren.profile);
+        root["warning_siren_event"] = toneEventToString(g_warning_siren.event);
+        root["warning_siren_strength"] = g_warning_siren.strength;
         JsonObject route = root["current_route"].to<JsonObject>();
         route["kind"] = mediaRouteKindToString(g_hotline.current_route.kind);
         if (g_hotline.current_route.kind == MediaRouteKind::TONE) {
@@ -4633,6 +5653,16 @@ void registerCommands() {
             playback["pause_ms"] = g_hotline.current_route.playback.pause_ms;
         }
         return jsonResponse(doc);
+    });
+
+    g_dispatcher.registerCommand("HOTLINE_INTERLUDE_FORCE", [](const String&) {
+        const bool triggered = triggerHotlineInterludeNow("force");
+        if (!triggered) {
+            return makeResponse(false,
+                                String("HOTLINE_INTERLUDE_FORCE ") +
+                                    (g_hotline_interlude.last_error.isEmpty() ? "failed" : g_hotline_interlude.last_error));
+        }
+        return makeResponse(true, "HOTLINE_INTERLUDE_FORCE");
     });
 
     g_dispatcher.registerCommand("HOTLINE_TRIGGER", [](const String& args) {
@@ -4667,6 +5697,10 @@ void registerCommands() {
 
     g_dispatcher.registerCommand("HOTLINE_VALIDATE", [](const String& args) {
         return dispatchHotlineValidateCommand(args);
+    });
+
+    g_dispatcher.registerCommand("WARNING_SIREN", [](const String& args) {
+        return dispatchWarningSirenCommand(args);
     });
 
     g_dispatcher.registerCommand("HOTLINE_SCENE_PLAY", [](const String& args) {
@@ -4872,6 +5906,51 @@ void processInboundBridgeCommand(const String& source, const JsonVariantConst& p
         return;
     }
 
+    auto send_bounded_bridge_response = [&](JsonDocument& response, bool envelope_mode) {
+        constexpr size_t kEspNowResponseBudget = 220U;
+        String response_payload;
+        serializeJson(response, response_payload);
+
+        if (response_payload.length() > kEspNowResponseBudget) {
+            if (envelope_mode) {
+                JsonObject payload_obj = response["payload"].as<JsonObject>();
+                payload_obj.remove("data");
+                payload_obj.remove("data_raw");
+                payload_obj["truncated"] = true;
+            } else {
+                response.remove("data");
+                response.remove("data_raw");
+                response["truncated"] = true;
+            }
+            response_payload = "";
+            serializeJson(response, response_payload);
+        }
+
+        if (response_payload.length() > kEspNowResponseBudget) {
+            JsonDocument minimal;
+            if (envelope_mode) {
+                minimal["msg_id"] = request_id.isEmpty() ? String(millis()) : request_id;
+                minimal["seq"] = request_seq;
+                minimal["type"] = "ack";
+                minimal["ack"] = true;
+                JsonObject payload_obj = minimal["payload"].to<JsonObject>();
+                payload_obj["ok"] = response["payload"]["ok"] | false;
+                payload_obj["code"] = response["payload"]["code"] | "";
+                payload_obj["error"] = "response_truncated";
+            } else {
+                minimal["proto"] = "rtcbl/1";
+                minimal["id"] = request_id;
+                minimal["ok"] = response["ok"] | false;
+                minimal["code"] = response["code"] | "";
+                minimal["error"] = "response_truncated";
+            }
+            response_payload = "";
+            serializeJson(minimal, response_payload);
+        }
+
+        g_espnow.sendJson(source, response_payload);
+    };
+
     DispatchResponse result;
     if (handleIncomingEspNowCallCommand(cmd, result)) {
         if (is_envelope_v2 && request_ack && isMacAddressString(source)) {
@@ -4896,9 +5975,7 @@ void processInboundBridgeCommand(const String& source, const JsonVariantConst& p
                 ack_payload["data_raw"] = result.raw;
             }
 
-            String response_payload;
-            serializeJson(response, response_payload);
-            g_espnow.sendJson(source, response_payload);
+            send_bounded_bridge_response(response, true);
             return;
         }
 
@@ -4925,9 +6002,7 @@ void processInboundBridgeCommand(const String& source, const JsonVariantConst& p
             response["data_raw"] = result.raw;
         }
 
-        String response_payload;
-        serializeJson(response, response_payload);
-        g_espnow.sendJson(source, response_payload);
+        send_bounded_bridge_response(response, false);
         return;
     }
 
@@ -4956,9 +6031,7 @@ void processInboundBridgeCommand(const String& source, const JsonVariantConst& p
             ack_payload["data_raw"] = result.raw;
         }
 
-        String response_payload;
-        serializeJson(response, response_payload);
-        g_espnow.sendJson(source, response_payload);
+        send_bounded_bridge_response(response, true);
         return;
     }
 
@@ -4985,9 +6058,7 @@ void processInboundBridgeCommand(const String& source, const JsonVariantConst& p
         response["data_raw"] = result.raw;
     }
 
-    String response_payload;
-    serializeJson(response, response_payload);
-    g_espnow.sendJson(source, response_payload);
+    send_bounded_bridge_response(response, false);
 }
 
 void printHelp() {
@@ -5043,10 +6114,11 @@ void enforceOnHookSilence() {
     if (g_slic.isHookOff()) {
         return;
     }
+    const bool allow_warning_siren_tone = g_warning_siren.enabled && g_warning_siren.tone_owned;
     if (g_audio.isPlaying()) {
         g_audio.stopPlayback();
     }
-    if (g_audio.isToneRenderingActive()) {
+    if (g_audio.isToneRenderingActive() && !allow_warning_siren_tone) {
         g_audio.stopTone();
     }
 }
@@ -5054,12 +6126,22 @@ void enforceOnHookSilence() {
 void tickPlaybackCompletionBusyTone() {
     const bool is_playing = g_audio.isPlaying();
     if (g_prev_audio_playing && !is_playing) {
-        if (g_busy_tone_after_mp3_pending && g_slic.isHookOff()) {
+        if (g_busy_tone_after_media_pending && g_slic.isHookOff()) {
             g_audio.stopDialTone();
             const bool busy_ok = g_audio.playTone(ToneProfile::FR_FR, ToneEvent::BUSY);
-            Serial.printf("[RTC_BL_PHONE] mp3 playback completed -> busy tone ok=%s\n", busy_ok ? "true" : "false");
+            Serial.printf("[RTC_BL_PHONE] media playback completed -> busy tone ok=%s\n", busy_ok ? "true" : "false");
         }
-        g_busy_tone_after_mp3_pending = false;
+        if (g_win_etape_validation_after_media_pending && g_slic.isHookOff()) {
+            const bool ack_ok = sendHotlineValidationAckEvent("ACK_WIN1", true, "auto_440");
+            if (ack_ok) {
+                g_hotline_validation_state = HotlineValidationState::kGranted;
+                g_hotline.current_digits = "440";
+            }
+            appendHotlineLogLine("WIN_ETAPE_440", String("ack=") + (ack_ok ? "1" : "0"));
+            Serial.printf("[RTC_BL_PHONE] WIN_ETAPE auto-compose 440 -> ACK_WIN1 sent=%s\n", ack_ok ? "true" : "false");
+        }
+        g_win_etape_validation_after_media_pending = false;
+        g_busy_tone_after_media_pending = false;
     }
     g_prev_audio_playing = is_playing;
 }
@@ -5136,6 +6218,11 @@ void setup() {
     g_peer_store.peers = g_espnow.peers();
     initEspNowPeerDiscoveryRuntime();
     initEspNowSceneSyncRuntime();
+    g_hotline_interlude = HotlineInterludeRuntimeState{};
+    g_hotline_interlude.enabled = true;
+    scheduleNextHotlineInterlude(millis());
+    Serial.printf("[RTC_BL_PHONE] hotline interlude scheduler enabled next_due_ms=%lu\n",
+                  static_cast<unsigned long>(g_hotline_interlude.next_due_ms));
     g_espnow.setCommandCallback([](const String& source, const JsonVariantConst& payload) {
         processInboundBridgeCommand(source, payload);
     });
@@ -5154,11 +6241,19 @@ void loop() {
     g_wifi.loop();
     const TelephonyState prev_telephony_state = g_telephony.state();
     g_telephony.tick();
+    const uint32_t now_ms = millis();
     const TelephonyState current_telephony_state = g_telephony.state();
     if (current_telephony_state == TelephonyState::OFF_HOOK && prev_telephony_state != TelephonyState::OFF_HOOK) {
         requestSceneSyncFromFreenove("off_hook", true);
+        armOffHookAutoRandomPlayback(now_ms);
+    } else if (prev_telephony_state == TelephonyState::OFF_HOOK &&
+               current_telephony_state != TelephonyState::OFF_HOOK) {
+        clearOffHookAutoRandomPlayback();
     }
+    tickOffHookAutoRandomPlayback(now_ms);
     tickHotlineRuntime();
+    tickHotlineInterludeRuntime();
+    tickWarningSirenRuntime();
     enforceOnHookSilence();
     tickPlaybackCompletionBusyTone();
     g_scope_display.tick();

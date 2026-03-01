@@ -26,10 +26,13 @@ Référence rôles: [docs/roles_agents.md](docs/roles_agents.md)
   - `3 -> /hotline/menu_dtmf_long.wav` (SD)
 - Numérotation impulsion active combiné décroché.
 - Après sélection d’un numéro valide:
-  - lecture WAV,
+  - tentative de lecture MP3 via table explicite `scene + validation_state + digit`,
+  - fallback heuristique par stems si entrée explicite absente,
+  - fallback automatique vers mapping WAV `1/2/3` si aucun MP3 contextualisé n’est trouvé,
   - pause 3s,
   - boucle jusqu’au raccroché.
-- `WAITING_VALIDATION` déclenche la sonnerie + prompt SD `enter_code_5.wav` au décroché.
+- `WAITING_VALIDATION` déclenche la sonnerie + prompt SD contextualisé (fallback `enter_code_5__fr-fr-deniseneural.mp3` / `enter_code_5.wav`).
+- `WAITING_VALIDATION {"scene_id":"SCENE_WIN_ETAPE","step_id":"RTC_ESP_ETAPE1","validation_state":"waiting"}` met à jour le contexte scène/état avant routage MP3.
 - Lecture MP3 SD activée (decodeur Helix) pour les prompts scène hotline.
 - Raccroché détecté rapidement (~300 ms).
 - Pas de sonnerie automatique au boot (ring déclenché par événement runtime uniquement).
@@ -37,8 +40,20 @@ Référence rôles: [docs/roles_agents.md](docs/roles_agents.md)
 ## Audio scène hotline (SD)
 
 - `SCENE <scene_id>` conserve l’état scène et tente une lecture SD mappée (`/hotline/scene_*`).
+- `SCENE {"id":"<scene_id>","step_id":"<step_id>","validation_state":"waiting|granted|refused|none"}` met à jour le contexte hotline complet.
 - Commande dédiée: `HOTLINE_SCENE_PLAY <scene_id>` pour forcer la lecture scène.
 - Mapping voix par défaut: suffixe `__fr-fr-deniseneural.mp3`.
+- Mapping scène explicite validé:
+  - `SCENE_U_SON_PROTO -> fiches-hotline_2`
+  - `SCENE_LA_DETECTOR -> scene_la_detector_2`
+  - `SCENE_WIN_ETAPE`, `SCENE_WIN_ETAPE1`, `SCENE_WIN_ETAPE2`, `SCENE_CREDITS -> scene_win_2`
+  - `SCENE_WARNING -> scene_broken_2`
+  - `SCENE_QR_DETECTOR -> scene_camera_scan_2`
+  - `SCENE_LEFOU_DETECTOR`, `SCENE_POLICE_CHASE_ARCADE -> scene_search_2`
+- `HOTLINE_STATUS` expose aussi:
+  - `route_lookup_key` (clé `scene|state|digit`),
+  - `route_resolution` (`explicit_table:*`, `heuristic_stems`, `dial_map`, etc.),
+  - `route_target` (fichier/tone effectivement routé).
 
 ## ESP-NOW (actuel)
 

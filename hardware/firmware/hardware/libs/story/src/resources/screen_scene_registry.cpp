@@ -25,6 +25,8 @@ constexpr ScreenSceneDef kScenes[] = {
     {"SCENE_REWARD", 1U, 2U},
     {"SCENE_WIN_ETAPE1", 1U, 2U},
     {"SCENE_WIN_ETAPE2", 1U, 2U},
+    {"SCENE_CREDITS", 1U, 2U},
+    {"SCENE_CREDIT", 1U, 2U},
     {"SCENE_FINAL_WIN", 1U, 2U},
     {"SCENE_MEDIA_ARCHIVE", 2U, 2U},
     {"SCENE_READY", 2U, 2U},

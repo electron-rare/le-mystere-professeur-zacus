@@ -142,7 +142,9 @@ class FreenoveLgfxDevice final : public lgfx::LGFX_Device {
       cfg.freq_read = SPI_READ_FREQUENCY;
       cfg.spi_3wire = false;
       cfg.use_lock = false;
-      cfg.dma_channel = SPI_DMA_CH_AUTO;
+      // Keep LGFX SPI in CPU mode; DMA out-link init can be unavailable on this board/runtime mix
+      // and short write auto-promotion to DMA then crashes in Bus_SPI::writeBytes.
+      cfg.dma_channel = 0;
       cfg.pin_sclk = FREENOVE_TFT_SCK;
       cfg.pin_mosi = FREENOVE_TFT_MOSI;
       cfg.pin_miso = FREENOVE_TFT_MISO;
@@ -295,6 +297,22 @@ class LovyanGfxDisplayHal final : public DisplayHal {
   }
 
   void pushColors(const uint16_t* pixels, uint32_t count, bool swap_bytes) override {
+    if (pixels == nullptr || count == 0U) {
+      return;
+    }
+    // LovyanGFX may auto-promote short writes (<1024 bytes) to DMA when SPI DMA channel
+    // is configured. On low-memory boots this can hit an uninitialized DMA out-link path.
+    // Keep short transfers in tiny CPU bursts to force the non-DMA register path.
+    if (count < 512U) {
+      constexpr uint32_t kCpuBurstPixels = 32U;  // 64 bytes, stays on Bus_SPI small-write path.
+      uint32_t offset = 0U;
+      while (offset < count) {
+        const uint32_t burst = ((count - offset) > kCpuBurstPixels) ? kCpuBurstPixels : (count - offset);
+        display_.writePixels(pixels + offset, static_cast<int32_t>(burst), swap_bytes);
+        offset += burst;
+      }
+      return;
+    }
     display_.writePixels(pixels, static_cast<int32_t>(count), swap_bytes);
   }
 

@@ -1,0 +1,11 @@
+Indice 3 :
+La détection de QR code est sensible aux conditions d’éclairage.
+Utilise le réticule pour bien centrer le code, ajuste la caméra si besoin.
+Le système optimise les ressources pour garantir une expérience fluide.
+La bibliothèque QR gère les cas d’erreur, offrant une robustesse accrue.
+Reste attentif à la qualité du QR, chaque pixel compte.
+La patience et la précision sont tes alliées pour réussir.
+Observe les variations, ajuste la position pour améliorer la détection.
+Le système teste différentes conditions pour garantir la fiabilité.
+Chaque essai rapproche du succès, ne te décourage pas.
+La réussite est à portée de main, reste concentré sur le centre du viseur.

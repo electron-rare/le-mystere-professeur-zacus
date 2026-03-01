@@ -370,6 +370,25 @@ void RuntimeConfigService::load(StorageManager& storage,
     }
   }
 
+  const String la_payload = storage.loadTextFile("/story/apps/APP_LA.json");
+  if (!la_payload.isEmpty()) {
+    StaticJsonDocument<384> document;
+    const DeserializationError error = deserializeJson(document, la_payload);
+    if (!error) {
+      JsonVariantConst config = document["config"];
+      // Keep LA timeout in sync with the scene-level APP_LA contract so trigger and hourglass share one timer.
+      if (config["timeout_ms"].is<unsigned int>()) {
+        uint32_t timeout_ms = config["timeout_ms"].as<unsigned int>();
+        if (timeout_ms > 600000U) {
+          timeout_ms = 600000U;
+        }
+        hardware_cfg->mic_la_timeout_ms = timeout_ms;
+      }
+    } else {
+      Serial.printf("[HW] APP_LA invalid json (%s)\n", error.c_str());
+    }
+  }
+
   const String media_payload = storage.loadTextFile("/story/apps/APP_MEDIA.json");
   if (!media_payload.isEmpty()) {
     StaticJsonDocument<512> document;

@@ -2,8 +2,8 @@
 
 ## Configurer
 
-- Scénario : DEFAULT
-- Fichier source : ../../game/scenarios/default_unlock_win_etape2.yaml
+- Scénario : None
+- Fichier source : ../../game/scenarios/scene_editor_all.yaml
 - Participants : ?–?
 - Durée : ?–? min
 - Stations prévues : 0

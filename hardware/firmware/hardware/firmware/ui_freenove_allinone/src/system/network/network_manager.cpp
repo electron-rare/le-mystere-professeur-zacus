@@ -115,6 +115,17 @@ bool looksLikeEspNowEnvelope(JsonVariantConst root) {
          object.containsKey("payload") && object["ack"].is<bool>();
 }
 
+bool looksLikeEspNowEnvelopeText(const char* payload) {
+  if (payload == nullptr || payload[0] != '{') {
+    return false;
+  }
+  return (std::strstr(payload, "\"msg_id\"") != nullptr) &&
+         (std::strstr(payload, "\"seq\"") != nullptr) &&
+         (std::strstr(payload, "\"type\"") != nullptr) &&
+         (std::strstr(payload, "\"payload\"") != nullptr) &&
+         (std::strstr(payload, "\"ack\"") != nullptr);
+}
+
 }  // namespace
 
 bool NetworkManager::begin(const char* hostname) {
@@ -556,10 +567,25 @@ bool NetworkManager::sendEspNowText(const uint8_t mac[6], const char* text) {
   esp_err_t err = esp_now_send(mac,
                                reinterpret_cast<const uint8_t*>(text),
                                payload_len);
-  if (err == ESP_ERR_ESPNOW_NOT_INIT) {
-    // WiFi mode switches can deinit ESP-NOW internally: recover once, then retry the same payload.
-    espnow_enabled_ = false;
+  if (err == ESP_ERR_ESPNOW_NO_MEM) {
+    // Transient TX queue pressure: short backoff before any heavier recovery path.
+    delay(8);
+    err = esp_now_send(mac, reinterpret_cast<const uint8_t*>(text), payload_len);
+  }
+  bool should_retry_once = (err == ESP_ERR_ESPNOW_NOT_INIT ||
+                            err == ESP_ERR_ESPNOW_INTERNAL ||
+                            err == ESP_ERR_ESPNOW_IF ||
+                            err == ESP_ERR_ESPNOW_NO_MEM);
+  should_retry_once = should_retry_once || (err == ESP_ERR_ESPNOW_FULL);
+#ifdef ESP_ERR_ESPNOW_CHAN
+  should_retry_once = should_retry_once || (err == ESP_ERR_ESPNOW_CHAN);
+#endif
+  if (should_retry_once) {
+    // WiFi mode/channel switches can desync ESP-NOW internals; recover once and retry.
+    disableEspNow();
+    delay(4);
     if (enableEspNow()) {
+      applyEspNowChannelHint("espnow_retry");
       addEspNowPeerInternal(mac);
       err = esp_now_send(mac, reinterpret_cast<const uint8_t*>(text), payload_len);
     }
@@ -605,15 +631,9 @@ bool NetworkManager::sendEspNowTarget(const char* target, const char* text) {
     return false;
   }
 
-  bool is_envelope = false;
-  if (frame[0] == '{') {
-    StaticJsonDocument<512> document;
-    if (!deserializeJson(document, frame) && looksLikeEspNowEnvelope(document.as<JsonVariantConst>())) {
-      is_envelope = true;
-    }
-  }
+  const bool is_envelope = looksLikeEspNowEnvelopeText(frame);
   if (!is_envelope) {
-    StaticJsonDocument<512> envelope;
+    StaticJsonDocument<384> envelope;
     ++espnow_tx_seq_;
     char msg_id[32] = {0};
     snprintf(msg_id,
@@ -626,17 +646,19 @@ bool NetworkManager::sendEspNowTarget(const char* target, const char* text) {
     envelope["type"] = inferEnvelopeType(frame);
     envelope["payload"] = frame;
     envelope["ack"] = false;
-    char encoded[kEspNowFrameCapacity + 1U] = {0};
-    const size_t encoded_size = serializeJson(envelope, encoded, sizeof(encoded));
-    if (encoded_size == 0U || encoded_size >= sizeof(encoded)) {
+    const size_t encoded_size = serializeJson(envelope, frame, sizeof(frame));
+    if (encoded_size == 0U || encoded_size >= sizeof(frame)) {
       Serial.println("[NET] ESP-NOW envelope too large");
       return false;
     }
-    copyText(frame, sizeof(frame), encoded);
   }
 
   if (target != nullptr && target[0] != '\0' && !equalsIgnoreCase(target, kBroadcastTarget)) {
-    Serial.printf("[NET] ESP-NOW target ignored; using broadcast target=%s\n", target);
+    uint8_t target_mac[6] = {0};
+    if (parseMac(target, target_mac)) {
+      return sendEspNowText(target_mac, frame);
+    }
+    Serial.printf("[NET] ESP-NOW invalid target; fallback broadcast target=%s\n", target);
   }
   return sendEspNowText(kBroadcastMac, frame);
 }

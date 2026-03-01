@@ -50,14 +50,19 @@ inline String sanitizeMediaPath(const String& raw_path) {
     if (path.isEmpty()) {
         return "";
     }
-    if (path == "null" || path.startsWith("{") || path.startsWith("[")) {
+
+    String lower = path;
+    lower.toLowerCase();
+    if (lower == "null" || path.startsWith("{") || path.startsWith("[")) {
         return "";
     }
     if (!path.startsWith("/")) {
         path = "/" + path;
     }
-    path.toLowerCase();
-    if (!path.endsWith(".wav") && !path.endsWith(".mp3")) {
+
+    String lower_path = path;
+    lower_path.toLowerCase();
+    if (!lower_path.endsWith(".wav") && !lower_path.endsWith(".mp3")) {
         path += ".wav";
     }
     return path;

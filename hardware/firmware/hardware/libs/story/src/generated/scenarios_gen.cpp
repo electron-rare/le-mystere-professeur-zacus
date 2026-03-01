@@ -49,8 +49,7 @@ constexpr const char* kSc0St2Apps[] = {
     "APP_ESPNOW",
 };
 constexpr TransitionDef kSc0St2Transitions[] = {
-    {"TR_RTC_ESP_ETAPE1_1", StoryTransitionTrigger::kOnEvent, StoryEventType::kEspNow, "ACK_WIN1", 0U, "WIN_ETAPE1", 130U, false},
-    {"TR_RTC_ESP_ETAPE1_2", StoryTransitionTrigger::kOnEvent, StoryEventType::kEspNow, "ACK_WIN2", 0U, "RTC_ESP_ETAPE2", 135U, false},
+    {"TR_RTC_ESP_ETAPE1_BTN", StoryTransitionTrigger::kOnEvent, StoryEventType::kButton, "ANY", 0U, "WIN_ETAPE1", 120U, false},
 };
 constexpr const char* kSc0St3Actions[] = {
     "ACTION_TRACE_STEP",
@@ -64,7 +63,7 @@ constexpr const char* kSc0St3Apps[] = {
     "APP_ESPNOW",
 };
 constexpr TransitionDef kSc0St3Transitions[] = {
-    {"TR_WIN_ETAPE1_1", StoryTransitionTrigger::kOnEvent, StoryEventType::kEspNow, "ACK_WARNING", 0U, "STEP_WARNING", 130U, false},
+    {"TR_WIN_ETAPE1_TO_CREDIT", StoryTransitionTrigger::kOnEvent, StoryEventType::kTimer, "WIN_ETAPE1_TO_CREDIT", 60000U, "SCENE_CREDIT", 100U, false},
 };
 constexpr const char* kSc0St4Actions[] = {
     "ACTION_TRACE_STEP",
@@ -79,8 +78,20 @@ constexpr const char* kSc0St4Apps[] = {
 };
 constexpr TransitionDef kSc0St4Transitions[] = {
     {"TR_STEP_WARNING_1", StoryTransitionTrigger::kOnEvent, StoryEventType::kAudioDone, "AUDIO_DONE", 0U, "STEP_WARNING", 80U, false},
-    {"TR_STEP_WARNING_2", StoryTransitionTrigger::kOnEvent, StoryEventType::kButton, "ANY", 0U, "SCENE_LEFOU_DETECTOR", 120U, false},
-    {"TR_STEP_WARNING_3", StoryTransitionTrigger::kOnEvent, StoryEventType::kSerial, "FORCE_ETAPE2", 0U, "SCENE_LEFOU_DETECTOR", 140U, true},
+};
+constexpr const char* kSc0StCreditActions[] = {
+    "ACTION_TRACE_STEP",
+    "ACTION_HW_LED_ALERT",
+};
+constexpr const char* kSc0StCreditApps[] = {
+    "APP_AUDIO",
+    "APP_SCREEN",
+    "APP_GATE",
+    "APP_WIFI",
+    "APP_ESPNOW",
+};
+constexpr TransitionDef kSc0StCreditTransitions[] = {
+    {"TR_SCENE_CREDIT_BTN", StoryTransitionTrigger::kOnEvent, StoryEventType::kButton, "ANY", 0U, "STEP_WARNING", 120U, false},
 };
 constexpr const char* kSc0St5Actions[] = {
     "ACTION_TRACE_STEP",
@@ -160,11 +171,12 @@ constexpr const char* kSc0St9Apps[] = {
 };
 
 constexpr StepDef kScenario0Steps[] = {
-    {"SCENE_U_SON_PROTO", {"SCENE_U_SON_PROTO", "PACK_BOOT_RADIO", kSc0St0Actions, 2U, kSc0St0Apps, 5U}, kSc0St0Transitions, 1U, false},
+    {"SCENE_U_SON_PROTO", {"SCENE_U_SON_PROTO", nullptr, kSc0St0Actions, 2U, kSc0St0Apps, 5U}, kSc0St0Transitions, 1U, false},
     {"SCENE_LA_DETECTOR", {"SCENE_LA_DETECTOR", nullptr, kSc0St1Actions, 2U, kSc0St1Apps, 4U}, kSc0St1Transitions, 1U, false},
-    {"RTC_ESP_ETAPE1", {"SCENE_WIN_ETAPE", nullptr, kSc0St2Actions, 4U, kSc0St2Apps, 5U}, kSc0St2Transitions, 2U, false},
+    {"RTC_ESP_ETAPE1", {"SCENE_WIN_ETAPE", nullptr, kSc0St2Actions, 4U, kSc0St2Apps, 5U}, kSc0St2Transitions, 1U, false},
     {"WIN_ETAPE1", {"SCENE_WIN_ETAPE1", "PACK_WIN", kSc0St3Actions, 2U, kSc0St3Apps, 5U}, kSc0St3Transitions, 1U, false},
-    {"STEP_WARNING", {"SCENE_WARNING", "PACK_BOOT_RADIO", kSc0St4Actions, 2U, kSc0St4Apps, 5U}, kSc0St4Transitions, 3U, false},
+    {"SCENE_CREDIT", {"SCENE_CREDITS", nullptr, kSc0StCreditActions, 2U, kSc0StCreditApps, 5U}, kSc0StCreditTransitions, 1U, false},
+    {"STEP_WARNING", {"SCENE_WARNING", nullptr, kSc0St4Actions, 2U, kSc0St4Apps, 5U}, kSc0St4Transitions, 1U, false},
     {"SCENE_LEFOU_DETECTOR", {"SCENE_LEFOU_DETECTOR", nullptr, kSc0St5Actions, 2U, kSc0St5Apps, 4U}, kSc0St5Transitions, 4U, false},
     {"RTC_ESP_ETAPE2", {"SCENE_WIN_ETAPE2", "PACK_CONFIRM_WIN_ETAPE2", kSc0St6Actions, 4U, kSc0St6Apps, 5U}, kSc0St6Transitions, 2U, false},
     {"SCENE_QR_DETECTOR", {"SCENE_QR_DETECTOR", nullptr, kSc0St7Actions, 2U, kSc0St7Apps, 5U}, kSc0St7Transitions, 4U, false},
@@ -176,8 +188,8 @@ constexpr ScenarioDef kScenario0 = {
     "DEFAULT",
     2U,
     kScenario0Steps,
-    10U,
-    "SCENE_U_SON_PROTO",
+    11U,
+    "RTC_ESP_ETAPE1",
 };
 
 constexpr const char* kSc1St0Actions[] = {

@@ -803,6 +803,31 @@ void UiManager::displayFlushCb(lv_disp_drv_t* disp, const lv_area_t* area, lv_co
 #endif
       }
     }
+  } else if (needs_copy_to_trans && !tx_pixels_prepared) {
+    // Draw buffers can live in PSRAM; if no DMA-capable transfer buffer is available,
+    // stream through a small internal row buffer to avoid direct SPI reads from PSRAM.
+    static uint16_t row_buffer[(FREENOVE_LCD_WIDTH > FREENOVE_LCD_HEIGHT) ? FREENOVE_LCD_WIDTH
+                                                                           : FREENOVE_LCD_HEIGHT];
+    const uint32_t max_row = sizeof(row_buffer) / sizeof(row_buffer[0]);
+    if (width <= max_row) {
+      for (uint32_t row = 0U; row < height; ++row) {
+        const uint16_t* src_row = reinterpret_cast<const uint16_t*>(&color_p[row * width].full);
+        std::memcpy(row_buffer, src_row, width * sizeof(uint16_t));
+        display.pushColors(row_buffer, width, true);
+      }
+    } else {
+      for (uint32_t row = 0U; row < height; ++row) {
+        uint32_t remaining = width;
+        const uint16_t* src = reinterpret_cast<const uint16_t*>(&color_p[row * width].full);
+        while (remaining > 0U) {
+          const uint32_t chunk = (remaining > max_row) ? max_row : remaining;
+          std::memcpy(row_buffer, src, chunk * sizeof(uint16_t));
+          display.pushColors(row_buffer, chunk, true);
+          src += chunk;
+          remaining -= chunk;
+        }
+      }
+    }
   } else if (needs_copy_to_trans && tx_pixels_prepared) {
     display.pushColors(tx_pixels, pixel_count, true);
   } else {

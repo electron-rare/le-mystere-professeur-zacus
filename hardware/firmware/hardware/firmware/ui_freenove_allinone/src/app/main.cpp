@@ -15,6 +15,7 @@
 
 #if defined(ARDUINO_ARCH_ESP32)
 #include <esp_heap_caps.h>
+#include <freertos/task.h>
 #if __has_include(<SD_MMC.h>)
 #include <SD_MMC.h>
 #define ZACUS_HAS_SD_AUDIO 1
@@ -74,10 +75,13 @@ constexpr uint8_t kUsonAmbientVolumeFixed = 21U;
 constexpr uint8_t kUsonAmbientVolumeMin =
     (kUsonAmbientVolumeFixed > FREENOVE_AUDIO_MAX_VOLUME) ? FREENOVE_AUDIO_MAX_VOLUME : kUsonAmbientVolumeFixed;
 constexpr uint8_t kUsonAmbientVolumeMax = kUsonAmbientVolumeMin;
-constexpr uint32_t kUsonAmbientDelayMinMs = 60000U;
-constexpr uint32_t kUsonAmbientDelayMaxMs = 240000U;
+// Keep U-SON ambient playlist continuous for the full scene runtime.
+constexpr uint32_t kUsonAmbientDelayMinMs = 1000U;
+constexpr uint32_t kUsonAmbientDelayMaxMs = 2000U;
+constexpr uint32_t kWarningSirenBeatIntervalMs = 700U;
 constexpr size_t kSerialLineCapacity = 192U;
 constexpr bool kBootDiagnosticTone = true;
+constexpr bool kAutoSyncStoryFromSdOnBoot = false;
 constexpr const char* kEspNowBroadcastTarget = "broadcast";
 constexpr const char* kStepWinEtape = "RTC_ESP_ETAPE1";
 constexpr const char* kPackWin = "PACK_WIN";
@@ -92,6 +96,7 @@ constexpr const char* kEspNowDeviceNameDefault = "U_SON";
 constexpr const char* kCredentialsNvsNamespace = "zacus_net";
 constexpr const char* kEspNowDeviceNameNvsKey = "esp_name";
 constexpr uint32_t kEspNowDiscoveryIntervalMs = 15000U;
+constexpr size_t kHotlineSceneSyncPayloadCapacity = 224U;
 #if defined(USE_AUDIO) && (USE_AUDIO != 0)
 constexpr const char* kAmpMusicPathPrimary = "/music";
 constexpr const char* kAmpMusicPathFallback1 = "/audio/music";
@@ -100,7 +105,7 @@ constexpr const char* kAmpMusicPathFallback2 = "/audio";
 constexpr const char* kCameraSceneId = "SCENE_PHOTO_MANAGER";
 constexpr const char* kMediaManagerSceneId = "SCENE_MEDIA_MANAGER";
 constexpr const char* kTestLabSceneId = "SCENE_TEST_LAB";
-constexpr const char* kDefaultBootSceneId = "SCENE_U_SON_PROTO";
+constexpr const char* kDefaultBootSceneId = "SCENE_CREDITS";
 constexpr bool kBootEspNowOnlyMode = true;
 constexpr const char* kTestLabLockStepId = "TEST_LAB_LOCK";
 constexpr bool kLockNvsMediaManagerMode = true;
@@ -147,6 +152,16 @@ struct SceneAmbientAudioFxState {
   bool eq_soft = true;
   bool eq_warm = true;
   bool eq_bright = true;
+};
+
+struct SceneWarningSirenFxState {
+  bool enabled = false;
+  bool remote_started = false;
+  bool local_backend_available = false;
+  bool local_fallback_logged = false;
+  uint32_t started_ms = 0U;
+  uint32_t next_beat_ms = 0U;
+  uint32_t next_retry_ms = 0U;
 };
 
 AudioManager g_audio;
@@ -203,12 +218,14 @@ RuntimeWebService g_runtime_web_service;
 SceneBacklightFxState g_scene_backlight_fx;
 SceneWs2812FxState g_scene_ws2812_fx;
 SceneAmbientAudioFxState g_scene_ambient_audio_fx;
+SceneWarningSirenFxState g_scene_warning_siren_fx;
 char g_scene_backlight_mode[24] = "static";
 uint8_t g_scene_ws2812_runtime_brightness = 0U;
 uint32_t g_scene_ws2812_runtime_next_update_ms = 0U;
 bool g_uson_ambient_audio_active = false;
 uint8_t g_uson_ambient_restore_volume = FREENOVE_AUDIO_MAX_VOLUME;
 uint32_t g_uson_ambient_next_play_ms = 0U;
+uint32_t g_next_credits_audio_retry_ms = 0U;
 #if defined(USE_AUDIO) && (USE_AUDIO != 0)
 ui::audio::AmigaAudioPlayer g_amp_player;
 bool g_amp_ready = false;
@@ -218,10 +235,30 @@ char g_amp_base_dir[40] = "/music";
 ui::camera::Win311CameraUI g_camera_player;
 bool g_camera_scene_active = false;
 bool g_camera_scene_ready = false;
+StaticJsonDocument<512> g_story_action_doc;
 
 bool dispatchScenarioEventByName(const char* event_name, uint32_t now_ms);
 bool parseBoolToken(const char* text, bool* out_value);
 void refreshSceneIfNeeded(bool force_render);
+bool sendWarningSirenSync(const char* phase, uint8_t strength);
+void updateWarningSirenFx(uint32_t now_ms);
+
+void logLoopStackWatermark(const char* stage, const char* scene_id) {
+#if defined(ARDUINO_ARCH_ESP32)
+  const UBaseType_t high_water_words = uxTaskGetStackHighWaterMark(nullptr);
+  const uint32_t high_water_bytes = static_cast<uint32_t>(high_water_words) * sizeof(StackType_t);
+  Serial.printf("[STACK] stage=%s scene=%s hwm_words=%u hwm_bytes=%lu heap_free=%u heap_largest=%u\n",
+                (stage != nullptr) ? stage : "n/a",
+                (scene_id != nullptr) ? scene_id : "n/a",
+                static_cast<unsigned int>(high_water_words),
+                static_cast<unsigned long>(high_water_bytes),
+                static_cast<unsigned int>(ESP.getFreeHeap()),
+                static_cast<unsigned int>(ESP.getMaxAllocHeap()));
+#else
+  (void)stage;
+  (void)scene_id;
+#endif
+}
 
 const char* audioPackToFile(const char* pack_id) {
   if (pack_id == nullptr || pack_id[0] == '\0') {
@@ -246,6 +283,49 @@ const char* audioPackToFile(const char* pack_id) {
     return "/music/confirm_win_etape2.mp3";
   }
   return "/music/placeholder.mp3";
+}
+
+bool isCreditsSceneId(const char* scene_id) {
+  if (scene_id == nullptr || scene_id[0] == '\0') {
+    return false;
+  }
+  return std::strcmp(scene_id, "SCENE_CREDITS") == 0 ||
+         std::strcmp(scene_id, "SCENE_CREDIT") == 0;
+}
+
+bool playCreditsWinTrack(const char** selected_path_out = nullptr) {
+  static const char* kCreditsWinCandidates[] = {
+      "/music/SCENE_WIN.mp3",
+      "/music/SCENE_WIN_ETAPE.mp3",
+      "/music/sonar_hint.mp3",
+  };
+
+  const char* selected = kCreditsWinCandidates[0];
+  bool ok = false;
+  for (const char* candidate : kCreditsWinCandidates) {
+    if (candidate == nullptr || candidate[0] == '\0') {
+      continue;
+    }
+    selected = candidate;
+    if (g_audio.play(candidate)) {
+      ok = true;
+      break;
+    }
+  }
+
+  if (selected_path_out != nullptr) {
+    *selected_path_out = selected;
+  }
+  return ok;
+}
+
+bool isCreditsWinTrackPath(const char* path) {
+  if (path == nullptr || path[0] == '\0') {
+    return false;
+  }
+  return std::strcmp(path, "/music/SCENE_WIN.mp3") == 0 ||
+         std::strcmp(path, "/music/SCENE_WIN_ETAPE.mp3") == 0 ||
+         std::strcmp(path, "/music/sonar_hint.mp3") == 0;
 }
 
 const char* scenarioIdFromSnapshot(const ScenarioSnapshot& snapshot) {
@@ -276,30 +356,87 @@ const char* inferHotlineValidationStateTag(const ScenarioSnapshot& snapshot) {
   return "none";
 }
 
+bool sendEspNowWithRetry(const char* target,
+                         const char* payload,
+                         uint8_t max_attempts,
+                         uint16_t retry_delay_ms,
+                         const char* log_tag) {
+  if (target == nullptr || target[0] == '\0' || payload == nullptr || payload[0] == '\0') {
+    return false;
+  }
+  if (max_attempts == 0U) {
+    max_attempts = 1U;
+  }
+
+  for (uint8_t attempt = 1U; attempt <= max_attempts; ++attempt) {
+    const bool ok = g_network.sendEspNowTarget(target, payload);
+    if (ok) {
+      if (attempt > 1U) {
+        Serial.printf("[%s] send retry success attempt=%u target=%s payload=%s\n",
+                      (log_tag != nullptr) ? log_tag : "ESPNOW_TX",
+                      static_cast<unsigned int>(attempt),
+                      target,
+                      payload);
+      }
+      return true;
+    }
+    if (attempt < max_attempts && retry_delay_ms > 0U) {
+      delay(retry_delay_ms);
+    }
+  }
+  return false;
+}
+
 void syncHotlineSceneState(const ScenarioSnapshot& snapshot) {
   if (snapshot.screen_scene_id == nullptr || snapshot.screen_scene_id[0] == '\0') {
     return;
   }
 
-  StaticJsonDocument<224> scene_state_doc;
-  scene_state_doc["id"] = snapshot.screen_scene_id;
-  if (snapshot.step != nullptr && snapshot.step->id != nullptr && snapshot.step->id[0] != '\0') {
-    scene_state_doc["step_id"] = snapshot.step->id;
-  }
+  const char* step_id =
+      (snapshot.step != nullptr && snapshot.step->id != nullptr && snapshot.step->id[0] != '\0')
+          ? snapshot.step->id
+          : "n/a";
   const char* validation_state = inferHotlineValidationStateTag(snapshot);
-  scene_state_doc["validation_state"] = validation_state;
+  char payload[kHotlineSceneSyncPayloadCapacity] = {0};
+  const int written = std::snprintf(payload,
+                                    sizeof(payload),
+                                    "SCENE {\"id\":\"%s\",\"step_id\":\"%s\",\"validation_state\":\"%s\"}",
+                                    snapshot.screen_scene_id,
+                                    step_id,
+                                    validation_state);
+  if (written <= 0 || static_cast<size_t>(written) >= sizeof(payload)) {
+    Serial.println("[HOTLINE_SYNC] payload truncated");
+    return;
+  }
 
-  String args_json;
-  serializeJson(scene_state_doc, args_json);
-  String payload = "SCENE ";
-  payload += args_json;
-
-  const bool ok = g_network.sendEspNowTarget(kEspNowBroadcastTarget, payload.c_str());
+  const bool ok = sendEspNowWithRetry(kEspNowBroadcastTarget, payload, 2U, 40U, "HOTLINE_SYNC");
   Serial.printf("[HOTLINE_SYNC] scene=%s step=%s validation=%s ok=%u\n",
                 snapshot.screen_scene_id,
-                (snapshot.step != nullptr && snapshot.step->id != nullptr) ? snapshot.step->id : "n/a",
+                step_id,
                 validation_state,
                 ok ? 1U : 0U);
+}
+
+bool sendWarningSirenSync(const char* phase, uint8_t strength) {
+  if (phase == nullptr || phase[0] == '\0') {
+    return false;
+  }
+  char payload[48] = {0};
+  int written = 0;
+  if (std::strcmp(phase, "STOP") == 0) {
+    written = std::snprintf(payload, sizeof(payload), "WARNING_SIREN %s", phase);
+  } else {
+    written = std::snprintf(payload, sizeof(payload), "WARNING_SIREN %s %u", phase, strength);
+  }
+  if (written <= 0 || static_cast<size_t>(written) >= sizeof(payload)) {
+    return false;
+  }
+  return g_network.sendEspNowTarget(kEspNowBroadcastTarget, payload);
+}
+
+bool warningSirenRemoteSyncReady() {
+  const NetworkManager::Snapshot net = g_network.snapshot();
+  return net.ready && net.espnow_enabled;
 }
 
 bool isFixedTestSceneActive(const ScenarioSnapshot& snapshot) {
@@ -628,6 +765,59 @@ void collectAmbientPlaylistFiles(fs::FS& file_system,
   }
   File dir = file_system.open(root.c_str(), "r");
   if (!dir || !dir.isDirectory()) {
+    if (dir) {
+      dir.close();
+    }
+    // LittleFS can expose nested paths without directory handles.
+    // Fallback to root scan and filter by the requested prefix.
+    if (depth == 0U && root != "/") {
+      File fs_root = file_system.open("/", "r");
+      if (!fs_root || !fs_root.isDirectory()) {
+        if (fs_root) {
+          fs_root.close();
+        }
+        return;
+      }
+      String prefix = root;
+      if (!prefix.endsWith("/")) {
+        prefix += "/";
+      }
+      const unsigned int prefix_len = static_cast<unsigned int>(prefix.length());
+      File entry = fs_root.openNextFile();
+      while (entry) {
+        String entry_name = entry.name();
+        if (!entry_name.startsWith("/")) {
+          entry_name = "/" + entry_name;
+        }
+        if (!entry.isDirectory() && isAmbientAudioFilePath(entry_name)) {
+          int prefix_pos = entry_name.indexOf(prefix);
+          if (prefix_pos < 0) {
+            String prefix_no_leading_slash = prefix;
+            if (prefix_no_leading_slash.startsWith("/")) {
+              prefix_no_leading_slash.remove(0, 1);
+            }
+            prefix_pos = entry_name.indexOf(prefix_no_leading_slash);
+          }
+          if (prefix_pos >= 0) {
+            bool include = true;
+            if (!recursive) {
+              const unsigned int child_start = static_cast<unsigned int>(prefix_pos) + prefix_len;
+              include = entry_name.indexOf('/', child_start) < 0;
+            }
+            if (include) {
+              out_files->push_back(entry_name);
+              if (out_files->size() >= 128U) {
+                entry.close();
+                break;
+              }
+            }
+          }
+        }
+        entry.close();
+        entry = fs_root.openNextFile();
+      }
+      fs_root.close();
+    }
     return;
   }
 
@@ -710,6 +900,7 @@ void applyLcdBacklight(uint8_t level) {
 
 void configureSceneVisualHardwareHints(const char* scene_id, const String& payload_json) {
   const bool is_u_son_proto = (scene_id != nullptr) && (std::strcmp(scene_id, "SCENE_U_SON_PROTO") == 0);
+  const bool is_warning_scene = (scene_id != nullptr) && (std::strcmp(scene_id, "SCENE_WARNING") == 0);
   const bool is_lefou_scene = (scene_id != nullptr) && (std::strcmp(scene_id, "SCENE_LEFOU_DETECTOR") == 0);
   static constexpr uint16_t kLefouDefaultSequenceHz[] = {440U, 880U, 330U, 349U, 147U, 98U};
 
@@ -748,6 +939,7 @@ void configureSceneVisualHardwareHints(const char* scene_id, const String& paylo
   uint16_t lefou_sequence_hz[RuntimeHardwareConfig::kLaSequenceMaxNotes] = {};
   uint8_t lefou_sequence_count = 0U;
   uint16_t lefou_note_hold_ms = 350U;
+  bool warning_siren = is_warning_scene;
   if (is_lefou_scene) {
     lefou_sequence_count = static_cast<uint8_t>(sizeof(kLefouDefaultSequenceHz) / sizeof(kLefouDefaultSequenceHz[0]));
     if (lefou_sequence_count > RuntimeHardwareConfig::kLaSequenceMaxNotes) {
@@ -957,6 +1149,9 @@ void configureSceneVisualHardwareHints(const char* scene_id, const String& paylo
           lefou_note_hold_ms = static_cast<uint16_t>(lefou_render["note_hold_ms"].as<uint32_t>());
         }
       }
+      if (document["render"]["warning"]["siren"].is<bool>()) {
+        warning_siren = document["render"]["warning"]["siren"].as<bool>();
+      }
     }
   }
 
@@ -1021,6 +1216,7 @@ void configureSceneVisualHardwareHints(const char* scene_id, const String& paylo
   if (is_u_son_proto) {
     ambient.enabled = true;
     ambient.non_interruptive = true;
+    ambient.playlist_recursive = true;
     if (ambient.track[0] == '\0') {
       std::strncpy(ambient.track, kUsonAmbientTrack, sizeof(ambient.track) - 1U);
       ambient.track[sizeof(ambient.track) - 1U] = '\0';
@@ -1035,12 +1231,8 @@ void configureSceneVisualHardwareHints(const char* scene_id, const String& paylo
     }
     ambient.volume_min = kUsonAmbientVolumeMin;
     ambient.volume_max = kUsonAmbientVolumeMax;
-    if (ambient.delay_min_ms < kUsonAmbientDelayMinMs) {
-      ambient.delay_min_ms = kUsonAmbientDelayMinMs;
-    }
-    if (ambient.delay_max_ms > kUsonAmbientDelayMaxMs) {
-      ambient.delay_max_ms = kUsonAmbientDelayMaxMs;
-    }
+    ambient.delay_min_ms = kUsonAmbientDelayMinMs;
+    ambient.delay_max_ms = kUsonAmbientDelayMaxMs;
   }
   if (ambient.delay_min_ms < 1000U) {
     ambient.delay_min_ms = 1000U;
@@ -1088,6 +1280,10 @@ void configureSceneVisualHardwareHints(const char* scene_id, const String& paylo
   g_scene_backlight_fx = backlight;
   g_scene_ws2812_fx = ws;
   g_scene_ambient_audio_fx = ambient;
+  g_scene_warning_siren_fx.enabled = is_warning_scene && warning_siren;
+  if (!g_scene_warning_siren_fx.enabled) {
+    g_scene_warning_siren_fx.local_fallback_logged = false;
+  }
   g_scene_ws2812_runtime_brightness = ws.brightness;
   g_scene_ws2812_runtime_next_update_ms = 0U;
   const char* backlight_mode = "static";
@@ -1290,6 +1486,77 @@ void updateSceneWs2812Fx(uint32_t now_ms) {
                                        out_b,
                                        g_scene_ws2812_runtime_brightness,
                                        g_scene_ws2812_fx.dominant_band_single);
+}
+
+void updateWarningSirenFx(uint32_t now_ms) {
+  SceneWarningSirenFxState& siren = g_scene_warning_siren_fx;
+
+  if (!siren.enabled) {
+    if (siren.remote_started) {
+      const bool stop_ok = sendWarningSirenSync("STOP", 0U);
+      ZACUS_RL_LOG_MS(1200U, "[WARN_SIREN] remote stop ok=%u\n", stop_ok ? 1U : 0U);
+    }
+    siren.remote_started = false;
+    siren.started_ms = 0U;
+    siren.next_beat_ms = 0U;
+    siren.next_retry_ms = 0U;
+    siren.local_fallback_logged = false;
+    return;
+  }
+
+  if (!siren.local_backend_available && !siren.local_fallback_logged) {
+    Serial.println("[WARN_SIREN] local backend unavailable, syncing siren to A252 only");
+    siren.local_fallback_logged = true;
+  }
+
+  if (!siren.remote_started) {
+    if (!warningSirenRemoteSyncReady()) {
+      siren.next_retry_ms = now_ms + 2000U;
+      ZACUS_RL_LOG_MS(2000U, "[WARN_SIREN] remote sync waiting peer\n");
+      return;
+    }
+    if (siren.next_retry_ms != 0U && static_cast<int32_t>(now_ms - siren.next_retry_ms) < 0) {
+      return;
+    }
+    const bool start_ok = sendWarningSirenSync("START", 220U);
+    if (!start_ok) {
+      siren.next_retry_ms = now_ms + 2000U;
+      ZACUS_RL_LOG_MS(1000U, "[WARN_SIREN] remote start failed, retrying\n");
+      return;
+    }
+    siren.remote_started = true;
+    siren.started_ms = now_ms;
+    siren.next_retry_ms = 0U;
+    siren.next_beat_ms = now_ms + kWarningSirenBeatIntervalMs;
+    Serial.println("[WARN_SIREN] remote start");
+  }
+
+  if (siren.next_beat_ms != 0U && static_cast<int32_t>(now_ms - siren.next_beat_ms) < 0) {
+    return;
+  }
+
+  if (!warningSirenRemoteSyncReady()) {
+    siren.remote_started = false;
+    siren.next_beat_ms = 0U;
+    siren.next_retry_ms = now_ms + 2000U;
+    ZACUS_RL_LOG_MS(2000U, "[WARN_SIREN] remote link lost, rearm\n");
+    return;
+  }
+
+  const uint32_t period_ms = 1400U;
+  const uint32_t half_period_ms = period_ms / 2U;
+  const uint32_t elapsed_ms = now_ms - siren.started_ms;
+  const uint32_t phase_ms = elapsed_ms % period_ms;
+  const uint32_t ramp = (phase_ms <= half_period_ms) ? phase_ms : (period_ms - phase_ms);
+  int strength = 160 + static_cast<int>((95U * ramp) / (half_period_ms == 0U ? 1U : half_period_ms));
+  if (strength > 255) {
+    strength = 255;
+  }
+  const bool beat_ok = sendWarningSirenSync("BEAT", static_cast<uint8_t>(strength));
+  if (!beat_ok) {
+    ZACUS_RL_LOG_MS(1000U, "[WARN_SIREN] remote beat send failed\n");
+  }
+  siren.next_beat_ms = now_ms + kWarningSirenBeatIntervalMs;
 }
 
 void updateUsonProtoAmbientAudio(const ScenarioSnapshot& snapshot, uint32_t now_ms) {
@@ -2970,6 +3237,53 @@ void onAudioFinished(const char* track, void* ctx) {
   }
 #endif
   const ScenarioSnapshot snapshot = g_scenario.snapshot();
+  const char* current_scene = (snapshot.screen_scene_id != nullptr) ? snapshot.screen_scene_id : "";
+  const bool credits_scene = (std::strcmp(current_scene, "SCENE_CREDITS") == 0 ||
+                              std::strcmp(current_scene, "SCENE_CREDIT") == 0);
+  if (credits_scene && track != nullptr && track[0] != '\0') {
+    const char* next_credits_scene =
+        (std::strcmp(current_scene, "SCENE_CREDIT") == 0) ? "SCENE_CREDITS" : "SCENE_CREDIT";
+    const bool routed = g_scenario.gotoScene(next_credits_scene, millis(), "credits_scene_loop");
+    const char* loop_track = track;
+    bool restart_ok = false;
+    if (isCreditsWinTrackPath(track)) {
+      restart_ok = g_audio.play(track);
+    } else {
+      restart_ok = playCreditsWinTrack(&loop_track);
+    }
+    if (restart_ok) {
+      Serial.printf("[MAIN] audio loop scene=%s next=%s routed=%u track=%s\n",
+                    current_scene,
+                    next_credits_scene,
+                    routed ? 1U : 0U,
+                    loop_track);
+      return;
+    }
+    Serial.printf("[MAIN] audio loop restart failed scene=%s next=%s routed=%u track=%s\n",
+                  current_scene,
+                  next_credits_scene,
+                  routed ? 1U : 0U,
+                  loop_track);
+    if (routed) {
+      return;
+    }
+  }
+  const char* loop_scene_tag = nullptr;
+  if (current_scene[0] != '\0') {
+    if (std::strcmp(current_scene, "SCENE_WIN_ETAPE1") == 0) {
+      loop_scene_tag = "SCENE_WIN_ETAPE1";
+    } else if (std::strcmp(current_scene, "SCENE_WIN") == 0 ||
+               std::strcmp(current_scene, "SCENE_WIN_ETAPE2") == 0) {
+      loop_scene_tag = current_scene;
+    }
+  }
+  if (loop_scene_tag != nullptr && track != nullptr && track[0] != '\0') {
+    if (g_audio.play(track)) {
+      Serial.printf("[MAIN] audio loop scene=%s track=%s\n", loop_scene_tag, track);
+      return;
+    }
+    Serial.printf("[MAIN] audio loop restart failed scene=%s track=%s\n", loop_scene_tag, track);
+  }
   if (snapshot.step != nullptr &&
       snapshot.step->id != nullptr &&
       std::strcmp(snapshot.step->id, kStepWinEtape) == 0 &&
@@ -3955,10 +4269,48 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
   }
 
   if (std::strcmp(action_id, "ACTION_QUEUE_SONAR") == 0) {
-    constexpr const char* kBuiltinSonarPath = "/music/sonar_hint.mp3";
-    const bool ok = g_audio.play(kBuiltinSonarPath);
-    Serial.printf("[ACTION] QUEUE_AUDIO_PACK pack=PACK_SONAR_HINT path=%s ok=%u source=builtin\n",
-                  kBuiltinSonarPath,
+    const char* candidates[4] = {"/music/sonar_hint.mp3", nullptr, nullptr, nullptr};
+    size_t candidate_count = 1U;
+    if (snapshot.screen_scene_id != nullptr && isCreditsSceneId(snapshot.screen_scene_id)) {
+      const char* selected_path = "/music/SCENE_WIN.mp3";
+      const bool ok = playCreditsWinTrack(&selected_path);
+      Serial.printf("[ACTION] QUEUE_AUDIO_PACK pack=PACK_SONAR_HINT scene=%s path=%s ok=%u source=credits_win\n",
+                    snapshot.screen_scene_id,
+                    selected_path,
+                    ok ? 1U : 0U);
+      return ok;
+    }
+    if (snapshot.screen_scene_id != nullptr &&
+        std::strcmp(snapshot.screen_scene_id, "SCENE_LA_DETECTOR") == 0) {
+      candidates[0] = "/music/scene_la_detector_tts.mp3";
+      candidates[1] = "/music/sonar_hint.mp3";
+      candidate_count = 2U;
+    } else if (snapshot.screen_scene_id != nullptr &&
+               std::strcmp(snapshot.screen_scene_id, "SCENE_WIN_ETAPE") == 0) {
+      candidates[0] = "/music/SCENE_WIN.mp3";
+      candidates[1] = "/music/SCENE_WIN_ETAPE.mp3";
+      candidates[2] = "/music/scene_win.mp3";
+      candidates[3] = "/music/sonar_hint.mp3";
+      candidate_count = 4U;
+    }
+
+    bool ok = false;
+    const char* selected_path = candidates[0];
+    for (size_t index = 0; index < candidate_count; ++index) {
+      const char* path = candidates[index];
+      if (path == nullptr || path[0] == '\0') {
+        continue;
+      }
+      if (g_audio.play(path)) {
+        selected_path = path;
+        ok = true;
+        break;
+      }
+    }
+
+    Serial.printf("[ACTION] QUEUE_AUDIO_PACK pack=PACK_SONAR_HINT scene=%s path=%s ok=%u source=builtin\n",
+                  snapshot.screen_scene_id != nullptr ? snapshot.screen_scene_id : "n/a",
+                  selected_path,
                   ok ? 1U : 0U);
     return ok;
   }
@@ -3980,11 +4332,11 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
       }
     }
   }
-  StaticJsonDocument<512> action_doc;
+  g_story_action_doc.clear();
   if (!payload.isEmpty()) {
-    deserializeJson(action_doc, payload);
+    deserializeJson(g_story_action_doc, payload);
   }
-  const char* action_type = action_doc["type"] | "";
+  const char* action_type = g_story_action_doc["type"] | "";
 
   if (std::strcmp(action_type, "trace_step") == 0) {
     Serial.printf("[ACTION] TRACE scenario=%s step=%s screen=%s audio=%s\n",
@@ -4002,16 +4354,16 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
   }
 
   if (std::strcmp(action_id, "ACTION_HW_LED_ALERT") == 0) {
-    const uint8_t red = static_cast<uint8_t>(action_doc["config"]["r"] | 255U);
-    const uint8_t green = static_cast<uint8_t>(action_doc["config"]["g"] | 60U);
-    const uint8_t blue = static_cast<uint8_t>(action_doc["config"]["b"] | 32U);
-    const uint8_t brightness = static_cast<uint8_t>(action_doc["config"]["brightness"] | 92U);
-    const bool pulse = action_doc["config"]["pulse"] | true;
+    const uint8_t red = static_cast<uint8_t>(g_story_action_doc["config"]["r"] | 255U);
+    const uint8_t green = static_cast<uint8_t>(g_story_action_doc["config"]["g"] | 60U);
+    const uint8_t blue = static_cast<uint8_t>(g_story_action_doc["config"]["b"] | 32U);
+    const uint8_t brightness = static_cast<uint8_t>(g_story_action_doc["config"]["brightness"] | 92U);
+    const bool pulse = g_story_action_doc["config"]["pulse"] | true;
     return g_hardware.setManualLed(red, green, blue, brightness, pulse);
   }
 
   if (std::strcmp(action_id, "ACTION_HW_LED_READY") == 0) {
-    const bool auto_scene = action_doc["config"]["auto_from_scene"] | true;
+    const bool auto_scene = g_story_action_doc["config"]["auto_from_scene"] | true;
     g_hardware.clearManualLed();
     if (auto_scene && snapshot.screen_scene_id != nullptr && g_hardware_cfg.led_auto_from_scene) {
       g_hardware.setSceneHint(snapshot.screen_scene_id);
@@ -4020,8 +4372,8 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
   }
 
   if (std::strcmp(action_id, "ACTION_CAMERA_SNAPSHOT") == 0) {
-    const char* filename = action_doc["config"]["filename"] | "";
-    const char* event_name = action_doc["config"]["event_on_success"] | "SERIAL:CAMERA_CAPTURED";
+    const char* filename = g_story_action_doc["config"]["filename"] | "";
+    const char* event_name = g_story_action_doc["config"]["event_on_success"] | "SERIAL:CAMERA_CAPTURED";
     if (!approveCameraOperation("action_camera_snapshot", nullptr)) {
       return false;
     }
@@ -4035,10 +4387,10 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
   }
 
   if (std::strcmp(action_type, "queue_audio_pack") == 0) {
-    const char* pack_id = action_doc["config"]["pack_id"] | action_doc["config"]["pack"] | "";
+    const char* pack_id = g_story_action_doc["config"]["pack_id"] | g_story_action_doc["config"]["pack"] | "";
     String audio_path = g_storage.resolveAudioPathByPackId(pack_id);
     if (audio_path.isEmpty()) {
-      const char* fallback_file = action_doc["config"]["file"] | action_doc["config"]["path"] | "";
+      const char* fallback_file = g_story_action_doc["config"]["file"] | g_story_action_doc["config"]["path"] | "";
       if (fallback_file[0] != '\0') {
         audio_path = fallback_file;
       }
@@ -4056,14 +4408,14 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
   }
 
   if (std::strcmp(action_id, "ACTION_MEDIA_PLAY_FILE") == 0) {
-    const char* media_file = action_doc["config"]["file"] | action_doc["config"]["path"] | "/music/boot_radio.mp3";
+    const char* media_file = g_story_action_doc["config"]["file"] | g_story_action_doc["config"]["path"] | "/music/boot_radio.mp3";
     return g_media.play(media_file, &g_audio);
   }
 
   if (std::strcmp(action_id, "ACTION_REC_START") == 0) {
-    const uint16_t seconds = static_cast<uint16_t>(action_doc["config"]["seconds"] | action_doc["config"]["duration_sec"] |
+    const uint16_t seconds = static_cast<uint16_t>(g_story_action_doc["config"]["seconds"] | g_story_action_doc["config"]["duration_sec"] |
                                                    g_media_cfg.record_max_seconds);
-    const char* filename = action_doc["config"]["filename"] | "";
+    const char* filename = g_story_action_doc["config"]["filename"] | "";
     return g_media.startRecording(seconds, filename);
   }
 
@@ -4076,8 +4428,8 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
       std::strcmp(action_id, "ACTION_ESP_NOW_WAITING") == 0 ||
       std::strcmp(action_id, "ACTION_ESP_NOW_WAITING_VALIDATION") == 0 ||
       std::strcmp(action_type, "espnow_send") == 0) {
-    const char* target = action_doc["config"]["target"] | action_doc["config"]["peer"] | "broadcast";
-    const char* payload = action_doc["config"]["payload"] | "";
+    const char* target = g_story_action_doc["config"]["target"] | g_story_action_doc["config"]["peer"] | "broadcast";
+    const char* payload = g_story_action_doc["config"]["payload"] | "";
     String payload_text;
     if (payload[0] == '\0') {
       const char* inferred = "WAITING_VALIDATION";
@@ -4092,24 +4444,35 @@ bool executeStoryAction(const char* action_id, const ScenarioSnapshot& snapshot,
       payload_text = payload;
     }
 
-    if ((std::strcmp(action_id, "ACTION_ESP_NOW_WAITING") == 0 ||
-         std::strcmp(action_id, "ACTION_ESP_NOW_WAITING_VALIDATION") == 0 || payload_text == "WAITING_VALIDATION") &&
-        !payload_text.startsWith("WAITING_VALIDATION {")) {
-      StaticJsonDocument<192> waiting_doc;
-      waiting_doc["scene_id"] = snapshot.screen_scene_id != nullptr ? snapshot.screen_scene_id : "";
-      waiting_doc["step_id"] = stepIdFromSnapshot(snapshot);
-      waiting_doc["validation_state"] = "waiting";
-      String waiting_args;
-      serializeJson(waiting_doc, waiting_args);
-      payload_text = String("WAITING_VALIDATION ") + waiting_args;
+    const bool is_waiting_action = (std::strcmp(action_id, "ACTION_ESP_NOW_WAITING") == 0 ||
+                                    std::strcmp(action_id, "ACTION_ESP_NOW_WAITING_VALIDATION") == 0 ||
+                                    payload_text == "WAITING_VALIDATION");
+    if (is_waiting_action && !payload_text.startsWith("WAITING_VALIDATION ")) {
+      const char* scene_for_waiting = (snapshot.screen_scene_id != nullptr && snapshot.screen_scene_id[0] != '\0')
+                                          ? snapshot.screen_scene_id
+                                          : "SCENE_WIN_ETAPE";
+      // Keep command compact to avoid ESPNOW TX pressure while preserving scene context.
+      payload_text = String("WAITING_VALIDATION ") + scene_for_waiting;
       payload = payload_text.c_str();
     }
-    const bool ok = g_network.sendEspNowTarget(target, payload);
+    uint8_t attempts = 2U;
+    uint16_t retry_delay_ms = 40U;
+    if (payload_text.startsWith("WAITING_VALIDATION")) {
+      // Validation launch is critical: ensure RTC hotline receives it and starts ringing.
+      attempts = 4U;
+      retry_delay_ms = 80U;
+    }
+    const bool ok = sendEspNowWithRetry(target, payload, attempts, retry_delay_ms, "ACTION_ESPNOW_SEND");
     Serial.printf("[ACTION] ESPNOW_SEND id=%s target=%s payload=%s ok=%u\n",
                   action_id,
                   target,
                   payload,
                   ok ? 1U : 0U);
+    if (is_waiting_action) {
+      const bool ring_ok = sendEspNowWithRetry(target, "RING", 2U, 40U, "ACTION_ESPNOW_RING");
+      Serial.printf("[ACTION] ESPNOW_RING target=%s ok=%u\n", target, ring_ok ? 1U : 0U);
+      return ok || ring_ok;
+    }
     return ok;
   }
 
@@ -5646,6 +6009,12 @@ void refreshSceneIfNeededImpl(bool force_render) {
   }
 
   const uint32_t now_ms = millis();
+  const bool warning_scene_transition =
+      transition.scene_changed && snapshot.screen_scene_id != nullptr &&
+      (std::strcmp(snapshot.screen_scene_id, "SCENE_WARNING") == 0);
+  if (warning_scene_transition) {
+    logLoopStackWatermark("transition_enter", snapshot.screen_scene_id);
+  }
 
   // Hard transition cleanup ordering: always release scene-owned resources on scene changes.
   if (transition.scene_changed) {
@@ -5664,6 +6033,9 @@ void refreshSceneIfNeededImpl(bool force_render) {
 
   if (transition.scene_changed && !kForceTestLabSceneLock) {
     syncHotlineSceneState(snapshot);
+    if (warning_scene_transition) {
+      logLoopStackWatermark("after_hotline_sync", snapshot.screen_scene_id);
+    }
   }
 
   const char* led_scene_id = snapshot.screen_scene_id;
@@ -5675,10 +6047,16 @@ void refreshSceneIfNeededImpl(bool force_render) {
   }
   if (!kForceTestLabSceneLock) {
     executeStoryActionsForStep(snapshot, now_ms);
+    if (warning_scene_transition) {
+      logLoopStackWatermark("after_actions", snapshot.screen_scene_id);
+    }
   }
 
   const char* step_id = (snapshot.step != nullptr && snapshot.step->id != nullptr) ? snapshot.step->id : "n/a";
   String screen_payload = g_storage.loadScenePayloadById(snapshot.screen_scene_id);
+  if (warning_scene_transition) {
+    logLoopStackWatermark("after_load_payload", snapshot.screen_scene_id);
+  }
   const char* render_scene_id = snapshot.screen_scene_id;
   const char* render_step_id = step_id;
   if (kForceTestLabSceneLock) {
@@ -5698,6 +6076,9 @@ void refreshSceneIfNeededImpl(bool force_render) {
   }
   const char* visual_scene_id = render_scene_id;
   configureSceneVisualHardwareHints(visual_scene_id, screen_payload);
+  if (warning_scene_transition) {
+    logLoopStackWatermark("after_visual_hints", snapshot.screen_scene_id);
+  }
   Serial.printf("[UI] render step=%s screen=%s pack=%s playing=%u\n",
                 render_step_id,
                 render_scene_id != nullptr ? render_scene_id : "n/a",
@@ -5712,6 +6093,9 @@ void refreshSceneIfNeededImpl(bool force_render) {
   frame.audio_playing = g_audio.isPlaying();
   frame.screen_payload_json = screen_payload.isEmpty() ? nullptr : screen_payload.c_str();
   g_ui.submitSceneFrame(frame);
+  if (warning_scene_transition) {
+    logLoopStackWatermark("after_submit_scene", snapshot.screen_scene_id);
+  }
 
   // Apply new owner resources after scene config is committed in UI.
   if (transition.scene_changed) {
@@ -5738,12 +6122,46 @@ void startPendingAudioIfAny() {
     return;
   }
 #endif
+  const ScenarioSnapshot snapshot = g_scenario.snapshot();
+  const char* scene_id = (snapshot.screen_scene_id != nullptr) ? snapshot.screen_scene_id : "";
+
+  if (isCreditsSceneId(scene_id)) {
+    const char* active_track = g_audio.currentTrack();
+    const bool credits_track_active = isCreditsWinTrackPath(active_track);
+    const bool startup_track_pending =
+        (g_audio.isPlaying() && active_track != nullptr && std::strcmp(active_track, "-") == 0);
+    if (!credits_track_active && !startup_track_pending) {
+      const uint32_t now_ms = millis();
+      if (now_ms >= g_next_credits_audio_retry_ms) {
+        if (g_audio.isPlaying()) {
+          g_audio.stop();
+        }
+        const char* selected_path = "/music/SCENE_WIN.mp3";
+        const bool ok = playCreditsWinTrack(&selected_path);
+        if (ok) {
+          g_next_credits_audio_retry_ms = 0U;
+          Serial.printf("[MAIN] credits boot audio scene=%s track=%s source=forced prev=%s\n",
+                        scene_id,
+                        selected_path,
+                        (active_track != nullptr && active_track[0] != '\0') ? active_track : "none");
+        } else {
+          g_next_credits_audio_retry_ms = now_ms + 2000U;
+          Serial.printf("[MAIN] credits boot audio retry scene=%s track=%s at=%lu prev=%s\n",
+                        scene_id,
+                        selected_path,
+                        static_cast<unsigned long>(g_next_credits_audio_retry_ms),
+                        (active_track != nullptr && active_track[0] != '\0') ? active_track : "none");
+        }
+      }
+    } else {
+      g_next_credits_audio_retry_ms = 0U;
+    }
+  }
+
   String audio_pack;
   if (!g_scenario.consumeAudioRequest(&audio_pack)) {
     return;
   }
-
-  const ScenarioSnapshot snapshot = g_scenario.snapshot();
   const bool is_win_etape_audio = (audio_pack == kPackWin &&
                                    snapshot.step != nullptr && snapshot.step->id != nullptr &&
                                    std::strcmp(snapshot.step->id, kStepWinEtape) == 0);
@@ -6693,12 +7111,14 @@ void setup() {
   g_storage.ensurePath("/audio");
   g_storage.ensurePath("/recorder");
   g_storage.ensureDefaultStoryBundle();
-  if (g_storage.hasSdCard()) {
+  if (kAutoSyncStoryFromSdOnBoot && g_storage.hasSdCard()) {
     g_storage.syncStoryTreeFromSd();
   }
   g_storage.ensureDefaultScenarioFile(kDefaultScenarioFile);
-  if (g_storage.hasSdCard()) {
+  if (kAutoSyncStoryFromSdOnBoot && g_storage.hasSdCard()) {
     g_storage.syncStoryFileFromSd(kDefaultScenarioFile);
+  } else if (g_storage.hasSdCard()) {
+    Serial.println("[MAIN] SD story sync disabled on boot (LittleFS is primary)");
   }
   RuntimeConfigService::load(g_storage, &g_network_cfg, &g_hardware_cfg, &g_camera_cfg, &g_media_cfg);
   loadBootProvisioningState();
@@ -7028,6 +7448,7 @@ void runRuntimeIteration(uint32_t now_ms) {
   la_metrics.gate_timeout_ms = g_hardware_cfg.mic_la_timeout_ms;
   g_ui.setLaMetrics(la_metrics);
   refreshSceneIfNeeded(false);
+  updateWarningSirenFx(now_ms);
   updateSceneBacklightFx(now_ms);
   const uint32_t ui_started_us = perfMonitor().beginSample();
   g_ui.tick(now_ms);

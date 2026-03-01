@@ -39,9 +39,9 @@ using S3PinsConfig = A252PinsConfig;
 struct A252AudioConfig {
     uint32_t sample_rate = 8000;
     uint8_t bits_per_sample = 16;
-    bool enable_capture = true;
-    bool adc_dsp_enabled = true;
-    bool adc_fft_enabled = true;
+    bool enable_capture = false;
+    bool adc_dsp_enabled = false;
+    bool adc_fft_enabled = false;
     uint8_t adc_dsp_fft_downsample = 2U;
     uint16_t adc_fft_ignore_low_bin = 1U;
     uint16_t adc_fft_ignore_high_bin = 1U;

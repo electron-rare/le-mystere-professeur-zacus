@@ -47,7 +47,7 @@
     "title_case": "upper",
     "subtitle_case": "raw",
     "title_align": "top",
-    "subtitle_align": "bottom"
+    "subtitle_align": "center"
   },
   "visual": {
     "show_title": true,

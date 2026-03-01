@@ -1,7 +1,11 @@
+#include <AudioFileSourceFS.h>
+#include <AudioGeneratorMP3.h>
+#include <AudioOutput.h>
 #include "audio/AudioEngine.h"
-
 #include <FFat.h>
+#include <SD.h>
 #include <SD_MMC.h>
+#include <SPI.h>
 #include <esp_dsp.h>
 
 #include <algorithm>
@@ -37,22 +41,82 @@ constexpr TickType_t kI2sWriteTimeoutMs = 30;
 constexpr uint8_t kToneWriteRetryCount = 10U;
 constexpr TickType_t kI2sReadTimeoutMs = 2;
 constexpr size_t kPlaybackCopyBytes = 256U;
-constexpr size_t kPlaybackCopyBytesMp3 = 1024U;
-constexpr uint8_t kPlaybackCopyRetryCount = 8U;
+constexpr uint8_t kPlaybackCopyRetryCount = 24U;
 constexpr uint8_t kPlaybackCopyRetryDelayMs = 1U;
-constexpr uint16_t kBlockingOutputMaxRetries = 2000U;
+// Keep retries bounded to avoid long loop stalls if the sink is wedged.
+constexpr uint16_t kBlockingOutputMaxRetries = 120U;
 constexpr uint8_t kBlockingOutputRetryDelayMs = 1U;
 // Keep playback gain neutral; loudness is driven by ES8388 hardware volume.
 constexpr float kPlaybackBoostLinear = 1.0f;
 // Keep software gain neutral to avoid cumulative clipping with volume boosts.
 constexpr float kPlaybackSoftwareGain = 1.0f;
+// Hotline runtime lock: keep loudness auto processing disabled to preserve deterministic playback.
+constexpr bool kHardDisableAutoLoudnessProcessing = true;
 constexpr int16_t kAdcRawMax = 4095;
 constexpr int16_t kAdcMidScale = kAdcRawMax / 2;
 constexpr size_t kWavHeaderProbeMaxBytes = 262144U;
 constexpr size_t kMp3HeaderProbeMaxBytes = 8192U;
-constexpr uint32_t kStableRatesHz[] = {8000U, 16000U, 22050U, 32000U, 44100U, 48000U};
+constexpr uint32_t kStorageMountRetryIntervalMs = 3000U;
+// Keep 24 kHz in the stable set: most hotline TTS MP3 prompts are encoded at 24 kHz.
+// Avoiding needless 24k -> 22.05k resampling reduces write pressure and artifacts.
+constexpr uint32_t kStableRatesHz[] = {8000U, 16000U, 22050U, 24000U, 32000U, 44100U, 48000U};
 constexpr float kDbToLinearRef = 20.0f;
 constexpr float kMinRmsLinear = 1.0e-5f;
+
+class AudioToolsMp3OutputBridge final : public ::AudioOutput {
+public:
+    AudioToolsMp3OutputBridge() {
+        channels = 2U;
+        gainF2P6 = static_cast<uint8_t>(1U << 6U);
+    }
+
+    void setSink(Print* sink) {
+        sink_ = sink;
+    }
+
+    bool begin() override {
+        return sink_ != nullptr;
+    }
+
+    bool stop() override {
+        return true;
+    }
+
+    bool SetRate(int hz) override {
+        return ::AudioOutput::SetRate(hz);
+    }
+
+    bool SetChannels(int chan) override {
+        if (!::AudioOutput::SetChannels(chan)) {
+            return false;
+        }
+        if (channels < 1U) {
+            channels = 1U;
+        } else if (channels > 2U) {
+            channels = 2U;
+        }
+        return true;
+    }
+
+    bool ConsumeSample(int16_t sample[2]) override {
+        if (sink_ == nullptr || sample == nullptr) {
+            return false;
+        }
+
+        if (channels <= 1U) {
+            const int16_t mono = sample[::AudioOutput::LEFTCHANNEL];
+            const size_t written = sink_->write(reinterpret_cast<const uint8_t*>(&mono), sizeof(mono));
+            return written == sizeof(mono);
+        }
+
+        const int16_t stereo[2] = {sample[::AudioOutput::LEFTCHANNEL], sample[::AudioOutput::RIGHTCHANNEL]};
+        const size_t written = sink_->write(reinterpret_cast<const uint8_t*>(stereo), sizeof(stereo));
+        return written == sizeof(stereo);
+    }
+
+private:
+    Print* sink_ = nullptr;
+};
 
 int16_t clampInt16(float value) {
     if (value > static_cast<float>(std::numeric_limits<int16_t>::max())) {
@@ -177,6 +241,10 @@ float linearToDb(float value) {
 float dbToLinear(float db) {
     return std::pow(10.0f, db / kDbToLinearRef);
 }
+
+bool wavAutoLoudnessEnabled(const AudioConfig& cfg) {
+    return !kHardDisableAutoLoudnessProcessing && cfg.wav_auto_normalize_limiter;
+}
 }  // namespace
 
 void AudioEngine::BlockingOutput::setOutput(Print* out) {
@@ -212,7 +280,9 @@ size_t AudioEngine::BlockingOutput::write(const uint8_t* data, size_t len) {
 }
 
 int AudioEngine::BlockingOutput::availableForWrite() {
-    return (out_ == nullptr) ? 0 : out_->availableForWrite();
+    // Advertise writable capacity and let write() block/retry on the real sink.
+    // This avoids StreamCopy aborting early on transient I2S backpressure spikes.
+    return (out_ == nullptr) ? 0 : 4096;
 }
 
 AudioConfig defaultAudioConfigForProfile(BoardProfile profile) {
@@ -231,7 +301,7 @@ AudioConfig defaultAudioConfigForProfile(BoardProfile profile) {
         cfg.ws_pin = A1S_I2S_LRCK;
         cfg.data_out_pin = A1S_I2S_DOUT;
         cfg.data_in_pin = A1S_I2S_DIN;
-        cfg.enable_capture = true;
+        cfg.enable_capture = false;
     }
     return cfg;
 }
@@ -242,25 +312,19 @@ AudioEngine::AudioEngine()
       capture_clients_mask_(0),
       playing_(false),
       features_(getFeatureMatrix(detectBoardProfile())) {
-    playback_blocking_output_.setOutput(&playback_volume_stream_);
-    playback_gain_stream_.setOutput(i2s_stream_);
+    playback_blocking_output_.setOutput(&i2s_stream_);
+    playback_gain_stream_.setOutput(playback_blocking_output_);
     playback_volume_stream_.setOutput(playback_gain_stream_);
-    playback_channel_converter_stream_.setOutput(playback_blocking_output_);
+    playback_channel_converter_stream_.setOutput(playback_volume_stream_);
     playback_resample_stream_.setOutput(playback_channel_converter_stream_);
     wav_stream_.setOutput(playback_volume_stream_);
     wav_stream_.setDecoder(&wav_decoder_);
     wav_copy_.setCheckAvailable(false);
-    wav_copy_.setCheckAvailableForWrite(true);
+    wav_copy_.setCheckAvailableForWrite(false);
     wav_copy_.setMinCopySize(sizeof(int16_t));
     wav_copy_.setRetry(kPlaybackCopyRetryCount);
     wav_copy_.setRetryDelay(kPlaybackCopyRetryDelayMs);
-    mp3_stream_.setOutput(playback_volume_stream_);
-    mp3_stream_.setDecoder(&mp3_decoder_);
-    mp3_copy_.setCheckAvailable(false);
-    mp3_copy_.setCheckAvailableForWrite(true);
-    mp3_copy_.setMinCopySize(sizeof(int16_t));
-    mp3_copy_.setRetry(kPlaybackCopyRetryCount);
-    mp3_copy_.setRetryDelay(kPlaybackCopyRetryDelayMs);
+    mp3_output_ = new AudioToolsMp3OutputBridge();
 }
 
 AudioEngine::~AudioEngine() {
@@ -290,23 +354,71 @@ void AudioEngine::unlockI2s() const {
     }
 }
 
+bool AudioEngine::lockPlaybackState(TickType_t timeout_ticks) const {
+    if (playback_state_mutex_ == nullptr) {
+        return true;
+    }
+    return xSemaphoreTake(playback_state_mutex_, timeout_ticks) == pdTRUE;
+}
+
+void AudioEngine::unlockPlaybackState() const {
+    if (playback_state_mutex_ != nullptr) {
+        xSemaphoreGive(playback_state_mutex_);
+    }
+}
+
 bool AudioEngine::ensureSdMounted() {
-    if (sd_mount_attempted_) {
-        return sd_ready_;
+    static uint32_t last_sd_attempt_ms = 0U;
+    if (sd_ready_ && sd_fs_ != nullptr) {
+        return true;
     }
+
+    const uint32_t now = millis();
+    if (sd_mount_attempted_ && static_cast<uint32_t>(now - last_sd_attempt_ms) < kStorageMountRetryIntervalMs) {
+        return false;
+    }
+
     sd_mount_attempted_ = true;
-    sd_ready_ = SD_MMC.begin();
-    if (!sd_ready_) {
-        Serial.println("[AudioEngine] SD_MMC begin failed");
+    last_sd_attempt_ms = now;
+    if (SD_MMC.begin()) {
+        sd_ready_ = true;
+        sd_fs_ = &SD_MMC;
+        return true;
     }
-    return sd_ready_;
+
+    Serial.println("[AudioEngine] SD_MMC begin failed, trying SD SPI fallback");
+    static bool sd_spi_bus_started = false;
+    if (!sd_spi_bus_started) {
+        SPI.begin(A1S_SD_SCK, A1S_SD_MISO, A1S_SD_MOSI, A1S_SD_CS);
+        sd_spi_bus_started = true;
+    }
+
+    if (SD.begin(A1S_SD_CS, SPI, 10000000U)) {
+        sd_ready_ = true;
+        sd_fs_ = &SD;
+        Serial.println("[AudioEngine] SD mounted via SPI fallback");
+        return true;
+    }
+
+    sd_ready_ = false;
+    sd_fs_ = nullptr;
+    Serial.println("[AudioEngine] SD SPI fallback init failed");
+    return false;
 }
 
 bool AudioEngine::ensureLittleFsMounted() {
-    if (littlefs_mount_attempted_) {
-        return littlefs_ready_;
+    static uint32_t last_littlefs_attempt_ms = 0U;
+    if (littlefs_ready_) {
+        return true;
     }
+
+    const uint32_t now = millis();
+    if (littlefs_mount_attempted_ && static_cast<uint32_t>(now - last_littlefs_attempt_ms) < kStorageMountRetryIntervalMs) {
+        return false;
+    }
+
     littlefs_mount_attempted_ = true;
+    last_littlefs_attempt_ms = now;
 #ifdef USB_MSC_BOOT_ENABLE
     littlefs_ready_ = FFat.begin(true, "/usbmsc", 10, "usbmsc");
 #else
@@ -353,7 +465,10 @@ bool AudioEngine::openPlaybackFileForSource(const char* path, MediaSource source
         if (!ensureSdMounted()) {
             return false;
         }
-        return try_open(MediaSource::SD, SD_MMC);
+        if (sd_fs_ == nullptr) {
+            return false;
+        }
+        return try_open(MediaSource::SD, *sd_fs_);
     }
 
     if (source == MediaSource::LITTLEFS) {
@@ -363,7 +478,7 @@ bool AudioEngine::openPlaybackFileForSource(const char* path, MediaSource source
         return try_open(MediaSource::LITTLEFS, FFat);
     }
 
-    if (ensureSdMounted() && try_open(MediaSource::SD, SD_MMC)) {
+    if (ensureSdMounted() && sd_fs_ != nullptr && try_open(MediaSource::SD, *sd_fs_)) {
         return true;
     }
     if (ensureLittleFsMounted() && try_open(MediaSource::LITTLEFS, FFat)) {
@@ -372,17 +487,29 @@ bool AudioEngine::openPlaybackFileForSource(const char* path, MediaSource source
     return false;
 }
 
-void AudioEngine::stopPlaybackFile() {
+void AudioEngine::stopPlaybackFileUnlocked() {
     wav_copy_.end();
     wav_stream_.end();
-    mp3_copy_.end();
-    mp3_stream_.end();
+    if (mp3_decoder_ != nullptr) {
+        mp3_decoder_->stop();
+        delete mp3_decoder_;
+        mp3_decoder_ = nullptr;
+    }
+    if (mp3_source_ != nullptr) {
+        mp3_source_->close();
+        delete mp3_source_;
+        mp3_source_ = nullptr;
+    }
+    if (mp3_output_ != nullptr) {
+        static_cast<AudioToolsMp3OutputBridge*>(mp3_output_)->setSink(nullptr);
+    }
+    mp3_pcm_sink_ = nullptr;
+    mp3_source_last_pos_ = 0U;
     playback_resample_stream_.end();
     playback_channel_converter_stream_.end();
-    playback_channel_converter_stream_.setOutput(playback_blocking_output_);
+    playback_channel_converter_stream_.setOutput(playback_volume_stream_);
     playback_resample_stream_.setOutput(playback_channel_converter_stream_);
     wav_stream_.setOutput(playback_volume_stream_);
-    mp3_stream_.setOutput(playback_volume_stream_);
     playback_loudness_gain_db_ = 0.0f;
     playback_volume_stream_.setVolume(kPlaybackBoostLinear);
     restorePlaybackAudioInfo();
@@ -392,6 +519,8 @@ void AudioEngine::stopPlaybackFile() {
     playback_path_ = "";
     playback_data_remaining_ = 0;
     playback_data_offset_ = 0;
+    playback_wav_direct_mode_ = false;
+    playback_mp3_bitrate_bps_ = 0U;
     playback_input_channels_ = 0;
     playback_input_audio_info_.clear();
     playback_resampler_active_ = false;
@@ -402,6 +531,14 @@ void AudioEngine::stopPlaybackFile() {
     playback_next_chunk_ms_ = 0U;
     playback_codec_ = PlaybackCodec::NONE;
     playing_ = false;
+}
+
+void AudioEngine::stopPlaybackFile() {
+    if (!lockPlaybackState(pdMS_TO_TICKS(50))) {
+        return;
+    }
+    stopPlaybackFileUnlocked();
+    unlockPlaybackState();
 }
 
 bool AudioEngine::prepareWavPlayback(File& file, const char* path) {
@@ -465,7 +602,7 @@ bool AudioEngine::prepareWavPlayback(File& file, const char* path) {
         return false;
     }
 
-    playback_loudness_auto_ = _config.wav_auto_normalize_limiter;
+    playback_loudness_auto_ = wavAutoLoudnessEnabled(_config);
     playback_limiter_active_ = false;
     playback_loudness_gain_db_ = 0.0f;
     if (playback_loudness_auto_) {
@@ -629,6 +766,7 @@ bool AudioEngine::prepareMp3Playback(File& file, const char* path) {
     playback_last_error_ = "";
     playback_data_offset_ = 0U;
     playback_data_remaining_ = static_cast<uint32_t>(file.size());
+    playback_mp3_bitrate_bps_ = 0U;
     playback_loudness_auto_ = false;
     playback_limiter_active_ = false;
     playback_loudness_gain_db_ = 0.0f;
@@ -638,7 +776,8 @@ bool AudioEngine::prepareMp3Playback(File& file, const char* path) {
     playback_volume_stream_.setVolume(kPlaybackBoostLinear);
 
     audio_tools::AudioInfo mp3_info{};
-    if (!readMp3HeaderInfo(file, mp3_info, nullptr) || !isPlaybackAudioInfoSupported(mp3_info)) {
+    uint32_t mp3_bitrate_bps = 0U;
+    if (!readMp3HeaderInfo(file, mp3_info, &mp3_bitrate_bps) || !isPlaybackAudioInfoSupported(mp3_info)) {
         playback_input_audio_info_ = default_playback_audio_info_;
         playback_resampler_active_ = false;
         playback_channel_upmix_active_ = false;
@@ -652,6 +791,7 @@ bool AudioEngine::prepareMp3Playback(File& file, const char* path) {
         return true;
     }
 
+    playback_mp3_bitrate_bps_ = mp3_bitrate_bps;
     playback_input_audio_info_ = mp3_info;
     const audio_tools::AudioInfo resolved_output = resolvePlaybackFormat(mp3_info);
     playback_resampler_active_ = (resolved_output.sample_rate != mp3_info.sample_rate);
@@ -667,10 +807,11 @@ bool AudioEngine::prepareMp3Playback(File& file, const char* path) {
     if (!file.seek(0U)) {
         return false;
     }
-    Serial.printf("[AudioEngine] mp3 header parsed sr=%u ch=%u bits=%u path=%s out_sr=%u out_ch=%u resampler=%s upmix=%s\n",
+    Serial.printf("[AudioEngine] mp3 header parsed sr=%u ch=%u bits=%u bitrate=%u path=%s out_sr=%u out_ch=%u resampler=%s upmix=%s\n",
                   static_cast<unsigned>(mp3_info.sample_rate),
                   static_cast<unsigned>(mp3_info.channels),
                   static_cast<unsigned>(mp3_info.bits_per_sample),
+                  static_cast<unsigned>(playback_mp3_bitrate_bps_),
                   path == nullptr ? "(null)" : path,
                   static_cast<unsigned>(resolved_output.sample_rate),
                   static_cast<unsigned>(resolved_output.channels),
@@ -846,15 +987,15 @@ audio_tools::AudioInfo AudioEngine::resolvePlaybackFormat(const audio_tools::Aud
     }
     playback_rate_fallback_ = fallback_rate_hz;
     output.bits_per_sample = 16U;
-    // Force stereo output for hotline playback so mono prompts are centered on both channels.
-    output.channels = 2U;
+    // Keep source channel count when possible: mono WAV prompts are native on A252.
+    output.channels = (input.channels == 0U) ? 1U : std::min<uint16_t>(input.channels, 2U);
     return output;
 }
 
 bool AudioEngine::configureWavPlaybackPipeline(const audio_tools::AudioInfo& input, const audio_tools::AudioInfo& output) {
     playback_resample_stream_.end();
     playback_channel_converter_stream_.end();
-    playback_channel_converter_stream_.setOutput(playback_blocking_output_);
+    playback_channel_converter_stream_.setOutput(playback_volume_stream_);
     playback_resample_stream_.setOutput(playback_channel_converter_stream_);
     wav_stream_.setOutput(playback_volume_stream_);
 
@@ -900,9 +1041,9 @@ bool AudioEngine::configureWavPlaybackPipeline(const audio_tools::AudioInfo& inp
 bool AudioEngine::configureMp3PlaybackPipeline(const audio_tools::AudioInfo& input, const audio_tools::AudioInfo& output) {
     playback_resample_stream_.end();
     playback_channel_converter_stream_.end();
-    playback_channel_converter_stream_.setOutput(playback_blocking_output_);
+    playback_channel_converter_stream_.setOutput(playback_volume_stream_);
     playback_resample_stream_.setOutput(playback_channel_converter_stream_);
-    mp3_stream_.setOutput(playback_volume_stream_);
+    mp3_pcm_sink_ = &playback_volume_stream_;
 
     const bool channel_convert_active = (output.channels != input.channels);
 
@@ -912,7 +1053,7 @@ bool AudioEngine::configureMp3PlaybackPipeline(const audio_tools::AudioInfo& inp
         } else {
             playback_resample_stream_.setOutput(playback_volume_stream_);
         }
-        mp3_stream_.setOutput(playback_resample_stream_);
+        mp3_pcm_sink_ = &playback_resample_stream_;
         if (!playback_resample_stream_.begin(input, static_cast<int>(output.sample_rate))) {
             Serial.printf("[AudioEngine] mp3 resampler begin failed in_sr=%u out_sr=%u\n",
                           static_cast<unsigned>(input.sample_rate),
@@ -921,9 +1062,9 @@ bool AudioEngine::configureMp3PlaybackPipeline(const audio_tools::AudioInfo& inp
         }
     } else {
         if (channel_convert_active) {
-            mp3_stream_.setOutput(playback_channel_converter_stream_);
+            mp3_pcm_sink_ = &playback_channel_converter_stream_;
         } else {
-            mp3_stream_.setOutput(playback_volume_stream_);
+            mp3_pcm_sink_ = &playback_volume_stream_;
         }
     }
 
@@ -940,7 +1081,11 @@ bool AudioEngine::configureMp3PlaybackPipeline(const audio_tools::AudioInfo& inp
         }
     }
 
-    return true;
+    if (mp3_output_ != nullptr) {
+        static_cast<AudioToolsMp3OutputBridge*>(mp3_output_)->setSink(mp3_pcm_sink_);
+    }
+
+    return mp3_pcm_sink_ != nullptr;
 }
 
 void AudioEngine::applyPlaybackAudioInfo(const audio_tools::AudioInfo& info) {
@@ -1021,7 +1166,7 @@ float AudioEngine::analyzeWavLoudnessGainDb(
     uint32_t data_size,
     bool& out_limiter_active) const {
     out_limiter_active = false;
-    if (!_config.wav_auto_normalize_limiter || input.channels == 0U || data_offset == 0U || data_size == 0U) {
+    if (!wavAutoLoudnessEnabled(_config) || input.channels == 0U || data_offset == 0U || data_size == 0U) {
         return 0.0f;
     }
 
@@ -1344,6 +1489,10 @@ int16_t AudioEngine::processAdcSample(int16_t raw_sample) {
 bool AudioEngine::begin(const AudioConfig& config) {
     end();
     _config = config;
+    if (kHardDisableAutoLoudnessProcessing && _config.wav_auto_normalize_limiter) {
+        Serial.println("[AudioEngine] wav auto loudness requested but hard-disabled by firmware policy");
+    }
+    _config.wav_auto_normalize_limiter = wavAutoLoudnessEnabled(_config);
     adc_capture_pin_ = config.capture_adc_pin;
     use_adc_capture_ = (adc_capture_pin_ >= 0);
     const int max_gpio = (detectBoardProfile() == BoardProfile::ESP32_S3) ? 48 : 39;
@@ -1433,6 +1582,7 @@ bool AudioEngine::begin(const AudioConfig& config) {
     playback_loudness_gain_db_ = 0.0f;
     playback_limiter_active_ = false;
     playback_rate_fallback_ = 0U;
+    playback_mp3_bitrate_bps_ = 0U;
     playback_copy_source_bytes_ = 0U;
     playback_copy_accepted_bytes_ = 0U;
     playback_copy_loss_bytes_ = 0U;
@@ -1464,6 +1614,12 @@ bool AudioEngine::begin(const AudioConfig& config) {
         i2s_io_mutex_ = xSemaphoreCreateMutex();
         if (i2s_io_mutex_ == nullptr) {
             Serial.println("[AudioEngine] i2s mutex unavailable");
+        }
+    }
+    if (playback_state_mutex_ == nullptr) {
+        playback_state_mutex_ = xSemaphoreCreateMutex();
+        if (playback_state_mutex_ == nullptr) {
+            Serial.println("[AudioEngine] playback state mutex unavailable");
         }
     }
 
@@ -1511,8 +1667,16 @@ void AudioEngine::end() {
         vSemaphoreDelete(i2s_io_mutex_);
         i2s_io_mutex_ = nullptr;
     }
+    if (playback_state_mutex_ != nullptr) {
+        vSemaphoreDelete(playback_state_mutex_);
+        playback_state_mutex_ = nullptr;
+    }
     i2s_stream_.end();
     playback_volume_stream_.end();
+    if (mp3_output_ != nullptr) {
+        delete static_cast<AudioToolsMp3OutputBridge*>(mp3_output_);
+        mp3_output_ = nullptr;
+    }
     driver_installed_ = false;
 }
 
@@ -1584,7 +1748,12 @@ bool AudioEngine::playFileFromSource(const char* path, MediaSource source) {
     }
 
     stopTone();
-    stopPlaybackFile();
+
+    if (!lockPlaybackState(pdMS_TO_TICKS(200))) {
+        playback_last_error_ = "playback_lock_timeout";
+        return false;
+    }
+    stopPlaybackFileUnlocked();
     playback_last_error_ = "";
 
     fs::FS* mounted_fs = nullptr;
@@ -1592,6 +1761,7 @@ bool AudioEngine::playFileFromSource(const char* path, MediaSource source) {
     if (!openPlaybackFileForSource(path, source, mounted_fs, selected_source) || mounted_fs == nullptr || !playback_file_) {
         Serial.printf("[AudioEngine] playback file not found source=%s path=%s\n", mediaSourceToString(source), path);
         playback_last_error_ = "file_not_found";
+        unlockPlaybackState();
         return false;
     }
 
@@ -1599,38 +1769,80 @@ bool AudioEngine::playFileFromSource(const char* path, MediaSource source) {
     if (use_mp3_decoder) {
         if (!prepareMp3Playback(playback_file_, path)) {
             playback_last_error_ = "mp3_prepare_failed";
-            stopPlaybackFile();
+            stopPlaybackFileUnlocked();
+            unlockPlaybackState();
             return false;
         }
 
-        if (!mp3_stream_.begin()) {
-            playback_last_error_ = "decoder_begin_failed";
-            stopPlaybackFile();
-            Serial.printf("[AudioEngine] mp3 decoder begin failed: %s\n", path);
+        if (playback_file_) {
+            playback_file_.close();
+        }
+        if (mp3_output_ == nullptr) {
+            mp3_output_ = new AudioToolsMp3OutputBridge();
+        }
+        if (mp3_output_ == nullptr) {
+            playback_last_error_ = "decoder_output_alloc_failed";
+            stopPlaybackFileUnlocked();
+            unlockPlaybackState();
             return false;
         }
+
+        static_cast<AudioToolsMp3OutputBridge*>(mp3_output_)->setSink(mp3_pcm_sink_);
+        mp3_source_ = new AudioFileSourceFS(*mounted_fs, path);
+        if (mp3_source_ == nullptr || !mp3_source_->isOpen()) {
+            playback_last_error_ = "source_open_failed";
+            stopPlaybackFileUnlocked();
+            Serial.printf("[AudioEngine] mp3 source open failed: %s\n", path);
+            unlockPlaybackState();
+            return false;
+        }
+
+        mp3_decoder_ = new AudioGeneratorMP3();
+        auto* output_bridge = static_cast<AudioToolsMp3OutputBridge*>(mp3_output_);
+        if (mp3_decoder_ == nullptr || output_bridge == nullptr || !mp3_decoder_->begin(mp3_source_, output_bridge)) {
+            playback_last_error_ = "decoder_begin_failed";
+            stopPlaybackFileUnlocked();
+            Serial.printf("[AudioEngine] mp3 decoder begin failed: %s\n", path);
+            unlockPlaybackState();
+            return false;
+        }
+
         playback_volume_stream_.setVolume(kPlaybackBoostLinear);
-        mp3_copy_.begin(mp3_stream_, playback_file_);
+        mp3_source_last_pos_ = mp3_source_ != nullptr ? mp3_source_->getPos() : 0U;
         playback_codec_ = PlaybackCodec::MP3;
     } else {
         if (!prepareWavPlayback(playback_file_, path)) {
             playback_last_error_ = "wav_prepare_failed";
-            stopPlaybackFile();
+            stopPlaybackFileUnlocked();
+            unlockPlaybackState();
             return false;
         }
 
-        if (!wav_stream_.begin()) {
-            playback_last_error_ = "decoder_begin_failed";
-            stopPlaybackFile();
-            Serial.printf("[AudioEngine] wav decoder begin failed: %s\n", path);
-            return false;
-        }
-        // Re-assert runtime volume after decoder init because stream reconfiguration
-        // may reset volume state on some runs.
         const float gain_linear = dbToLinear(playback_loudness_gain_db_);
         const float requested_volume = clampFloat(kPlaybackBoostLinear * gain_linear, 0.05f, 4.0f);
         playback_volume_stream_.setVolume(requested_volume);
-        wav_copy_.begin(wav_stream_, playback_file_);
+        playback_wav_direct_mode_ =
+            (playback_input_audio_info_.bits_per_sample == 16U) &&
+            !playback_resampler_active_ &&
+            !playback_channel_upmix_active_ &&
+            (playback_data_offset_ > 0U);
+        if (playback_wav_direct_mode_) {
+            if (!playback_file_.seek(playback_data_offset_)) {
+                playback_last_error_ = "wav_seek_data_failed";
+                stopPlaybackFileUnlocked();
+                unlockPlaybackState();
+                return false;
+            }
+        } else {
+            if (!wav_stream_.begin()) {
+                playback_last_error_ = "decoder_begin_failed";
+                stopPlaybackFileUnlocked();
+                Serial.printf("[AudioEngine] wav decoder begin failed: %s\n", path);
+                unlockPlaybackState();
+                return false;
+            }
+            wav_copy_.begin(wav_stream_, playback_file_);
+        }
         playback_codec_ = PlaybackCodec::WAV;
     }
 
@@ -1644,6 +1856,7 @@ bool AudioEngine::playFileFromSource(const char* path, MediaSource source) {
                   use_mp3_decoder ? "mp3" : "wav",
                   mediaSourceToString(selected_source),
                   path);
+    unlockPlaybackState();
     return true;
 }
 
@@ -2081,7 +2294,7 @@ uint32_t AudioEngine::toneWriteMissCount() const {
 }
 
 bool AudioEngine::supportsFullDuplex() const {
-    return features_.has_full_duplex_i2s;
+    return features_.has_full_duplex_i2s && _config.enable_capture;
 }
 
 void AudioEngine::clearToneStateIfIdle() {
@@ -2224,7 +2437,7 @@ bool AudioEngine::probePlaybackFileFromSource(const char* path, MediaSource sour
 
     bool limiter_active = false;
     float gain_db = 0.0f;
-    const bool loudness_auto = _config.wav_auto_normalize_limiter;
+    const bool loudness_auto = wavAutoLoudnessEnabled(_config);
     if (loudness_auto) {
         gain_db = analyzeWavLoudnessGainDb(playback_file_, wav_info, data_offset, data_size, limiter_active);
     }
@@ -2268,29 +2481,108 @@ void AudioEngine::updateToneJitter(uint32_t now_ms) {
 }
 
 bool AudioEngine::streamPlaybackChunk() {
-    if (!playback_file_) {
-        stopPlaybackFile();
+    if (!lockPlaybackState(0)) {
+        return true;
+    }
+
+    if (playback_codec_ == PlaybackCodec::MP3) {
+        if (mp3_decoder_ == nullptr || mp3_source_ == nullptr) {
+            stopPlaybackFileUnlocked();
+            unlockPlaybackState();
+            return false;
+        }
+    } else if (!playback_file_) {
+        stopPlaybackFileUnlocked();
+        unlockPlaybackState();
         return false;
     }
 
     const uint32_t now_ms = millis();
     if (playback_next_chunk_ms_ != 0U &&
         static_cast<int32_t>(now_ms - playback_next_chunk_ms_) < 0) {
+        unlockPlaybackState();
         return true;
     }
 
     size_t total_source_advanced = 0U;
     size_t total_copied = 0U;
-    const size_t copy_bytes = (playback_codec_ == PlaybackCodec::MP3) ? kPlaybackCopyBytesMp3 : kPlaybackCopyBytes;
-
-    const size_t pos_before = playback_file_.position();
     if (playback_codec_ == PlaybackCodec::MP3) {
-        total_copied = mp3_copy_.copyBytes(copy_bytes);
+        const uint32_t pos_before = mp3_source_->getPos();
+        const bool decoder_running = mp3_decoder_->loop();
+        const uint32_t pos_after = mp3_source_->getPos();
+        total_source_advanced = (pos_after >= pos_before) ? (pos_after - pos_before) : 0U;
+        total_copied = total_source_advanced;
+        mp3_source_last_pos_ = pos_after;
+        if (!decoder_running || !mp3_decoder_->isRunning()) {
+            stopPlaybackFileUnlocked();
+            unlockPlaybackState();
+            return false;
+        }
     } else {
-        total_copied = wav_copy_.copyBytes(copy_bytes);
+        if (playback_wav_direct_mode_) {
+            uint8_t pcm_buf[kPlaybackCopyBytes];
+            size_t wanted = kPlaybackCopyBytes;
+            if (playback_data_remaining_ > 0U) {
+                wanted = std::min<size_t>(wanted, playback_data_remaining_);
+            }
+            const size_t align = sizeof(int16_t);
+            wanted = (wanted / align) * align;
+            if (wanted == 0U) {
+                stopPlaybackFileUnlocked();
+                unlockPlaybackState();
+                return false;
+            }
+
+            const size_t pos_before = playback_file_.position();
+            const size_t bytes_read = playback_file_.read(pcm_buf, wanted);
+            if (bytes_read == 0U) {
+                stopPlaybackFileUnlocked();
+                unlockPlaybackState();
+                return false;
+            }
+
+            const size_t aligned_read = (bytes_read / align) * align;
+            const size_t sample_count = aligned_read / sizeof(int16_t);
+            const size_t samples_written =
+                writePlaybackFrame(reinterpret_cast<const int16_t*>(pcm_buf), sample_count);
+            total_copied = samples_written * sizeof(int16_t);
+            total_source_advanced = total_copied;
+
+            if (total_copied < aligned_read) {
+                const size_t rewind = aligned_read - total_copied;
+                if (rewind > 0U) {
+                    const size_t safe_pos = playback_file_.position();
+                    if (safe_pos >= rewind) {
+                        playback_file_.seek(safe_pos - rewind);
+                    }
+                }
+            }
+
+            if (playback_data_remaining_ > 0U) {
+                const uint32_t consumed =
+                    static_cast<uint32_t>(std::min<size_t>(total_source_advanced, playback_data_remaining_));
+                playback_data_remaining_ -= consumed;
+                if (playback_data_remaining_ == 0U) {
+                    stopPlaybackFileUnlocked();
+                    unlockPlaybackState();
+                    return false;
+                }
+            } else {
+                const size_t pos_after = playback_file_.position();
+                if (pos_after <= pos_before || !playback_file_.available()) {
+                    stopPlaybackFileUnlocked();
+                    unlockPlaybackState();
+                    return false;
+                }
+            }
+        } else {
+            const size_t copy_bytes = kPlaybackCopyBytes;
+            const size_t pos_before = playback_file_.position();
+            total_copied = wav_copy_.copyBytes(copy_bytes);
+            const size_t pos_after = playback_file_.position();
+            total_source_advanced = (pos_after >= pos_before) ? (pos_after - pos_before) : 0U;
+        }
     }
-    const size_t pos_after = playback_file_.position();
-    total_source_advanced = (pos_after >= pos_before) ? (pos_after - pos_before) : 0U;
 
     const size_t progress_bytes = (total_source_advanced > 0U) ? total_source_advanced : total_copied;
     if (progress_bytes > 0U) {
@@ -2300,27 +2592,48 @@ bool AudioEngine::streamPlaybackChunk() {
 
     if (progress_bytes > 0U) {
         uint32_t next_delay_ms = 1U;
-        const uint32_t bytes_per_sample = std::max<uint32_t>(1U, playback_input_audio_info_.bits_per_sample / 8U);
-        const uint32_t channels = std::max<uint32_t>(1U, playback_input_audio_info_.channels);
-        const uint32_t bytes_per_frame = bytes_per_sample * channels;
-        const uint32_t input_rate = std::max<uint32_t>(1U, playback_input_audio_info_.sample_rate);
-        if (bytes_per_frame > 0U) {
-            const uint32_t frames = static_cast<uint32_t>(progress_bytes / bytes_per_frame);
-            if (frames > 0U) {
-                const uint32_t chunk_ms = std::max<uint32_t>(1U, (frames * 1000U) / input_rate);
-                next_delay_ms = std::max<uint32_t>(1U, chunk_ms / 2U);
+        if (playback_codec_ == PlaybackCodec::MP3 && playback_mp3_bitrate_bps_ > 0U) {
+            const uint64_t bits = static_cast<uint64_t>(progress_bytes) * 8ULL;
+            const uint64_t chunk_ms_u64 =
+                std::max<uint64_t>(1ULL, (bits * 1000ULL) / static_cast<uint64_t>(playback_mp3_bitrate_bps_));
+            const uint32_t chunk_ms =
+                (chunk_ms_u64 > static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()))
+                    ? std::numeric_limits<uint32_t>::max()
+                    : static_cast<uint32_t>(chunk_ms_u64);
+            next_delay_ms = std::max<uint32_t>(1U, chunk_ms / 2U);
+        } else {
+            const uint32_t bytes_per_sample = std::max<uint32_t>(1U, playback_input_audio_info_.bits_per_sample / 8U);
+            const uint32_t channels = std::max<uint32_t>(1U, playback_input_audio_info_.channels);
+            const uint32_t bytes_per_frame = bytes_per_sample * channels;
+            const uint32_t input_rate = std::max<uint32_t>(1U, playback_input_audio_info_.sample_rate);
+            if (bytes_per_frame > 0U) {
+                const uint32_t frames = static_cast<uint32_t>(progress_bytes / bytes_per_frame);
+                if (frames > 0U) {
+                    const uint32_t chunk_ms = std::max<uint32_t>(1U, (frames * 1000U) / input_rate);
+                    // WAV flow is already light; pacing at real-time avoids saturating I2S buffers.
+                    next_delay_ms = chunk_ms;
+                }
             }
         }
         playback_next_chunk_ms_ = now_ms + next_delay_ms;
+        unlockPlaybackState();
+        return true;
+    }
+
+    if (playback_codec_ == PlaybackCodec::MP3) {
+        playback_next_chunk_ms_ = now_ms + 1U;
+        unlockPlaybackState();
         return true;
     }
 
     if (!playback_file_.available()) {
-        stopPlaybackFile();
+        stopPlaybackFileUnlocked();
+        unlockPlaybackState();
         return false;
     }
 
     playback_next_chunk_ms_ = now_ms + 1U;
+    unlockPlaybackState();
     return true;
 }
 

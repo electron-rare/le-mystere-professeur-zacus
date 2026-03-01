@@ -36,7 +36,8 @@
       "progress_layout": "ring",
       "hourglass_style": "modern",
       "flip_on_timeout": false,
-      "reset_flip_ms": 3000
+      "reset_flip_ms": 3000,
+      "full_turn_flip_ms": 2000
     }
   },
   "transition": {

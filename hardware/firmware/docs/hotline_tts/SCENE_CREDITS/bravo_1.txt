@@ -1,0 +1,10 @@
+Crédits :
+La scène des crédits s’ouvre sur un effet LovyanGFX Star Wars.
+Le texte défile verticalement, mettant en valeur chaque participant.
+La police Montserrat 28 rend hommage à la brigade Z.
+Le fichier credits.txt du FS est utilisé pour afficher tous les noms.
+L’ambiance est solennelle, chaque nom est mis en lumière.
+Le scroll est lent, permettant à chacun de lire et d’apprécier le travail accompli.
+La scène finale rend hommage à tous les héros du projet.
+La fête se termine sur une note de reconnaissance et de gratitude.
+Bravo à tous, la brigade Z a marqué l’histoire du projet Zacus.

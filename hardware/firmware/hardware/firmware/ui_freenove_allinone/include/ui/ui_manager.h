@@ -439,6 +439,7 @@ class UiManager {
   bool shouldApplySceneStaticState(const char* scene_id, const char* payload_json, bool scene_changed) const;
   void applySceneDynamicState(const String& subtitle, bool show_subtitle, bool audio_playing, uint32_t text_rgb);
   void renderLgfxSceneTextOverlay(uint32_t now_ms);
+  void renderLgfxWarningOverlay(drivers::display::DisplayHal& display, uint32_t now_ms);
   void renderLgfxLaDetectorOverlay(uint32_t now_ms);
   void resetSceneTimeline();
   void onTimelineTick(uint16_t elapsed_ms);
@@ -713,6 +714,8 @@ class UiManager {
   bool la_hg_timeout_latched_ = false;
   uint32_t la_hg_flip_started_ms_ = 0U;
   uint32_t la_hg_flip_duration_ms_ = 10000U;
+  uint32_t la_hg_reset_flip_duration_ms_ = 10000U;
+  uint32_t la_hg_full_turn_flip_duration_ms_ = 2000U;
   uint32_t la_hg_prev_gate_elapsed_ms_ = 0U;
   bool la_hg_prev_gate_valid_ = false;
   float la_hg_theta_ = 0.0f;
@@ -740,12 +743,13 @@ class UiManager {
   bool warning_gyrophare_disable_direct_fx_ = false;
   bool warning_lgfx_only_ = false;
   bool warning_siren_enabled_ = false;
+  uint32_t warning_lgfx_started_ms_ = 0U;
   uint8_t warning_gyrophare_fps_ = 25U;
   uint16_t warning_gyrophare_speed_deg_per_sec_ = 180U;
   uint16_t warning_gyrophare_beam_width_deg_ = 70U;
   char warning_gyrophare_message_[64] = "SIGNAL ANORMAL";
-  static constexpr uint8_t kWinEtapeCreditsMaxLines = 48U;
-  static constexpr uint8_t kWinEtapeCreditsMaxLineChars = 96U;
+  static constexpr uint8_t kWinEtapeCreditsMaxLines = 102U;
+  static constexpr uint8_t kWinEtapeCreditsMaxLineChars = 80U;
   bool win_etape_credits_loaded_ = false;
   uint8_t win_etape_credits_count_ = 0U;
   char win_etape_credits_lines_[kWinEtapeCreditsMaxLines][kWinEtapeCreditsMaxLineChars] = {};

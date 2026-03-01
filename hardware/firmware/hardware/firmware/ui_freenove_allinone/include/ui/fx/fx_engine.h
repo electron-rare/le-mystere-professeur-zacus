@@ -85,12 +85,14 @@ class FxEngine {
   void reset();
   void setEnabled(bool enabled);
   bool enabled() const;
+  bool ready() const;
   void setQualityLevel(uint8_t quality_level);
   void setPreset(FxPreset preset);
   FxPreset preset() const;
   void setMode(FxMode mode);
   FxMode mode() const;
   void setScrollText(const char* text);
+  void setAlternatingScrollText(const char* text_a, const char* text_b, bool enabled);
   void setScrollFont(FxScrollFont font);
   FxScrollFont scrollFont() const;
   void setScrollerCentered(bool centered);
@@ -231,6 +233,13 @@ class FxEngine {
   bool scroll_text_custom_ = false;
   char scroll_text_[256] = {0};
   uint16_t scroll_text_len_ = 0U;
+  char scroll_text_alt_a_[256] = {0};
+  char scroll_text_alt_b_[256] = {0};
+  uint16_t scroll_text_alt_len_a_ = 0U;
+  uint16_t scroll_text_alt_len_b_ = 0U;
+  bool scroll_text_alternating_ = false;
+  bool scroll_text_alt_use_a_ = true;
+  bool scroll_dir_rtl_ = true;
   uint32_t scroll_phase_px_q16_ = 0U;
   uint8_t scroll_wave_phase_ = 0U;
   uint8_t scroll_highlight_phase_ = 0U;

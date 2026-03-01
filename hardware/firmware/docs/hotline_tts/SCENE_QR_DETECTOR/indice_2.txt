@@ -1,0 +1,11 @@
+Indice 2 :
+La scène QR_DETECTOR utilise une bibliothèque optimisée pour la reconnaissance.
+La caméra capture l’image, le système traite chaque pixel pour détecter le code.
+Reste attentif à la luminosité, elle influence la rapidité de la détection.
+Le réticule de visée t’aide à aligner correctement le QR code.
+La patience et la précision sont essentielles pour réussir.
+Observe les variations d’éclairage, ajuste la position si nécessaire.
+Le système gère les erreurs pour offrir une expérience robuste.
+Chaque essai permet d’améliorer la détection, ne te décourage pas.
+La réussite dépend de la qualité du QR et de l’environnement.
+Prépare-toi à valider la scène, chaque détail compte pour le succès.

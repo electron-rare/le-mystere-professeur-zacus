@@ -1,3 +1,202 @@
+## [2026-02-28] Reflash + verification run (Freenove SCENE_CREDITS LGFX-only timeline)
+
+- Objectif:
+  - reflasher la Freenove puis verifier rapidement en serie que la scene credits reste en rendu LGFX-only avec timeline active.
+- Actions:
+  - Upload FW: `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301`
+  - Monitor + commandes:
+    - `SCENE_GOTO SCENE_CREDITS`
+    - `UI_SCENE_STATUS`
+    - `UI_GFX_STATUS`
+    - `STATUS`
+- Evidence:
+  - `ACK SCENE_GOTO ok=1`
+  - `UI_SCENE_STATUS`: `scene_id=SCENE_CREDITS`, `text_backend=lgfx_overlay`, `lvgl_text_disabled=true`
+  - `STATUS`: `render_lock=lgfx_runtime_only`
+  - `UI_GFX_STATUS`: `fx_scene=1`, `fx_fps` stable (8->15) sans panic/reboot.
+
+## [2026-02-28] SCENE_CREDITS timeline adaptee (BOOT -> HOLO -> STARWARS) + verrou LovyanGFX only
+
+- Objectif:
+  - appliquer la timeline demandee en full LovyanGFX pour `SCENE_CREDITS`,
+  - desactiver completement le rendu LVGL runtime sur scenes cibles (`SCENE_CREDITS`, `SCENE_WIN_ETAPE1`),
+  - utiliser en priorite `credits.txt` du FS pour le crawl.
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_172058_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_172058_status.txt`
+- Correctifs appliques:
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+    - timeline `SCENE_CREDITS`:
+      - phase BOOT (0-15s) style terminal,
+      - phase HOLO (15-30s) glitch/chroma + scanline,
+      - phase STARWARS (>=30s) parser credits + perspective/fade,
+    - source credits: ajout priorite `/credits.txt` avant les chemins legacy,
+    - mode STARWARS en `SCENE_CREDITS`: scroll non boucle (attend la fin du defilement),
+    - verrou LGFX only par scene: `SCENE_CREDITS`/`SCENE_CREDIT`/`SCENE_WIN_ETAPE1` force `lgfx_hard_mode`.
+- Validation:
+  - Build PASS: `pio run -e freenove_esp32s3_full_with_ui`
+  - Upload PASS: `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301`
+  - Monitor PASS:
+    - `SCENE_GOTO SCENE_CREDITS` -> transition OK + `ACK SCENE_GOTO ok=1`
+    - `UI_SCENE_STATUS` -> `scene_id=SCENE_CREDITS`, `text_backend=lgfx_overlay`, `lvgl_text_disabled=true`.
+
+## [2026-02-28] Freenove SCENE_CREDITS StarWars crawl + SCENE_WIN_ETAPE1 audio loop
+
+- Objectif:
+  - `SCENE_CREDITS`: rendu credits en style "Star Wars" (perspective + fade) en LovyanGFX overlay, avec wrap auto conserve.
+  - `SCENE_WIN_ETAPE1`: relancer le son en boucle tant que la scene reste active.
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_170548_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_170548_status.txt`
+- Correctifs appliques:
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+    - mode `credits_scene` detecte (`SCENE_CREDITS` + alias `SCENE_CREDIT`),
+    - credits crawl LGFX avec perspective/fade type StarWars (horizon + profondeur),
+    - wrap automatique des lignes credits conserve.
+  - `hardware/firmware/ui_freenove_allinone/src/app/main.cpp`
+    - callback `onAudioFinished`: si scene active `SCENE_WIN_ETAPE1`, replay immediat du meme track au lieu de notifier `AUDIO_DONE`.
+- Validation:
+  - Build PASS: `pio run -e freenove_esp32s3_full_with_ui`
+  - Upload PASS: `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301`
+  - Reflash PASS (this run): same env/port, completed with hard reset.
+
+## [2026-02-28] Freenove SCENE_CREDITS - wrap auto lignes + rendu LovyanGFX
+
+- Objectif: sur `SCENE_CREDIT/SCENE_CREDITS`, garder le rendu full LovyanGFX et ajouter des retours a la ligne automatiques sur les textes credits trop longs.
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_170548_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_170548_status.txt`
+- Correctifs appliques:
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+    - activation du mode credits parser overlay aussi pour `SCENE_CREDITS` (et alias `SCENE_CREDIT`),
+    - ajout `append_credit_line_wrapped(...)` avec word-wrap automatique base sur `measureOverlayText(...)`,
+    - conservation du parser directives (`[SIZE]`, `[ALIGN]`, `[SPACE]`, `[PAUSE]`, `[END]`) et application du wrap sur les lignes texte normales + fallback.
+- Validation:
+  - Build PASS: `pio run -e freenove_esp32s3_full_with_ui`
+  - Upload PASS: `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301`
+
+## [2026-02-28] A252 off-hook auto playback (dial tone 2s then random file)
+
+- Objectif: au decroche (`OFF_HOOK`) sur A252, laisser 2s de tonalite d'appel puis lancer automatiquement un fichier aleatoire.
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_165817_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_165817_status.txt`
+- Correctifs appliques:
+  - `hardware/RTC_SLIC_PHONE/src/main.cpp`
+    - ajout runtime `OffHookAutoRandomPlaybackState` (armement + delai + route aleatoire),
+    - nouvel enchainement:
+      - transition `OFF_HOOK` -> armement auto-play `+2000 ms`,
+      - fin delai -> stop dial tone/tone puis lecture d'un fichier aleatoire resolu via `pickRandomInterludeRoute`,
+      - annulation auto-play si raccroche ou si numerotation commence.
+- Validation:
+  - Build PASS: `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev`
+  - Upload tentative 1 FAIL: `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001`
+    - erreur initiale: port absent.
+  - Upload tentative 2 PASS (port revenu): `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001`
+
+## [2026-02-28] Freenove boot route hard-forced to SCENE_WIN_ETAPE
+
+- Objectif: forcer le boot runtime par defaut vers `SCENE_WIN_ETAPE` en conservant les priorites `test_lab` et `media_manager`.
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_165247_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_165247_status.txt`
+- Artefacts trackes verifies:
+  - scan `git ls-files` sur `.pio/.platformio/logs/dist/build/node_modules/.venv` -> aucun fichier tracke detecte.
+- Correctif applique:
+  - `hardware/firmware/ui_freenove_allinone/src/app/main.cpp`
+    - `kDefaultBootSceneId` passe de `SCENE_U_SON_PROTO` a `SCENE_WIN_ETAPE`.
+    - ordre de routage conserve:
+      - `kForceTestLabSceneLock` prioritaire,
+      - puis `g_boot_media_manager_mode`,
+      - puis fallback `kDefaultBootSceneId`.
+- Build / flash / validation:
+  - `pio run -e freenove_esp32s3_full_with_ui` -> OK
+  - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` -> OK
+  - monitor `pio device monitor --port /dev/cu.usbmodem5AB90753301 --baud 115200` (PTY) -> evidence:
+    - `[BOOT] route default scene=SCENE_WIN_ETAPE ok=1`
+    - transition scenario boot: `from_scene=SCENE_WIN_ETAPE to_scene=SCENE_WIN_ETAPE`
+
+## [2026-02-28] A252 hotline follow-up - ringback 2..10s + serial validation
+
+- Objectif: finaliser le delta hotline demande:
+  - ringback aleatoire 2..10s,
+  - garder sync scene ESP-NOW toutes les 30s + trigger off-hook,
+  - conserver interlude 15..30 min + force test,
+  - verifier absence de rejet payload `payload too large`.
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_124635_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_124635_status.txt`
+- Etat code confirme:
+  - `hardware/RTC_SLIC_PHONE/src/main.cpp`
+    - `kHotlineRingbackMinMs=2000`, `kHotlineRingbackMaxMs=10000`.
+    - `kEspNowPeerDiscoveryIntervalMs=30000`, `kEspNowSceneSyncIntervalMs=30000`.
+    - trigger scene sync au decroche (`reason=off_hook`) + periodic.
+    - `HOTLINE_INTERLUDE_FORCE` actif, scheduler interlude 15..30 min actif.
+    - validation WIN_ETAPE auto `ACK_WIN1` conservee apres media one-shot.
+  - `hardware/firmware/ui_freenove_allinone/src/system/network/network_manager.cpp`
+    - `sendEspNowTarget(...)` respecte maintenant une cible MAC explicite (unicast) au lieu de forcer broadcast.
+- Build / upload:
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev` -> OK
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001` -> OK
+  - `pio run -e freenove_esp32s3_full_with_ui` -> OK
+  - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301` -> OK
+- Validation serie (A252):
+  - `HOTLINE_STATUS` -> scene sync runtime enabled + interlude fields exposes.
+  - `HOTLINE_TRIGGER 2` -> evidence:
+    - `[Hotline] ringback profile=UK_GB duration_ms=8013 ...` (dans fenetre 2..10s).
+    - pas de log `EspNowBridge send rejected: payload too large`.
+  - `HOTLINE_INTERLUDE_FORCE` -> ring + fichier random:
+    - `file=/interlude_tts/interlude_07_mystere_henri.wav`.
+- Observation cross-board a suivre:
+  - apres flash Freenove, le port serie A252 `/dev/cu.usbserial-0001` n'est plus apparu sur ce poste (retest scene_sync ACK A252 non rejouable immediatement).
+  - bloc hotline principal valide avant ce point (ringback 2..10s, interlude force, payload compact sans rejet).
+  - retest ulterieur Freenove (monitor direct) valide la correction unicast ESP-NOW:
+    - `SCENE_GOTO SCENE_WARNING` -> `[HOTLINE_SYNC] ... ok=1` puis `[WARN_SIREN] remote start`.
+    - `UI_SCENE_STATUS` reponse + ack entrant: `code=UI_SCENE_STATUS` depuis peer `A0:B7:65:E7:F6:44`.
+    - `STATUS` Freenove pendant warning: `espnow=1 peers=1`.
+
+## [2026-02-28] A252 hotline WIN_ETAPE: one-shot scene routes + suffix matching + auto-ACK plumbing
+
+- Objectif: completer le lot hotline en production reelle:
+  - garder les routes scene en one-shot (pas boucle forcee),
+  - resoudre les fichiers `hotline_tts` avec suffixes voix variables (`*_mystere_*.mp3`),
+  - armer ACK `ACK_WIN1` auto (compose 440) apres fin MP3 de `SCENE_WIN_ETAPE`,
+  - conserver busy tone post-MP3.
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_063900_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_063900_status.txt`
+- Correctifs appliques:
+  - `hardware/RTC_SLIC_PHONE/src/main.cpp`
+    - ajout `resolveHotlineSceneDirectoryVariantRoute(...)` pour matcher les fichiers scene `stem_suffix.mp3` dans `/hotline_tts/SCENE_*`,
+    - `triggerHotlineRouteForDigits(...)`: suppression de la boucle forcee sur les routes FILE venant des scenes (`routed_from_scene_hint=true`),
+    - ajout helper central `sendHotlineValidationAckEvent(...)`,
+    - ajout pipeline WIN_ETAPE auto-validation:
+      - armement `g_win_etape_validation_after_mp3_pending` au demarrage post-ringback d'un MP3 one-shot en `WIN_ETAPE`,
+      - emission `ACK_WIN1` source `auto_440` en fin playback (si off-hook),
+      - reset flag dans `clearHotlineRuntimeState()` et `tickPlaybackCompletionBusyTone()`.
+- Build / upload executes:
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev` -> OK
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001` -> OK
+  - `pio run -e freenove_esp32s3` -> OK
+  - `pio run -e freenove_esp32s3 -t upload --upload-port /dev/cu.usbmodem5AB90753301` -> OK
+  - `pio run -e freenove_esp32s3 -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301` -> OK
+- Validation serial / evidence:
+  - SLIC:
+    - `SLIC_CONFIG_GET` -> `hook_active_high=true`
+    - `SLIC_CONFIG_SET {"hook_active_high":true}` -> persisted / re-read OK
+    - `STATUS` (combine decroche) -> `hook=OFF_HOOK`
+  - Audit SD (`FS_LIST`):
+    - `/hotline_tts` present (scene dirs + voix suffixees),
+    - `/interlude_tts` present (45 fichiers),
+    - `/music/v8_pack` absent sur SD (fallback requis cote firmware).
+  - WIN_ETAPE runtime:
+    - evidence observee: `[RTC_BL_PHONE] WIN_ETAPE post-ringback mp3 armed for auto 440 validation (...)`
+    - evidence observee: lecture MP3 scene WIN_ETAPE depuis `/hotline_tts/...`
+    - limitation en cours: sur ce banc, la fin de lecture (et donc logs `busy tone` + `auto-compose 440`) n'a pas ete observee dans une fenetre 240s.
+  - Smoke scripts:
+    - `./tools/dev/run_smoke_tests.sh` (dual) -> FAIL (resolver mappe A252 comme ESP32 story, commandes story non supportees)
+    - `ZACUS_COMBINED_BOARD=1 ... run_smoke_tests.sh --combined-board` -> FAIL (scenario DEFAULT bloque sur LA, timeout completion)
+
 ## [2026-02-28] Freenove scenes + A252 hotline (ringback 5-25s, LEFOU sequence, U_SON playlist root)
 
 - Objectif: appliquer le lot prioritaire du plan global sans toucher `hardware/firmware/esp32/`:
@@ -4254,3 +4453,234 @@
 - Status:
   - STOP condition raised (`build/test regression not fixed quickly`).
   - See `docs/STOP_REQUIRED.md` for required decision.
+
+## [2026-02-28] A252 hotline routing updated for WAV-first assets (pcm_s16le 8k/16-bit)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_115512_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_115512_status.txt`
+- Scope:
+  - `hardware/RTC_SLIC_PHONE/src/main.cpp`
+- Actions:
+  - route resolution `hotline_tts/SCENE_*` now expands each requested filename to WAV-first candidates, then MP3 fallback,
+  - keeps compatibility with legacy MP3 names while preferring `.wav` lookups for all waiting/validation/hint prompts.
+  - hotspot fix: hotline ESP-NOW notify payload now auto-compacts (short keys + reduced route fields, minimal fallback) to stay under 240 bytes.
+- Validation:
+  - Build PASS: `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev`
+  - Flash PASS: `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001`
+  - Serial boot PASS (115200): audio init OK, interlude scheduler active, Web server started.
+  - Runtime probe PASS: `HOTLINE_TRIGGER 2` resolved a WAV prompt route (`/hotline_tts/SCENE_U_SON_PROTO/indice_2_mystere_eloise.wav`), confirming WAV-first lookup.
+  - Runtime probe PASS: no more `EspNowBridge send rejected: payload too large` on `ringback`/`stopped_hangup` notifications.
+
+## [2026-02-28] Freenove SCENE_WARNING stack canary retest (post-stack trim)
+
+- Scope:
+  - `hardware/firmware/ui_freenove_allinone/src/app/main.cpp`
+  - `hardware/firmware/ui_freenove_allinone/src/system/network/network_manager.cpp`
+- Actions:
+  - warning remote siren sync now gates on ESP-NOW runtime readiness (no hard dependency on peer cache count),
+  - ESP-NOW send path now retries once on transient internal/interface/channel-ish errors by re-enabling ESP-NOW + channel hint.
+- Validation:
+  - Build PASS: `pio run -e freenove_esp32s3_full_with_ui`
+  - Flash PASS: `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301`
+  - Serial runtime probe: `SCENE_GOTO SCENE_WARNING` now runs without panic/canary markers (`PANIC_MARKERS 0` over ~18s).
+  - Cross-board warning sync PASS:
+    - Freenove log: `[WARN_SIREN] remote start` (no `ESP-NOW send failed` spam in this run).
+    - A252 `HOTLINE_STATUS` at t+2/t+5/t+8 after trigger: `warning_siren_enabled=true`, `warning_siren_tone_owned=true`.
+- Residual note:
+  - none blocking in this pass (warning siren sync + scene sync both observed end-to-end).
+
+## [2026-02-28] A252 WAV hotline stability pass (direct PCM fallback) + WIN_ETAPE WAV auto-440 scope
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_140551_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_140551_status.txt`
+- Skills utilises:
+  - `rtc-audio-stack`
+  - `firmware-espnow-stack`
+- Correctifs appliques:
+  - `hardware/RTC_SLIC_PHONE/src/main.cpp`
+    - armement busy-tone + auto-440 WIN_ETAPE generalise aux medias hotline `.wav` et `.mp3` (plus uniquement MP3),
+    - helper media path: `isWavMediaPath()` + `isPlayableMediaPath()`.
+  - `hardware/RTC_SLIC_PHONE/src/audio/AudioEngine.h`
+    - ajout flag runtime `playback_wav_direct_mode_`.
+  - `hardware/RTC_SLIC_PHONE/src/audio/AudioEngine.cpp`
+    - adoucissement pression write WAV (`kPlaybackCopyRetryCount=24`, retries bloquees bornees),
+    - `BlockingOutput::availableForWrite()` force un budget ecriture (evite abort pre-check sur backpressure transitoire),
+    - policy format playback: canaux de sortie alignes sur source (mono WAV conserve),
+    - mode direct PCM16 pour WAV non-resample/non-upmix (bypass `StreamCopy/WAVDecoder` quand applicable),
+    - reset propre `playback_wav_direct_mode_` au stop.
+- Validation:
+  - Build PASS: `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev`.
+  - Flash PASS (plusieurs iterations): `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001`.
+  - Serie PASS (route):
+    - `WAITING_VALIDATION {"scene_id":"SCENE_WIN_ETAPE","validation_state":"waiting"}` -> resolution explicite stem WAV scene (`attente_validation_*.wav`).
+    - `PLAY sd:/hotline_tts/SCENE_WIN_ETAPE/attente_validation_*.wav` -> parse WAV OK + sortie routee.
+  - Limite de banc actuelle:
+    - verification complete en condition `OFF_HOOK` de la chaine finale (ringback -> media -> ACK auto-440) reste a confirmer sur run telephonique complet; banc observe majoritairement `ON_HOOK` pendant cette passe.
+
+## [2026-02-28] Upload lot complet demande utilisateur (Freenove + A252)
+
+- Freenove code upload PASS:
+  - `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301`
+- Freenove FS upload PASS:
+  - `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301`
+- A252 code upload PASS:
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001`
+- A252 FS upload execute:
+  - `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t uploadfs --upload-port /dev/cu.usbserial-0001`
+  - Note: build SPIFFS a affiche `File system is full` pendant generation image (contenu depasse la partition), puis image partielle ecrite avec succes.
+
+## [2026-02-28] A252 hotline trigger priority fix (pending WAITING override)
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_143037_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_143037_status.txt`
+- Skill utilise:
+  - `rtc-audio-stack`
+- Correctifs:
+  - `hardware/RTC_SLIC_PHONE/src/main.cpp`
+    - ajout `clearPendingEspNowCallRoute()` pour nettoyer la route answer en attente,
+    - appel de ce nettoyage dans `triggerHotlineRouteForDigits()` pour forcer la priorite du `HOTLINE_TRIGGER` sur `WAITING_VALIDATION`.
+  - maintien du matching `indice_1*` deja corrige dans le resolver stem scene (`SCENE_*`).
+- Validation:
+  - Build PASS: `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev`.
+  - Upload PASS: `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001`.
+  - Serie PASS:
+    - `WAITING_VALIDATION {"scene_id":"SCENE_LA_DETECTOR","validation_state":"waiting"}`
+    - `HOTLINE_TRIGGER 1`
+    - evidence: log `pending espnow route cleared reason=dial_trigger ...` puis lecture WAV finale `.../indice_1_*.wav` (plus de replay route attente via answer callback).
+
+## [2026-02-28] Freenove U_SON ambient random playlist continuous
+
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_143903_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_143903_status.txt`
+- Correctif:
+  - `hardware/firmware/ui_freenove_allinone/src/app/main.cpp`
+    - U_SON_PROTO: forçage playlist random `/music/v8_pack` avec cadence continue (`delay_min_ms=1000`, `delay_max_ms=2000`) pour couvrir toute la scene sans trou long.
+- Validation:
+  - Build PASS: `pio run -e freenove_esp32s3_full_with_ui`.
+  - Upload Freenove: FAIL (port occupe) sur `/dev/cu.usbmodem5AB90753301`.
+
+## [2026-02-28] A252 volume normal (suppression forcage max)
+
+- Correctifs:
+  - `hardware/RTC_SLIC_PHONE/src/main.cpp`
+    - ajout constante `kA252CodecNormalVolumePercent=70`,
+    - remplacement du forcage volume 100 -> 70 dans `ensureA252AudioDefaults`,
+    - remplacement du forcage `VOLUME_SET` 100 -> 70,
+    - maintien gain logiciel neutre (`[AudioEngine] playback boost set to 1.00x + software 1.00x`).
+  - `hardware/RTC_SLIC_PHONE/src/config/A252ConfigStore.h`
+    - volume par defaut passe de 100 -> 70.
+- Validation:
+  - Build PASS: `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev`.
+  - Upload PASS: `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001`.
+  - Serie PASS:
+    - `VOLUME_GET` -> `{"volume":70}`.
+
+## [2026-02-28] A252 rollback volume (retour son comme avant)
+
+- Demande utilisateur: restaurer le comportement sonore precedent.
+- Correctifs:
+  - `hardware/RTC_SLIC_PHONE/src/main.cpp`
+    - retour forçage volume A252 a `100` (`kA252CodecMaxVolumePercent`),
+    - `ensureA252AudioDefaults()` repasse en cible `100`,
+    - `VOLUME_SET` repasse en forçage `100`.
+  - `hardware/RTC_SLIC_PHONE/src/config/A252ConfigStore.h`
+    - valeur par defaut `volume = 100`.
+- Validation:
+  - Build PASS: `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev`.
+  - Upload PASS: `pio run -d hardware/RTC_SLIC_PHONE -e esp32dev -t upload --upload-port /dev/cu.usbserial-0001`.
+  - Serie PASS: `VOLUME_GET` -> `{"volume":100}`.
+
+## [2026-02-28 17:44] Freenove FX all-scenes + scroll text
+- Scope: SCENE_* forced to LGFX/FX runtime (LVGL text disabled in scene runtime path).
+- Alias parity: SCENE_CREDIT handled as credits timeline/preset path.
+- Scroll policy: fallback scroll text enabled for every scene (subtitle/title, fallback message).
+- Build gate: pio run -e freenove_esp32s3_full_with_ui => SUCCESS.
+- Flash: pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301 => SUCCESS.
+
+## [2026-02-28 17:51] Credits: StarWars immediate + no LVGL text scroll
+- Scene credits path now enters StarWars crawl immediately (no boot/holo pre-phases for SCENE_CREDITS/SCENE_CREDIT).
+- Credits elapsed base adjusted to start from scene time 0 to avoid delayed/wrapped crawl.
+- Serial evidence after flash:
+  - `ACK SCENE_GOTO ok=1` for `SCENE_CREDITS`
+  - `UI_SCENE_STATUS`: `scene_id=SCENE_CREDITS`, `text_backend=lgfx_overlay`, `lvgl_text_disabled=true`
+- Build PASS: `pio run -e freenove_esp32s3_full_with_ui`
+- Upload PASS: `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301`
+
+## [2026-02-28 18:00] Credits scroll direction audit + StarWars crawl correction
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_175454_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_175454_status.txt`
+- Audit code:
+  - sens vertical credits explicite en `bottom -> top` via `kCreditsScrollDirectionY=-1`.
+  - projection Y StarWars passee en quadratique (compression vers horizon) pour eviter un simple scroll lineaire.
+  - scroller horizontal FX desactive pour `SCENE_CREDITS`/`SCENE_CREDIT` (texte StarWars uniquement).
+- Fichiers modifies:
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager_effects.cpp`
+- Validation:
+  - Build PASS: `pio run -e freenove_esp32s3_full_with_ui`
+  - Upload PASS: `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301`
+  - Serial PASS:
+    - `ACK SCENE_GOTO ok=1` on `SCENE_CREDITS`
+    - `UI_SCENE_STATUS`: `scene_id=SCENE_CREDITS`, `text_backend=lgfx_overlay`, `lvgl_text_disabled=true`
+
+## [2026-02-28 18:38] Credits StarWars text visibility hardening (LGFX overlay)
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_183054_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_183054_status.txt`
+- Correctifs:
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+    - `sceneStatusSnapshot()` renvoie des compteurs overlay live (`overlay_draw_ok/fail/startwrite/skip`) pour debug reel.
+    - Credits StarWars: bascule des lignes en fonts built-in LGFX pour robustesse d'affichage.
+    - Ajout fallback: si aucune ligne du crawl n'est visible sur la frame, affichage d'une ligne credits de secours (centre bas) pour eviter ecran texte vide.
+- Validation:
+  - Build PASS: `pio run -e freenove_esp32s3_full_with_ui`
+  - Upload PASS: `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301`
+  - Serie PASS:
+    - `ACK SCENE_GOTO ok=1` sur `SCENE_CREDIT`
+    - `UI_SCENE_STATUS` montre `scene_id=SCENE_CREDITS`, `text_backend=lgfx_overlay`
+    - compteurs overlay progressent (`overlay_draw_ok: 9 -> 65`, `overlay_draw_fail: 0`)
+
+## [2026-02-28 19:42] Credits StarWars effet renforce (perspective + inclinaison visuelle)
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_193417_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_193417_status.txt`
+- Correctifs:
+  - `hardware/firmware/ui_freenove_allinone/src/ui/ui_manager.cpp`
+    - horizon remonte (`height/5`) pour accentuer la fuite perspective.
+    - couleur crawl forcee en jaune StarWars (`0xFFD34A`) en mode credits.
+    - projection verticale passe en cubique (compression plus marquee vers l'horizon).
+    - squeeze horizontal renforce + couloir top plus etroit.
+    - ajout d'un tilt vertical par glyph (bords legerement releves) pour un rendu plus "crawl cinema".
+- Validation:
+  - Build PASS: `pio run -e freenove_esp32s3_full_with_ui`
+  - Upload PASS: `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301`
+  - Serie PASS:
+    - `ACK SCENE_GOTO ok=1` sur `SCENE_CREDIT`
+    - `UI_SCENE_STATUS`: `scene_id=SCENE_CREDITS`
+    - overlay actif (`overlay_draw_ok: 1 -> 38`, `overlay_draw_fail: 0`)
+
+## [2026-02-28 20:14] Boot credits direct + audio SCENE_WIN force loop
+- Checkpoint securite:
+  - `/tmp/zacus_checkpoint/20260228_195154_wip.patch`
+  - `/tmp/zacus_checkpoint/20260228_195154_status.txt`
+- Correctifs:
+  - `hardware/firmware/ui_freenove_allinone/src/app/main.cpp`
+    - boot story par defaut route sur `SCENE_CREDITS`.
+    - helper credits ajoute (`isCreditsSceneId`, `playCreditsWinTrack`, `isCreditsWinTrackPath`).
+    - `ACTION_QUEUE_SONAR` en scene credits joue prioritairement `SCENE_WIN.mp3`.
+    - garde credits audio: si piste non credits (ex: boot_radio), stop + force `SCENE_WIN.mp3`.
+    - boucle credits conservee entre `SCENE_CREDITS` et `SCENE_CREDIT` avec relance piste credits.
+- Validation:
+  - Build PASS: `pio run -e freenove_esp32s3_full_with_ui`
+  - Upload firmware PASS (avant deconnexion USB): `pio run -e freenove_esp32s3_full_with_ui -t upload --upload-port /dev/cu.usbmodem5AB90753301`
+  - UploadFS PASS: `pio run -e freenove_esp32s3_full_with_ui -t uploadfs --upload-port /dev/cu.usbmodem5AB90753301`
+  - Serie PASS (evidence):
+    - `[BOOT] route default scene=SCENE_CREDITS ok=1`
+    - `[MAIN] credits boot audio scene=SCENE_CREDITS track=/music/SCENE_WIN.mp3 source=forced prev=/music/boot_radio.mp3`
+    - `AUDIO_STATUS ... track=/music/SCENE_WIN.mp3 ...`
+  - Dernier upload TENTATIVE FAIL: port `/dev/cu.usbmodem5AB90753301` disparu (USB non detecte au moment de la commande).

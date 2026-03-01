@@ -793,7 +793,7 @@ bool A252ConfigStore::validateAudio(const A252AudioConfig& cfg, String& error) {
     String clock_policy = cfg.clock_policy;
     clock_policy.trim();
     clock_policy.toUpperCase();
-    if (!(clock_policy == "HYBRID_TELCO")) {
+    if (!(clock_policy == "HYBRID_TELCO" || clock_policy == "FIXED_TELCO")) {
         error = "invalid_clock_policy";
         return false;
     }

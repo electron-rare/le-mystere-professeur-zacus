@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "WIN_ETAPE1 30s (Tunnel + Rotozoom)",
+    "title": "WIN_ETAPE1 60s (Celebrate -> Winner -> Credits)",
     "fps": 50,
     "bpm": 125,
     "seed": 252261,
@@ -12,26 +12,92 @@
   },
   "clips": [
     {
-      "id": "win_etape1_tunnel",
+      "id": "win_etape1_celebrate_bg",
       "t0": 0.0,
-      "t1": 15.0,
+      "t1": 20.0,
       "track": "BG",
-      "fx": "tunnel3d",
+      "fx": "plasma",
       "params": {
         "speed": 0.82,
-        "rotSpeed": 0.12
+        "contrast": 1.05
       }
     },
     {
-      "id": "win_etape1_rotozoom",
-      "t0": 15.0,
-      "t1": 30.0,
-      "track": "BG",
-      "fx": "rotozoom",
+      "id": "win_etape1_celebrate_mid",
+      "t0": 0.0,
+      "t1": 20.0,
+      "track": "MID",
+      "fx": "shadebobs",
       "params": {
-        "rotSpeed": 0.17,
-        "zoomBase": 0.90,
-        "zoomAmp": 0.21
+        "bobs": 6,
+        "radius": 11,
+        "decay": 0.18
+      }
+    },
+    {
+      "id": "win_etape1_winner_bg",
+      "t0": 20.0,
+      "t1": 40.0,
+      "track": "BG",
+      "fx": "tunnel3d",
+      "params": {
+        "speed": 0.66,
+        "rotSpeed": 0.1
+      }
+    },
+    {
+      "id": "win_etape1_winner_mid",
+      "t0": 20.0,
+      "t1": 40.0,
+      "track": "MID",
+      "fx": "wirecube",
+      "params": {
+        "rotX": 0.28,
+        "rotY": 0.34,
+        "rotZ": 0.22,
+        "intensity": 78
+      }
+    },
+    {
+      "id": "win_etape1_credits_bg",
+      "t0": 40.0,
+      "t1": 60.0,
+      "track": "BG",
+      "fx": "starfield",
+      "params": {
+        "layers": 3,
+        "stars": 128,
+        "speedNear": 0.44,
+        "driftAmp": 0.12
+      }
+    },
+    {
+      "id": "win_etape1_credits_mid",
+      "t0": 40.0,
+      "t1": 60.0,
+      "track": "MID",
+      "fx": "rasterbars",
+      "params": {
+        "bars": 5,
+        "thickness": 10,
+        "amp": 0.25,
+        "speed": 0.18
+      }
+    },
+    {
+      "id": "credits_crawl",
+      "t0": 40.0,
+      "t1": 60.0,
+      "track": "UI",
+      "fx": "scrolltext",
+      "params": {
+        "textId": "credits",
+        "speed": 0.35,
+        "waveAmp": 3,
+        "wavePeriod": 48,
+        "y": 102,
+        "shadow": true,
+        "highlight": true
       }
     }
   ],

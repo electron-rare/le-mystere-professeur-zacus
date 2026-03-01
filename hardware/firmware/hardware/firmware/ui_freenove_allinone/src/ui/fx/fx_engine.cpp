@@ -128,8 +128,19 @@ uint16_t* allocateAlignedDmaBuffer(size_t bytes, const char* tag) {
   if (bytes == 0U) {
     return nullptr;
   }
-  return static_cast<uint16_t*>(
+  uint16_t* ptr = static_cast<uint16_t*>(
       runtime::memory::CapsAllocator::allocInternalDmaAligned(kLineBufAlignment, bytes, tag));
+  if (ptr != nullptr || kFxUseDmaBlit) {
+    return ptr;
+  }
+  // CPU blit path does not require DMA-capable storage; relax allocation caps to avoid FX starvation.
+  ptr = static_cast<uint16_t*>(runtime::memory::CapsAllocator::allocDefault(bytes, tag));
+  if (ptr != nullptr) {
+    Serial.printf("[FX] linebuf fallback source=DEFAULT bytes=%u tag=%s\n",
+                  static_cast<unsigned int>(bytes),
+                  (tag != nullptr) ? tag : "n/a");
+  }
+  return ptr;
 }
 
 bool readFsTextFile(const char* path, std::string* out_text) {
@@ -228,6 +239,13 @@ bool FxEngine::begin(const FxEngineConfig& config) {
   scroll_wave_phase_ = 0U;
   scroll_highlight_phase_ = 0U;
   scroll_text_custom_ = false;
+  scroll_text_alternating_ = false;
+  scroll_text_alt_use_a_ = true;
+  scroll_dir_rtl_ = true;
+  scroll_text_alt_a_[0] = '\0';
+  scroll_text_alt_b_[0] = '\0';
+  scroll_text_alt_len_a_ = 0U;
+  scroll_text_alt_len_b_ = 0U;
   bpm_ = kFxBpmDefault;
   fx_luts_init();
   fx_sync_init(&sync_, bpm_);
@@ -338,6 +356,8 @@ void FxEngine::reset() {
   scroll_phase_px_q16_ = 0U;
   scroll_wave_phase_ = 0U;
   scroll_highlight_phase_ = 0U;
+  scroll_text_alt_use_a_ = true;
+  scroll_dir_rtl_ = true;
   std::memset(fireworks_, 0, sizeof(fireworks_));
   firework_live_count_ = 0U;
   boing_phase_ = 0U;
@@ -434,11 +454,15 @@ bool FxEngine::allocateLineBuffers() {
 }
 
 void FxEngine::setEnabled(bool enabled) {
-  enabled_ = enabled && config_.lgfx_backend;
+  enabled_ = enabled && config_.lgfx_backend && ready_;
 }
 
 bool FxEngine::enabled() const {
   return enabled_;
+}
+
+bool FxEngine::ready() const {
+  return ready_;
 }
 
 void FxEngine::setQualityLevel(uint8_t quality_level) {
@@ -480,6 +504,10 @@ FxMode FxEngine::mode() const {
 }
 
 void FxEngine::setScrollText(const char* text) {
+  scroll_text_alternating_ = false;
+  scroll_text_alt_use_a_ = true;
+  scroll_dir_rtl_ = true;
+  scroll_phase_px_q16_ = 0U;
   if (text == nullptr || text[0] == '\0') {
     scroll_text_custom_ = false;
     ensureDefaultScrollText(preset_);
@@ -489,6 +517,27 @@ void FxEngine::setScrollText(const char* text) {
   scroll_text_[sizeof(scroll_text_) - 1U] = '\0';
   scroll_text_len_ = static_cast<uint16_t>(std::strlen(scroll_text_));
   scroll_text_custom_ = true;
+}
+
+void FxEngine::setAlternatingScrollText(const char* text_a, const char* text_b, bool enabled) {
+  if (!enabled || text_a == nullptr || text_a[0] == '\0' || text_b == nullptr || text_b[0] == '\0') {
+    scroll_text_alternating_ = false;
+    scroll_text_alt_use_a_ = true;
+    scroll_dir_rtl_ = true;
+    scroll_phase_px_q16_ = 0U;
+    return;
+  }
+
+  std::strncpy(scroll_text_alt_a_, text_a, sizeof(scroll_text_alt_a_) - 1U);
+  scroll_text_alt_a_[sizeof(scroll_text_alt_a_) - 1U] = '\0';
+  std::strncpy(scroll_text_alt_b_, text_b, sizeof(scroll_text_alt_b_) - 1U);
+  scroll_text_alt_b_[sizeof(scroll_text_alt_b_) - 1U] = '\0';
+  scroll_text_alt_len_a_ = static_cast<uint16_t>(std::strlen(scroll_text_alt_a_));
+  scroll_text_alt_len_b_ = static_cast<uint16_t>(std::strlen(scroll_text_alt_b_));
+  scroll_text_alternating_ = (scroll_text_alt_len_a_ > 0U && scroll_text_alt_len_b_ > 0U);
+  scroll_text_alt_use_a_ = true;
+  scroll_dir_rtl_ = true;
+  scroll_phase_px_q16_ = 0U;
 }
 
 void FxEngine::setScrollFont(FxScrollFont font) {
@@ -1879,15 +1928,25 @@ void FxEngine::drawChar6x8(int16_t x, int16_t y_top, char c, uint16_t color565, 
 }
 
 void FxEngine::renderScroller(uint32_t now_ms) {
-  if (scroll_text_len_ == 0U || scroll_text_[0] == '\0') {
+  (void)now_ms;
+  const char* active_text = scroll_text_;
+  uint16_t active_text_len = scroll_text_len_;
+  if (scroll_text_alternating_) {
+    active_text = scroll_text_alt_use_a_ ? scroll_text_alt_a_ : scroll_text_alt_b_;
+    active_text_len = scroll_text_alt_use_a_ ? scroll_text_alt_len_a_ : scroll_text_alt_len_b_;
+  }
+  if (active_text_len == 0U || active_text[0] == '\0') {
     return;
   }
+
   const int16_t width = static_cast<int16_t>(config_.sprite_width);
   const int16_t height = static_cast<int16_t>(config_.sprite_height);
-  const int16_t base_y = scroller_centered_
-                             ? static_cast<int16_t>(height / 2)
-                             : static_cast<int16_t>(
-                                   clampValue<int>(height - static_cast<int>(kScrollerBaseYOffset), 12, height - 18));
+  const int16_t base_y = scroll_text_alternating_
+                             ? static_cast<int16_t>(height - 16)
+                             : (scroller_centered_
+                                    ? static_cast<int16_t>(height / 2)
+                                    : static_cast<int16_t>(
+                                          clampValue<int>(height - static_cast<int>(kScrollerBaseYOffset), 12, height - 18)));
   const int16_t top = static_cast<int16_t>(base_y - kScrollerAmpPx - kSafeBandMarginTop - kSafeFeatherPx);
   const int16_t bottom = static_cast<int16_t>(base_y + kScrollerAmpPx + kScrollerGlyphHeight +
                                               kSafeBandMarginBottom + kSafeFeatherPx);
@@ -1904,12 +1963,31 @@ void FxEngine::renderScroller(uint32_t now_ms) {
     }
   }
 
-  const int total_px = static_cast<int>(scroll_text_len_) * static_cast<int>(kScrollerCharWidth);
+  int total_px = static_cast<int>(active_text_len) * static_cast<int>(kScrollerCharWidth);
   if (total_px <= 0) {
     return;
   }
   const uint32_t scroll_px = scroll_phase_px_q16_ >> 16U;
-  int x0 = width - static_cast<int16_t>(scroll_px % static_cast<uint32_t>(total_px));
+  int x0 = 0;
+  if (scroll_text_alternating_) {
+    const uint32_t travel_px = static_cast<uint32_t>(width + total_px + 6);
+    uint32_t phase_px = (travel_px > 0U) ? (scroll_px % travel_px) : 0U;
+    if (scroll_px >= travel_px) {
+      scroll_phase_px_q16_ = static_cast<uint32_t>(phase_px << 16U);
+      scroll_text_alt_use_a_ = !scroll_text_alt_use_a_;
+      scroll_dir_rtl_ = !scroll_dir_rtl_;
+      active_text = scroll_text_alt_use_a_ ? scroll_text_alt_a_ : scroll_text_alt_b_;
+      active_text_len = scroll_text_alt_use_a_ ? scroll_text_alt_len_a_ : scroll_text_alt_len_b_;
+      total_px = static_cast<int>(active_text_len) * static_cast<int>(kScrollerCharWidth);
+      if (total_px <= 0) {
+        return;
+      }
+      phase_px = scroll_phase_px_q16_ >> 16U;
+    }
+    x0 = scroll_dir_rtl_ ? (width - static_cast<int>(phase_px)) : (-total_px + static_cast<int>(phase_px));
+  } else {
+    x0 = width - static_cast<int16_t>(scroll_px % static_cast<uint32_t>(total_px));
+  }
   const uint16_t base_col = fx_rgb565(255U, 210U, 90U);
   const uint16_t shadow_col = fx_rgb565(0U, 0U, 0U);
   const uint8_t ph = scroll_highlight_phase_;
@@ -1925,16 +2003,16 @@ void FxEngine::renderScroller(uint32_t now_ms) {
       fx_rgb565(255U, 255U, 0U),   // jaune
   };
 
-  const int repeat = (width / total_px) + 3;
+  const int repeat = scroll_text_alternating_ ? 1 : ((width / total_px) + 3);
   for (int r = 0; r < repeat; ++r) {
-    for (uint16_t i = 0U; i < scroll_text_len_; ++i) {
+    for (uint16_t i = 0U; i < active_text_len; ++i) {
       const int x_char = x0 + static_cast<int>(i * kScrollerCharWidth);
       const int16_t y_off = static_cast<int16_t>(
           (fx_sin8(static_cast<uint8_t>(scroll_wave_phase_ + static_cast<uint8_t>(i * 9U))) * kScrollerAmpPx) / 127);
       const uint16_t col = scroller_centered_
                                ? color_cycle[i % 6U]
                                : (((i & 7U) == 0U) ? accent : base_col);
-      drawChar6x8(static_cast<int16_t>(x_char), static_cast<int16_t>(base_y + y_off), scroll_text_[i], col,
+      drawChar6x8(static_cast<int16_t>(x_char), static_cast<int16_t>(base_y + y_off), active_text[i], col,
                   shadow_col);
     }
     x0 += total_px;

@@ -1,4 +1,4 @@
-# Script — DEFAULT
+# Script — None
 
 ## Introduction
 

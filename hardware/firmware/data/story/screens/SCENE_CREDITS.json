@@ -1,0 +1,38 @@
+{
+  "id": "SCENE_CREDITS",
+  "title": "CREDITS",
+  "subtitle": "Merci Brigade Z",
+  "symbol": "BRAVO",
+  "effect": "winner",
+  "effect_speed_ms": 260,
+  "theme": {
+    "bg": "#0A1027",
+    "accent": "#66D9FF",
+    "text": "#FFFFFF"
+  },
+  "text": {
+    "show_title": true,
+    "show_subtitle": true,
+    "show_symbol": true,
+    "title_case": "upper",
+    "subtitle_case": "raw",
+    "title_align": "center",
+    "subtitle_align": "center",
+    "symbol_align": "top",
+    "title_font_face": "bungee_24",
+    "subtitle_font_face": "ibm_bold_20",
+    "size": 92
+  },
+  "scroll": {
+    "mode": "left",
+    "text": " -- CREDITS : Bravo Brigade Z ---",
+    "speed_ms": 28,
+    "pause_ms": 300,
+    "loop": true
+  },
+  "render": {
+    "text_backend": "lgfx_overlay",
+    "disable_lvgl_text": true,
+    "wave": false
+  }
+}

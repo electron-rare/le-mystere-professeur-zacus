@@ -1,6 +1,6 @@
 id: DEFAULT
 version: 2
-initial_step: SCENE_U_SON_PROTO
+initial_step: RTC_ESP_ETAPE1
 debug_transition_bypass_enabled: false
 
 app_bindings:
@@ -20,7 +20,7 @@ app_bindings:
 steps:
   - step_id: SCENE_U_SON_PROTO
     screen_scene_id: SCENE_U_SON_PROTO
-    audio_pack_id: PACK_BOOT_RADIO
+    audio_pack_id: ""
     actions:
       - ACTION_TRACE_STEP
       - ACTION_HW_LED_ALERT
@@ -76,17 +76,11 @@ steps:
     mp3_gate_open: false
     transitions:
       - trigger: on_event
-        event_type: espnow
-        event_name: ACK_WIN1
+        event_type: button
+        event_name: ANY
         target_step_id: WIN_ETAPE1
         after_ms: 0
-        priority: 130
-      - trigger: on_event
-        event_type: espnow
-        event_name: ACK_WIN2
-        target_step_id: RTC_ESP_ETAPE2
-        after_ms: 0
-        priority: 135
+        priority: 120
 
   - step_id: WIN_ETAPE1
     screen_scene_id: SCENE_WIN_ETAPE1
@@ -103,15 +97,36 @@ steps:
     mp3_gate_open: false
     transitions:
       - trigger: on_event
-        event_type: espnow
-        event_name: ACK_WARNING
+        event_type: timer
+        event_name: WIN_ETAPE1_TO_CREDIT
+        target_step_id: SCENE_CREDIT
+        after_ms: 60000
+        priority: 100
+
+  - step_id: SCENE_CREDIT
+    screen_scene_id: SCENE_CREDITS
+    audio_pack_id: ""
+    actions:
+      - ACTION_TRACE_STEP
+      - ACTION_HW_LED_ALERT
+    apps:
+      - APP_AUDIO
+      - APP_SCREEN
+      - APP_GATE
+      - APP_WIFI
+      - APP_ESPNOW
+    mp3_gate_open: false
+    transitions:
+      - trigger: on_event
+        event_type: button
+        event_name: ANY
         target_step_id: STEP_WARNING
         after_ms: 0
-        priority: 130
+        priority: 120
 
   - step_id: STEP_WARNING
     screen_scene_id: SCENE_WARNING
-    audio_pack_id: PACK_BOOT_RADIO
+    audio_pack_id: ""
     actions:
       - ACTION_TRACE_STEP
       - ACTION_HW_LED_ALERT
@@ -129,19 +144,6 @@ steps:
         target_step_id: STEP_WARNING
         after_ms: 0
         priority: 80
-      - trigger: on_event
-        event_type: button
-        event_name: ANY
-        target_step_id: SCENE_LEFOU_DETECTOR
-        after_ms: 0
-        priority: 120
-      - trigger: on_event
-        event_type: serial
-        event_name: FORCE_ETAPE2
-        target_step_id: SCENE_LEFOU_DETECTOR
-        after_ms: 0
-        priority: 140
-        debug_only: true
 
   - step_id: SCENE_LEFOU_DETECTOR
     screen_scene_id: SCENE_LEFOU_DETECTOR

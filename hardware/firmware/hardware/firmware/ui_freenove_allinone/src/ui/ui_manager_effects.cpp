@@ -316,6 +316,7 @@ void UiManager::renderMicrophoneWaveform() {
 
   if (la_detection_scene_ && scene_use_lgfx_text_overlay_) {
     hide_waveform();
+    setBaseSceneFxVisible(false);
     updateLaOverlay(false, freq_hz, cents, confidence, level_pct, stability_pct, active_snapshot);
     return;
   }
@@ -717,7 +718,9 @@ bool UiManager::isWinEtapeSceneId(const char* scene_id) const {
   }
   return std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0 ||
          std::strcmp(scene_id, "SCENE_WIN_ETAPE1") == 0 ||
-         std::strcmp(scene_id, "SCENE_WIN_ETAPE2") == 0;
+         std::strcmp(scene_id, "SCENE_WIN_ETAPE2") == 0 ||
+         std::strcmp(scene_id, "SCENE_CREDITS") == 0 ||
+         std::strcmp(scene_id, "SCENE_CREDIT") == 0;
 }
 
 bool UiManager::isDirectFxSceneId(const char* scene_id) const {
@@ -725,6 +728,97 @@ bool UiManager::isDirectFxSceneId(const char* scene_id) const {
     return false;
   }
   return std::strncmp(scene_id, "SCENE_", 6U) == 0;
+}
+
+void UiManager::armDirectFxScene(const char* scene_id,
+                                 bool test_lab_lgfx_scroller,
+                                 const char* title_text,
+                                 const char* subtitle_text) {
+  if (scene_id == nullptr || !fx_engine_.config().lgfx_backend) {
+    return;
+  }
+  if (!isDirectFxSceneId(scene_id)) {
+    return;
+  }
+
+  if (!fx_engine_.ready()) {
+    ui::fx::FxEngineConfig retry_cfg = fx_engine_.config();
+    bool retry_ok = fx_engine_.begin(retry_cfg);
+    if (!retry_ok) {
+      // Last-resort geometry to keep FX alive when memory pressure is high.
+      retry_cfg.sprite_width = 128U;
+      retry_cfg.sprite_height = 96U;
+      if (retry_cfg.target_fps > 15U) {
+        retry_cfg.target_fps = 15U;
+      }
+      retry_ok = fx_engine_.begin(retry_cfg);
+    }
+    if (!retry_ok) {
+      fx_engine_.setEnabled(false);
+      direct_fx_scene_active_ = false;
+      fx_rearm_retry_after_ms_ = millis() + 2000U;
+      UI_LOGI("FX rearm skipped scene=%s reason=engine_not_ready", scene_id);
+      return;
+    }
+    fx_rearm_retry_after_ms_ = 0U;
+    UI_LOGI("FX engine recovered scene=%s sprite=%ux%u fps=%u",
+            scene_id,
+            static_cast<unsigned int>(retry_cfg.sprite_width),
+            static_cast<unsigned int>(retry_cfg.sprite_height),
+            static_cast<unsigned int>(retry_cfg.target_fps));
+  }
+
+  if (test_lab_lgfx_scroller) {
+    direct_fx_scene_preset_ = ui::fx::FxPreset::kDemo;
+  } else if (std::strcmp(scene_id, "SCENE_U_SON_PROTO") == 0) {
+    direct_fx_scene_preset_ = ui::fx::FxPreset::kUsonProto;
+  } else if (std::strcmp(scene_id, "SCENE_WIN_ETAPE1") == 0) {
+    direct_fx_scene_preset_ = ui::fx::FxPreset::kWinEtape1;
+  } else if (std::strcmp(scene_id, "SCENE_CREDITS") == 0 ||
+             std::strcmp(scene_id, "SCENE_CREDIT") == 0) {
+    // Credits StarWars crawl is drawn by overlay text, keep the FX scroller empty.
+    direct_fx_scene_preset_ = ui::fx::FxPreset::kUsonProto;
+  } else if (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0 || std::strcmp(scene_id, "SCENE_FIREWORKS") == 0) {
+    direct_fx_scene_preset_ = ui::fx::FxPreset::kFireworks;
+  } else if (std::strcmp(scene_id, "SCENE_WIN") == 0 || std::strcmp(scene_id, "SCENE_REWARD") == 0 ||
+             std::strcmp(scene_id, "SCENE_WINNER") == 0 || std::strcmp(scene_id, "SCENE_WIN_ETAPE2") == 0 ||
+             std::strcmp(scene_id, "SCENE_FINAL_WIN") == 0) {
+    direct_fx_scene_preset_ = ui::fx::FxPreset::kWinner;
+  } else {
+    direct_fx_scene_preset_ = ui::fx::FxPreset::kDemo;
+  }
+
+  fx_engine_.setEnabled(true);
+  fx_rearm_retry_after_ms_ = 0U;
+  fx_engine_.setPreset(direct_fx_scene_preset_);
+  fx_engine_.setMode(ui::fx::FxMode::kClassic);
+  fx_engine_.setBpm(125U);
+  fx_engine_.setScrollFont(ui::fx::FxScrollFont::kItalic);
+  static constexpr const char* kWinEtapeScrollA = " -- en attente de validation distante ---";
+  static constexpr const char* kWinEtapeScrollB = " -- validation non recue, merci de patienter ---";
+  if (test_lab_lgfx_scroller) {
+    fx_engine_.setAlternatingScrollText(nullptr, nullptr, false);
+    fx_engine_.setScrollerCentered(true);
+    fx_engine_.setScrollText("RVBCMJ -- DEMOMAKING RULEZ ---");
+  } else if (std::strcmp(scene_id, "SCENE_WIN_ETAPE") == 0) {
+    fx_engine_.setScrollerCentered(false);
+    fx_engine_.setAlternatingScrollText(kWinEtapeScrollA, kWinEtapeScrollB, true);
+  } else if (std::strcmp(scene_id, "SCENE_CREDITS") == 0 || std::strcmp(scene_id, "SCENE_CREDIT") == 0) {
+    fx_engine_.setAlternatingScrollText(nullptr, nullptr, false);
+    fx_engine_.setScrollerCentered(false);
+    fx_engine_.setScrollText(nullptr);
+  } else {
+    fx_engine_.setAlternatingScrollText(nullptr, nullptr, false);
+    fx_engine_.setScrollerCentered(false);
+    const char* source_text =
+        (subtitle_text != nullptr && subtitle_text[0] != '\0') ? subtitle_text : title_text;
+    const String fx_scroll_text = asciiFallbackForUiText(source_text != nullptr ? source_text : "");
+    if (fx_scroll_text.length() > 0U) {
+      fx_engine_.setScrollText(fx_scroll_text.c_str());
+    } else {
+      fx_engine_.setScrollText(" -- mode demo fx ---");
+    }
+  }
 }
 
 void UiManager::cleanupSceneTransitionAssets(const char* from_scene_id, const char* to_scene_id) {
@@ -748,7 +842,14 @@ void UiManager::cleanupSceneTransitionAssets(const char* from_scene_id, const ch
   la_detection_stable_target_ms_ = 0U;
   la_detection_gate_elapsed_ms_ = 0U;
   la_detection_gate_timeout_ms_ = 0U;
+  warning_gyrophare_.destroy();
+  warning_gyrophare_enabled_ = false;
+  warning_gyrophare_disable_direct_fx_ = false;
+  warning_lgfx_only_ = false;
+  warning_siren_enabled_ = false;
+  warning_lgfx_started_ms_ = 0U;
   scene_use_lgfx_text_overlay_ = false;
+  scene_lgfx_hard_mode_ = false;
   setBaseSceneFxVisible(false);
   stopSceneAnimations();
 }

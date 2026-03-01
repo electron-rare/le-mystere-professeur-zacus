@@ -1,0 +1,11 @@
+Indice 1 :
+Pour réussir la détection, aligne le QR code dans le réticule de visée.
+L’affichage LovyanGFX optimise la lecture, chaque détail compte.
+La scène utilise une bibliothèque QR optimisée pour microcontrôleur.
+Reste attentif à la position et à la luminosité pour une détection rapide.
+Le système analyse l’image capturée, chaque pixel peut être porteur d’information.
+La patience et la précision sont tes alliées pour réussir.
+Observe le réticule, ajuste l’angle si nécessaire.
+La détection fiable dépend de la qualité du QR et de l’environnement.
+Prépare-toi à valider la scène, chaque essai rapproche du succès.
+La réussite est à portée de main, reste concentré sur le centre du viseur.

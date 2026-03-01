@@ -23,6 +23,13 @@ constexpr uint32_t kTelephonyPowerProbeWindowMs = 180U;
 constexpr uint8_t kDialSourceNone = 0U;
 constexpr uint8_t kDialSourceDtmf = 1U;
 constexpr uint8_t kDialSourcePulse = 2U;
+constexpr ToneProfile kDialToneProfiles[] = {
+    ToneProfile::FR_FR,
+    ToneProfile::ETSI_EU,
+    ToneProfile::UK_GB,
+    ToneProfile::NA_US,
+};
+constexpr size_t kDialToneProfileCount = sizeof(kDialToneProfiles) / sizeof(kDialToneProfiles[0]);
 }
 
 const char* telephonyStateToString(TelephonyState state) {
@@ -95,7 +102,8 @@ TelephonyService::TelephonyService()
       last_digit_ms_(0),
       dial_exact_pending_since_ms_(0),
       last_dial_error_(""),
-      message_path_("/welcome.wav") {}
+      message_path_("/welcome.wav"),
+      off_hook_dial_profile_(ToneProfile::FR_FR) {}
 
 bool TelephonyService::begin(BoardProfile profile, SlicController& slic, AudioEngine& audio) {
     profile_ = profile;
@@ -135,6 +143,7 @@ bool TelephonyService::begin(BoardProfile profile, SlicController& slic, AudioEn
     last_digit_ms_ = 0;
     dial_exact_pending_since_ms_ = 0;
     last_dial_error_ = "";
+    off_hook_dial_profile_ = ToneProfile::FR_FR;
 
     dtmf_.setDigitCallback([this](char digit) {
         onDialDigit(digit, false);
@@ -142,7 +151,9 @@ bool TelephonyService::begin(BoardProfile profile, SlicController& slic, AudioEn
 
     slic_->setRing(false);
     setTelephonyPower(true);
-    setTelephonyPower(false);
+    if (!forcePowerOnPolicy()) {
+        setTelephonyPower(false);
+    }
     return true;
 }
 
@@ -175,6 +186,9 @@ void TelephonyService::setIncomingRing(bool active) {
 }
 
 void TelephonyService::forceTelephonyPower(bool enabled) {
+    if (forcePowerOnPolicy()) {
+        enabled = true;
+    }
     setTelephonyPower(enabled);
     power_probe_active_ = false;
     if (enabled) {
@@ -185,9 +199,16 @@ void TelephonyService::forceTelephonyPower(bool enabled) {
     }
 }
 
+bool TelephonyService::forcePowerOnPolicy() const {
+    return profile_ == BoardProfile::ESP32_A252;
+}
+
 void TelephonyService::setTelephonyPower(bool enabled) {
     if (slic_ == nullptr) {
         return;
+    }
+    if (forcePowerOnPolicy() && !enabled) {
+        enabled = true;
     }
     if (telephony_powered_ == enabled) {
         return;
@@ -211,6 +232,12 @@ void TelephonyService::setTelephonyPower(bool enabled) {
 
 void TelephonyService::applyPowerPolicyPreTick(uint32_t now) {
     if (slic_ == nullptr) {
+        return;
+    }
+    if (forcePowerOnPolicy()) {
+        setTelephonyPower(true);
+        power_probe_active_ = false;
+        idle_since_ms_ = 0U;
         return;
     }
 
@@ -251,6 +278,12 @@ void TelephonyService::applyPowerPolicyPreTick(uint32_t now) {
 
 void TelephonyService::applyPowerPolicyPostTick(bool hook_off, uint32_t now) {
     if (slic_ == nullptr) {
+        return;
+    }
+    if (forcePowerOnPolicy()) {
+        setTelephonyPower(true);
+        power_probe_active_ = false;
+        idle_since_ms_ = 0U;
         return;
     }
 
@@ -491,6 +524,22 @@ void TelephonyService::clearDialSession() {
     dial_buffer_ = "";
     last_digit_ms_ = 0;
     dial_exact_pending_since_ms_ = 0U;
+    off_hook_dial_profile_ = ToneProfile::FR_FR;
+}
+
+void TelephonyService::selectRandomDialProfile() {
+    const uint32_t entropy = millis() ^ micros() ^ last_hook_edge_ms_;
+    const size_t index = static_cast<size_t>(entropy % static_cast<uint32_t>(kDialToneProfileCount));
+    off_hook_dial_profile_ = kDialToneProfiles[index];
+    Serial.printf("[Telephony] off_hook dial profile=%s\n", toneProfileToString(off_hook_dial_profile_));
+}
+
+bool TelephonyService::startSelectedDialTone() {
+    ToneProfile profile = off_hook_dial_profile_;
+    if (profile == ToneProfile::NONE) {
+        profile = ToneProfile::FR_FR;
+    }
+    return audio_ != nullptr && audio_->playTone(profile, ToneEvent::DIAL);
 }
 
 void TelephonyService::suppressDialToneForMs(uint32_t duration_ms) {
@@ -591,14 +640,17 @@ void TelephonyService::tick() {
             }
 
             if (!hook_off) {
+                // Mute immediately on first on-hook edge so audio does not continue
+                // while the hangup debounce window is still running.
+                if (audio_ != nullptr && audio_->isToneRenderingActive()) {
+                    audio_->stopTone();
+                }
+                if (audio_ != nullptr && audio_->isPlaying()) {
+                    audio_->stopPlayback();
+                }
+
                 const bool hangup_confirmed = (now - last_hook_edge_ms_) >= kHookHangupMs;
                 if (hangup_confirmed) {
-                    if (audio_ != nullptr && audio_->isToneRenderingActive()) {
-                        audio_->stopTone();
-                    }
-                    if (audio_ != nullptr && audio_->isPlaying()) {
-                        audio_->stopPlayback();
-                    }
                     if (audio_ != nullptr && capture_active_) {
                         audio_->releaseCapture(AudioEngine::CAPTURE_CLIENT_TELEPHONY);
                         capture_active_ = false;
@@ -661,8 +713,9 @@ void TelephonyService::tick() {
                 pulse_collecting_ || pulse_count_ > 0U ||
                 (last_pulse_edge_ms_ != 0U && (now - last_pulse_edge_ms_) < kPulseInterDigitGapMs);
             if (!tone_suppressed && !dialing_started_ && dial_buffer_.isEmpty() && !audio_->isDialToneActive() &&
+                !audio_->isToneRenderingActive() && !audio_->isPlaying() &&
                 !pulse_dial_in_progress) {
-                audio_->startDialTone();
+                startSelectedDialTone();
             }
 
             if (!dial_buffer_.isEmpty() && (now - last_digit_ms_) >= 10000U) {
@@ -697,8 +750,9 @@ void TelephonyService::tick() {
             dial_exact_pending_since_ms_ = 0U;
             dtmf_capture_start_ms_ = now + kDtmfCaptureStartDelayMs;
             next_dtmf_read_ms_ = now;
-            if (audio_ != nullptr && !tone_suppressed) {
-                audio_->startDialTone();
+            if (audio_ != nullptr && !tone_suppressed && !audio_->isPlaying()) {
+                selectRandomDialProfile();
+                startSelectedDialTone();
             }
         }
 

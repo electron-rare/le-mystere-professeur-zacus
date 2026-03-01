@@ -3,7 +3,6 @@
 
 #include <Arduino.h>
 #include <AudioTools.h>
-#include <AudioTools/AudioCodecs/CodecMP3Helix.h>
 #include <FS.h>
 #include <driver/i2s.h>
 #include <memory>
@@ -14,6 +13,9 @@
 #include "core/PlatformProfile.h"
 #include "audio/ToneCatalog.h"
 #include "media/MediaRouting.h"
+
+class AudioFileSourceFS;
+class AudioGeneratorMP3;
 
 struct AudioConfig {
     i2s_port_t port = I2S_NUM_0;
@@ -177,11 +179,14 @@ private:
     void stopTask();
     bool lockI2s() const;
     void unlockI2s() const;
+    bool lockPlaybackState(TickType_t timeout_ticks) const;
+    void unlockPlaybackState() const;
     bool ensureSdMounted();
     bool ensureLittleFsMounted();
     bool ensureStorageForSource(MediaSource source);
     bool openPlaybackFileForSource(const char* path, MediaSource source, fs::FS*& out_fs, MediaSource& out_source);
     void stopPlaybackFile();
+    void stopPlaybackFileUnlocked();
     bool prepareWavPlayback(File& file, const char* path);
     bool prepareMp3Playback(File& file, const char* path);
     bool isMp3Path(const char* path) const;
@@ -236,6 +241,7 @@ private:
     int16_t tone_lut_[kToneLutSize] = {0};
     bool sd_mount_attempted_ = false;
     bool sd_ready_ = false;
+    fs::FS* sd_fs_ = nullptr;
     bool littlefs_mount_attempted_ = false;
     bool littlefs_ready_ = false;
     MediaSource last_storage_source_ = MediaSource::AUTO;
@@ -252,6 +258,8 @@ private:
     uint16_t playback_input_channels_ = 0;
     bool playback_audio_info_overridden_ = false;
     uint32_t playback_data_offset_ = 0;
+    bool playback_wav_direct_mode_ = false;
+    uint32_t playback_mp3_bitrate_bps_ = 0U;
     audio_tools::AudioInfo playback_input_audio_info_;
     audio_tools::AudioInfo default_playback_audio_info_;
     audio_tools::AudioInfo active_playback_audio_info_;
@@ -317,13 +325,16 @@ private:
     audio_tools::WAVDecoder wav_decoder_;
     audio_tools::EncodedAudioStream wav_stream_;
     audio_tools::StreamCopy wav_copy_;
-    audio_tools::MP3DecoderHelix mp3_decoder_;
-    audio_tools::EncodedAudioStream mp3_stream_;
-    audio_tools::StreamCopy mp3_copy_;
+    AudioGeneratorMP3* mp3_decoder_ = nullptr;
+    AudioFileSourceFS* mp3_source_ = nullptr;
+    void* mp3_output_ = nullptr;
+    Print* mp3_pcm_sink_ = nullptr;
+    uint32_t mp3_source_last_pos_ = 0U;
     mutable SemaphoreHandle_t i2s_io_mutex_ = nullptr;
+    mutable SemaphoreHandle_t playback_state_mutex_ = nullptr;
     TaskHandle_t task_handle_ = nullptr;
     static constexpr uint16_t kAudioTaskStackWords = 4096;
-    static constexpr uint8_t kAudioTaskPriority = 8;
+    static constexpr uint8_t kAudioTaskPriority = 1;
     portMUX_TYPE capture_lock_ = portMUX_INITIALIZER_UNLOCKED;
 };
 

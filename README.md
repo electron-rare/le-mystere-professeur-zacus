@@ -78,7 +78,7 @@ Le scénario principal est dans `game/scenarios/`. Il pilote :
 1. Lis le **guide MJ** : `kit-maitre-du-jeu/`
 2. Imprime les **printables** : `printables/`
 3. Prépare l’audio : `audio/`
-4. (Option) Achete, cable et Flash l’électronique : `hardware/` (un kit esp32-S3 avec écran est parfait... ou un vieux grille-pain, mais c’est moins efficace)
+4. Prépare, câble et flashe l’électronique : `hardware/` (un kit esp32-S3 avec écran est requis pour chaque partie)
 5. Lance la partie 🎩
 
 👉 FAQ / dépannage : `docs/faq.md` (aucune question idiote, sauf “où est le MJ ?”)

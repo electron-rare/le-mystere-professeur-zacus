@@ -1,0 +1,87 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: zacus-ollama
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_HOST_PORT:-11434}:11434"
+    volumes:
+      - zacus_ollama_data:/root/.ollama
+
+  sdxl:
+    profiles:
+      - with-sdxl
+    image: "${SDXL_IMAGE:-runpod/stable-diffusion-webui:latest}"
+    container_name: zacus-sdxl
+    restart: unless-stopped
+    environment:
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
+    ports:
+      - "${SDXL_HOST_PORT:-7860}:7860"
+    volumes:
+      - zacus_sdxl_models:/stable-diffusion-webui/models
+      - zacus_sdxl_outputs:/stable-diffusion-webui/outputs
+    healthcheck:
+      test:
+        - "CMD"
+        - "python3"
+        - "-c"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7860/').read()"
+      interval: 15s
+      timeout: 10s
+      retries: 20
+
+  studio-ai-gateway:
+    build:
+      context: ../../..
+      dockerfile: tools/dev/docker-studio-ai/Dockerfile
+    container_name: zacus-studio-ai-gateway
+    restart: unless-stopped
+    depends_on:
+      - ollama
+    working_dir: /workspace
+    ports:
+      - "${STUDIO_AI_HOST_PORT:-8787}:8787"
+    volumes:
+      - ../../..:/workspace
+      - ./.cache/pip:/root/.cache/pip
+    environment:
+      LLM_URL: "${LLM_URL:-http://ollama:11434/v1/chat/completions}"
+      LLM_MODEL: "${LLM_MODEL:-qwen2.5-coder:14b}"
+      SDXL_URL: "${SDXL_URL:-http://sdxl:7860/sdapi/v1/txt2img}"
+      SDXL_MODEL: "${SDXL_MODEL:-stabilityai/stable-diffusion-xl-base-1.0}"
+      SDXL_PROVIDER: "${SDXL_PROVIDER:-auto}"
+      SDXL_TIMEOUT_SEC: "${SDXL_TIMEOUT_SEC:-180}"
+    command:
+      - python3
+      - tools/dev/local_studio_ai_gateway.py
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8787"
+      - --llm-url
+      - "${LLM_URL:-http://ollama:11434/v1/chat/completions}"
+      - --llm-model
+      - "${LLM_MODEL:-qwen2.5-coder:14b}"
+      - --image-url
+      - "${SDXL_URL:-http://sdxl:7860/sdapi/v1/txt2img}"
+      - --image-model
+      - "${SDXL_MODEL:-stabilityai/stable-diffusion-xl-base-1.0}"
+      - --image-provider
+      - "${SDXL_PROVIDER:-auto}"
+      - --image-timeout
+      - "${SDXL_TIMEOUT_SEC:-180}"
+    healthcheck:
+      test:
+        - "CMD"
+        - "python3"
+        - "-c"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/health').read()"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  zacus_ollama_data:
+  zacus_sdxl_models:
+  zacus_sdxl_outputs:

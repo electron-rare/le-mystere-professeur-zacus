@@ -1,0 +1,21 @@
+manifest_id: zacus_v2_audio
+version: 1
+scenario_id: zacus_v2
+description: "Sequence audio canon pour le scenario Zacus V2"
+tracks:
+  - id: intro
+    title: "Alerte du professeur"
+    source: "game/prompts/audio/intro.md"
+    cues: "début du jeu, mise en immersion"
+  - id: incident
+    title: "Incident thermique"
+    source: "game/prompts/audio/incident.md"
+    cues: "après la première exploration, déclenchement de la porte verrouillée"
+  - id: accusation
+    title: "Accusation"
+    source: "game/prompts/audio/accusation.md"
+    cues: "début de la synthèse, demande de conclusion"
+  - id: solution
+    title: "Solution dévoilée"
+    source: "game/prompts/audio/solution.md"
+    cues: "fin, révélation et remerciement"

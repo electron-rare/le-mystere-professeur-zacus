@@ -16,7 +16,7 @@ Interface web de pilotage, design et diagnostic pour les firmwares Zacus (Story 
 
 - Sélecteur de scénario avancé (recherche, tri, mode legacy, CTA adaptés)
 - Orchestrateur live (statut runtime, recovery, filtres, contrôles réseau)
-- Story Designer nodal (React Flow, import/export YAML, édition guidée, auto-layout)
+- Story Designer nodal (Cytoscape.js, import/export YAML, édition guidée, auto-layout)
 - UI harmonisée (glass modern, labels FR, accessibilité)
 
 ---
@@ -52,6 +52,23 @@ Variables d'environnement :
 - `VITE_API_BASE` (ex: `http://192.168.0.91`)
 - `VITE_API_PROBE_PORTS` (défaut: `80,8080`)
 - `VITE_API_FLAVOR` (`auto|story_v2|freenove_legacy`, défaut `auto`)
+- `VITE_API_ACCESS_MODE` (`hybrid|direct|proxy`, défaut `hybrid`)
+- `VITE_ZACUS_STUDIO_AI_URL` (ex: `http://127.0.0.1:8787/story_generate`) pour activer la génération IA locale des scénarios et du manifeste imprimables.
+
+Intégration IA locale (Docker) :
+
+```bash
+cd tools/dev/docker-studio-ai
+cp .env.example .env
+docker compose up -d --build
+docker exec -it zacus-ollama ollama pull qwen2.5-coder:14b
+```
+
+Puis lancer le frontend avec `fronted dev web UI/.env.local` :
+
+```bash
+VITE_ZACUS_STUDIO_AI_URL=http://127.0.0.1:8787/story_generate
+```
 
 ---
 
@@ -88,8 +105,8 @@ npm run preview:esp:build
 npm run lint
 npm run build
 npm run test:unit
-npx playwright test
-npx playwright test --grep @live
+npm run test:e2e
+npm run test:e2e:live
 ```
 
 - `test:unit`: validation parser/generation YAML Story Designer.

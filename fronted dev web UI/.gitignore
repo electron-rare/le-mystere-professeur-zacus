@@ -7,9 +7,18 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Build artifacts
+.pio
+.platformio
+build
+.venv
+
 node_modules
 dist
 dist-ssr
+.svelte-kit
+playwright-report
+test-results
 *.local
 
 # Editor directories and files

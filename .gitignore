@@ -127,3 +127,12 @@ hardware/firmware/data/music/v8_pack/vivienne/p09.mp3
 hardware/firmware/data/music/v8_pack/vivienne/p10.mp3
 hardware/firmware/data/music/v8_pack/vivienne/p11.mp3
 hardware/firmware/data/music/v8_pack/vivienne/p12.mp3
+
+# Local build artifacts
+.pio
+.platformio
+logs
+dist
+build
+node_modules\.
+.venv

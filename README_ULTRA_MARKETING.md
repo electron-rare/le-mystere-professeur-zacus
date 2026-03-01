@@ -2,7 +2,7 @@
 
 ![Couverture](./docs/assets/cover.png)
 
-> **Une enquête scientifique cyber‑labo** pour anniversaire : indices imprimables, audio, modules électroniques (option), et un guide MJ ultra clair.  
+> **Une enquête scientifique cyber‑labo** pour anniversaire : indices imprimables, audio, modules électroniques intégrés, et un guide MJ ultra clair.  
 > **⚛ L’électron rare — ⚡ unstable by design**  
 > **Auteur : Clément SAILLANT**
 
@@ -14,7 +14,7 @@
 
 ## ⚡ Pitch (30 secondes)
 
-Le Professeur Zacus a disparu. Dans son labo, tout est encore “sous tension” : **signaux audio**, **capsules d’indices**, **preuves imprimées**… et un dispositif électronique optionnel qui réagit aux découvertes.
+Le Professeur Zacus a disparu. Dans son labo, tout est encore “sous tension” : **signaux audio**, **capsules d’indices**, **preuves imprimées**… et un dispositif électronique indispensable qui réagit aux découvertes.
 
 Les joueurs fouillent, recoupent, déduisent — comme une vraie équipe d’enquête.  
 Le MJ déroule une session fluide, avec des checkpoints et une fin satisfaisante.
@@ -27,7 +27,7 @@ Le MJ déroule une session fluide, avec des checkpoints et une fin satisfaisante
 - **Guide Maître du Jeu** (mise en place, script, solutions)
 - **Audio** (timers / ambiance / déclenchements)
 - **Scénario YAML** = source de vérité (durée/difficulté modulables)
-- **Option électronique** : ESP32/Arduino (UI, effets, interactions)
+- **Matériel électronique** : ESP32/Arduino (UI, effets, interactions) pour orchestrer les phases de jeu.
 
 > Tout est pensé pour être **rejouable** et **facile à préparer**.
 
@@ -38,7 +38,7 @@ Le MJ déroule une session fluide, avec des checkpoints et une fin satisfaisante
 - **Joueurs** : 6–14 (recommandé), ou équipes de 2–4
 - **Durée** : 60–90 min (modulable)
 - **Âge** : famille / anniversaire (adaptable)
-- **Matériel** : imprimante + (option) modules électroniques
+- **Matériel** : imprimante + modules électroniques (ESP32 + écran tactique) requis pour chaque partie
 
 ---
 
@@ -57,7 +57,7 @@ Le scénario principal est dans `game/scenarios/`. Il pilote :
 - les exports (briefs MJ, docs, manifestes).
 
 ### Pipeline du repo
-`game/scenarios/*.yaml → tools/ (validate + export) → kit MJ / printables / audio → (option) hardware/firmware/esp32`
+`game/scenarios/*.yaml → tools/ (validate + export) → kit MJ / printables / audio → hardware/firmware/esp32`
 
 ![Diagramme](./docs/assets/diagram.png)
 
@@ -68,7 +68,7 @@ Le scénario principal est dans `game/scenarios/`. Il pilote :
 1. Lis le **guide MJ** : `kit-maitre-du-jeu/`
 2. Imprime les **printables** : `printables/`
 3. Prépare l’audio : `audio/`
-4. (Option) Achete, cable et Flash l’électronique : `hardware/` (un kit esp32-S3 avec écran est parfait...)
+4. Prépare, câble et flashe l’électronique : `hardware/` (un kit esp32-S3 avec écran est requis pour la partie)
 5. Lance la partie 🎩
 
 👉 FAQ / dépannage : `docs/faq.md`
@@ -102,7 +102,7 @@ kit-maitre-du-jeu/           Guide MJ + solutions + script
 printables/                  Cartes/indices + manifestes
 audio/                       Manifestes audio + ressources
 tools/                       Validation + export + génération
-hardware/                    Firmware & accessoires électroniques (option)
+hardware/                    Firmware & accessoires électroniques (prérequis)
 docs/                        Mini-site / FAQ / ressources
 ```
 
@@ -131,4 +131,3 @@ Signature : **⚛ L’électron rare** — **⚡ unstable by design**
 ---
 
 OpenGraph : `docs/assets/og.png` (1200×630)
-

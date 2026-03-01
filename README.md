@@ -3,7 +3,7 @@
 
 ![Couverture](./assets/cover.png)
 
-> **Bienvenue dans l’enquête la plus instable du multivers** : indices imprimables, audio, modules électroniques (option), et un guide MJ qui ne bug jamais (sauf si tu l’imprimes en 3D).
+> **Bienvenue dans l’enquête la plus instable du multivers** : indices imprimables, audio, modules électroniques intégrés, et un guide MJ qui ne bug jamais (sauf si tu l’imprimes en 3D).
 > 
 > **⚛ L’électron rare — ⚡ unstable by design**
 > 
@@ -17,7 +17,7 @@
 
 ## ⚡ Pitch (30 secondes chrono)
 
-Le Professeur Zacus a disparu. Son labo est sous tension : **signaux audio**, **capsules d’indices**, **preuves imprimées**… et un dispositif électronique optionnel qui réagit (parfois) à tes découvertes.
+Le Professeur Zacus a disparu. Son labo est sous tension : **signaux audio**, **capsules d’indices**, **preuves imprimées**… et un dispositif électronique indispensable qui réagit à chaque étape de l’enquête.
 
 Les joueurs fouillent, recoupent, déduisent — comme une vraie équipe d’enquête, mais avec plus de blagues et moins de panique.
 Le MJ déroule une session fluide, avec des checkpoints et une fin satisfaisante (sauf si tu oublies le gâteau).
@@ -43,7 +43,7 @@ Le MJ déroule une session fluide, avec des checkpoints et une fin satisfaisante
 - **Joueurs** : 6–14 (recommandé), ou équipes de 2–4
 - **Durée** : 60–90 min (modulable, sauf si tu actives le mode “slow motion”)
 - **Âge** : famille / anniversaire (adaptable, sauf pour les robots)
-- **Matériel** : imprimante + (option) modules électroniques (simple si tu achète un kit tout prête genre freenove ou autres esp32 avec un écran)
+- **Matériel** : imprimante + modules électroniques (ESP32 + écran / interface tactile) pour piloter les phases de jeu
 
 > *"Le mode ‘slow motion’ est réservé aux anniversaires avec trop de bonbons."*
 
@@ -65,7 +65,7 @@ Le scénario principal est dans `game/scenarios/`. Il pilote :
 - les exports (briefs MJ, docs, manifestes).
 
 ### Pipeline du repo
-`game/scenarios/*.yaml → tools/ (validate + export) → kit MJ / printables / audio → (option) hardware/firmware/esp32`
+`game/scenarios/*.yaml → tools/ (validate + export) → kit MJ / printables / audio → hardware/firmware/esp32`
 
 ![Diagramme](./assets/diagram.png)
 
@@ -116,7 +116,7 @@ kit-maitre-du-jeu/           Guide MJ + solutions + script
 printables/                  Cartes/indices + manifestes
 audio/                       Manifestes audio + ressources
 tools/                       Validation + export + génération
-hardware/                    Firmware & accessoires électroniques (option)
+hardware/                    Firmware & accessoires électroniques (prérequis)
 docs/                        Mini-site / FAQ / ressources
 ```
 

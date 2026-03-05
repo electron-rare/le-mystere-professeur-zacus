@@ -20,6 +20,6 @@ Use for printables/manifests consistency, naming, and export hygiene.
 - Do not introduce ad-hoc export folders in git.
 
 ## Quick Commands
-- `python3 tools/printables/validate_manifest.py printables/manifests/zacus_v1_printables.yaml`
-- `rg -n "zacus_v1_printables" printables`
+- `python3 tools/printables/validate_manifest.py printables/manifests/zacus_v2_printables.yaml`
+- `rg -n "zacus_v2_printables" printables`
 - `rg --files printables`

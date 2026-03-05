@@ -12,7 +12,7 @@ Validate:
 - `rg -n "station|indice|enigme|zacus" kit-maitre-du-jeu`
 
 Common commands:
-- `python3 tools/printables/validate_manifest.py printables/manifests/zacus_v1_printables.yaml`
+- `python3 tools/printables/validate_manifest.py printables/manifests/zacus_v2_printables.yaml`
 
 Do not:
 - regenerate bulk binary exports unless explicitly requested

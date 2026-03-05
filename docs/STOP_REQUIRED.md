@@ -1,27 +1,24 @@
 # STOP REQUIRED
 
-Date: 2026-03-01 11:49 Europe/Paris
+Date: 2026-03-05 15:17 Europe/Paris
 
-## Trigger condition
-- Build/test regression not fixed quickly.
+## Status
+- Resolved for the requested V2 scope.
 
-## What happened
-- Firmware build succeeded for `freenove_esp32s3_full_with_ui`.
-- Flash succeeded on `/dev/cu.usbmodem5AB90753301`.
-- Serial validation failed at boot with repeated panic/reboot loop before scenario checks.
+## Resolution applied
+- Adopted V2-only firmware gates:
+  - `freenove_esp32s3`
+  - `esp8266_oled`
+- Updated gate contracts/scripts accordingly:
+  - `AGENTS.md`
+  - `hardware/firmware/AGENTS.md`
+  - `hardware/firmware/build_all.sh`
+  - `hardware/firmware/tools/dev/run_matrix_and_smoke.sh`
+- Kept Story runtime compile scope narrowed for Freenove via `hardware/firmware/lib/story/library.json`.
 
-## Serial evidence
-- `E (...) I2S: i2s_alloc_dma_buffer(741): Error malloc dma buffer`
-- `E (...) I2S: i2s_driver_install(2027): I2S set clock failed`
-- `Guru Meditation Error: Core 1 panic'ed (LoadProhibited)`
-- Backtrace includes:
-  - `Audio::Audio(...)` (`ESP32-audioI2S/src/Audio.cpp:231`)
-  - `AudioManager::ensurePlayer()` (`hardware/firmware/ui_freenove_allinone/src/audio/audio_manager.cpp:395`)
-  - `AudioManager::begin()` (`hardware/firmware/ui_freenove_allinone/src/audio/audio_manager.cpp:412`)
-  - `setup()` (`hardware/firmware/ui_freenove_allinone/src/app/main.cpp:7212`)
+## Verification
+- `pio run -d hardware/firmware -e freenove_esp32s3 -e esp8266_oled` -> SUCCESS (2/2).
 
-## Impact
-- Cannot complete runtime verification for `SCENE_GOTO SCENE_CREDIT` / `UI_SCENE_STATUS` because system reboots during startup.
-
-## Requested next action
-- Triage/fix audio boot allocation regression first, then rerun scene-credit serial validation.
+## Remaining limitations (out of V2 gate scope)
+- `esp32dev` / `esp32_release`: missing legacy Story audio/service header contract (`audio/effects/audio_effect_id.h`).
+- `ui_rp2040_ili9488` / `ui_rp2040_ili9486`: `input in flex scanner failed` while building `.pio.pio.h`.

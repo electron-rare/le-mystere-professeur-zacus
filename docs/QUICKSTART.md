@@ -1,33 +1,40 @@
 # Quickstart
 
 ## En un coup d’œil
-- Source de vérité : `game/scenarios/zacus_v1.yaml` (dérive tout le reste : kit MJ, audio, printables).
-- Public : 6 à 14 enfants, 60–90 minutes.
-- Matériel : `kit-maitre-du-jeu/`, `printables/`, `game/scenarios/zacus_v1.yaml`, `audio/manifests/zacus_v1_audio.yaml`, `hardware/firmware/esp32` (ESP32 + écran tactile).
+- Source de vérité : `game/scenarios/zacus_v2.yaml` (dérive tout le reste : kit MJ, audio, printables).
+- Public : 6 à 14 enfants, 105 minutes (45 + 60).
+- Matériel : `kit-maitre-du-jeu/`, `printables/`, `game/scenarios/zacus_v2.yaml`, `audio/manifests/zacus_v2_audio.yaml`, `hardware/firmware/` (ESP32 + écran tactile).
 - Licences : contenus créatifs CC BY-NC 4.0 (`LICENSES/CC-BY-NC-4.0.txt`), code/script MIT (`LICENSES/MIT.txt`).
 
 ## Installer
-1. Copie les imprimables depuis `printables/export/pdf/` ou généré via les prompts listés dans `printables/manifests/zacus_v1_printables.yaml` + `printables/src/prompts/`.
-2. Prépare un lecteur audio avec `audio/manifests/zacus_v1_audio.yaml` et les fichiers de `game/prompts/audio/`.
+1. Copie les imprimables depuis `printables/export/pdf/` ou génère-les via `printables/manifests/zacus_v2_printables.yaml` + `printables/src/prompts/`.
+2. Prépare un lecteur audio avec `audio/manifests/zacus_v2_audio.yaml` et les fichiers de `game/prompts/audio/`.
 3. Positionne les stations selon `kit-maitre-du-jeu/plan-stations-et-mise-en-place.md`, prépare les rôles (`distribution-des-roles.md`) et l’accueil rapide (`script-minute-par-minute.md`).
-4. Flash et configure l’ESP32 en suivant les instructions de `hardware/firmware/esp32/README.md` pour que l’interface réagisse aux stations imprimées.
+4. Flash et configure l’ESP32 en suivant `hardware/firmware/README.md` pour que l’interface réagisse aux stations imprimées.
 
 ## Préparer l’électronique
 
-1. Installe PlatformIO (`pip install -U platformio`) et branche l’ESP32 décrit dans `hardware/firmware/esp32`, écran + alim.
+1. Installe PlatformIO (`pip install -U platformio`) et branche l’ESP32 décrit dans `hardware/firmware/README.md`, écran + alim.
 2. Compile/flash avec un profil supporté (`pio run -e esp32dev -t upload`), puis charge les assets `pio run -e esp32dev -t uploadfs` si nécessaire.
 3. Vérifie que l’écran affiche le scénario (`python3 tools/scenario/validate_scenario.py ...`), la connectique audio/led est prête, et que l’ESP32 reste branché pendant toute la partie.
 
 ## Déroulé express
 1. Accueil + immersion (0-10 min) : boucle audio d’`intro.md`, attribution des rôles, mise au courant sur les règles anti-chaos.
-2. Support d’enquête (10-65 min) : station par station, fiche d’enquête, audio `incident.md`, indices prints.
-3. Synthèse & final (65-90 min) : audio `accusation.md`, accusation finale, audio `solution.md`, lecture `solution-complete.md`.
+2. Support d’enquête (10-80 min) : station par station, fiche d’enquête, audio `incident.md`, indices printables.
+3. Synthèse & final (80-105 min) : audio `accusation.md`, accusation finale, audio `solution.md`, lecture `solution-complete.md`.
 
 ## Outils de validation
-- Scénario : `python tools/scenario/validate_scenario.py game/scenarios/zacus_v1.yaml`
-- Audio : `python tools/audio/validate_manifest.py audio/manifests/zacus_v1_audio.yaml`
-- Printables : `python tools/printables/validate_manifest.py printables/manifests/zacus_v1_printables.yaml`
-- Export Markdown : `python3 tools/scenario/export_md.py game/scenarios/zacus_v1.yaml`
+- Scénario : `python3 tools/scenario/validate_scenario.py game/scenarios/zacus_v2.yaml`
+- Audio : `python3 tools/audio/validate_manifest.py audio/manifests/zacus_v2_audio.yaml`
+- Printables : `python3 tools/printables/validate_manifest.py printables/manifests/zacus_v2_printables.yaml`
+- Export Markdown : `python3 tools/scenario/export_md.py game/scenarios/zacus_v2.yaml`
+
+## Frontend V2
+- Frontend canon : `frontend-scratch-v2/`.
+- Démarrage :
+  - `cd frontend-scratch-v2`
+  - `npm install`
+  - `VITE_STORY_API_BASE=http://<esp_ip>:8080 npm run dev`
 
 ## Outils test firmware
 

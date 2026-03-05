@@ -25,7 +25,7 @@ logs/
 # Artifacts and caches
 artifacts/
 __pycache__/
-.venv/
+.venv*/
 
 # Generated game exports
 game/exports/*
@@ -134,5 +134,6 @@ hardware/firmware/data/music/v8_pack/vivienne/p12.mp3
 logs
 dist
 build
-node_modules\.
-.venv
+node_modules/
+.venv*/
+platformio_override.ini

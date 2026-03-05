@@ -53,10 +53,10 @@ run_step() {
   "$@"
 }
 
-run_step python3 tools/scenario/validate_scenario.py game/scenarios/zacus_v1.yaml
-run_step python3 tools/audio/validate_manifest.py audio/manifests/zacus_v1_audio.yaml
-run_step python3 tools/printables/validate_manifest.py printables/manifests/zacus_v1_printables.yaml
-run_step python3 tools/scenario/export_md.py game/scenarios/zacus_v1.yaml
+run_step python3 tools/scenario/validate_scenario.py game/scenarios/zacus_v2.yaml
+run_step python3 tools/audio/validate_manifest.py audio/manifests/zacus_v2_audio.yaml
+run_step python3 tools/printables/validate_manifest.py printables/manifests/zacus_v2_printables.yaml
+run_step python3 tools/scenario/export_md.py game/scenarios/zacus_v2.yaml
 
 if [[ "$CHECK_CLEAN_GIT" == "1" ]]; then
   if ! command -v git >/dev/null 2>&1; then

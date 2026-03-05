@@ -32,17 +32,14 @@ Default rules for the whole repository. Nested `AGENTS.md` files override only l
 
 ## Gates
 Default firmware build gates:
-- `pio run -e esp32dev`
-- `pio run -e esp32_release`
+- `pio run -e freenove_esp32s3`
 - `pio run -e esp8266_oled`
-- `pio run -e ui_rp2040_ili9488`
-- `pio run -e ui_rp2040_ili9486`
 
 Scenario/content workflow gates:
 - `python3 tools/scenario/validate_scenario.py <scenario>`
 - `python3 tools/scenario/export_md.py <scenario>`
-- `python3 tools/audio/validate_manifest.py audio/manifests/zacus_v1_audio.yaml`
-- `python3 tools/printables/validate_manifest.py printables/manifests/zacus_v1_printables.yaml`
+- `python3 tools/audio/validate_manifest.py audio/manifests/zacus_v2_audio.yaml`
+- `python3 tools/printables/validate_manifest.py printables/manifests/zacus_v2_printables.yaml`
 
 ## Reporting
 Final report must include:

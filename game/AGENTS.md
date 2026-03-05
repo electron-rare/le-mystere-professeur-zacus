@@ -8,10 +8,10 @@ Allowed scope:
 - generated docs derived from scenario YAML
 
 Validate:
-- `python3 tools/scenario/validate_scenario.py game/scenarios/zacus_v1.yaml`
-- `python3 tools/scenario/export_md.py game/scenarios/zacus_v1.yaml`
-- `python3 tools/audio/validate_manifest.py audio/manifests/zacus_v1_audio.yaml`
-- `python3 tools/printables/validate_manifest.py printables/manifests/zacus_v1_printables.yaml`
+- `python3 tools/scenario/validate_scenario.py game/scenarios/zacus_v2.yaml`
+- `python3 tools/scenario/export_md.py game/scenarios/zacus_v2.yaml`
+- `python3 tools/audio/validate_manifest.py audio/manifests/zacus_v2_audio.yaml`
+- `python3 tools/printables/validate_manifest.py printables/manifests/zacus_v2_printables.yaml`
 
 Common commands:
 - `rg -n "id:|station|solution" game/scenarios`

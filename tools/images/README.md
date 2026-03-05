@@ -18,11 +18,11 @@ Pré-requis :
 Exécution :
 ```sh
 PYTHON=.venv/bin/python tools/images/generate_printables.py \
-  --manifest printables/manifests/zacus_v1_printables.yaml
+  --manifest printables/manifests/zacus_v2_printables.yaml
 ```
 Ajouter `--force` pour régénérer même si les fichiers existent déjà.
 
-Les sorties sont dans `printables/export/png/zacus_v1/` et reprennent les IDs du manifeste.
+Les sorties sont dans `printables/export/png/zacus_v2/` et reprennent les IDs du manifeste.
 
 ---
 

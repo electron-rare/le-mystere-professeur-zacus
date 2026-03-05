@@ -20,10 +20,10 @@ jobs:
       - name: Validate runtime bundle coherence
         run: python tools/scenario/validate_runtime_bundle.py
       - name: Validate scenario
-        run: python tools/scenario/validate_scenario.py game/scenarios/zacus_v1.yaml
+        run: python tools/scenario/validate_scenario.py game/scenarios/zacus_v2.yaml
       - name: Export scenario markdown briefs
-        run: python tools/scenario/export_md.py game/scenarios/zacus_v1.yaml
+        run: python tools/scenario/export_md.py game/scenarios/zacus_v2.yaml
       - name: Validate audio manifest
-        run: python tools/audio/validate_manifest.py audio/manifests/zacus_v1_audio.yaml
+        run: python tools/audio/validate_manifest.py audio/manifests/zacus_v2_audio.yaml
       - name: Validate printables manifest
-        run: python tools/printables/validate_manifest.py printables/manifests/zacus_v1_printables.yaml
+        run: python tools/printables/validate_manifest.py printables/manifests/zacus_v2_printables.yaml

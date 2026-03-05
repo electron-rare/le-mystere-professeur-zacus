@@ -8,7 +8,7 @@ Allowed scope:
 - exported references when explicitly requested
 
 Validate:
-- `python3 tools/printables/validate_manifest.py printables/manifests/zacus_v1_printables.yaml`
+- `python3 tools/printables/validate_manifest.py printables/manifests/zacus_v2_printables.yaml`
 - `rg --files printables`
 
 Common commands:

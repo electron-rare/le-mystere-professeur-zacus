@@ -48,7 +48,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-DEFAULT_ENVS=(esp32dev esp32_release esp8266_oled ui_rp2040_ili9488 ui_rp2040_ili9486)
+DEFAULT_ENVS=(freenove_esp32s3 esp8266_oled)
 BUILD_STATUS="SKIPPED"
 PORT_STATUS="SKIPPED"
 SMOKE_STATUS="SKIPPED"

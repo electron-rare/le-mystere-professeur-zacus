@@ -2,7 +2,7 @@
 
 ## Overview
 
-This repository contains all materials for "Le Mystère du Professeur Zacus" - a complete investigation kit for birthday parties (6-14 children, 60-90 minutes), with a laboratory/scientific campus theme.
+This repository contains all materials for "Le Mystère du Professeur Zacus" - a complete investigation kit for birthday parties (6-14 children, 105 minutes), with a laboratory/scientific campus theme.
 
 ## Root Structure
 
@@ -58,7 +58,7 @@ Cross-functional examples and demonstrations. See `examples/README.md` for index
 ### `game/`
 Core game content (canonical):
 - **`scenarios/`**: YAML scenario definitions (single source of truth)
-  - `zacus_v1.yaml`: Canon scenario with timeline, clues, solution
+  - `zacus_v2.yaml`: Canon scenario with acts, runtime steps and terrain clues
 - **`prompts/`**: Generation prompts for various content
 - **`exports/`**: Generated exports (not versioned)
 
@@ -162,16 +162,16 @@ See `BRANCHES.md` for complete branch workflow. Key branches:
 
 ```bash
 # Validate scenario
-python3 tools/scenario/validate_scenario.py game/scenarios/zacus_v1.yaml
+python3 tools/scenario/validate_scenario.py game/scenarios/zacus_v2.yaml
 
 # Export markdown
-python3 tools/scenario/export_md.py game/scenarios/zacus_v1.yaml
+python3 tools/scenario/export_md.py game/scenarios/zacus_v2.yaml
 
 # Validate audio manifest
-python3 tools/audio/validate_manifest.py audio/manifests/zacus_v1_audio.yaml
+python3 tools/audio/validate_manifest.py audio/manifests/zacus_v2_audio.yaml
 
 # Validate printables manifest
-python3 tools/printables/validate_manifest.py printables/manifests/zacus_v1_printables.yaml
+python3 tools/printables/validate_manifest.py printables/manifests/zacus_v2_printables.yaml
 
 # Or use Makefile
 make scenario-validate

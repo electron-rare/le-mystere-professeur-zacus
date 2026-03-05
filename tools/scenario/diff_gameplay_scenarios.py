@@ -87,7 +87,7 @@ def build_report(base_path: Path, target_path: Path, base: dict, target: dict) -
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate functional diff report between two scenario YAML files.")
     parser.add_argument("--base", default="scenario-ai-coherence/zacus_conversation_bundle_v3/zacus_v2.yaml")
-    parser.add_argument("--target", default="game/scenarios/zacus_v1.yaml")
+    parser.add_argument("--target", default="game/scenarios/zacus_v2.yaml")
     parser.add_argument("--out", default=f"artifacts/qa-test/{date.today().isoformat()}/gameplay-functional-diff.md")
     args = parser.parse_args()
 

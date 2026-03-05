@@ -1,46 +1,45 @@
-# SCENARIO BRIEF — Le mystère du Professeur Zacus — U-SON (promotion gameplay)
+# SCENARIO BRIEF - Le mystère du Professeur Zacus — Version Réelle (U-SON, piano LEFOU, QR WIN)
 
 ## Stats
 
-- Joueurs : 6–14
-- Durée : 60–90 min
+- Joueurs : 6-14
+- Duree : 105-105 min
 - Solution unique : True
 
 ## Introduction
 
-Le professeur Zacus a disparu après avoir lancé une alerte cryptée : le prototype U-SON dérive. L'équipe doit stabiliser la référence LA 440 Hz, résoudre la règle Zone 4 et déclencher la clé finale.
+Le Professeur Zacus a disparu après avoir déclenché une alerte cryptée. Le prototype U-SON (un module sonore expérimental) a commencé à “dériver” : ses signaux deviennent instables, comme si quelque chose perturbait le Campus. Pour protéger U-SON, l’équipe doit prouver deux choses : (1) stabiliser une référence scientifique (LA 440 Hz), (2) respecter la règle de Zone 4 — l’installation personnelle de l’Électron Fou — avant de récupérer la clé finale (QR “WIN”) cachée aux Archives.
 
 ## Chronologie
 
-- **Acte 1 (~45 min)** — Atelier des Ondes : stabiliser LA 440 pour recaler U-SON.
-- **Acte 2 (~60 min)** — Zone 4 : décoder et jouer LEFOU sur le piano alphabet (A ancré sur LA 440).
-- **Finale** — Archives : scanner le QR payload WIN derrière le portrait.
+- **Acte 1 — Stabiliser U-SON (LA 440) (≈45 min)** - Valider Étape 1 via la référence LA 440 Hz.
+- **Acte 2 — Zone 4 (piano LEFOU) + Archives (QR WIN) (≈60 min)** - Valider Étape 2 via piano-alphabet (LEFOU), puis scanner QR WIN derrière le portrait.
 
 ## Stations
 
-- **Atelier des ondes** — stabiliser un LA 440 Hz propre et constant. | Indice : une consigne rappelle que la référence audio juste est la seule ancre fiable pour la suite.
-- **Zone 4 — Studio de Résonance** — jouer le code LEFOU via un piano-alphabet brouillé. | Indice : les lettres sont collées en ordre aléatoire sur les touches blanches, avec A placé sur la touche du LA 440.
-- **Salle des archives** — localiser la clé finale et valider le déverrouillage. | Indice : le QR final WIN est caché derrière le portrait.
+- **Atelier des Ondes** - Stabiliser la référence LA 440 Hz pour recaler U-SON. | Indice : La force ne sert à rien. Seule la stabilité ouvre le premier verrou.
+- **Zone 4 — Studio de Résonance (Piano Alphabet)** - Jouer 5 lettres sur le piano-alphabet pour valider l’accès. | Indice : Le Fou ne valide pas la force. Il valide son nom.
+- **Salle des Archives** - Trouver et scanner la clé finale. | Indice : Regarde là où Zacus surveille toujours.
 
 ## Puzzles
 
-- la-440 (audio) — produire un LA 440 stable déclenche la validation de l'étape 1.
-  Effet : confirmation audio et ouverture de l'étape Zone 4.
-- piano-lefou (logique) — retrouver puis jouer L-E-F-O-U sur le piano à lettres brouillées, en utilisant l'ancre A=LA 440.
-  Effet : validation de l'étape 2 et indice explicite vers les Archives.
-- qr-win (observation) — scanner le QR avec payload WIN derrière le portrait de la salle des Archives.
-  Effet : déverrouille le media manager et la conclusion narrative.
+- PUZZLE_LA_440 (audio / stabilisation) - Produire un LA 440 Hz stable.
+  Effet : Le son doit rester stable quelques secondes ; l’écran/LED confirme l’alignement. Ensuite, la transmission Étape 1 peut être validée (ACK_WIN1).
+- PUZZLE_PIANO_ALPHABET_5 (piano / code lettres) - Jouer 5 lettres sur le piano-alphabet.
+  Effet : Validation “réelle terrain” : le MJ écoute/observe la séquence, puis déclenche la transition (unlock / BTN_NEXT / serial) vers la confirmation Étape 2.
+- PUZZLE_QR_WIN (recherche / scan) - Scanner le QR final.
+  Effet : Timeout 30s → QR_TIMEOUT → retour étape précédente + backup MJ.
 
 ## Solution
 
-- Coupable : Aucun coupable unique, il s'agit d'une épreuve orchestrée par Zacus.
-- Mobile : Vérifier la capacité des équipes à coopérer sous contrainte, sans céder à la panique ni aux fausses pistes.
-- Méthode : Progression en 3 validations séquentielles : LA 440, LEFOU en Zone 4, puis QR WIN aux Archives.
+- Coupable : Aucun coupable unique, epreuve orchestrée par Zacus.
+- Mobile : Si l’équipe échoue, le Campus reste en mode sécurité et U-SON demeure instable. Le vrai test n’est pas la vitesse : c’est la coopération, la précision et le calme.
+- Methode : Progression V2: STEP_U_SON_PROTO -> STEP_LA_DETECTOR -> STEP_RTC_ESP_ETAPE1 -> STEP_WIN_ETAPE1 -> STEP_WARNING -> STEP_LEFOU_DETECTOR -> STEP_RTC_ESP_ETAPE2 -> STEP_QR_DETECTOR -> STEP_FINAL_WIN
 - Preuves:
-  - Le signal LA 440 stabilise U-SON et valide l'étape 1.
-  - La séquence LEFOU correctement jouée valide l'étape 2.
-  - Le QR payload WIN finalise le parcours et ouvre la conclusion.
+  - Le son doit rester stable quelques secondes ; l’écran/LED confirme l’alignement. Ensuite, la transmission Étape 1 peut être validée (ACK_WIN1).
+  - Validation “réelle terrain” : le MJ écoute/observe la séquence, puis déclenche la transition (unlock / BTN_NEXT / serial) vers la confirmation Étape 2.
+  - Timeout 30s → QR_TIMEOUT → retour étape précédente + backup MJ.
 
 ## Notes
 
-Cette promotion gameplay aligne le canon sur le bundle conversationnel v3, tout en conservant `game/scenarios/*.yaml` comme source de vérité.
+Cette version est 100% alignée avec la réalité “2 étapes + QR + Media Hub”. Si tu veux, je peux aussi te générer la fiche MJ (indices soft/hard, cadence, placements) et une version “short 90 min” sans casser le runtime.

@@ -43,7 +43,7 @@ Bootstrap + workspace:
 Build gates:
 
 - `./build_all.sh`
-- or `pio run -e esp32dev -e esp32_release -e freenove_esp32s3 -e esp8266_oled -e ui_rp2040_ili9488 -e ui_rp2040_ili9486`
+- or `pio run -e freenove_esp32s3 -e esp8266_oled`
 
 
 Smoke gates:

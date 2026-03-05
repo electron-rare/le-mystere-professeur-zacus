@@ -15,7 +15,7 @@ except ImportError:  # pragma: no cover
     sys.exit(1)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_MANIFEST = REPO_ROOT / "printables/manifests/zacus_v1_printables.yaml"
+DEFAULT_MANIFEST = REPO_ROOT / "printables/manifests/zacus_v2_printables.yaml"
 REQUIRED_MANIFEST_KEYS = ["manifest_id", "version", "scenario_id", "items"]
 
 

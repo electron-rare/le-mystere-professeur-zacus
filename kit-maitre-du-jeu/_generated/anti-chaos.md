@@ -1,13 +1,13 @@
-# Guide anti-chaos généré
+# Guide anti-chaos genere
 
-## Règles
+## Regles
 
 - Max 14 enfants : rotation toutes les 15 min.
-- Durée cible 60–90 min : deux pauses courtes.
-- Un seul enfant parle à la fois, signal sonore pour les transitions.
-- Indices dans leurs enveloppes jusqu’à validation du chef de piste.
+- Duree cible 105-105 min : deux pauses courtes.
+- Une seule personne parle a la fois, signal sonore pour les transitions.
+- Indices gardes sous enveloppe jusqu'a validation du chef de piste.
 
 ## Interventions
 
-- Propose un mini-défi express si ça déraille.
-- Donne un rôle d’observateur aux enfants en retrait.
+- Proposer un mini-defi express si ca deraille.
+- Donner un role d'observateur aux enfants en retrait.

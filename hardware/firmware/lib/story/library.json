@@ -1,0 +1,16 @@
+{
+  "name": "story",
+  "version": "0.1.0",
+  "description": "Zacus story runtime primitives for firmware UI targets.",
+  "build": {
+    "includeDir": "src",
+    "srcFilter": [
+      "-<*>",
+      "+<core/scenario_def.cpp>",
+      "+<generated/scenarios_gen.cpp>",
+      "+<scenarios/default_scenario_v2.cpp>",
+      "+<resources/screen_scene_registry.cpp>",
+      "+<ui/player_ui_model.cpp>"
+    ]
+  }
+}

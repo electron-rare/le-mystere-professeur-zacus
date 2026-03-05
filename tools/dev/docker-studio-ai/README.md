@@ -104,13 +104,14 @@ curl http://127.0.0.1:8787/health
 
 ## Utilisation avec le frontend
 
-Dans `fronted dev web UI/.env.local` :
+Frontend canon: `frontend-scratch-v2`.
 
 ```bash
-VITE_ZACUS_STUDIO_AI_URL=http://127.0.0.1:8787/story_generate
+cd frontend-scratch-v2
+VITE_STORY_API_BASE=http://<esp_ip>:8080 npm run dev
 ```
 
-Le frontend tentera l’endpoint IA puis basculera automatiquement sur le générateur local si indisponible.
+Le gateway IA reste accessible via API (`/story_generate`) pour les scripts/outils externes.
 
 ### Génération d’images (optionnelle)
 

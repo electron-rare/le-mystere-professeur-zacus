@@ -25,8 +25,8 @@ except ImportError as exc:
 from openai import OpenAI, OpenAIError
 
 PRINTABLES_DIR = Path("printables")
-MANIFEST_PATH = PRINTABLES_DIR / "manifests" / "zacus_v1_printables.yaml"
-EXPORT_DIR = PRINTABLES_DIR / "export" / "png" / "zacus_v1"
+MANIFEST_PATH = PRINTABLES_DIR / "manifests" / "zacus_v2_printables.yaml"
+EXPORT_DIR = PRINTABLES_DIR / "export" / "png" / "zacus_v2"
 MODEL = "gpt-image-1-mini"
 SIZE = "1024x1024"
 QUALITY = "low"

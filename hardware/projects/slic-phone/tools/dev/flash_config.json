@@ -1,0 +1,51 @@
+{
+  "defaults": {
+    "artifacts_dir": "artifacts/flash",
+    "baud": 19200,
+    "prefer_cu_macos": true
+  },
+  "roles": [
+    {
+      "role": "esp32",
+      "method": "platformio",
+      "pio_env": "esp32_audio",
+      "match": "10c4:ea60|CP210|SLAB_USBtoUART|esp32",
+      "need_serial_port": true
+    },
+    {
+      "role": "esp8266",
+      "method": "platformio",
+      "pio_env": "esp8266_oled",
+      "match": "1a86:7523|CH340|wchusbserial|esp8266",
+      "need_serial_port": true
+    },
+    {
+      "role": "esp32s3",
+      "method": "platformio",
+      "pio_env": "esp32_s3",
+      "match": "303a:|Espressif|esp32-s3|S3",
+      "need_serial_port": true
+    },
+    {
+      "role": "rp2040",
+      "method": "uf2_copy",
+      "uf2_path": ".pio/build/rp2040_tft/firmware.uf2",
+      "volume_match": "RPI-RP2|PICOBOOT|RP2040"
+    },
+    {
+      "role": "stm32",
+      "method": "platformio",
+      "pio_env": "stm32_f103",
+      "match": "stlink|stm32|0483:",
+      "need_serial_port": false
+    },
+    {
+      "role": "arduino",
+      "method": "arduino_cli",
+      "fqbn": "arduino:avr:uno",
+      "sketch_dir": "arduino/sketches/blink",
+      "match": "2341:|Arduino|usbmodem|ttyACM",
+      "need_serial_port": true
+    }
+  ]
+}

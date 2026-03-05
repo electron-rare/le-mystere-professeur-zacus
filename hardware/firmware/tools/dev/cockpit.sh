@@ -1,482 +1,186 @@
-# --- Détection automatique du hardware connecté ---
-detect_hardware_env() {
-  # Utilise pyserial pour détecter le port et l'ID USB
-  local PYTHON_EXEC="$FW_ROOT/.venv/bin/python3"
-  local port_info
-  if [[ -x "$PYTHON_EXEC" ]]; then
-    port_info=$($PYTHON_EXEC -m serial.tools.list_ports -v 2>/dev/null | grep -E 'Freenove|CP2102|ESP32|ESP8266|RP2040' || true)
-  else
-    port_info=$(python3 -m serial.tools.list_ports -v 2>/dev/null | grep -E 'Freenove|CP2102|ESP32|ESP8266|RP2040' || true)
-  fi
-  # Détection simple par nom
-  if echo "$port_info" | grep -q 'Freenove'; then
-    echo 'freenove_esp32s3'
-  elif echo "$port_info" | grep -q 'ESP32'; then
-    echo 'esp32dev'
-  elif echo "$port_info" | grep -q 'ESP8266'; then
-    echo 'esp8266_oled'
-  elif echo "$port_info" | grep -q 'RP2040'; then
-    echo 'ui_rp2040_ili9488'
-  else
-    echo 'esp32dev'  # fallback
-  fi
-}
-
 #!/usr/bin/env bash
-    # Tableau options déplacé dans show_menu()
-
 set -euo pipefail
 
-export LC_ALL=C
-export LANG=C
-
-
-# --- Zacus Menu TUI ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(git -C "$SCRIPT_DIR/../.." rev-parse --show-toplevel)"
-FW_ROOT="$REPO_ROOT/hardware/firmware"
-AGENTS_ROOT="$FW_ROOT/.github/agents"
-ARTIFACTS_ROOT="$FW_ROOT/artifacts/rc_live"
-PROMPT_DIR="$FW_ROOT/tools/dev/codex_prompts"
-RC_PROMPT="$PROMPT_DIR/rc_live_fail.prompt.md"
+FW_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+DEFAULT_ENV="${ZACUS_PIO_ENV:-freenove_esp32s3_full_with_ui}"
 
+usage() {
+  cat <<USAGE
+Usage: ./tools/dev/cockpit.sh <command> [env] [options]
 
+PIO-only firmware cockpit.
 
+Commands:
+  help                     Show this help.
+  envs                     List available PlatformIO environments.
+  ports                    List serial devices (pio device list).
+  build [env]              Build env (default: ${DEFAULT_ENV}).
+  flash [env] [--port P]   Upload firmware for env.
+  monitor [env] [--port P] [--baud B]
+                           Open serial monitor for env.
+  go [env] [--port P] [--baud B]
+                           Build + flash + monitor.
 
-# Utilitaire de menu factorisé (centralisé dans agent_utils.sh)
-source "$(dirname "$0")/agent_utils.sh"
+Examples:
+  ./tools/dev/cockpit.sh envs
+  ./tools/dev/cockpit.sh build freenove_esp32s3
+  ./tools/dev/cockpit.sh flash freenove_esp32s3 --port /dev/cu.usbmodemXXXX
+  ./tools/dev/cockpit.sh monitor freenove_esp32s3 --baud 115200
+USAGE
+}
 
-# --- Flash auto ciblé (détection hardware + build + flash + log) ---
-run_flash_auto() {
-  local env
-  env=$(detect_hardware_env)
-  echo "[AGENT][INFO] Hardware détecté : $env"
-  echo "[AGENT][INFO] Build ciblé ($env) en cours..."
-  if ! "$FW_ROOT/build_all.sh" "$env"; then
-    echo "[AGENT][FAIL] Build échoué pour $env"
-    return 1
-  fi
-  echo "[AGENT][INFO] Flash ($env) en cours..."
-  if ! "$FW_ROOT/tools/dev/flash_gate.sh" "$env"; then
-    echo "[AGENT][FAIL] Flash échoué pour $env"
-    return 1
-  fi
-  local artifacts
-  artifacts="$(latest_artifacts)"
-  if [[ -n "$artifacts" && -f "$artifacts/commands.txt" ]]; then
-    echo "flash_auto $env" >> "$artifacts/commands.txt"
-  fi
-  echo "[AGENT][INFO] Flash auto terminé pour $env"
-  if [[ -n "$artifacts" && -f "$artifacts/summary.md" ]]; then
-    echo -e "\n\033[1;32m[Rapport santé] Exporté : $artifacts/summary.md\033[0m"
-    tail -20 "$artifacts/summary.md"
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "[fail] missing command: $1" >&2
+    exit 127
   fi
 }
 
-
-
-run_bootstrap() {
-  "$FW_ROOT/tools/dev/bootstrap_local.sh"
+run_pio() {
+  local -a cmd=(pio "$@")
+  printf '$'
+  printf ' %q' "${cmd[@]}"
+  printf '\n'
+  "${cmd[@]}"
 }
 
-run_build_all() {
-  local env
-  env=$(detect_hardware_env)
-  echo "[AGENT][INFO] Hardware détecté : $env"
-      local idx
-      idx=$(menu_select "Zacus Firmware Cockpit" "${options[@]}")
-      if [[ "$idx" == "" || "$idx" -le 0 ]]; then
+ENV_NAME=""
+PORT=""
+BAUD=""
+EXTRA_ARGS=()
+
+parse_env_and_options() {
+  ENV_NAME=""
+  PORT=""
+  BAUD=""
+  EXTRA_ARGS=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --port)
+        if [[ $# -lt 2 ]]; then
+          echo "[fail] --port requires a value" >&2
+          exit 2
+        fi
+        PORT="$2"
+        shift 2
+        ;;
+      --baud)
+        if [[ $# -lt 2 ]]; then
+          echo "[fail] --baud requires a value" >&2
+          exit 2
+        fi
+        BAUD="$2"
+        shift 2
+        ;;
+      -h|--help)
+        usage
         exit 0
-      fi
-      case $idx in
-        1) ZACUS_REQUIRE_HW=0 run_rc_live ;;
-        2) ZACUS_REQUIRE_HW=1 run_rc_live ;;
-        3) "$FW_ROOT/tools/dev/cockpit.sh" rc-autofix ;;
-        4) run_build_all ;;
-        5) run_bootstrap ;;
-        6) ports_watch ;;
-        7) monitor_wifi_debug_serial ;;
-        8) run_codex_prompts ;;
-        9) run_agent_plan ;;
-        10) run_audit_all ;;
-        11) run_sync_report ;;
-        12) run_cleanup ;;
-        13) run_codex_check ;;
-        14) afficher_logs_menu ;;
-        15) afficher_aide ;;
-        16) run_flash_auto ;;
-        *) exit 0 ;;
-      esac
-}
-
-run_audit_all() {
-  run_build_all
-  if [[ "${ZACUS_REQUIRE_HW:-0}" == "1" ]]; then
-    ZACUS_REQUIRE_HW=1 ZACUS_SKIP_PIO=1 "$FW_ROOT/tools/dev/run_matrix_and_smoke.sh"
-  else
-    ZACUS_REQUIRE_HW=0 ZACUS_SKIP_PIO=1 ZACUS_NO_COUNTDOWN=1 "$FW_ROOT/tools/dev/run_matrix_and_smoke.sh"
-  fi
-  analyse_artefacts_logs
-  local platform
-  for platform in esp32dev esp32_release freenove_esp32s3 esp8266_oled ui_rp2040_ili9488 ui_rp2040_ili9486; do
-    drivers_audit "$platform"
-    tests_audit "$platform"
-  done
-  run_codex_check
-  run_sync_report
-}
-
-run_rc_live() {
-  local artifacts=""
-  if ! "$FW_ROOT/tools/dev/run_matrix_and_smoke.sh"; then
-    artifacts="$(latest_artifacts)"
-    if [[ -n "$artifacts" && -f "$RC_PROMPT" ]]; then
-      local codex_last="$artifacts/codex_last_message.md"
-      local cmd="codex exec --output-last-message $codex_last - < $RC_PROMPT"
-      if [[ -f "$artifacts/commands.txt" ]]; then
-        printf '%s\n' "$cmd" >> "$artifacts/commands.txt"
-      fi
-      ARTIFACT_PATH="$artifacts" codex exec --output-last-message "$codex_last" - < "$RC_PROMPT"
-    elif [[ -f "$RC_PROMPT" ]]; then
-      codex exec - < "$RC_PROMPT"
-    fi
-    # Export synthétique du rapport de santé
-    if [[ -n "$artifacts" && -f "$artifacts/summary.md" ]]; then
-      echo -e "\n\033[1;32m[Rapport santé] Exporté : $artifacts/summary.md\033[0m"
-      tail -20 "$artifacts/summary.md"
-    fi
-    return 1
-  else
-    artifacts="$(latest_artifacts)"
-    if [[ -n "$artifacts" && -f "$artifacts/summary.md" ]]; then
-      echo -e "\n\033[1;32m[Rapport santé] Exporté : $artifacts/summary.md\033[0m"
-      tail -20 "$artifacts/summary.md"
-    fi
-  fi
-}
-
-ports_watch() {
-  echo "Press Ctrl+C to exit ports watch."
-  local PYTHON_VENV3="$FW_ROOT/.venv/bin/python3"
-  local PYTHON_VENV="$FW_ROOT/.venv/bin/python"
-  if [[ -x "$PYTHON_VENV3" ]]; then
-    PYTHON_EXEC="$PYTHON_VENV3"
-  elif [[ -x "$PYTHON_VENV" ]]; then
-    PYTHON_EXEC="$PYTHON_VENV"
-  else
-    echo "[AGENT][FAIL] Aucun interpréteur Python .venv trouvé pour la détection des ports." >&2
-    exit 1
-  fi
-  while true; do
-    echo "=== $(date -R) ==="
-    "$PYTHON_EXEC" -m serial.tools.list_ports -v || true
-    sleep 5
-  done
-}
-
-latest_artifacts() {
-  if [[ ! -d "$ARTIFACTS_ROOT" ]]; then
-    echo ""
-    return
-  fi
-  ls -1d "$ARTIFACTS_ROOT"/*/ 2>/dev/null | sort | tail -n1
-}
-
-
-show_menu() {
-  local options=(
-    "RC live gate (ZACUS_REQUIRE_HW unset)"
-    "RC live gate (ZACUS_REQUIRE_HW=1)"
-    "RC Live + AutoFix (auto-correct simple erreurs)"
-    "Build all firmware (hardware/firmware/build_all.sh)"
-    "Bootstrap (outils/dev/bootstrap_local.sh)"
-    "Watch serial ports"
-    "Monitor WiFi debug (serial ESP32)"
-    "Run codex prompt menu"
-    "Execute agent plan (plan_runner)"
-    "Audit full (build + rc + drivers/tests)"
-    "Generate sync report"
-    "Cleanup logs/artefacts"
-    "Codex CLI check"
-    "Afficher logs (firmware/logs/)"
-    "Aide"
-    "Quitter"
-  )
-  while true; do
-    local idx=$(menu_select "Zacus Firmware Cockpit" "${options[@]}")
-    case "$idx" in
-      1) ZACUS_REQUIRE_HW=0 run_rc_live ;;
-      2) ZACUS_REQUIRE_HW=1 run_rc_live ;;
-      3) "$FW_ROOT/tools/dev/cockpit.sh" rc-autofix ;;
-      4) run_build_all ;;
-      15) run_flash_auto ;;
-      16|0) exit 0 ;;
-      5) run_bootstrap ;;
-      6) ports_watch ;;
-      7) monitor_wifi_debug_serial ;;
-      8) run_codex_prompts ;;
-      9) run_agent_plan ;;
-      10) run_audit_all ;;
-      11) run_sync_report ;;
-      12) run_cleanup ;;
-      13) run_codex_check ;;
-      14) afficher_logs_menu ;;
-      15) afficher_aide ;;
-      16|0) exit 0 ;;
+        ;;
+      --)
+        shift
+        if [[ $# -gt 0 ]]; then
+          EXTRA_ARGS+=("$@")
+        fi
+        break
+        ;;
+      *)
+        if [[ -z "$ENV_NAME" ]]; then
+          ENV_NAME="$1"
+        else
+          EXTRA_ARGS+=("$1")
+        fi
+        shift
+        ;;
     esac
   done
-}
 
-# --- WiFi Debug Serial Monitor (ESP32) ---
-monitor_wifi_debug_serial() {
-  echo -e "\n\033[1;36m[WiFi Debug Serial] Monitoring ESP32 serial port (logs, WiFi, scan, connect, errors)\033[0m"
-  local PYTHON_VENV3="$FW_ROOT/.venv/bin/python3"
-  local PYTHON_VENV="$FW_ROOT/.venv/bin/python"
-  if [[ -x "$PYTHON_VENV3" ]]; then
-    PYTHON_EXEC="$PYTHON_VENV3"
-  elif [[ -x "$PYTHON_VENV" ]]; then
-    PYTHON_EXEC="$PYTHON_VENV"
-  else
-    echo "[AGENT][FAIL] Aucun interpréteur Python .venv trouvé pour le debug série." >&2
-    exit 1
+  if [[ -z "$ENV_NAME" ]]; then
+    ENV_NAME="$DEFAULT_ENV"
   fi
-  # Lancement du script serial_smoke.py en mode monitor-only sur l'ESP32
-  "$PYTHON_EXEC" "$FW_ROOT/tools/dev/serial_smoke.py" --role esp32 --baud 115200 --timeout 1.0
-  echo -e "\033[1;36m--- Fin du monitoring série ---\033[0m"
-  read -n 1 -s -r -p "Appuyez sur une touche pour revenir au menu..."
 }
 
-afficher_aide() {
-  echo -e "\n\033[1;36mAide Zacus Cockpit\033[0m"
-  echo "- Utilisez les flèches ou le numéro pour naviguer."
-  echo "- 'Monitor WiFi debug (serial ESP32)' : lance le monitoring live du port série ESP32 (logs WiFi, scan, connect, erreurs)."
-  echo "- Installez fzf/dialog/whiptail pour une meilleure expérience."
-  echo "- [Entrée] pour valider, [Échap] ou [Entrée] vide pour annuler."
-  echo "- Logs : 15 dernières lignes de chaque fichier dans logs/"
-  echo "- Pour toute question, voir README.md."
-  read -n 1 -s -r -p "Appuyez sur une touche pour revenir au menu..."
-}
-
-run_codex_prompts() {
-  "$FW_ROOT/tools/dev/codex_prompt_menu.sh"
-}
-
-run_agent_plan() {
-  local agents=()
-  local agent_file rel
-  while IFS= read -r -d '' agent_file; do
-    rel="${agent_file#$AGENTS_ROOT/}"
-    agents+=("${rel%.md}")
-  done < <(find "$AGENTS_ROOT" -type f -name '*.md' ! -path "$AGENTS_ROOT/archive/*" -print0 | sort -z)
-
-  if [[ ${#agents[@]} -eq 0 ]]; then
-    echo "[AGENT][FAIL] Aucun agent actif disponible sous $AGENTS_ROOT." >&2
-    return 1
+ensure_no_extra_args() {
+  if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
+    echo "[fail] unknown argument(s): ${EXTRA_ARGS[*]}" >&2
+    exit 2
   fi
-
-  local idx=$(menu_select "Plan runner – sélectionnez un agent" "${agents[@]}")
-  if [[ -z "$idx" || "$idx" -le 0 ]]; then
-    return 0
-  fi
-  local selected="${agents[$((idx-1))]}"
-  "$FW_ROOT/tools/dev/plan_runner.sh" --agent "$selected"
 }
 
-run_git() {
-  local action="${1:-status}"
+list_envs() {
+  local json
+  json="$(pio project config -d "$FW_ROOT" --json-output)"
+  echo "$json" | grep -o '"env:[^"]*"' | sed -E 's/"env:(.*)"/\1/' | sort -u
+}
+
+cmd_build() {
+  run_pio run -d "$FW_ROOT" -e "$ENV_NAME"
+}
+
+cmd_flash() {
+  local -a args=(run -d "$FW_ROOT" -e "$ENV_NAME" -t upload)
+  if [[ -n "$PORT" ]]; then
+    args+=(--upload-port "$PORT")
+  fi
+  run_pio "${args[@]}"
+}
+
+cmd_monitor() {
+  local -a args=(device monitor -d "$FW_ROOT" -e "$ENV_NAME")
+  if [[ -n "$PORT" ]]; then
+    args+=(--port "$PORT")
+  fi
+  if [[ -n "$BAUD" ]]; then
+    args+=(--baud "$BAUD")
+  fi
+  run_pio "${args[@]}"
+}
+
+main() {
+  require_cmd pio
+
+  local command="${1:-help}"
   shift || true
-  case "$action" in
-    status)
-      git_cmd status "$@"
-      ;;
-    diff)
-      git_cmd diff "$@"
-      ;;
-    log)
-      local count="20"
-      if [[ "${1:-}" =~ ^[0-9]+$ ]]; then
-        count="$1"
-        shift
-      fi
-      git_cmd log --oneline -n "$count" "$@"
-      ;;
-    branch)
-      git_cmd branch -vv
-      ;;
-    show)
-      git_cmd show "$@"
-      ;;
-    add)
-      git_add "$@"
-      ;;
-    commit)
-      git_commit "$@"
-      ;;
-    stash)
-      git_stash "$@"
-      ;;
-    push)
-      git_push "$@"
-      ;;
-    *)
-      fail "Unknown git action: $action. Use: status, diff, log, branch, show, add, commit, stash, push"
-      ;;
-  esac
-}
 
-
-
-
-# Sous-menu pour afficher les logs (doit être défini avant la boucle principale)
-afficher_logs_menu() {
-  local logs_dir="$FW_ROOT/logs"
-  local files=()
-  local file
-  # Liste les fichiers de log (récents d'abord)
-  while IFS= read -r -d '' f; do
-    files+=("$f")
-  done < <(find "$logs_dir" -type f -print0 | sort -z -r)
-  if [[ ${#files[@]} -eq 0 ]]; then
-    echo "Aucun fichier de log trouvé dans $logs_dir." >&2
-    sleep 2
-    return
-  fi
-  local choix
-  if [[ "$TUI_CMD" == "fzf" ]]; then
-    choix=$(printf '%s\n' "${files[@]}" | fzf --ansi --prompt="❯ Sélectionnez un log : " --header="[Flèches] naviguer, [Entrée] afficher, [Échap] retour" --height=15 --border)
-    [[ -z "$choix" ]] && return
-  elif [[ "$TUI_CMD" == "dialog" || "$TUI_CMD" == "whiptail" ]]; then
-    local menu_args=()
-    local idx=1
-    for f in "${files[@]}"; do
-      menu_args+=("$idx" "$(basename "$f")")
-      ((idx++))
-    done
-    if [[ "$TUI_CMD" == "dialog" ]]; then
-      idx=$(dialog --clear --title "Logs firmware" --menu "Sélectionnez un log :" 20 70 15 "${menu_args[@]}" 3>&1 1>&2 2>&3)
-    else
-      idx=$(whiptail --title "Logs firmware" --menu "Sélectionnez un log :" 20 70 15 "${menu_args[@]}" 3>&1 1>&2 2>&3)
-    fi
-    [[ -z "$idx" ]] && return
-    choix="${files[idx-1]}"
-  else
-    echo -e "\033[1;36mFichiers de log disponibles :\033[0m" >&2
-    local i=1
-    for f in "${files[@]}"; do
-      echo "  $i) $(basename "$f")" >&2
-      ((i++))
-    done
-    echo -en "Numéro du log à afficher (ou Entrée pour retour) : " >&2
-    read -r idx
-    [[ -z "$idx" ]] && return
-    if [[ "$idx" =~ ^[0-9]+$ ]] && (( idx >= 1 && idx <= ${#files[@]} )); then
-      choix="${files[idx-1]}"
-    else
-      echo "Entrée invalide." >&2
-      sleep 1
-      return
-    fi
-  fi
-  echo -e "\033[1;33m--- Dernières lignes de : $choix ---\033[0m"
-  tail -n 15 "$choix"
-  echo -e "\033[1;36m--- Appuyez sur Entrée pour revenir au menu ---\033[0m"
-  read -r _
-}
-
-
-
-# Mode CLI (compatibilité zacus.sh)
-command=${1:-}
-if [[ -n "$command" ]]; then
   case "$command" in
-    bootstrap)
-      run_bootstrap; exit $? ;;
-    build)
-      run_build_all; exit $? ;;
-    drivers)
-      # Audit des drivers pour la plateforme passée en 2e argument
-      platform=${2:-}
-      if [[ -z "$platform" ]]; then echo "Usage: cockpit.sh drivers <platform>"; exit 1; fi
-      log "[AGENT] Audit drivers $platform"
-      # Appel d’un helper centralisé ou d’un script spécifique si existant
-      if [[ -f "$FW_ROOT/tools/dev/agent_utils.sh" ]]; then
-        source "$FW_ROOT/tools/dev/agent_utils.sh"
-        drivers_audit "$platform"
-      else
-        echo "[TODO] Implémenter drivers_audit pour $platform"; exit 1
-      fi
-      exit $? ;;
-    test)
-      # Audit des tests hardware pour la plateforme passée en 2e argument
-      platform=${2:-}
-      if [[ -z "$platform" ]]; then echo "Usage: cockpit.sh test <platform>"; exit 1; fi
-      log "[AGENT] Audit tests $platform"
-      if [[ -f "$FW_ROOT/tools/dev/agent_utils.sh" ]]; then
-        source "$FW_ROOT/tools/dev/agent_utils.sh"
-        tests_audit "$platform"
-      else
-        echo "[TODO] Implémenter tests_audit pour $platform"; exit 1
-      fi
-      exit $? ;;
-    flash)
-      flash_all; exit $? ;;
-    rc)
-      run_rc_live; exit $? ;;
-    rc-autofix)
-      "$FW_ROOT/tools/dev/zacus.sh" rc-autofix; exit $? ;;
+    help|-h|--help)
+      usage
+      ;;
+    envs)
+      list_envs
+      ;;
     ports)
-      ports_watch; exit $? ;;
-    plan)
-      shift || true
-      if [[ $# -lt 1 ]]; then
-        echo "Usage: cockpit.sh plan <agent> [--dry-run|--plan-only]" >&2
-        exit 1
-      fi
-      plan_agent="$1"
-      shift
-      "$FW_ROOT/tools/dev/plan_runner.sh" --agent "$plan_agent" "$@"
-      exit $? ;;
-
-    git)
-      shift || true
-      run_git "$@"; exit $? ;;
-    latest)
-      latest_artifacts; exit $? ;;
-    audit)
-      run_audit_all; exit $? ;;
-    report)
-      run_sync_report; exit $? ;;
-    cleanup)
-      run_cleanup; exit $? ;;
-    codex-check)
-      run_codex_check; exit $? ;;
-    codex-audit)
-      # Audit Codex manuel (audit + autogen)
-      codex_cli_audit
-      if command -v codex >/dev/null 2>&1; then
-        if [[ -d "$PROMPT_DIR" ]]; then
-          PROMPT_FILE=$(ls -1 "$PROMPT_DIR"/*.prompt*.md 2>/dev/null | head -n1)
-          if [[ -n "$PROMPT_FILE" ]]; then
-            echo "codex: génération automatique (prompt: $PROMPT_FILE)"
-            codex "$PROMPT_FILE" > "$ARTIFACTS_ROOT/codex_autogen_$(date -u +"%Y%m%d-%H%M%S").md" 2>&1 || echo "codex: génération échouée"
-          else
-            echo "codex: aucun prompt trouvé pour génération automatique"
-          fi
-        else
-          echo "codex: dossier de prompts manquant"
-        fi
-      else
-        echo "codex: non disponible, génération automatique sautée"
-      fi
-      exit $? ;;
-    help|--help|-h)
-      afficher_aide; exit 0 ;;
-    wifi-debug)
-      monitor_wifi_debug_serial; exit $? ;;
+      run_pio device list
+      ;;
+    build)
+      parse_env_and_options "$@"
+      ensure_no_extra_args
+      cmd_build
+      ;;
+    flash)
+      parse_env_and_options "$@"
+      ensure_no_extra_args
+      cmd_flash
+      ;;
+    monitor)
+      parse_env_and_options "$@"
+      ensure_no_extra_args
+      cmd_monitor
+      ;;
+    go)
+      parse_env_and_options "$@"
+      ensure_no_extra_args
+      cmd_build
+      cmd_flash
+      cmd_monitor
+      ;;
     *)
-      echo "Usage: cockpit.sh <command>"; exit 1 ;;
+      echo "[fail] unknown command: $command" >&2
+      usage >&2
+      exit 2
+      ;;
   esac
-fi
+}
 
-# Boucle principale : tout est dans show_menu
-show_menu
+main "$@"

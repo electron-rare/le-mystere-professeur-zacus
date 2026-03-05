@@ -1,27 +1,27 @@
-# Stations détaillées
+# Stations detaillees
 
-## Atelier des ondes
+## Atelier des Ondes
 
-- Focus : stabiliser un LA 440 Hz propre et constant.
-- Clue : une consigne rappelle que la référence audio juste est la seule ancre fiable pour la suite.
+- Focus : Stabiliser la référence LA 440 Hz pour recaler U-SON.
+- Clue : La force ne sert à rien. Seule la stabilité ouvre le premier verrou.
 
-## Zone 4 — Studio de Résonance
+## Zone 4 — Studio de Résonance (Piano Alphabet)
 
-- Focus : jouer le code LEFOU via un piano-alphabet brouillé.
-- Clue : les lettres sont collées en ordre aléatoire sur les touches blanches, avec A placé sur la touche du LA 440.
+- Focus : Jouer 5 lettres sur le piano-alphabet pour valider l’accès.
+- Clue : Le Fou ne valide pas la force. Il valide son nom.
 
-## Salle des archives
+## Salle des Archives
 
-- Focus : localiser la clé finale et valider le déverrouillage.
-- Clue : le QR final WIN est caché derrière le portrait.
+- Focus : Trouver et scanner la clé finale.
+- Clue : Regarde là où Zacus surveille toujours.
 
 ## Puzzles
 
-- la-440 (audio) : produire un LA 440 stable déclenche la validation de l'étape 1.
-  Effet : confirmation audio et ouverture de l'étape Zone 4.
+- PUZZLE_LA_440 (audio / stabilisation) : Produire un LA 440 Hz stable.
+  Effet : Le son doit rester stable quelques secondes ; l’écran/LED confirme l’alignement. Ensuite, la transmission Étape 1 peut être validée (ACK_WIN1).
 
-- piano-lefou (logique) : retrouver puis jouer L-E-F-O-U sur le piano à lettres brouillées, en utilisant l'ancre A=LA 440.
-  Effet : validation de l'étape 2 et indice explicite vers les Archives.
+- PUZZLE_PIANO_ALPHABET_5 (piano / code lettres) : Jouer 5 lettres sur le piano-alphabet.
+  Effet : Validation “réelle terrain” : le MJ écoute/observe la séquence, puis déclenche la transition (unlock / BTN_NEXT / serial) vers la confirmation Étape 2.
 
-- qr-win (observation) : scanner le QR avec payload WIN derrière le portrait de la salle des Archives.
-  Effet : déverrouille le media manager et la conclusion narrative.
+- PUZZLE_QR_WIN (recherche / scan) : Scanner le QR final.
+  Effet : Timeout 30s → QR_TIMEOUT → retour étape précédente + backup MJ.

@@ -36,7 +36,7 @@ Le MJ déroule une session fluide, avec des checkpoints et une fin satisfaisante
 ## 🕹️ Pour qui / durée
 
 - **Joueurs** : 6–14 (recommandé), ou équipes de 2–4
-- **Durée** : 60–90 min (modulable)
+- **Durée** : 105 min (45 + 60, modulable)
 - **Âge** : famille / anniversaire (adaptable)
 - **Matériel** : imprimante + modules électroniques (ESP32 + écran tactique) requis pour chaque partie
 
@@ -57,7 +57,7 @@ Le scénario principal est dans `game/scenarios/`. Il pilote :
 - les exports (briefs MJ, docs, manifestes).
 
 ### Pipeline du repo
-`game/scenarios/*.yaml → tools/ (validate + export) → kit MJ / printables / audio → hardware/firmware/esp32`
+`game/scenarios/*.yaml -> tools/ (validate + export) -> kit MJ / printables / audio -> hardware/firmware/`
 
 ![Diagramme](./docs/assets/diagram.png)
 
@@ -84,12 +84,19 @@ bash tools/setup/install_validators.sh
 
 Valider le scénario officiel :
 ```bash
-python3 tools/scenario/validate_scenario.py game/scenarios/zacus_v1.yaml
+python3 tools/scenario/validate_scenario.py game/scenarios/zacus_v2.yaml
 ```
 
 Exporter un brief Markdown :
 ```bash
-python3 tools/scenario/export_md.py game/scenarios/zacus_v1.yaml -o docs/exports/zacus_v1.md
+python3 tools/scenario/export_md.py game/scenarios/zacus_v2.yaml -o docs/exports/zacus_v2.md
+```
+
+Frontend canon (V2) :
+```bash
+cd frontend-scratch-v2
+npm install
+VITE_STORY_API_BASE=http://<esp_ip>:8080 npm run dev
 ```
 
 ---

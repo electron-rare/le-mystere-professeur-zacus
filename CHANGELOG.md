@@ -1,8 +1,8 @@
 # Changelog
 
 ## [Unreleased]
-- Workflow : nouvelle exportation `tools/scenario/export_md.py` et briefs Markdown (kit + `docs/_generated/SCENARIO_BRIEF.md`) alignés sur `game/scenarios/zacus_v1.yaml`.
-- Printables : manifeste `printables/manifests/zacus_v1_printables.yaml`, prompts dédiés pour chaque asset et `tools/printables/validate_manifest.py` pour éviter les trous entre IDs et fichiers.
+- Workflow : nouvelle exportation `tools/scenario/export_md.py` et briefs Markdown (kit + `docs/_generated/SCENARIO_BRIEF.md`) alignés sur `game/scenarios/zacus_v2.yaml`.
+- Printables : manifeste `printables/manifests/zacus_v2_printables.yaml`, prompts dédiés pour chaque asset et `tools/printables/validate_manifest.py` pour éviter les trous entre IDs et fichiers.
 - Documentation : AGENTS, WORKFLOWS, GLOSSARY, Quickstart, index et le Makefile rappellent que le YAML est la single source of truth et listent les commandes standard de validation/export.
 - Tooling : `tools/scenario/validate_scenario.py`, `tools/audio/validate_manifest.py`, `tools/scenario/export_md.py` et `tools/printables/validate_manifest.py` accompagnés par `Makefile` facilitent la maintenance.
 - Automation : workflow GitHub `.github/workflows/validate.yml` installe PyYAML puis lance les validations de scénario, audio et printables.

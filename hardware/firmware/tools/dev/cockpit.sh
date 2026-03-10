@@ -401,9 +401,15 @@ if [[ -n "$command" ]]; then
       # Appel d’un helper centralisé ou d’un script spécifique si existant
       if [[ -f "$FW_ROOT/tools/dev/agent_utils.sh" ]]; then
         source "$FW_ROOT/tools/dev/agent_utils.sh"
-        drivers_audit "$platform"
+        if declare -f drivers_audit >/dev/null 2>&1; then
+          drivers_audit "$platform"
+        else
+          echo "[warn] drivers_audit absent, fallback sur matrix+smoke pour $platform"
+          "$FW_ROOT/tools/dev/run_matrix_and_smoke.sh" --build --env "$platform"
+        fi
       else
-        echo "[TODO] Implémenter drivers_audit pour $platform"; exit 1
+        echo "[warn] agent_utils.sh absent, fallback sur matrix+smoke pour $platform"
+        "$FW_ROOT/tools/dev/run_matrix_and_smoke.sh" --build --env "$platform"
       fi
       exit $? ;;
     test)
@@ -413,9 +419,15 @@ if [[ -n "$command" ]]; then
       log "[AGENT] Audit tests $platform"
       if [[ -f "$FW_ROOT/tools/dev/agent_utils.sh" ]]; then
         source "$FW_ROOT/tools/dev/agent_utils.sh"
-        tests_audit "$platform"
+        if declare -f tests_audit >/dev/null 2>&1; then
+          tests_audit "$platform"
+        else
+          echo "[warn] tests_audit absent, fallback tests+smoke pour $platform"
+          "$FW_ROOT/tools/dev/run_matrix_and_smoke.sh" --test --smoke --env "$platform"
+        fi
       else
-        echo "[TODO] Implémenter tests_audit pour $platform"; exit 1
+        echo "[warn] agent_utils.sh absent, fallback tests+smoke pour $platform"
+        "$FW_ROOT/tools/dev/run_matrix_and_smoke.sh" --test --smoke --env "$platform"
       fi
       exit $? ;;
     flash)

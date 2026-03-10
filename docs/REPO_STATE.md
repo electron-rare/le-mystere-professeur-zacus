@@ -1,11 +1,11 @@
 <!-- REPO_STATE:v1 -->
 Repo: le-mystere-professeur-zacus
 Branch: codex/repo-state-zacus
-HEAD: 3fec631c43c66a6ae12c12d2f652c8800d22b28f
-HeadDate: 2026-02-21T02:59:01+01:00
-HeadSubject: feat(freenove): stabilize fallback AP outside local wifi (#103)
+HEAD: 7b62f7d76e4b308b6388a08b8219c72a408a5829
+HeadDate: 2026-02-21T03:24:00+01:00
+HeadSubject: [codex] add repo_state generator and workflow
 RepoURL: https://github.com/electron-rare/le-mystere-professeur-zacus.git
 ProjectKind: hardware_firmware_hybrid
-PivotChanges: [{"path": "hardware/firmware/data/story/apps/APP_WIFI.json", "tags": ["firmware_build_test", "hardware_validation"]}, {"path": "hardware/firmware/docs/AGENT_TODO.md", "tags": ["firmware_build_test", "hardware_validation"]}, {"path": "hardware/firmware/hardware/firmware/ui_freenove_allinone/include/network_manager.h", "tags": ["firmware_build_test", "hardware_validation"]}, {"path": "hardware/firmware/hardware/firmware/ui_freenove_allinone/src/main.cpp", "tags": ["firmware_build_test", "hardware_validation"]}, {"path": "hardware/firmware/hardware/firmware/ui_freenove_allinone/src/network_manager.cpp", "tags": ["firmware_build_test", "hardware_validation"]}]
-ImpactGates: firmware_build_test, hardware_validation
-GeneratedAtUTC: 2026-02-21T02:23:01Z
+PivotChanges: [{"path": ".github/workflows/repo_state.yml", "tags": ["general_change"]}, {"path": "docs/REPO_STATE.md", "tags": ["docs_specs_sync"]}, {"path": "docs/repo_state.json", "tags": ["docs_specs_sync"]}, {"path": "tools/repo_state/collect.py", "tags": ["agentic_orchestration"]}]
+ImpactGates: agentic_orchestration, docs_specs_sync, general_change
+GeneratedAtUTC: 2026-02-21T03:00:11Z

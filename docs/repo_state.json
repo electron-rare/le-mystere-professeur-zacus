@@ -1,52 +1,42 @@
 {
   "schema_version": "repo_state.v1",
-  "generated_at_utc": "2026-02-21T02:23:01Z",
+  "generated_at_utc": "2026-02-21T03:00:11Z",
   "repo": "le-mystere-professeur-zacus",
   "repo_url": "https://github.com/electron-rare/le-mystere-professeur-zacus.git",
   "branch": "codex/repo-state-zacus",
-  "head": "3fec631c43c66a6ae12c12d2f652c8800d22b28f",
-  "head_date": "2026-02-21T02:59:01+01:00",
-  "head_subject": "feat(freenove): stabilize fallback AP outside local wifi (#103)",
+  "head": "7b62f7d76e4b308b6388a08b8219c72a408a5829",
+  "head_date": "2026-02-21T03:24:00+01:00",
+  "head_subject": "[codex] add repo_state generator and workflow",
   "project_kind": "hardware_firmware_hybrid",
   "pivot_changes": [
     {
-      "path": "hardware/firmware/data/story/apps/APP_WIFI.json",
+      "path": ".github/workflows/repo_state.yml",
       "tags": [
-        "firmware_build_test",
-        "hardware_validation"
+        "general_change"
       ]
     },
     {
-      "path": "hardware/firmware/docs/AGENT_TODO.md",
+      "path": "docs/REPO_STATE.md",
       "tags": [
-        "firmware_build_test",
-        "hardware_validation"
+        "docs_specs_sync"
       ]
     },
     {
-      "path": "hardware/firmware/hardware/firmware/ui_freenove_allinone/include/network_manager.h",
+      "path": "docs/repo_state.json",
       "tags": [
-        "firmware_build_test",
-        "hardware_validation"
+        "docs_specs_sync"
       ]
     },
     {
-      "path": "hardware/firmware/hardware/firmware/ui_freenove_allinone/src/main.cpp",
+      "path": "tools/repo_state/collect.py",
       "tags": [
-        "firmware_build_test",
-        "hardware_validation"
-      ]
-    },
-    {
-      "path": "hardware/firmware/hardware/firmware/ui_freenove_allinone/src/network_manager.cpp",
-      "tags": [
-        "firmware_build_test",
-        "hardware_validation"
+        "agentic_orchestration"
       ]
     }
   ],
   "impact_gates": [
-    "firmware_build_test",
-    "hardware_validation"
+    "agentic_orchestration",
+    "docs_specs_sync",
+    "general_change"
   ]
 }

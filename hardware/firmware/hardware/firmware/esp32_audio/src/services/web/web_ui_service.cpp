@@ -170,7 +170,8 @@ void WebUiService::begin(WifiService* wifi,
     return;
   }
 
-  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+  // CORS: restrict to local origins only (no wildcard)
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "http://localhost");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   DefaultHeaders::Instance().addHeader("Access-Control-Max-Age", "3600");

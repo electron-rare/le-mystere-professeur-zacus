@@ -63,8 +63,8 @@ bool LaDetector::beginI2sInput() {
   i2sConfig.mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_RX);
   i2sConfig.sample_rate = static_cast<int>(config::kDetectFs);
   i2sConfig.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
-  i2sConfig.channel_format = config::kMicI2SUseLeftChannel ? I2S_CHANNEL_FMT_ONLY_LEFT
-                                                            : I2S_CHANNEL_FMT_ONLY_RIGHT;
+  // Mono mic: use ONLY_LEFT format (compatible with I2S_CHANNEL_MONO below)
+  i2sConfig.channel_format = I2S_CHANNEL_FMT_ONLY_LEFT;
   i2sConfig.communication_format = I2S_COMM_FORMAT_STAND_I2S;
   i2sConfig.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
   i2sConfig.dma_buf_count = 4;

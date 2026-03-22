@@ -25,5 +25,12 @@ if [[ ! -f "$REQ_FILE" ]]; then
   exit 1
 fi
 
-"$PYTHON_BIN" -m pip install --user -r "$REQ_FILE"
+install_args=(--user -r "$REQ_FILE")
+if "$PYTHON_BIN" -m pip install "${install_args[@]}"; then
+  echo "[install-validators] ok installed requirements from $REQ_FILE"
+  exit 0
+fi
+
+echo "[install-validators] retrying with --break-system-packages" >&2
+"$PYTHON_BIN" -m pip install --break-system-packages "${install_args[@]}"
 echo "[install-validators] ok installed requirements from $REQ_FILE"

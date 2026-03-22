@@ -1,82 +1,98 @@
 # Quickstart
 
-## En un coup d’œil
-- Source de vérité : `game/scenarios/zacus_v2.yaml` (dérive tout le reste : kit MJ, audio, printables).
-- Public : 6 à 14 enfants, 105 minutes (45 + 60).
-- Matériel : `kit-maitre-du-jeu/`, `printables/`, `game/scenarios/zacus_v2.yaml`, `audio/manifests/zacus_v2_audio.yaml`, `hardware/firmware/` (ESP32 + écran tactile).
-- Licences : contenus créatifs CC BY-NC 4.0 (`LICENSES/CC-BY-NC-4.0.txt`), code/script MIT (`LICENSES/MIT.txt`).
+## Vue canonique
+- Source de vérité: `game/scenarios/zacus_v2.yaml`
+- Studio auteur: `frontend-scratch-v2/`
+- Runtime portable: Zacus Runtime 3
+- Cible terrain principale: `hardware/firmware` sur `freenove_esp32s3`
+- Shell d'orchestration: `tools/dev/zacus.sh`
 
-## Installer
-1. Copie les imprimables depuis `printables/export/pdf/` ou génère-les via `printables/manifests/zacus_v2_printables.yaml` + `printables/src/prompts/`.
-2. Prépare un lecteur audio avec `audio/manifests/zacus_v2_audio.yaml` et les fichiers de `game/prompts/audio/`.
-3. Positionne les stations selon `kit-maitre-du-jeu/plan-stations-et-mise-en-place.md`, prépare les rôles (`distribution-des-roles.md`) et l’accueil rapide (`script-minute-par-minute.md`).
-4. Flash et configure l’ESP32 en suivant `hardware/firmware/README.md` pour que l’interface réagisse aux stations imprimées.
-
-## Préparer l’électronique
-
-1. Installe PlatformIO (`pip install -U platformio`) et branche l’ESP32 décrit dans `hardware/firmware/README.md`, écran + alim.
-2. Compile/flash avec un profil supporté (`pio run -e esp32dev -t upload`), puis charge les assets `pio run -e esp32dev -t uploadfs` si nécessaire.
-3. Vérifie que l’écran affiche le scénario (`python3 tools/scenario/validate_scenario.py ...`), la connectique audio/led est prête, et que l’ESP32 reste branché pendant toute la partie.
-
-## Déroulé express
-1. Accueil + immersion (0-10 min) : boucle audio d’`intro.md`, attribution des rôles, mise au courant sur les règles anti-chaos.
-2. Support d’enquête (10-80 min) : station par station, fiche d’enquête, audio `incident.md`, indices printables.
-3. Synthèse & final (80-105 min) : audio `accusation.md`, accusation finale, audio `solution.md`, lecture `solution-complete.md`.
-
-## Outils de validation
-- Scénario : `python3 tools/scenario/validate_scenario.py game/scenarios/zacus_v2.yaml`
-- Audio : `python3 tools/audio/validate_manifest.py audio/manifests/zacus_v2_audio.yaml`
-- Printables : `python3 tools/printables/validate_manifest.py printables/manifests/zacus_v2_printables.yaml`
-- Export Markdown : `python3 tools/scenario/export_md.py game/scenarios/zacus_v2.yaml`
-
-## Frontend V2
-- Frontend canon : `frontend-scratch-v2/`.
-- Démarrage :
-  - `cd frontend-scratch-v2`
-  - `npm install`
-  - `VITE_STORY_API_BASE=http://<esp_ip>:8080 npm run dev`
-
-## Outils test firmware
-
-Entrée rapide:
-
+## Valider le contenu
 ```bash
-python3 tools/test/zacus_menu.py
+bash tools/setup/install_validators.sh
+bash tools/test/run_content_checks.sh --install-missing
 ```
 
-Codex CLI intégré : `./tools/dev/zacus.sh codex --prompt tools/dev/codex_prompts/zacus_overhaul_one_shot.md`
-Préflight USB ZeroClaw : `./tools/dev/zacus.sh zeroclaw-preflight --require-port`
+Checks inclus:
+- validation scénario
+- compilation Runtime 3
+- simulation Runtime 3
+- validation runtime bundle
+- validation audio
+- validation printables
+- export Markdown
 
-Checks contenu (sans hardware):
-
+## Compiler le runtime portable
 ```bash
-bash tools/test/run_content_checks.sh
+python3 tools/scenario/compile_runtime3.py game/scenarios/zacus_v2.yaml
+python3 tools/scenario/simulate_runtime3.py game/scenarios/zacus_v2.yaml
+python3 tools/scenario/verify_runtime3_pivots.py game/scenarios/zacus_v2.yaml
+python3 -m unittest discover -s tests/runtime3 -p 'test_*.py'
+python3 tools/scenario/export_runtime3_firmware_bundle.py game/scenarios/zacus_v2.yaml
 ```
 
-Suites série disponibles:
-
+Ou via le shell canonique:
 ```bash
-python3 tools/test/run_serial_suite.py --list-suites
+./tools/dev/zacus.sh runtime3-compile
+./tools/dev/zacus.sh runtime3-simulate
+./tools/dev/zacus.sh runtime3-verify
+./tools/dev/zacus.sh runtime3-test
+./tools/dev/zacus.sh frontend-test
 ```
 
-Mode laptop/CI (sans carte branchée):
+Les artefacts sont écrits sous `artifacts/runtime3/<timestamp>/`.
+Le bundle firmware canonique est écrit dans `hardware/firmware/data/story/runtime3/DEFAULT.json`.
 
+## Démarrer le studio React + Blockly
 ```bash
-python3 tools/test/run_serial_suite.py --suite smoke_plus --allow-no-hardware
-python3 tools/test/zacus_menu.py --action smoke --allow-no-hardware
+cd frontend-scratch-v2
+npm install
+npm test
+npm run lint
+VITE_STORY_API_BASE=http://<esp_ip>:8080 npm run dev
 ```
 
-Pour résoudre les ports sans matériel, la commande `./tools/dev/zacus.sh ports` écrit le JSON contractuel dans `artifacts/ports/<timestamp>/ports_resolve.json` et met à jour `artifacts/ports/latest_ports_resolve.json`. Pour mocker les CP2102 utilisez `ZACUS_MOCK_PORTS=1 ZACUS_PORTS_FIXTURE=tools/test/fixtures/ports_list_macos.txt ./tools/dev/zacus.sh ports`.
+Pour un build local:
+```bash
+./tools/dev/zacus.sh frontend-build
+```
 
-Codex CLI intégré : `./tools/dev/zacus.sh codex --prompt tools/dev/codex_prompts/zacus_overhaul_one_shot.md`. Le script note aussi l’état des ports résolus et place les logs dans `artifacts/codex/<timestamp>/`.
+## Générer la documentation
+```bash
+python3 -m pip install --user --break-system-packages -r tools/requirements/docs.txt
+python3 -m mkdocs build --strict
+```
 
-Guide orchestration ZeroClaw: `docs/zeroclaw_orchestration.md`
+Ou:
+```bash
+./tools/dev/zacus.sh docs-build
+```
 
-Dépendances optionnelles:
-- `pip install pyyaml` pour `run_content_checks.sh`
-- `pip install pyserial` pour suites USB, UI Link sim et console série
+## Valider le firmware
+```bash
+cd hardware/firmware
+pio run -e freenove_esp32s3
+pio run -e esp8266_oled
+```
 
-## Pour aller plus loin
-- Crée une variante : duplique le YAML, modifie `canon` et `solution` et revalide avec le script.
-- Ajoute des cartes imprimables en t’inspirant des prompts dans `printables/src/prompts/`.
-- Mets à jour ce quickstart via un PR si le montage change (p. ex. nouvelle station ou nouvelle plage horaire).
+Chemin mono-carte recommandé:
+```bash
+cd hardware/firmware
+ZACUS_ENV="freenove_esp32s3" ./tools/dev/run_matrix_and_smoke.sh
+```
+
+## Utiliser le shell Zacus
+```bash
+./tools/dev/zacus.sh content-checks
+./tools/dev/zacus.sh ports
+./tools/dev/zacus.sh artifacts-summary
+./tools/dev/zacus.sh menu
+```
+
+Le menu utilise `gum` si disponible et repasse en mode texte sinon.
+
+## Où regarder ensuite
+- `docs/architecture/index.md`
+- `plans/master-plan.md`
+- `todos/master.md`
+- `hardware/firmware/docs/AGENT_TODO.md`

@@ -12,8 +12,8 @@ Entire repository; project manager + tech lead + QA gatekeeper as per `AGENTS.md
 - Touch licensing text or use destructive git commands without explicit requests.
 
 ## Gates
-- PlatformIO matrix (`pio run -e esp32dev`, `esp32_release`, `esp8266_oled`, `ui_rp2040_ili9488`, `ui_rp2040_ili9486`).
-- Scenario/audio/printables validators from `docs/AGENTS_INDEX.md`.
+- PlatformIO release gates (`pio run -d hardware/firmware -e freenove_esp32s3`, `pio run -d hardware/firmware -e esp8266_oled`).
+- Scenario/audio/printables validators plus Runtime 3 checks from `Makefile` and `tools/test/run_content_checks.sh`.
 
 ## References
 - `AGENTS.md`
@@ -24,13 +24,11 @@ Entire repository; project manager + tech lead + QA gatekeeper as per `AGENTS.md
    - run: git status -sb
    - run: git diff --stat
 2. Exécuter la matrice PlatformIO complète via PlatformIO.
-   - run: pio run -e esp32dev
-   - run: pio run -e esp32_release
-   - run: pio run -e esp8266_oled
-   - run: pio run -e ui_rp2040_ili9488
-   - run: pio run -e ui_rp2040_ili9486
+   - run: pio run -d hardware/firmware -e freenove_esp32s3
+   - run: pio run -d hardware/firmware -e esp8266_oled
 3. Valider les scénarios et manifestes croisés.
-   - run: python3 tools/scenario/validate_scenario.py game/scenarios/zacus_v1.yaml
-   - run: python3 tools/scenario/export_md.py game/scenarios/zacus_v1.yaml
-   - run: python3 tools/audio/validate_manifest.py audio/manifests/zacus_v1_audio.yaml
-   - run: python3 tools/printables/validate_manifest.py printables/manifests/zacus_v1_printables.yaml
+   - run: python3 tools/scenario/validate_scenario.py game/scenarios/zacus_v2.yaml
+   - run: python3 tools/scenario/export_md.py game/scenarios/zacus_v2.yaml
+   - run: python3 tools/audio/validate_manifest.py audio/manifests/zacus_v2_audio.yaml
+   - run: python3 tools/printables/validate_manifest.py printables/manifests/zacus_v2_printables.yaml
+   - run: python3 tools/scenario/verify_runtime3_pivots.py game/scenarios/zacus_v2.yaml

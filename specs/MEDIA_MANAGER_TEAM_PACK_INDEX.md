@@ -10,8 +10,8 @@
 - Runbook sync (section FW): `specs/MEDIA_MANAGER_SYNC_RUNBOOK.md`
 
 ## Pack Equipe Front-end
-- Handoff opérationnel frontend: `fronted dev web UI/specs/MEDIA_MANAGER_FRONTEND_HANDOFF.md`
-- Spécification détaillée frontend: `fronted dev web UI/specs/MEDIA_MANAGER_FRONTEND_SPEC.md`
+- Handoff opérationnel frontend: `specs/MEDIA_MANAGER_FRONTEND_HANDOFF.md`
+- Spécification détaillée frontend: `specs/MEDIA_MANAGER_FRONTEND_SPEC.md`
 - Runbook sync (section WEB): `specs/MEDIA_MANAGER_SYNC_RUNBOOK.md`
 - Contrat runtime API global: `specs/FIRMWARE_WEB_DATA_CONTRACT.md`
 

@@ -123,9 +123,9 @@ Coordonner les agents et developpeurs pour:
 - `python3 tools/scenario/export_md.py game/scenarios/zacus_v2.yaml`
 - `python3 tools/audio/validate_manifest.py audio/manifests/zacus_v2_audio.yaml`
 - `python3 tools/printables/validate_manifest.py printables/manifests/zacus_v2_printables.yaml`
-- `npm --prefix 'fronted dev web UI' run lint`
-- `npm --prefix 'fronted dev web UI' run build`
-- `npm --prefix 'fronted dev web UI' run test:unit -- --run`
+- `npm --prefix 'frontend-scratch-v2' run lint`
+- `npm --prefix 'frontend-scratch-v2' run build`
+- importer/exporter YAML + IR Runtime 3 sans perte fonctionnelle
 
 ## Regle de handoff entre agents
 Chaque ticket passe seulement avec ces evidences:

@@ -9,6 +9,7 @@
 Ce contrat couvre les payloads utilises par l'integration Web:
 1. Story V2 (`/api/story/*`, WebSocket `/api/story/stream`)
 2. Legacy Freenove (`/api/status`, `/api/stream`, `/api/scenario/*`, `/api/control`, `/api/network/*`)
+3. Runtime 3 adapter (`/api/runtime3/*`)
 
 Le contrat est strict sur les champs consommes par le frontend.
 
@@ -246,7 +247,19 @@ Reponse 200 (core minimal consomme):
     "scenario": "DEFAULT",
     "step": "SCENE_LEFOU_DETECTOR",
     "screen": "SCENE_LEFOU_DETECTOR",
-    "audio_pack": "PACK_CONFIRM_WIN_ETAPE2"
+    "audio_pack": "PACK_CONFIRM_WIN_ETAPE2",
+    "runtime_contract": "runtime3+story_v2_adapter"
+  },
+  "runtime3": {
+    "discovered": true,
+    "loaded": true,
+    "path": "/story/runtime3/DEFAULT.json",
+    "schema_version": "zacus.runtime3.v1",
+    "scenario_id": "ZACUS_V2",
+    "entry_step_id": "STEP_U_SON_PROTO",
+    "step_count": 9,
+    "transition_count": 8,
+    "error": ""
   },
   "network": {
     "state": "STA",
@@ -254,6 +267,33 @@ Reponse 200 (core minimal consomme):
   }
 }
 ```
+
+### 4) Runtime 3 adapter
+
+### 4.1 GET `/api/runtime3/status`
+Réponse 200:
+```json
+{
+  "discovered": true,
+  "loaded": true,
+  "path": "/story/runtime3/DEFAULT.json",
+  "schema_version": "zacus.runtime3.v1",
+  "scenario_id": "ZACUS_V2",
+  "scenario_version": 3,
+  "entry_step_id": "STEP_U_SON_PROTO",
+  "source_kind": "yaml",
+  "generated_by": "tools/scenario/compile_runtime3.py",
+  "migration_mode": "firmware_import",
+  "step_count": 9,
+  "transition_count": 8,
+  "size_bytes": 4096,
+  "error": ""
+}
+```
+
+### 4.2 GET `/api/runtime3/document`
+- Retourne le document Runtime 3 actuellement chargé depuis LittleFS.
+- Réponse `404` si aucun artefact Runtime 3 n’est disponible.
 
 Schema core (strict):
 ```json

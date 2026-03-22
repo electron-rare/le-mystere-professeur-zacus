@@ -9,7 +9,7 @@
 - Keep scripts non-interactive when possible and surface a short, grep-friendly summary.
 
 ## Must Not
-- Skip recording logs/commands in `hardware/firmware/logs/` or the runbook (`docs/AGENT_TODO.md`).
+- Skip recording logs/commands in `hardware/firmware/logs/` or the runbook (`hardware/firmware/docs/AGENT_TODO.md`).
 - Hardcode static port/device names that would break on other machines.
 
 ## References

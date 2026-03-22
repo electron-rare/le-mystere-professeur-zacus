@@ -1,0 +1,98 @@
+# =============================================================================
+# TTS Services for Zacus Voice Pipeline
+# =============================================================================
+# Deploy on Tower (clems@192.168.0.120) for Piper (CPU-only, 31GB RAM)
+# Deploy on KXKM-AI (kxkm@kxkm-ai) for XTTS-v2 (RTX 4090 24GB)
+# DO NOT deploy on VM (192.168.0.119) — too small (6.8GB RAM)
+#
+# Usage:
+#   # Piper only (CPU, any machine):
+#   docker compose -f docker-compose.tts.yml up -d piper-tts
+#
+#   # Both Piper + XTTS (GPU machine only):
+#   docker compose -f docker-compose.tts.yml --profile gpu up -d
+#
+#   # Test Piper:
+#   curl -X POST http://localhost:8000/v1/audio/speech \
+#     -H "Content-Type: application/json" \
+#     -d '{"model":"tts-1","voice":"fr_FR-siwis-medium","input":"Bonjour, je suis le Professeur Zacus."}' \
+#     --output test.wav
+#
+#   # Test XTTS-v2:
+#   curl -X POST http://localhost:5002/api/tts \
+#     -H "Content-Type: application/json" \
+#     -d '{"text":"Bonjour, je suis le Professeur Zacus.","language":"fr","speaker_wav":"/voice_samples/zacus_ref.wav"}' \
+#     --output test.wav
+# =============================================================================
+
+version: "3.8"
+
+services:
+  # ---------------------------------------------------------------------------
+  # Piper TTS — Fast, CPU-only, French
+  # ---------------------------------------------------------------------------
+  # OpenAI-compatible TTS API (openedai-speech wrapper around Piper)
+  # Latency: ~200ms for short sentences on CPU
+  # French voices: fr_FR-siwis-medium, fr_FR-upmc-medium
+  # API: POST /v1/audio/speech (OpenAI-compatible)
+  # ---------------------------------------------------------------------------
+  piper-tts:
+    image: ghcr.io/matatonic/openedai-speech:latest
+    container_name: zacus-tts-piper
+    ports:
+      - "8000:8000"
+    volumes:
+      - tts_voices:/app/voices
+    environment:
+      - TTS_HOME=voices
+      - HF_HOME=voices
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # Coqui XTTS-v2 — Voice Cloning, GPU Required
+  # ---------------------------------------------------------------------------
+  # Only deploy on KXKM-AI (RTX 4090, 24GB VRAM)
+  # Can clone Professeur Zacus's voice from ~30s of reference audio
+  # Place reference audio in ./voice_samples/zacus_ref.wav
+  # API: POST /api/tts (Coqui native API)
+  # Latency: ~1-2s (GPU), not suitable for CPU
+  # ---------------------------------------------------------------------------
+  xtts-v2:
+    image: ghcr.io/coqui-ai/tts
+    container_name: zacus-tts-xtts
+    ports:
+      - "5002:5002"
+    volumes:
+      - tts_models:/root/.local/share/tts
+      - ./voice_samples:/voice_samples:ro
+    command: >
+      --model_name tts_models/multilingual/multi-dataset/xtts_v2
+      --server
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5002/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s  # Model download on first run takes time
+    profiles:
+      - gpu
+
+volumes:
+  tts_voices:
+    name: zacus-tts-voices
+  tts_models:
+    name: zacus-tts-models

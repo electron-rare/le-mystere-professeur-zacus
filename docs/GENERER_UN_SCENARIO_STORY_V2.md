@@ -1,91 +1,96 @@
-# Générer un scénario STORY V2 (firmware ESP32)
+# Générer un scénario STORY V2
 
-Ce guide explique **comment créer/modifier un scénario** pour le firmware ESP32 sans toucher au moteur C++.
+Ce guide explique **comment créer, compiler et tester un scénario** avec le Runtime 3 sans toucher au moteur C++.
 
 ## Prérequis
 
-Depuis ce dossier:
+- Python 3.x avec PyYAML installé (`pip install pyyaml`)
+- Le dépôt cloné à la racine du projet
 
-```bash
-cd hardware/firmware/esp32_audio
+## 1) Source canonique du scénario
+
+Le fichier de référence est :
+
+```
+game/scenarios/zacus_v2.yaml
 ```
 
-## 1) Créer (ou dupliquer) un scénario YAML
+C'est la **single source of truth**. Toute modification de scénario doit passer par ce fichier YAML.
 
-Point de départ recommandé:
+## 2) Édition visuelle (studio Blockly)
 
-- template: `docs/protocols/story_specs/templates/scenario.template.yaml`
-- exemple existant: `docs/protocols/story_specs/scenarios/default_unlock_win_etape2.yaml`
-- schéma de référence: `docs/protocols/story_specs/schema/story_spec_v1.yaml`
+Pour éditer le scénario graphiquement, utiliser le studio React + Blockly :
 
-Crée un nouveau fichier dans `docs/protocols/story_specs/scenarios/`, par exemple:
+```bash
+cd frontend-scratch-v2
+npm install
+npm run dev
+```
 
-`docs/protocols/story_specs/scenarios/mon_scenario.yaml`
-
-Exemple prêt à l'emploi dans le repo:
-
-- `docs/protocols/story_specs/scenarios/example_unlock_express.yaml`
-- `docs/protocols/story_specs/scenarios/example_unlock_express_done.yaml`
-
-## 2) Définir la structure minimale
-
-Dans le YAML, renseigne au minimum:
-
-- `id` (identifiant unique)
-- `version` (utiliser la version supportée par le générateur; dans ce repo les exemples sont en `2`)
-- `initial_step`
-- `app_bindings`
-- `steps`
-- `transitions`
-
-Règle pratique:
-- chaque `target_step_id` doit pointer vers une étape existante,
-- les IDs doivent être uniques,
-- les transitions doivent permettre d’atteindre une fin logique (`DONE` ou équivalent).
+Le studio permet de manipuler les étapes, transitions et événements visuellement, puis d'exporter vers le format YAML V2.
 
 ## 3) Valider le scénario
 
 ```bash
-make story-validate
+make scenario-validate
 ```
 
-Cette commande vérifie:
+Cette commande vérifie :
 
-- la conformité de structure,
-- les IDs / références,
+- la conformité de structure au schéma V2,
+- les IDs / références croisées,
 - la cohérence des transitions,
 - les bindings des mini-apps.
 
-Corrige les erreurs jusqu’à obtenir une validation propre.
+Corriger les erreurs jusqu'à obtenir une validation propre.
 
-## 4) Générer le code C++
+## 4) Compiler avec le Runtime 3
 
 ```bash
-make story-gen
+make runtime3-compile
 ```
 
-Le générateur produit les fichiers utilisés par le runtime V2:
-
-- `src/story/generated/scenarios_gen.h`
-- `src/story/generated/scenarios_gen.cpp`
-- `src/story/generated/apps_gen.h`
-- `src/story/generated/apps_gen.cpp`
-
-## 5) Compiler et flasher
+Cela exécute `tools/scenario/compile_runtime3.py` sur le scénario par défaut. Pour spécifier un fichier :
 
 ```bash
+make runtime3-compile SCENARIO=game/scenarios/zacus_v2.yaml
+```
+
+## 5) Simuler le scénario
+
+```bash
+make runtime3-simulate
+```
+
+Cela exécute `tools/scenario/simulate_runtime3.py` et déroule le scénario hors firmware pour vérifier les transitions et les états finaux.
+
+## 6) Vérifier les pivots et générer le bundle firmware
+
+```bash
+make runtime3-verify
+make runtime3-firmware-bundle
+```
+
+- `runtime3-verify` valide les points pivots du graphe de scénario.
+- `runtime3-firmware-bundle` produit le bundle prêt à flasher sur l'ESP32.
+
+## 7) Lancer les tests unitaires Runtime 3
+
+```bash
+make runtime3-test
+```
+
+## 8) Compiler et flasher le firmware
+
+```bash
+cd ESP32_ZACUS
 pio run -e esp32dev
-```
-
-Puis upload selon ton port série:
-
-```bash
 pio run -e esp32dev -t upload --upload-port /dev/ttyUSB0
 ```
 
-## 6) Tester côté série
+## 9) Tester côté série
 
-Dans le moniteur série, commandes utiles:
+Dans le moniteur série, commandes utiles :
 
 - `STORY_V2_ENABLE ON`
 - `STORY_V2_LIST`
@@ -97,15 +102,27 @@ Dans le moniteur série, commandes utiles:
 ## Workflow court (copier-coller)
 
 ```bash
-cd hardware/firmware/esp32_audio
-make story-validate
-make story-gen
-pio run -e esp32dev
+make scenario-validate
+make runtime3-compile
+make runtime3-simulate
+make runtime3-verify
 ```
+
+## Toutes les cibles Makefile disponibles
+
+| Cible | Description |
+|---|---|
+| `scenario-validate` | Validation YAML du scénario |
+| `runtime3-compile` | Compilation Runtime 3 |
+| `runtime3-simulate` | Simulation hors firmware |
+| `runtime3-verify` | Vérification des pivots |
+| `runtime3-test` | Tests unitaires Runtime 3 |
+| `runtime3-firmware-bundle` | Export bundle firmware ESP32 |
 
 ## Conseils pour éviter les blocages
 
-- Commence simple: 3 à 4 étapes max au début.
-- N’ajoute qu’un seul nouveau type d’événement à la fois.
-- Teste chaque transition clé au moniteur série (`STORY_V2_EVENT ...`).
-- Garde un scénario « de secours » valide dans `docs/protocols/story_specs/scenarios/`.
+- Commencer simple : 3 à 4 étapes max au début.
+- N'ajouter qu'un seul nouveau type d'événement à la fois.
+- Toujours valider (`make scenario-validate`) avant de compiler.
+- Tester chaque transition clé au moniteur série (`STORY_V2_EVENT ...`).
+- Utiliser `make runtime3-simulate` pour déboguer sans flasher.

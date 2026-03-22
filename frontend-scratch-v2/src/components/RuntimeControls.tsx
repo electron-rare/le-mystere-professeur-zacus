@@ -87,6 +87,20 @@ export function RuntimeControls({ yaml }: RuntimeControlsProps) {
           </button>
           <button
             type="button"
+            disabled={busy}
+            onClick={() => runRequest('runtime3 status', '/api/runtime3/status')}
+          >
+            Runtime 3 Status
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => runRequest('runtime3 document', '/api/runtime3/document')}
+          >
+            Runtime 3 Document
+          </button>
+          <button
+            type="button"
             disabled={busy || yaml.trim().length === 0}
             onClick={() =>
               runRequest('validate', '/api/story/validate', {

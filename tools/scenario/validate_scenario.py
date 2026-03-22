@@ -36,6 +36,16 @@ REQUIRED_V2_KEYS = [
     "steps_narrative",
 ]
 
+EVENT_TYPES = {
+    "button",
+    "serial",
+    "timer",
+    "audio_done",
+    "unlock",
+    "espnow",
+    "action",
+}
+
 
 class ValidationError(Exception):
     pass
@@ -210,11 +220,85 @@ def validate_v2(data: dict) -> tuple[int, int, int]:
             )
 
     firmware = data.get("firmware", {})
+    firmware_step_ids: list[str] = []
+    if isinstance(firmware, dict) and isinstance(firmware.get("steps"), list):
+        raw_steps = firmware["steps"]
+        if not raw_steps:
+            raise ValidationError("`firmware.steps` must not be empty when defined")
+        for idx, step in enumerate(raw_steps, start=1):
+            if not isinstance(step, dict):
+                raise ValidationError(f"`firmware.steps[{idx}]` must be a mapping")
+            for field in ("step_id", "screen_scene_id", "audio_pack_id", "actions", "apps", "transitions"):
+                if field not in step:
+                    raise ValidationError(f"`firmware.steps[{idx}]` is missing `{field}`")
+            step_id = step["step_id"]
+            if not isinstance(step_id, str) or not step_id:
+                raise ValidationError(f"`firmware.steps[{idx}].step_id` must be a non-empty string")
+            if step_id in firmware_step_ids:
+                raise ValidationError(f"Duplicate step_id in `firmware.steps`: {step_id}")
+            if not isinstance(step["screen_scene_id"], str) or not step["screen_scene_id"]:
+                raise ValidationError(f"`firmware.steps[{idx}].screen_scene_id` must be a non-empty string")
+            if not isinstance(step["audio_pack_id"], str):
+                raise ValidationError(f"`firmware.steps[{idx}].audio_pack_id` must be a string")
+            if not isinstance(step["actions"], list):
+                raise ValidationError(f"`firmware.steps[{idx}].actions` must be a list")
+            if not isinstance(step["apps"], list):
+                raise ValidationError(f"`firmware.steps[{idx}].apps` must be a list")
+            if not isinstance(step["transitions"], list):
+                raise ValidationError(f"`firmware.steps[{idx}].transitions` must be a list")
+            firmware_step_ids.append(step_id)
+
+        initial_step = firmware.get("initial_step")
+        if not isinstance(initial_step, str) or not initial_step:
+            raise ValidationError("`firmware.initial_step` must be a non-empty string when `firmware.steps` is defined")
+        if initial_step not in firmware_step_ids:
+            raise ValidationError("`firmware.initial_step` must exist in `firmware.steps.step_id`")
+        if firmware_step_ids != narrative_step_ids:
+            raise ValidationError("`firmware.steps.step_id` order must match `steps_narrative.step_id` order")
+
+        allowed_step_ids = set(firmware_step_ids)
+        for idx, step in enumerate(raw_steps, start=1):
+            for transition_idx, transition in enumerate(step["transitions"], start=1):
+                if not isinstance(transition, dict):
+                    raise ValidationError(
+                        f"`firmware.steps[{idx}].transitions[{transition_idx}]` must be a mapping"
+                    )
+                for field in ("event_type", "event_name", "target_step_id", "priority", "after_ms"):
+                    if field not in transition:
+                        raise ValidationError(
+                            f"`firmware.steps[{idx}].transitions[{transition_idx}]` is missing `{field}`"
+                        )
+                event_type = transition["event_type"]
+                if event_type not in EVENT_TYPES:
+                    raise ValidationError(
+                        f"`firmware.steps[{idx}].transitions[{transition_idx}].event_type` is unsupported: {event_type}"
+                    )
+                if transition["target_step_id"] not in allowed_step_ids:
+                    raise ValidationError(
+                        f"`firmware.steps[{idx}].transitions[{transition_idx}].target_step_id` references an unknown step"
+                    )
+                if not isinstance(transition["event_name"], str) or not transition["event_name"]:
+                    raise ValidationError(
+                        f"`firmware.steps[{idx}].transitions[{transition_idx}].event_name` must be a non-empty string"
+                    )
+                if not isinstance(transition["priority"], int):
+                    raise ValidationError(
+                        f"`firmware.steps[{idx}].transitions[{transition_idx}].priority` must be an integer"
+                    )
+                if not isinstance(transition["after_ms"], int) or transition["after_ms"] < 0:
+                    raise ValidationError(
+                        f"`firmware.steps[{idx}].transitions[{transition_idx}].after_ms` must be a non-negative integer"
+                    )
+
     if isinstance(firmware, dict) and isinstance(firmware.get("steps_reference_order"), list):
         ref_steps = firmware["steps_reference_order"]
         if narrative_step_ids != ref_steps:
             raise ValidationError(
                 "`firmware.steps_reference_order` must match `steps_narrative.step_id` order"
+            )
+        if firmware_step_ids and ref_steps != firmware_step_ids:
+            raise ValidationError(
+                "`firmware.steps_reference_order` must match `firmware.steps.step_id` order"
             )
     elif runtime_steps_from_acts:
         # Preserve deterministic ordering checks even without firmware.steps_reference_order.

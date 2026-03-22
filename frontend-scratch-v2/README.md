@@ -1,29 +1,9 @@
-# Zacus Scratch Frontend V2 (greenfield)
+# Zacus Story Designer — React 19 + Blockly
 
-Frontend "from scratch" pour designer un scenario Zacus avec des blocs type Scratch,
-generer du YAML, puis appeler les endpoints Story V2.
+Studio auteur visuel pour concevoir des scenarios Zacus avec des blocs type Scratch.
+Genere du YAML canonique et communique avec le firmware ESP32 via l'API Story V2.
 
-## Objectif
-
-- Ne pas reutiliser le frontend legacy du repo.
-- Construire un socle neuf, orientee OSS/libre.
-- Garder la compatibilite API avec `STORY_V2_WEBUI.md`.
-
-## Stack OSS retenue
-
-Validation rapide faite le 2026-03-01 (npm registry):
-
-| Brique | Version | Licence | Role |
-| --- | --- | --- | --- |
-| blockly | 12.4.1 | Apache-2.0 | editeur blocs |
-| yaml | 2.8.2 | ISC | serialisation YAML |
-| zod | 4.3.6 | MIT | validation locale de schema |
-| ajv | 8.18.0 | MIT | JSON schema (next step) |
-| @monaco-editor/react | 4.7.0 | MIT | vue YAML |
-
-Note: `scratch-gui` / `scratch-vm` sont AGPL-3.0-only, donc non retenus ici pour garder un front permissif.
-
-## Demarrage
+## Setup
 
 ```bash
 cd frontend-scratch-v2
@@ -31,32 +11,66 @@ npm install
 npm run dev
 ```
 
-Option API:
+Connexion API (optionnel) :
 
 ```bash
 VITE_STORY_API_BASE=http://<esp_ip>:8080 npm run dev
 ```
 
-## Fonctionnalites livrees
+## Scripts disponibles
 
-- Workspace Blockly avec bloc `step`.
-- Generation YAML live depuis les blocs.
-- Preview/edit YAML dans Monaco.
-- Actions runtime:
-  - GET `/api/story/list`
-  - GET `/api/story/status`
-  - POST `/api/story/validate`
-  - POST `/api/story/deploy`
+| Commande | Description |
+| --- | --- |
+| `npm run dev` | Serveur de dev Vite (HMR) |
+| `npm run build` | Build production (`dist/`) |
+| `npm test` | Tests Vitest (18 tests) |
+| `npm run lint` | ESLint |
 
-## Structure
+## Architecture
 
-- `src/components/BlocklyDesigner.tsx`: editeur blocs + generation YAML.
-- `src/components/RuntimeControls.tsx`: actions HTTP Story V2.
-- `src/lib/scenario.ts`: mapping blocs -> document scenario -> YAML.
-- `src/types.ts`: types du document scenario.
+L'interface s'organise en 4 onglets :
 
-## Prochain lot recommande
+| Onglet | Composant | Role |
+| --- | --- | --- |
+| Designer | `BlocklyDesigner.tsx` | Editeur blocs + generation YAML live |
+| Dashboard | `Dashboard.tsx` | Vue d'ensemble scenario |
+| Media | `MediaManager.tsx` | Gestion assets audio/image |
+| Network | `NetworkPanel.tsx` | Monitoring devices terrain |
 
-1. Ajouter un mapping complet `steps + transitions` (FSM) avec validation croisee.
-2. Ajouter import/export Blockly JSON.
-3. Ajouter tests unitaires de generation YAML et smoke E2E API mock.
+Autres fichiers cles :
+- `src/components/RuntimeControls.tsx` — actions HTTP Story V2 (list, status, validate, deploy)
+- `src/lib/scenario.ts` — mapping blocs → document scenario → YAML
+- `src/types.ts` — types TypeScript du document scenario
+
+## Stack OSS
+
+| Brique | Version | Licence | Role |
+| --- | --- | --- | --- |
+| blockly | 12.4.1 | Apache-2.0 | editeur blocs |
+| yaml | 2.8.2 | ISC | serialisation YAML |
+| zod | 4.3.6 | MIT | validation locale |
+| ajv | 8.18.0 | MIT | JSON schema |
+| @monaco-editor/react | 4.7.0 | MIT | vue YAML |
+
+Note : `scratch-gui` / `scratch-vm` sont AGPL-3.0, non retenus pour garder un front permissif.
+
+## API Story V2
+
+| Methode | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/api/story/list` | Liste des scenarios |
+| GET | `/api/story/status` | Statut runtime |
+| POST | `/api/story/validate` | Validation YAML |
+| POST | `/api/story/deploy` | Deploiement sur device |
+
+Variable d'environnement : `VITE_STORY_API_BASE` (defaut : pas de proxy).
+
+## Tests
+
+18 tests passing (Vitest). Lancer avec `npm test`.
+
+## Prochaines etapes
+
+1. Mapping complet steps + transitions (FSM) avec validation croisee
+2. Import/export Blockly JSON
+3. Tests E2E avec API mock

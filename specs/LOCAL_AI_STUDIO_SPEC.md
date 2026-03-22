@@ -27,13 +27,14 @@ Le firmware reste **intouché** par cette spécification.
   - contraintes éditoriales
   - configuration médias/printables (formats demandés)
 - Sorties attendues :
-  - `YAML` conforme **Story V2** pour `game/scenarios/*.yaml`
+  - `YAML` canonique pour `game/scenarios/*.yaml`
+  - `IR JSON` conforme **Zacus Runtime 3** pour les previews et adaptateurs firmware
   - `manifest_yaml` + `markdown` pour le bundle imprimables
   - objet `diagnostic` (`rationale`, `source`, `warnings`)
 - Services inclus :
   - Docker LLM local (Ollama)
   - Gateway HTTP locale (script Python)
-  - Frontend web Studio (React/Svelte selon stack du dépôt)
+  - Frontend web Studio React + Blockly (`frontend-scratch-v2`)
 
 ## 4) Architecture cible
 
@@ -220,9 +221,9 @@ curl http://127.0.0.1:8787/health
 ```
 
 ```bash
-cp "fronted dev web UI/.env.local.example" "fronted dev web UI/.env.local"
+cp "frontend-scratch-v2/.env.local.example" "frontend-scratch-v2/.env.local"
 # VITE_ZACUS_STUDIO_AI_URL=http://127.0.0.1:8787/story_generate
-npm --prefix "fronted dev web UI" run dev
+npm --prefix "frontend-scratch-v2" run dev
 ```
 
 ### One-liner

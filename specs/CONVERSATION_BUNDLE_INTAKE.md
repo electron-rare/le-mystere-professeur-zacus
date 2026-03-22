@@ -17,7 +17,7 @@ Le bundle conversationnel est maintenu dans :
 - Aucune refonte des manifests audio/printables.
 
 ## Risques
-- Le bundle peut diverger du scénario canonique `game/scenarios/zacus_v1.yaml`.
+- Le bundle peut diverger du scénario canonique `game/scenarios/zacus_v2.yaml`.
 - Les formats `scenario_runtime.json`/templates peuvent nécessiter une validation dédiée ultérieure.
 
 ## Prochaine étape proposée

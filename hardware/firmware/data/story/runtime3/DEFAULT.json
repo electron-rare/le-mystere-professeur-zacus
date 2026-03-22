@@ -1,0 +1,161 @@
+{
+  "schema_version": "zacus.runtime3.v1",
+  "scenario": {
+    "id": "ZACUS_V2",
+    "version": 3,
+    "title": "Le mystère du Professeur Zacus — Version Réelle (U-SON, piano LEFOU, QR WIN)",
+    "entry_step_id": "STEP_U_SON_PROTO",
+    "source_kind": "yaml"
+  },
+  "steps": [
+    {
+      "id": "STEP_U_SON_PROTO",
+      "scene_id": "SCENE_U_SON_PROTO",
+      "audio_pack_id": "",
+      "actions": [],
+      "apps": [],
+      "transitions": [
+        {
+          "event_type": "serial",
+          "event_name": "BTN_NEXT",
+          "target_step_id": "STEP_LA_DETECTOR",
+          "priority": 100,
+          "after_ms": 0
+        }
+      ],
+      "narrative": "Boot radio. Transmission tronquée. Zacus annonce que U-SON dérive et qu’il faut une référence stable pour recaler le système.\n"
+    },
+    {
+      "id": "STEP_LA_DETECTOR",
+      "scene_id": "SCENE_LA_DETECTOR",
+      "audio_pack_id": "",
+      "actions": [],
+      "apps": [],
+      "transitions": [
+        {
+          "event_type": "unlock",
+          "event_name": "UNLOCK_LA_440",
+          "target_step_id": "STEP_RTC_ESP_ETAPE1",
+          "priority": 120,
+          "after_ms": 0
+        }
+      ],
+      "narrative": "Atelier des Ondes. Objectif : produire un LA 440 stable. Le groupe s’organise : une personne fait le son, d’autres surveillent le feedback.\n"
+    },
+    {
+      "id": "STEP_RTC_ESP_ETAPE1",
+      "scene_id": "SCENE_WIN_ETAPE1",
+      "audio_pack_id": "",
+      "actions": [],
+      "apps": [],
+      "transitions": [
+        {
+          "event_type": "espnow",
+          "event_name": "ACK_WIN1",
+          "target_step_id": "STEP_WIN_ETAPE1",
+          "priority": 130,
+          "after_ms": 0
+        }
+      ],
+      "narrative": "Transmission distante (ESP-NOW). L’ACK confirme la validation Étape 1.\n"
+    },
+    {
+      "id": "STEP_WIN_ETAPE1",
+      "scene_id": "SCENE_WIN_ETAPE1",
+      "audio_pack_id": "",
+      "actions": [],
+      "apps": [],
+      "transitions": [
+        {
+          "event_type": "audio_done",
+          "event_name": "AUDIO_DONE",
+          "target_step_id": "STEP_WARNING",
+          "priority": 110,
+          "after_ms": 0
+        }
+      ],
+      "narrative": "Victoire 1. Puis le campus bascule en WARNING : direction Zone 4.\n"
+    },
+    {
+      "id": "STEP_WARNING",
+      "scene_id": "SCENE_WARNING",
+      "audio_pack_id": "",
+      "actions": [],
+      "apps": [],
+      "transitions": [
+        {
+          "event_type": "serial",
+          "event_name": "BTN_NEXT",
+          "target_step_id": "STEP_LEFOU_DETECTOR",
+          "priority": 100,
+          "after_ms": 0
+        }
+      ],
+      "narrative": "Alerte rouge. Message clair : Zone 4, l’installation de l’Électron Fou. Le système annonce qu’un code musical (5 lettres) sera requis.\n"
+    },
+    {
+      "id": "STEP_LEFOU_DETECTOR",
+      "scene_id": "SCENE_LEFOU_DETECTOR",
+      "audio_pack_id": "",
+      "actions": [],
+      "apps": [],
+      "transitions": [
+        {
+          "event_type": "unlock",
+          "event_name": "UNLOCK_PIANO_LEFOU",
+          "target_step_id": "STEP_RTC_ESP_ETAPE2",
+          "priority": 120,
+          "after_ms": 0
+        }
+      ],
+      "narrative": "Zone 4. Piano-alphabet : les lettres sont sur les touches blanches. L’équipe doit jouer LEFOU (L-E-F-O-U) pour prouver qu’elle a compris la règle.\n"
+    },
+    {
+      "id": "STEP_RTC_ESP_ETAPE2",
+      "scene_id": "SCENE_WIN_ETAPE2",
+      "audio_pack_id": "",
+      "actions": [],
+      "apps": [],
+      "transitions": [
+        {
+          "event_type": "espnow",
+          "event_name": "ACK_WIN2",
+          "target_step_id": "STEP_QR_DETECTOR",
+          "priority": 130,
+          "after_ms": 0
+        }
+      ],
+      "narrative": "Confirmation Étape 2. Le système donne la destination finale : les Archives, et révèle que la clé est derrière le portrait.\n"
+    },
+    {
+      "id": "STEP_QR_DETECTOR",
+      "scene_id": "SCENE_QR_DETECTOR",
+      "audio_pack_id": "",
+      "actions": [],
+      "apps": [],
+      "transitions": [
+        {
+          "event_type": "unlock",
+          "event_name": "UNLOCK_QR",
+          "target_step_id": "STEP_FINAL_WIN",
+          "priority": 140,
+          "after_ms": 0
+        }
+      ],
+      "narrative": "Aux Archives : chercher derrière le portrait, récupérer le QR, et le scanner. QR “WIN” valide l’accès final.\n"
+    },
+    {
+      "id": "STEP_FINAL_WIN",
+      "scene_id": "SCENE_FINAL_WIN",
+      "audio_pack_id": "",
+      "actions": [],
+      "apps": [],
+      "transitions": [],
+      "narrative": "Victoire + révélation. Récompense : bascule vers le Media Hub, et boot persistant après QR validé.\n"
+    }
+  ],
+  "metadata": {
+    "migration_mode": "firmware_import",
+    "generated_by": "tools/scenario/compile_runtime3.py"
+  }
+}

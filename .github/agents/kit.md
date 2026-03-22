@@ -5,7 +5,7 @@
 
 ## Do
 - Validate stations via `rg --files kit-maitre-du-jeu` and `rg -n "station|indice|enigme|zacus" kit-maitre-du-jeu`.
-- Run `python3 tools/printables/validate_manifest.py printables/manifests/zacus_v1_printables.yaml` when updates touch exported assets.
+- Run `python3 tools/printables/validate_manifest.py printables/manifests/zacus_v2_printables.yaml` when updates touch exported assets.
 
 ## Must Not
 - Rename station identifiers without syncing references across game and printables.
@@ -19,5 +19,4 @@
    - run: rg --files kit-maitre-du-jeu
    - run: rg -n 'station|indice|enigme|zacus' kit-maitre-du-jeu
 2. Valider tout asset imprimable référencé.
-   - run: python3 tools/printables/validate_manifest.py printables/manifests/zacus_v1_printables.yaml
-
+   - run: python3 tools/printables/validate_manifest.py printables/manifests/zacus_v2_printables.yaml

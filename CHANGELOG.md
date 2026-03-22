@@ -1,6 +1,21 @@
 # Changelog
 
 ## [Unreleased]
+
+### Ajouté
+- Runtime 3 : compilateur (`tools/scenario/compile_runtime3.py`) et simulateur (`tools/scenario/simulate_runtime3.py`) pour le moteur de scénarios V2.
+- Studio visuel React + Blockly dans `frontend-scratch-v2/` pour l'édition graphique des scénarios.
+- Schéma Scenario V2 : refonte du format YAML, validation renforcée et pivot vers `game/scenarios/zacus_v2.yaml` comme source canonique.
+- Analyse d'intégration IA : `docs/AI_INTEGRATION_ANALYSIS.md` — specs, opportunités et roadmap.
+- Documentation : cartes d'architecture (system-map, component-map, data-flow-map, feature-map, migration-map, agent-matrix, release-map), specs de déploiement, runbook opérationnel.
+- Spécifications de durcissement sécurité.
+- Cibles Makefile : `runtime3-compile`, `runtime3-simulate`, `runtime3-verify`, `runtime3-test`, `runtime3-firmware-bundle`.
+
+### Modifié
+- Consolidation du dépôt : suppression des doublons (`AGENTS 2.md`, `AGENT_TODO 2.md`).
+- Sous-module `ESP32_ZACUS` mis à jour (23 commits).
+
+### Précédemment non versionné
 - Workflow : nouvelle exportation `tools/scenario/export_md.py` et briefs Markdown (kit + `docs/_generated/SCENARIO_BRIEF.md`) alignés sur `game/scenarios/zacus_v2.yaml`.
 - Printables : manifeste `printables/manifests/zacus_v2_printables.yaml`, prompts dédiés pour chaque asset et `tools/printables/validate_manifest.py` pour éviter les trous entre IDs et fichiers.
 - Documentation : AGENTS, WORKFLOWS, GLOSSARY, Quickstart, index et le Makefile rappellent que le YAML est la single source of truth et listent les commandes standard de validation/export.

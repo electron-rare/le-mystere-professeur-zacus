@@ -2,16 +2,19 @@
 set -euo pipefail
 
 CHECK_CLEAN_GIT=0
+INSTALL_MISSING=0
 
 usage() {
   cat <<'USAGE'
-Usage: bash tools/test/run_content_checks.sh [--check-clean-git]
+Usage: bash tools/test/run_content_checks.sh [--check-clean-git] [--install-missing]
 
-Runs canonical content validations and markdown export.
+Runs canonical content validations, Runtime 3 compilation/simulation/tests,
+and markdown export.
 
 Options:
   --check-clean-git  Fail if export updates tracked/untracked files under
                      kit-maitre-du-jeu/_generated or docs/_generated.
+  --install-missing  Install validator dependencies when PyYAML is missing.
   -h, --help         Show this help.
 USAGE
 }
@@ -20,6 +23,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --check-clean-git)
       CHECK_CLEAN_GIT=1
+      shift
+      ;;
+    --install-missing)
+      INSTALL_MISSING=1
       shift
       ;;
     -h|--help)
@@ -44,7 +51,17 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 if ! python3 -c "import yaml" >/dev/null 2>&1; then
-  echo "[fail] missing dependency: pip install pyyaml" >&2
+  if [[ "$INSTALL_MISSING" == "1" ]]; then
+    echo "[step] installing validator dependencies"
+    bash tools/setup/install_validators.sh
+  else
+    echo "[fail] missing dependency: run 'bash tools/setup/install_validators.sh' or retry with --install-missing" >&2
+    exit 3
+  fi
+fi
+
+if ! python3 -c "import yaml" >/dev/null 2>&1; then
+  echo "[fail] validator dependency still missing after bootstrap" >&2
   exit 3
 fi
 
@@ -54,6 +71,11 @@ run_step() {
 }
 
 run_step python3 tools/scenario/validate_scenario.py game/scenarios/zacus_v2.yaml
+run_step python3 tools/scenario/compile_runtime3.py game/scenarios/zacus_v2.yaml
+run_step python3 tools/scenario/simulate_runtime3.py game/scenarios/zacus_v2.yaml
+run_step python3 tools/scenario/verify_runtime3_pivots.py game/scenarios/zacus_v2.yaml
+run_step python3 -m unittest discover -s tests/runtime3 -p 'test_*.py'
+run_step python3 tools/scenario/validate_runtime_bundle.py
 run_step python3 tools/audio/validate_manifest.py audio/manifests/zacus_v2_audio.yaml
 run_step python3 tools/printables/validate_manifest.py printables/manifests/zacus_v2_printables.yaml
 run_step python3 tools/scenario/export_md.py game/scenarios/zacus_v2.yaml

@@ -1,0 +1,41 @@
+site_name: Zacus V3
+site_description: Zacus refactor architecture, runtime, studio, and operating guides.
+site_url: https://example.invalid/zacus
+repo_name: electron-rare/le-mystere-professeur-zacus
+docs_dir: docs
+exclude_docs: |
+  README.md
+  AGENTS*.md
+  README_FAQ_SNIPPET.md
+  design.md
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+plugins:
+  - search
+nav:
+  - Home: index.md
+  - Quickstart: QUICKSTART.md
+  - Architecture:
+      - Overview: architecture/index.md
+      - System Map: architecture/system-map.md
+      - Component Map: architecture/component-map.md
+      - Data Flow Map: architecture/data-flow-map.md
+      - Feature Map: architecture/feature-map.md
+      - Migration Map: architecture/migration-map.md
+      - Agent Matrix: architecture/agent-matrix.md
+      - Release Map: architecture/release-map.md
+      - AI Integration Map: architecture/ai-integration-map.md
+  - AI Integration Analysis: AI_INTEGRATION_ANALYSIS.md
+  - Security: SECURITY.md
+  - Deployment Runbook: DEPLOYMENT_RUNBOOK.md
+  - OSS Benchmark: benchmark-oss.md

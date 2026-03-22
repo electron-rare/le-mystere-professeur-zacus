@@ -1,163 +1,100 @@
+# Le Mystere du Professeur Zacus
 
-# 🤖🎩 Le Mystère du Professeur Zacus 🎩🤖
+Zacus est en refonte vers un produit hybride unique:
+- un jeu terrain fiable sur carte Freenove ESP32-S3,
+- un studio auteur moderne en React + Blockly,
+- un runtime portable "Zacus Runtime 3" compile depuis le YAML canonique.
 
-![Couverture](./assets/cover.png)
+## Canon actuel
+- Source narrative: `game/scenarios/zacus_v2.yaml`
+- Studio auteur: `frontend-scratch-v2/`
+- Runtime portable: `tools/scenario/compile_runtime3.py` + `tools/scenario/simulate_runtime3.py`
+- Cible hardware principale: `hardware/firmware` avec `freenove_esp32s3`
+- Plans et memoire: `memory/`, `plans/`, `todos/`
+- Architecture et cartes Mermaid: `docs/architecture/`
 
-> **Bienvenue dans l’enquête la plus instable du multivers** : indices imprimables, audio, modules électroniques intégrés, et un guide MJ qui ne bug jamais (sauf si tu l’imprimes en 3D).
-> 
-> **⚛ L’électron rare — ⚡ unstable by design**
-> 
-> **Auteur : Clément SAILLANT**
+## Démarrage rapide
 
-[![Build](https://img.shields.io/badge/build-validate%20%2B%20export-brightgreen)](./.github/workflows/validate.yml)
-[![PlatformIO](https://img.shields.io/badge/PlatformIO-ready-brightgreen)](https://platformio.org/)
-[![Code: MIT](https://img.shields.io/badge/code-MIT-blue)](./LICENSE)
-[![Content: CC%20BY--NC%204.0](https://img.shields.io/badge/content-CC%20BY--NC%204.0-orange)](./LICENSE-CONTENT.md)
-
-
-## ⚡ Pitch (30 secondes chrono)
-
-Le Professeur Zacus a disparu. Son labo est sous tension : **signaux audio**, **capsules d’indices**, **preuves imprimées**… et un dispositif électronique indispensable qui réagit à chaque étape de l’enquête.
-
-Les joueurs fouillent, recoupent, déduisent — comme une vraie équipe d’enquête, mais avec plus de blagues et moins de panique.
-Le MJ déroule une session fluide, avec des checkpoints et une fin satisfaisante (sauf si tu oublies le gâteau).
-
-> *"Si tu trouves une LED qui clignote, c’est normal. Si elle te parle, c’est probablement un bug... ou le MJ qui s’ennuie."*
----
-
-## ✅ Ce que tu obtiens (concret, pas du vent)
-
-- **Printables** prêts à imprimer (indices, cartes, accessoires)
-- **Guide Maître du Jeu** (mise en place, script, solutions)
-- **Audio** (timers / ambiance / déclenchements)
-- **Scénario YAML** = source de vérité (durée/difficulté modulables)
-- **Option électronique** : ESP32/Arduino (UI, effets, interactions)
-
-> Tout est pensé pour être **rejouable** et **facile à préparer**. Même pour les MJ qui n’ont jamais touché un oscilloscope.
-> *"MJ : Maître du Jeu, mais aussi Maître du Jazz, Maître du Jenga, Maître du Juste Prix... à toi de choisir."*
-
----
-
-## 🕹️ Pour qui / durée / niveau de fun
-
-- **Joueurs** : 6–14 (recommandé), ou équipes de 2–4
-- **Durée** : 105 min (45 + 60, modulable selon le groupe)
-- **Âge** : famille / anniversaire (adaptable, sauf pour les robots)
-- **Matériel** : imprimante + modules électroniques (ESP32 + écran / interface tactile) pour piloter les phases de jeu
-
-> *"Le mode ‘slow motion’ est réservé aux anniversaires avec trop de bonbons."*
-
----
-
-## 🎬 Démo
-
-![Démo](./assets/demo.gif)
-
-> *"Si tu croises un QR code dans les archives, scanne-le. Si tu croises un QR code sur ton gâteau, scanne-le aussi (on ne sait jamais)."*
----
-
-## 🧠 Comment ça marche (en 1 minute, ou 42 secondes si tu es pressé)
-
-### Source de vérité : le scénario YAML
-Le scénario principal est dans `game/scenarios/`. Il pilote :
-- les étapes / stations,
-- les validations / codes,
-- les exports (briefs MJ, docs, manifestes).
-
-### Pipeline du repo
-`game/scenarios/*.yaml -> tools/ (validate + export) -> kit MJ / printables / audio -> hardware/firmware/`
-
-![Diagramme](./assets/diagram.png)
-
----
-
-## 🧩 Démarrage rapide (MJ, version turbo)
-
-> *"Si tu veux une expérience vraiment futuriste, branche un ESP32 sur ton chat. (Non, ne fais pas ça, mais l’idée est marrante.)"*
-
-1. Lis le **guide MJ** : `kit-maitre-du-jeu/`
-2. Imprime les **printables** : `printables/`
-3. Prépare l’audio : `audio/`
-4. Prépare, câble et flashe l’électronique : `hardware/` (un kit esp32-S3 avec écran est requis pour chaque partie)
-5. Lance la partie 🎩
-
-👉 FAQ / dépannage : `docs/faq.md` (aucune question idiote, sauf “où est le MJ ?”)
-
----
-
-## 🛠️ Démarrage rapide (dev, version quantum)
-
-> *"Astuce dev : Si tu valides le YAML sans erreur du premier coup, tu gagnes un badge ‘Zacus Quantum’ (à imprimer toi-même)."*
-
-Installer les validateurs :
+### 1. Bootstrap validation
 ```bash
 bash tools/setup/install_validators.sh
+bash tools/test/run_content_checks.sh
 ```
 
-Valider le scénario officiel :
+### 2. Compiler et simuler Runtime 3
 ```bash
-python3 tools/scenario/validate_scenario.py game/scenarios/zacus_v2.yaml
+python3 tools/scenario/compile_runtime3.py game/scenarios/zacus_v2.yaml
+python3 tools/scenario/simulate_runtime3.py game/scenarios/zacus_v2.yaml
+python3 tools/scenario/export_runtime3_firmware_bundle.py game/scenarios/zacus_v2.yaml
 ```
 
-Exporter un brief Markdown :
-```bash
-python3 tools/scenario/export_md.py game/scenarios/zacus_v2.yaml -o docs/exports/zacus_v2.md
-```
-
-Frontend canon (V2) :
+### 3. Démarrer le studio React + Blockly
 ```bash
 cd frontend-scratch-v2
 npm install
+npm test
 VITE_STORY_API_BASE=http://<esp_ip>:8080 npm run dev
 ```
 
----
-
-## 🧾 Contenu du dépôt (repères galactiques)
-
-> *"Ce dépôt est plus organisé que le bureau du Professeur Zacus (et ça, c’est pas peu dire)."*
-
-```text
-game/scenarios/              Scénarios YAML (source de vérité)
-kit-maitre-du-jeu/           Guide MJ + solutions + script
-printables/                  Cartes/indices + manifestes
-audio/                       Manifestes audio + ressources
-tools/                       Validation + export + génération
-hardware/                    Firmware & accessoires électroniques (prérequis)
-docs/                        Mini-site / FAQ / ressources
+### 4. Utiliser le shell canonique
+```bash
+./tools/dev/zacus.sh content-checks
+./tools/dev/zacus.sh runtime3-compile
+make runtime3-verify
+make runtime3-test
+./tools/dev/zacus.sh frontend-test
+./tools/dev/zacus.sh frontend-build
+./tools/dev/zacus.sh menu
 ```
 
----
+## Cartographie du dépôt
+- `game/`: scénarios YAML canoniques.
+- `audio/`: manifestes audio et assets associés.
+- `printables/`: manifestes et exports imprimables.
+- `kit-maitre-du-jeu/`: matériel MJ et déroulé terrain.
+- `frontend-scratch-v2/`: studio auteur React + Blockly.
+- `hardware/firmware/`: firmware, APIs device, scripts terrain.
+- `tools/`: validateurs, compilateur/simulateur Runtime 3, shells d'automatisation.
+- `docs/`: quickstart, architecture, benchmark OSS et runbooks.
+- `memory/`, `plans/`, `todos/`: pilotage de la refonte.
 
-## 🧷 Visuels
+## AI Integration
 
-> *"Si tu reconnais le prototype sur la photo, tu es officiellement un expert en électronique de fête."*
+Le projet intègre une couche IA pour enrichir l'expérience terrain :
+- **Voice pipeline** : wake word (ESP-SR) → ASR → LLM → TTS (Piper / XTTS-v2) → speaker. Scaffold prêt, voir [`docs/voice/VOICE_PIPELINE_GUIDE.md`](docs/voice/VOICE_PIPELINE_GUIDE.md).
+- **Vision** : détection d'objets via ESP-DL pour indices contextuels.
+- **LLM hints** : le Professeur Zacus répond aux joueurs via mascarade.
+- **TUI dev** : script interactif d'orchestration → `python3 tools/dev/zacus_tui.py`
 
-![Prototype](./assets/board.png)
+Analyse complète : [`docs/AI_INTEGRATION_ANALYSIS.md`](docs/AI_INTEGRATION_ANALYSIS.md)
 
-![Printables](./assets/printables.png)
+## Sécurité & Déploiement
 
----
+- [`docs/SECURITY.md`](docs/SECURITY.md) — audit firmware, HMAC auth, rate limiting
+- [`docs/DEPLOYMENT_RUNBOOK.md`](docs/DEPLOYMENT_RUNBOOK.md) — procédures de déploiement terrain
 
-## 🧑‍🎓 Licence
+## Statut du projet
 
-- **Code** : MIT (`LICENSE`)
-- **Contenu créatif** (scénarios, docs, printables, assets) : CC BY‑NC 4.0 (`LICENSE-CONTENT.md`)
+- Runtime 3 : compilateur + simulateur + export firmware bundle OK
+- Studio auteur : React 19 + Blockly, 18 tests passing
+- Firmware : sécurité P0 intégrée (HMAC, rate limit, safe OTA)
+- Voice pipeline : scaffold ESP-SR prêt, TTS Docker validé
+- Specs : `ZACUS_RUNTIME_3_SPEC.md`, `STORY_DESIGNER_SCRATCH_LIKE_SPEC.md`
 
+## Documentation à lire
+- `docs/QUICKSTART.md`
+- `docs/architecture/index.md`
+- `docs/AI_INTEGRATION_ANALYSIS.md`
+- `specs/ZACUS_RUNTIME_3_SPEC.md`
+- `specs/STORY_DESIGNER_SCRATCH_LIKE_SPEC.md`
+- `docs/benchmark-oss.md`
 
-> *"Ce jeu est garanti sans IA malveillante, mais avec des enfants qui peuvent hacker le scénario à tout moment."*
----
+## Notes de refonte
+- Le YAML reste la source de vérité pendant la migration.
+- Le Runtime 3 devient le contrat portable entre studio, simulateur et firmware.
+- `hardware/firmware/esp32/` reste en lecture seule.
+- Les chemins legacy ne doivent être supprimés qu'après preuve de remplacement.
 
-## 🤝 Crédits
-
-> *"Merci à tous les MJ, enfants, parents, et robots qui ont testé ce scénario. Mention spéciale à ceux qui ont trouvé le twist avant la LED rouge."*
-
-**Auteur : Clément SAILLANT**  
-Signature : **⚛ L’électron rare** — **⚡ unstable by design**
-
-> *"Ce projet a été validé par un oscilloscope, un grille-pain, et une IA qui adore les énigmes."*
-
----
-
-OpenGraph : `assets/og.png` (1200×630)
-- generation/story-ia : scénarios IA
+## Licences
+- Code: MIT (`LICENSE`)
+- Contenu créatif: CC BY-NC 4.0 (`LICENSE-CONTENT.md`)

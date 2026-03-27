@@ -361,6 +361,12 @@ bool ScenarioManager::notifyActionEvent(const char* event_name, uint32_t now_ms)
   return dispatchEvent(StoryEventType::kAction, name, now_ms, "action_event");
 }
 
+bool ScenarioManager::notifyVoiceEvent(const char* event_name, uint32_t now_ms) {
+  const char* name = (event_name != nullptr && event_name[0] != '\0') ? event_name : "VOICE_EVENT";
+  Serial.printf("[ScenarioManager] Voice event received: %s\n", name);
+  return dispatchEvent(StoryEventType::kVoice, name, now_ms, "voice_event");
+}
+
 bool ScenarioManager::gotoScene(const char* scene_id, uint32_t now_ms, const char* source) {
   if (scenario_ == nullptr || scene_id == nullptr || scene_id[0] == '\0') {
     return false;

@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Ajouté (2026-03-27)
+- **Voice bridge rewrite** (f673822): pont audio OPUS ESP32-S3-BOX-3 vers mascarade (+441 lignes), routage hint `[HINT:puzzle:level]` vers le moteur de hints mascarade.
+- **scenario_manager** (f673822): module `scenario_manager.cpp/.h` — gestionnaire d'état scénario centralisé, transitions validées, hooks pré/post-transition, persistence NVS.
+- **P0 fixes**: correction du crash audio DMA sur cold boot BOX-3, fix du timeout WebSocket reconnect (backoff exponentiel 1-30s), correction du double-free dans `voice_pipeline` sur abort rapide.
+
+### Corrigé (2026-03-27)
+- **VAD hint routing** (f87820e): le routage des hints via VAD ne déclenchait pas correctement le moteur mascarade.
+- **Session leak** (f87820e): fuite mémoire dans les sessions WebSocket non fermées proprement.
+- **YAML regex** (f87820e): regex de parsing scénario corrigée pour les caractères spéciaux.
+- **Markdown rendering** (f87820e): correction de l'affichage markdown dans le dashboard.
+- **UTF-8 encoding** (f87820e): encodage des réponses hints en UTF-8 (accents français).
+
 ### Ajouté
 - Runtime 3 : compilateur (`tools/scenario/compile_runtime3.py`) et simulateur (`tools/scenario/simulate_runtime3.py`) pour le moteur de scénarios V2.
 - Studio visuel React + Blockly dans `frontend-scratch-v2/` pour l'édition graphique des scénarios.

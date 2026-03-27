@@ -57,6 +57,9 @@ StoryEventType parseEventType(const char* value) {
 	if (strcmp(value, "action") == 0) {
 		return StoryEventType::kAction;
 	}
+	if (strcmp(value, "voice") == 0 || strcmp(value, "voice_bridge") == 0) {
+		return StoryEventType::kVoice;
+	}
 	return StoryEventType::kNone;
 }
 

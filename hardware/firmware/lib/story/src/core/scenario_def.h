@@ -11,6 +11,7 @@ enum class StoryEventType : uint8_t {
   kButton,
   kEspNow,
   kAction,
+  kVoice,
 };
 
 enum class StoryTransitionTrigger : uint8_t {

@@ -1,4 +1,4 @@
-name: Validate Zacus content
+name: Validate Zacus refactor
 
 on:
   push:
@@ -11,19 +11,42 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
-      - name: Install dependencies
+          python-version: "3.x"
+
+      - name: Install validator dependencies
         run: python -m pip install --upgrade pip -r tools/requirements/validators.txt
-      - name: Validate runtime bundle coherence
+
+      - name: Install docs dependencies
+        run: python -m pip install -r tools/requirements/docs.txt
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend-scratch-v2/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend-scratch-v2 ci
+
+      - name: Run canonical content checks
+        run: bash tools/test/run_content_checks.sh
+
+      - name: Validate runtime bundle
         run: python tools/scenario/validate_runtime_bundle.py
-      - name: Validate scenario
-        run: python tools/scenario/validate_scenario.py game/scenarios/zacus_v2.yaml
-      - name: Export scenario markdown briefs
-        run: python tools/scenario/export_md.py game/scenarios/zacus_v2.yaml
-      - name: Validate audio manifest
-        run: python tools/audio/validate_manifest.py audio/manifests/zacus_v2_audio.yaml
-      - name: Validate printables manifest
-        run: python tools/printables/validate_manifest.py printables/manifests/zacus_v2_printables.yaml
+
+      - name: Lint studio frontend
+        run: npm --prefix frontend-scratch-v2 run lint
+
+      - name: Test studio frontend
+        run: npm --prefix frontend-scratch-v2 run test
+
+      - name: Build studio frontend
+        run: npm --prefix frontend-scratch-v2 run build
+
+      - name: Build docs
+        run: python -m mkdocs build --strict

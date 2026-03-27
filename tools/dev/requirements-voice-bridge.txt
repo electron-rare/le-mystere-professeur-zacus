@@ -1,0 +1,12 @@
+# Voice Bridge dependencies
+# Core (required)
+fastapi>=0.100
+uvicorn>=0.23
+httpx>=0.24
+websockets>=11.0
+
+# OPUS audio codec (required for audio path)
+opuslib>=3.0.1
+
+# Voice Activity Detection (required for audio path)
+webrtcvad>=2.0.10

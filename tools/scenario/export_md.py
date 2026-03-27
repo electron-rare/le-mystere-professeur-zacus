@@ -102,7 +102,13 @@ def to_export_model(scenario: dict) -> dict:
 
     firmware_steps = []
     firmware = scenario.get("firmware")
-    if isinstance(firmware, dict) and isinstance(firmware.get("steps_reference_order"), list):
+    if isinstance(firmware, dict) and isinstance(firmware.get("steps"), list):
+        firmware_steps = [
+            str(step.get("step_id", ""))
+            for step in firmware["steps"]
+            if isinstance(step, dict) and step.get("step_id")
+        ]
+    elif isinstance(firmware, dict) and isinstance(firmware.get("steps_reference_order"), list):
         firmware_steps = [str(step) for step in firmware["steps_reference_order"] if step]
 
     proof = []

@@ -95,5 +95,5 @@ struct StorySnapshot {
   uint8_t queuedEvents;
 };
 
-int8_t storyFindStepIndex(const ScenarioDef& scenario, const char* stepId);
+int16_t storyFindStepIndex(const ScenarioDef& scenario, const char* stepId);
 bool storyValidateScenarioDef(const ScenarioDef& scenario, StoryValidationError* outError);

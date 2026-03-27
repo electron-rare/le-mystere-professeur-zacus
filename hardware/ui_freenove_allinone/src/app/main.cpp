@@ -5180,12 +5180,31 @@ bool webDispatchAction(const String& action_raw) {
   return dispatchControlAction(action_raw, millis(), nullptr);
 }
 
+void webFillRuntime3Status(JsonObject runtime3) {
+  const Runtime3ArtifactInfo& artifact = g_scenario.runtime3Artifact();
+  runtime3["discovered"] = artifact.discovered;
+  runtime3["loaded"] = artifact.loaded;
+  runtime3["path"] = artifact.path;
+  runtime3["schema_version"] = artifact.schema_version;
+  runtime3["scenario_id"] = artifact.scenario_id;
+  runtime3["scenario_version"] = artifact.scenario_version;
+  runtime3["entry_step_id"] = artifact.entry_step_id;
+  runtime3["source_kind"] = artifact.source_kind;
+  runtime3["generated_by"] = artifact.generated_by;
+  runtime3["migration_mode"] = artifact.migration_mode;
+  runtime3["step_count"] = artifact.step_count;
+  runtime3["transition_count"] = artifact.transition_count;
+  runtime3["size_bytes"] = artifact.size_bytes;
+  runtime3["error"] = artifact.error;
+}
+
 void webBuildStatusDocument(StaticJsonDocument<4096>* out_document) {
   if (out_document == nullptr) {
     return;
   }
   const NetworkManager::Snapshot net = g_network.snapshot();
   const ScenarioSnapshot scenario = g_scenario.snapshot();
+  const Runtime3ArtifactInfo& runtime3_artifact = g_scenario.runtime3Artifact();
 
   out_document->clear();
   JsonObject network = (*out_document)["network"].to<JsonObject>();
@@ -5214,6 +5233,7 @@ void webBuildStatusDocument(StaticJsonDocument<4096>* out_document) {
   story["step"] = stepIdFromSnapshot(scenario);
   story["screen"] = (scenario.screen_scene_id != nullptr) ? scenario.screen_scene_id : "";
   story["audio_pack"] = (scenario.audio_pack_id != nullptr) ? scenario.audio_pack_id : "";
+  story["runtime_contract"] = runtime3_artifact.loaded ? "runtime3+story_v2_adapter" : "story_v2";
 
   JsonObject audio = (*out_document)["audio"].to<JsonObject>();
   audio["playing"] = g_audio.isPlaying();
@@ -5233,6 +5253,9 @@ void webBuildStatusDocument(StaticJsonDocument<4096>* out_document) {
 
   JsonObject media = (*out_document)["media"].to<JsonObject>();
   webFillMediaStatus(media, millis());
+
+  JsonObject runtime3 = (*out_document)["runtime3"].to<JsonObject>();
+  webFillRuntime3Status(runtime3);
 
   const runtime::resource::ResourceCoordinatorSnapshot resource_snapshot = g_resource_coordinator.snapshot();
   const UiMemorySnapshot ui_snapshot = g_ui.memorySnapshot();
@@ -5259,6 +5282,27 @@ void webSendStatus() {
   StaticJsonDocument<4096> document;
   webBuildStatusDocument(&document);
   webSendJsonDocument(document);
+}
+
+void webSendRuntime3Status() {
+  StaticJsonDocument<1024> document;
+  webFillRuntime3Status(document.to<JsonObject>());
+  webSendJsonDocument(document);
+}
+
+void webSendRuntime3Document() {
+  const Runtime3ArtifactInfo& artifact = g_scenario.runtime3Artifact();
+  if (!artifact.loaded || artifact.path.isEmpty()) {
+    g_web_server.send(404, "application/json", "{\"ok\":false,\"error\":\"runtime3_not_loaded\"}");
+    return;
+  }
+  File file = LittleFS.open(artifact.path.c_str(), "r");
+  if (!file) {
+    g_web_server.send(500, "application/json", "{\"ok\":false,\"error\":\"runtime3_open_failed\"}");
+    return;
+  }
+  g_web_server.streamFile(file, "application/json");
+  file.close();
 }
 
 void webSendStatusSse() {
@@ -5305,6 +5349,14 @@ void setupWebUiImpl() {
 
   webOnApi("/api/status", HTTP_GET, []() {
     webSendStatus();
+  });
+
+  webOnApi("/api/runtime3/status", HTTP_GET, []() {
+    webSendRuntime3Status();
+  });
+
+  webOnApi("/api/runtime3/document", HTTP_GET, []() {
+    webSendRuntime3Document();
   });
 
   webOnApi("/api/stream", HTTP_GET, []() {

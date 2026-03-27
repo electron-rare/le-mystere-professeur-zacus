@@ -16,6 +16,23 @@ struct ScenarioSnapshot {
   bool mp3_gate_open = false;
 };
 
+struct Runtime3ArtifactInfo {
+  bool discovered = false;
+  bool loaded = false;
+  size_t size_bytes = 0U;
+  uint32_t scenario_version = 0U;
+  uint16_t step_count = 0U;
+  uint16_t transition_count = 0U;
+  String path;
+  String schema_version;
+  String scenario_id;
+  String entry_step_id;
+  String source_kind;
+  String generated_by;
+  String migration_mode;
+  String error;
+};
+
 class ScenarioManager {
  public:
   static const char* readScenarioField(JsonVariantConst root,
@@ -39,6 +56,7 @@ class ScenarioManager {
   bool gotoScene(const char* scene_id, uint32_t now_ms, const char* source);
 
   ScenarioSnapshot snapshot() const;
+  const Runtime3ArtifactInfo& runtime3Artifact() const;
   bool consumeSceneChanged();
   bool consumeAudioRequest(String* out_audio_pack_id);
   uint32_t transitionEventMask() const;
@@ -59,6 +77,8 @@ class ScenarioManager {
   static constexpr uint8_t kMaxStepResourceOverrides = 24U;
 
   void clearStepResourceOverrides();
+  void clearRuntime3ArtifactInfo();
+  void loadRuntime3ArtifactInfo(const char* scenario_file_path, const char* scenario_id);
   void loadStepResourceOverrides(const char* scenario_file_path);
   const StepResourceOverride* findStepResourceOverride(const char* step_id) const;
   void applyStepResourceOverride(const StepDef* step,
@@ -93,4 +113,5 @@ class ScenarioManager {
   String initial_step_override_;
   StepResourceOverride step_resource_overrides_[kMaxStepResourceOverrides];
   uint8_t step_resource_override_count_ = 0U;
+  Runtime3ArtifactInfo runtime3_artifact_;
 };

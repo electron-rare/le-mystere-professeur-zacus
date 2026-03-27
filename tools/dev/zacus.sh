@@ -12,6 +12,9 @@ ARTIFACT_ROOT="$REPO_ROOT/artifacts"
 PORTS_ARTIFACT_ROOT="$ARTIFACT_ROOT/ports"
 LATEST_PORTS_JSON="$PORTS_ARTIFACT_ROOT/latest_ports_resolve.json"
 CODEX_ARTIFACT_ROOT="$ARTIFACT_ROOT/codex"
+RUNTIME3_ARTIFACT_ROOT="$ARTIFACT_ROOT/runtime3"
+FRONTEND_ROOT="$REPO_ROOT/frontend-scratch-v2"
+DEFAULT_SCENARIO="$REPO_ROOT/game/scenarios/zacus_v2.yaml"
 DEFAULT_PORTS_FIXTURE="$REPO_ROOT/tools/test/fixtures/ports_list_macos.txt"
 LAST_RESOLVED_JSON=""
 
@@ -33,6 +36,18 @@ usage() {
   cat <<'USAGE'
 Usage: zacus.sh <command> [args]
 Commands:
+  content-checks   Run canonical validators, Runtime 3 compile/sim, and export
+  runtime3-compile Compile a scenario YAML to Runtime 3 IR JSON
+  runtime3-simulate Simulate the Runtime 3 route from a scenario YAML
+  runtime3-verify  Verify Runtime 3 pivot coverage on the canonical scenario
+  runtime3-test    Run Runtime 3 unit tests
+  runtime3-firmware-bundle Export Runtime 3 JSON into the firmware LittleFS tree
+  frontend-lint    Run the React/Blockly studio lint gate
+  frontend-test    Run the React/Blockly studio test gate
+  frontend-build   Run the React/Blockly studio build gate
+  docs-build       Build the MkDocs site in strict mode
+  artifacts-summary Show recent Zacus artifact directories
+  artifacts-prune  Delete old Zacus artifact directories (explicit --yes required)
   rc       Run the RC live gate (always strict)
   smoke    Run the serial smoke helper (pass --role ... args)
   ports    Resolve ports once and show summary
@@ -41,6 +56,10 @@ Commands:
   menu     Show the Zacus cockpit menu
   help     Show this usage
 USAGE
+}
+
+have_gum() {
+  [[ -t 0 && -t 1 ]] && command -v gum >/dev/null 2>&1
 }
 
 print_ports_summary() {
@@ -157,6 +176,239 @@ cmd_ports() {
   fi
 }
 
+cmd_content_checks() {
+  info "running content checks"
+  (cd "$REPO_ROOT" && bash tools/test/run_content_checks.sh "$@")
+}
+
+cmd_runtime3_compile() {
+  local scenario="$DEFAULT_SCENARIO"
+  local out_file=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --scenario)
+        shift
+        scenario="${1:-}"
+        ;;
+      -o|--out)
+        shift
+        out_file="${1:-}"
+        ;;
+      --help|-h)
+        cat <<'HELP'
+Usage: zacus.sh runtime3-compile [--scenario <yaml>] [-o <json>]
+Compiles the canonical YAML into Zacus Runtime 3 IR JSON.
+HELP
+        return 0
+        ;;
+      *)
+        die "unexpected option: $1"
+        ;;
+    esac
+    shift
+  done
+  mkdir -p "$RUNTIME3_ARTIFACT_ROOT"
+  local ts
+  ts=$(date -u +%Y%m%d-%H%M%S)
+  local art_dir="$RUNTIME3_ARTIFACT_ROOT/$ts"
+  mkdir -p "$art_dir"
+  if [[ -z "$out_file" ]]; then
+    out_file="$art_dir/runtime3.json"
+  fi
+  printf 'command=runtime3-compile\nscenario=%s\nout=%s\n' "$scenario" "$out_file" > "$art_dir/meta.txt"
+  printf 'python3 tools/scenario/compile_runtime3.py %q -o %q\n' "$scenario" "$out_file" > "$art_dir/commands.txt"
+  info "compiling Runtime 3 (out=$out_file)"
+  (cd "$REPO_ROOT" && python3 tools/scenario/compile_runtime3.py "$scenario" -o "$out_file")
+  cat > "$art_dir/summary.md" <<EOF
+# Runtime 3 Compile
+
+- Scenario: \`$scenario\`
+- Output: \`$out_file\`
+- Status: success
+EOF
+  printf '[runtime3] artifact directory: %s\n' "$art_dir"
+}
+
+cmd_runtime3_simulate() {
+  local scenario="$DEFAULT_SCENARIO"
+  local max_steps="16"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --scenario)
+        shift
+        scenario="${1:-}"
+        ;;
+      --max-steps)
+        shift
+        max_steps="${1:-}"
+        ;;
+      --help|-h)
+        cat <<'HELP'
+Usage: zacus.sh runtime3-simulate [--scenario <yaml>] [--max-steps <n>]
+Simulates the Runtime 3 route from the given scenario YAML.
+HELP
+        return 0
+        ;;
+      *)
+        die "unexpected option: $1"
+        ;;
+    esac
+    shift
+  done
+  mkdir -p "$RUNTIME3_ARTIFACT_ROOT"
+  local ts
+  ts=$(date -u +%Y%m%d-%H%M%S)
+  local art_dir="$RUNTIME3_ARTIFACT_ROOT/$ts"
+  mkdir -p "$art_dir"
+  printf 'command=runtime3-simulate\nscenario=%s\nmax_steps=%s\n' "$scenario" "$max_steps" > "$art_dir/meta.txt"
+  printf 'python3 tools/scenario/simulate_runtime3.py %q --max-steps %q\n' "$scenario" "$max_steps" > "$art_dir/commands.txt"
+  info "simulating Runtime 3 (scenario=$scenario max_steps=$max_steps)"
+  (cd "$REPO_ROOT" && python3 tools/scenario/simulate_runtime3.py "$scenario" --max-steps "$max_steps") | tee "$art_dir/simulate.log"
+  cat > "$art_dir/summary.md" <<EOF
+# Runtime 3 Simulation
+
+- Scenario: \`$scenario\`
+- Max steps: \`$max_steps\`
+- Status: success
+EOF
+  printf '[runtime3] artifact directory: %s\n' "$art_dir"
+}
+
+cmd_runtime3_verify() {
+  local scenario="$DEFAULT_SCENARIO"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --scenario)
+        shift
+        scenario="${1:-}"
+        ;;
+      --help|-h)
+        cat <<'HELP'
+Usage: zacus.sh runtime3-verify [--scenario <yaml>]
+Checks Runtime 3 pivots and route order on the given scenario YAML.
+HELP
+        return 0
+        ;;
+      *)
+        die "unexpected option: $1"
+        ;;
+    esac
+    shift
+  done
+  info "verifying Runtime 3 pivots (scenario=$scenario)"
+  (cd "$REPO_ROOT" && python3 tools/scenario/verify_runtime3_pivots.py "$scenario")
+}
+
+cmd_runtime3_test() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --help|-h)
+        cat <<'HELP'
+Usage: zacus.sh runtime3-test
+Runs the Runtime 3 unit test suite.
+HELP
+        return 0
+        ;;
+      *)
+        die "unexpected option: $1"
+        ;;
+    esac
+    shift
+  done
+  info "running Runtime 3 unit tests"
+  (cd "$REPO_ROOT" && python3 -m unittest discover -s tests/runtime3 -p 'test_*.py')
+}
+
+cmd_runtime3_firmware_bundle() {
+  local scenario="$DEFAULT_SCENARIO"
+  local out_file="$REPO_ROOT/hardware/firmware/data/story/runtime3/DEFAULT.json"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --scenario)
+        shift
+        scenario="${1:-}"
+        ;;
+      -o|--out)
+        shift
+        out_file="${1:-}"
+        ;;
+      --help|-h)
+        cat <<'HELP'
+Usage: zacus.sh runtime3-firmware-bundle [--scenario <yaml>] [-o <json>]
+Exports Runtime 3 JSON into the firmware LittleFS tree.
+HELP
+        return 0
+        ;;
+      *)
+        die "unexpected option: $1"
+        ;;
+    esac
+    shift
+  done
+  info "exporting Runtime 3 firmware bundle (out=$out_file)"
+  (cd "$REPO_ROOT" && python3 tools/scenario/export_runtime3_firmware_bundle.py "$scenario" -o "$out_file")
+}
+
+cmd_frontend_lint() {
+  info "running frontend lint"
+  (cd "$FRONTEND_ROOT" && npm run lint)
+}
+
+cmd_frontend_test() {
+  info "running frontend tests"
+  (cd "$FRONTEND_ROOT" && npm run test)
+}
+
+cmd_frontend_build() {
+  info "running frontend build"
+  (cd "$FRONTEND_ROOT" && npm run build)
+}
+
+cmd_docs_build() {
+  info "building MkDocs site"
+  (cd "$REPO_ROOT" && python3 -m mkdocs build --strict)
+}
+
+cmd_artifacts_summary() {
+  mkdir -p "$ARTIFACT_ROOT"
+  info "recent artifact directories"
+  find "$ARTIFACT_ROOT" -mindepth 1 -maxdepth 2 -type d | sort | tail -n 20 | while IFS= read -r path; do
+    du -sh "$path"
+  done
+}
+
+cmd_artifacts_prune() {
+  local keep_days="7"
+  local confirmed="0"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --keep-days)
+        shift
+        keep_days="${1:-}"
+        ;;
+      --yes)
+        confirmed="1"
+        ;;
+      --help|-h)
+        cat <<'HELP'
+Usage: zacus.sh artifacts-prune [--keep-days <n>] --yes
+Deletes artifact directories older than the retention window under artifacts/.
+HELP
+        return 0
+        ;;
+      *)
+        die "unexpected option: $1"
+        ;;
+    esac
+    shift
+  done
+  if [[ "$confirmed" != "1" ]]; then
+    die "artifacts-prune is destructive; re-run with --yes"
+  fi
+  info "pruning artifacts older than $keep_days days"
+  find "$ARTIFACT_ROOT" -mindepth 2 -maxdepth 2 -type d -mtime +"$keep_days" -print -exec rm -rf {} +
+}
+
 cmd_rc() {
   info "running RC live"
   (cd "$FW_ROOT" && "$RC_RUNNER")
@@ -266,6 +518,10 @@ menu_select_prompt() {
   if [[ ${#choices[@]} -eq 0 ]]; then
     die "no prompt files found under $PROMPT_DIR"
   fi
+  if have_gum; then
+    gum choose --header "Select Codex prompt" "${choices[@]}"
+    return 0
+  fi
   printf 'Available prompts:\n'
   local idx=1
   for prompt in "${choices[@]}"; do
@@ -334,31 +590,81 @@ cmd_menu() {
   while true; do
     printf '\n=== Zacus cockpit ===\n'
     show_ports_context || true
-    printf '[menu] options:\n'
-    printf '  1) RC live\n'
-    printf '  2) Serial smoke\n'
-    printf '  3) Codex (run prompt)\n'
-    printf '  4) Ports: resolve now\n'
-    printf '  5) ZeroClaw preflight\n'
-    printf '  0) Exit\n'
-    read -rp 'Choice: ' choice
+    if have_gum; then
+      choice="$(gum choose \
+        "RC live" \
+        "Serial smoke" \
+        "Content checks" \
+        "Runtime 3 compile" \
+        "Runtime 3 simulate" \
+        "Runtime 3 verify" \
+        "Runtime 3 tests" \
+        "Runtime 3 firmware bundle" \
+        "Frontend tests" \
+        "Frontend build" \
+        "Codex (run prompt)" \
+        "Ports: resolve now" \
+        "ZeroClaw preflight" \
+        "Exit")"
+    else
+      printf '[menu] options:\n'
+      printf '  1) RC live\n'
+      printf '  2) Serial smoke\n'
+      printf '  3) Content checks\n'
+      printf '  4) Runtime 3 compile\n'
+      printf '  5) Runtime 3 simulate\n'
+      printf '  6) Runtime 3 verify\n'
+      printf '  7) Runtime 3 tests\n'
+      printf '  8) Runtime 3 firmware bundle\n'
+      printf '  9) Frontend tests\n'
+      printf ' 10) Frontend build\n'
+      printf ' 11) Codex (run prompt)\n'
+      printf ' 12) Ports: resolve now\n'
+      printf ' 13) ZeroClaw preflight\n'
+      printf '  0) Exit\n'
+      read -rp 'Choice: ' choice
+    fi
     case "$choice" in
-      1)
+      1|"RC live")
         cmd_rc
         ;;
-      2)
+      2|"Serial smoke")
         cmd_smoke
         ;;
-      3)
+      3|"Content checks")
+        cmd_content_checks
+        ;;
+      4|"Runtime 3 compile")
+        cmd_runtime3_compile
+        ;;
+      5|"Runtime 3 simulate")
+        cmd_runtime3_simulate
+        ;;
+      6|"Runtime 3 verify")
+        cmd_runtime3_verify
+        ;;
+      7|"Runtime 3 tests")
+        cmd_runtime3_test
+        ;;
+      8|"Runtime 3 firmware bundle")
+        cmd_runtime3_firmware_bundle
+        ;;
+      9|"Frontend tests")
+        cmd_frontend_test
+        ;;
+      10|"Frontend build")
+        cmd_frontend_build
+        ;;
+      11|"Codex (run prompt)")
         menu_run_codex
         ;;
-      4)
+      12|"Ports: resolve now")
         cmd_ports
         ;;
-      5)
+      13|"ZeroClaw preflight")
         cmd_zeroclaw_preflight --require-port
         ;;
-      0)
+      0|"Exit")
         return 0
         ;;
       *)
@@ -371,6 +677,42 @@ cmd_menu() {
 command="${1:-help}"
 shift || true
 case "$command" in
+  content-checks)
+    cmd_content_checks "$@"
+    ;;
+  runtime3-compile)
+    cmd_runtime3_compile "$@"
+    ;;
+  runtime3-simulate)
+    cmd_runtime3_simulate "$@"
+    ;;
+  runtime3-verify)
+    cmd_runtime3_verify "$@"
+    ;;
+  runtime3-test)
+    cmd_runtime3_test "$@"
+    ;;
+  runtime3-firmware-bundle)
+    cmd_runtime3_firmware_bundle "$@"
+    ;;
+  frontend-lint)
+    cmd_frontend_lint "$@"
+    ;;
+  frontend-test)
+    cmd_frontend_test "$@"
+    ;;
+  frontend-build)
+    cmd_frontend_build "$@"
+    ;;
+  docs-build)
+    cmd_docs_build "$@"
+    ;;
+  artifacts-summary)
+    cmd_artifacts_summary "$@"
+    ;;
+  artifacts-prune)
+    cmd_artifacts_prune "$@"
+    ;;
   rc)
     cmd_rc
     ;;

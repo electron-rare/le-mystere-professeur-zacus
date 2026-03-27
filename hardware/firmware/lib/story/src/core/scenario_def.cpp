@@ -15,13 +15,13 @@ bool sameText(const char* lhs, const char* rhs) {
 
 }  // namespace
 
-int8_t storyFindStepIndex(const ScenarioDef& scenario, const char* stepId) {
+int16_t storyFindStepIndex(const ScenarioDef& scenario, const char* stepId) {
   if (scenario.steps == nullptr || scenario.stepCount == 0U || stepId == nullptr || stepId[0] == '\0') {
     return -1;
   }
   for (uint8_t i = 0U; i < scenario.stepCount; ++i) {
     if (sameText(scenario.steps[i].id, stepId)) {
-      return static_cast<int8_t>(i);
+      return static_cast<int16_t>(i);
     }
   }
   return -1;

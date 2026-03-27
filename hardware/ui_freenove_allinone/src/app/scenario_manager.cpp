@@ -89,6 +89,48 @@ bool loadScenarioIdFromFile(const char* scenario_file_path, String* out_scenario
   return true;
 }
 
+bool loadRuntime3PathFromFile(const char* scenario_file_path, String* out_runtime3_path) {
+  if (scenario_file_path == nullptr || scenario_file_path[0] == '\0' || out_runtime3_path == nullptr) {
+    return false;
+  }
+  if (!LittleFS.exists(scenario_file_path)) {
+    return false;
+  }
+
+  File file = LittleFS.open(scenario_file_path, "r");
+  if (!file) {
+    return false;
+  }
+
+  StaticJsonDocument<96> filter;
+  filter["runtime3_file"] = true;
+  filter["runtime3_path"] = true;
+  filter["story"]["runtime3_file"] = true;
+  filter["story"]["runtime3_path"] = true;
+
+  StaticJsonDocument<512> document;
+  const DeserializationError error =
+      deserializeJson(document, file, DeserializationOption::Filter(filter));
+  file.close();
+  if (error) {
+    return false;
+  }
+
+  const char* const runtime3_keys[] = {"runtime3_file", "runtime3_path"};
+  const char* runtime3_path = ScenarioManager::readScenarioField(
+      document.as<JsonVariantConst>(), runtime3_keys, sizeof(runtime3_keys) / sizeof(runtime3_keys[0]));
+  if (runtime3_path == nullptr) {
+    runtime3_path = ScenarioManager::readScenarioField(
+        document["story"].as<JsonVariantConst>(), runtime3_keys, sizeof(runtime3_keys) / sizeof(runtime3_keys[0]));
+  }
+  if (runtime3_path == nullptr || runtime3_path[0] == '\0') {
+    return false;
+  }
+
+  *out_runtime3_path = runtime3_path;
+  return true;
+}
+
 }  // namespace
 
 const char* ScenarioManager::readScenarioField(JsonVariantConst root,
@@ -123,6 +165,7 @@ bool ScenarioManager::begin(const char* scenario_file_path) {
   debug_transition_bypass_enabled_ = false;
   initial_step_override_.remove(0);
   clearStepResourceOverrides();
+  clearRuntime3ArtifactInfo();
   String selected_scenario_id;
   if (loadScenarioIdFromFile(scenario_file_path, &selected_scenario_id)) {
     scenario_ = storyScenarioV2ById(selected_scenario_id.c_str());
@@ -157,6 +200,7 @@ bool ScenarioManager::begin(const char* scenario_file_path) {
   }
 
   loadStepResourceOverrides(scenario_file_path);
+  loadRuntime3ArtifactInfo(scenario_file_path, scenario_->id);
   reset();
   return true;
 }
@@ -166,6 +210,7 @@ bool ScenarioManager::beginById(const char* scenario_id) {
   debug_transition_bypass_enabled_ = false;
   initial_step_override_.remove(0);
   clearStepResourceOverrides();
+  clearRuntime3ArtifactInfo();
 
   if (scenario_id != nullptr && scenario_id[0] != '\0') {
     scenario_ = storyScenarioV2ById(scenario_id);
@@ -183,6 +228,7 @@ bool ScenarioManager::beginById(const char* scenario_id) {
   } else {
     Serial.printf("[SCENARIO] warning: validation failed for %s\n", scenario_->id);
   }
+  loadRuntime3ArtifactInfo(nullptr, scenario_->id);
   reset();
   return true;
 }
@@ -376,6 +422,10 @@ ScenarioSnapshot ScenarioManager::snapshot() const {
     out.mp3_gate_open = out.step->mp3GateOpen;
   }
   return out;
+}
+
+const Runtime3ArtifactInfo& ScenarioManager::runtime3Artifact() const {
+  return runtime3_artifact_;
 }
 
 bool ScenarioManager::consumeSceneChanged() {
@@ -660,6 +710,94 @@ void ScenarioManager::clearStepResourceOverrides() {
     }
   }
   step_resource_override_count_ = 0U;
+}
+
+void ScenarioManager::clearRuntime3ArtifactInfo() {
+  runtime3_artifact_ = Runtime3ArtifactInfo{};
+}
+
+void ScenarioManager::loadRuntime3ArtifactInfo(const char* scenario_file_path, const char* scenario_id) {
+  clearRuntime3ArtifactInfo();
+
+  String runtime3_path;
+  if (!loadRuntime3PathFromFile(scenario_file_path, &runtime3_path)) {
+    if (scenario_id == nullptr || scenario_id[0] == '\0') {
+      return;
+    }
+    runtime3_path = "/story/runtime3/";
+    runtime3_path += scenario_id;
+    runtime3_path += ".json";
+  }
+
+  runtime3_artifact_.discovered = true;
+  runtime3_artifact_.path = runtime3_path;
+  if (!LittleFS.exists(runtime3_path.c_str())) {
+    runtime3_artifact_.error = "missing";
+    Serial.printf("[RUNTIME3] artifact missing path=%s\n", runtime3_path.c_str());
+    return;
+  }
+
+  File file = LittleFS.open(runtime3_path.c_str(), "r");
+  if (!file) {
+    runtime3_artifact_.error = "open_failed";
+    Serial.printf("[RUNTIME3] open failed path=%s\n", runtime3_path.c_str());
+    return;
+  }
+
+  const size_t file_size = static_cast<size_t>(file.size());
+  runtime3_artifact_.size_bytes = file_size;
+  if (file_size == 0U || file_size > 32768U) {
+    runtime3_artifact_.error = "size_out_of_range";
+    file.close();
+    Serial.printf("[RUNTIME3] unexpected artifact size path=%s bytes=%u\n",
+                  runtime3_path.c_str(),
+                  static_cast<unsigned int>(file_size));
+    return;
+  }
+
+  DynamicJsonDocument document(file_size + 1024U);
+  const DeserializationError error = deserializeJson(document, file);
+  file.close();
+  if (error) {
+    runtime3_artifact_.error = error.c_str();
+    Serial.printf("[RUNTIME3] parse failed path=%s error=%s\n",
+                  runtime3_path.c_str(),
+                  runtime3_artifact_.error.c_str());
+    return;
+  }
+
+  JsonObjectConst scenario = document["scenario"].as<JsonObjectConst>();
+  JsonArrayConst steps = document["steps"].as<JsonArrayConst>();
+  JsonObjectConst metadata = document["metadata"].as<JsonObjectConst>();
+  if (scenario.isNull() || steps.isNull()) {
+    runtime3_artifact_.error = "invalid_document";
+    Serial.printf("[RUNTIME3] invalid artifact path=%s\n", runtime3_path.c_str());
+    return;
+  }
+
+  runtime3_artifact_.schema_version = stringOrNull(document["schema_version"]);
+  runtime3_artifact_.scenario_id = stringOrNull(scenario["id"]);
+  runtime3_artifact_.entry_step_id = stringOrNull(scenario["entry_step_id"]);
+  runtime3_artifact_.source_kind = stringOrNull(scenario["source_kind"]);
+  runtime3_artifact_.generated_by = stringOrNull(metadata["generated_by"]);
+  runtime3_artifact_.migration_mode = stringOrNull(metadata["migration_mode"]);
+  runtime3_artifact_.scenario_version = scenario["version"].is<uint32_t>() ? scenario["version"].as<uint32_t>() : 0U;
+  runtime3_artifact_.step_count = static_cast<uint16_t>(steps.size());
+  runtime3_artifact_.transition_count = 0U;
+  for (JsonVariantConst step_variant : steps) {
+    JsonArrayConst transitions = step_variant["transitions"].as<JsonArrayConst>();
+    if (!transitions.isNull()) {
+      runtime3_artifact_.transition_count =
+          static_cast<uint16_t>(runtime3_artifact_.transition_count + transitions.size());
+    }
+  }
+  runtime3_artifact_.loaded = true;
+  runtime3_artifact_.error.remove(0);
+  Serial.printf("[RUNTIME3] loaded path=%s steps=%u transitions=%u entry=%s\n",
+                runtime3_path.c_str(),
+                static_cast<unsigned int>(runtime3_artifact_.step_count),
+                static_cast<unsigned int>(runtime3_artifact_.transition_count),
+                runtime3_artifact_.entry_step_id.c_str());
 }
 
 void ScenarioManager::loadStepResourceOverrides(const char* scenario_file_path) {

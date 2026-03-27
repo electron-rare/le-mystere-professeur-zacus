@@ -1,3 +1,294 @@
+## [2026-03-16] Graph-first cleanup slice
+
+- Objective:
+  - keep enchaîning the Runtime 3 migration with a surgical cleanup pass,
+  - remove the canonical `steps_reference_order` bridge from the scenario YAML,
+  - align the studio and compiler helpers on graph-first `firmware.steps`.
+
+- Changes applied:
+  - Canonical scenario cleanup:
+    - removed `firmware.steps_reference_order` from `game/scenarios/zacus_v2.yaml`.
+  - Studio/runtime alignment:
+    - `frontend-scratch-v2/src/lib/scenario.ts` now treats `firmware.steps` as canonical and only falls back to `firmware.steps_reference_order`,
+      not a top-level `steps_reference_order`.
+    - `frontend-scratch-v2/src/lib/runtime3.ts` now resolves the Runtime 3 entry step from nested firmware data only.
+    - `frontend-scratch-v2/src/types.ts` moves the compatibility bridge under `firmware.steps_reference_order`.
+    - `frontend-scratch-v2/tests/scenario-runtime3.test.ts` now asserts the builder no longer emits a top-level
+      `steps_reference_order`.
+  - Runtime 3 compiler compatibility:
+    - `tools/scenario/runtime3_common.py` now prefers `firmware.steps_reference_order` over a legacy top-level fallback
+      when it needs an ordered import path.
+  - Spec/todo refresh:
+    - updated active plan/todo/spec files to record that the canonical scenario is now graph-only.
+
+- Validation:
+  - `bash tools/test/run_content_checks.sh --install-missing` -> PASS
+  - `npm --prefix frontend-scratch-v2 run test` -> PASS
+
+- Evidence artifacts:
+  - Safety checkpoint:
+    - `/tmp/zacus_checkpoint/20260316-073226_wip.patch`
+    - `/tmp/zacus_checkpoint/20260316-073226_status.txt`
+
+- Remaining next steps:
+  - remove the last compatibility bridge from non-canonical import/export paths,
+  - wire native Runtime 3 deploy actions once firmware accepts native IR payloads,
+  - run the full build gate matrix after this cleanup slice.
+
+## [2026-03-16] Frontend regression gate wiring
+
+- Objective:
+  - harden the studio migration with a first-class frontend test gate,
+  - keep graph-first behavior protected in CI and local shells,
+  - align the local AI gateway prompt with the new canonical YAML shape.
+
+- Changes applied:
+  - Added frontend regression tests in:
+    - `frontend-scratch-v2/tests/scenario-runtime3.test.ts`
+  - Added frontend test tooling:
+    - `frontend-scratch-v2/package.json` -> `npm test`
+    - `Makefile` -> `frontend-test`
+    - `tools/dev/zacus.sh` -> `frontend-test`
+    - `.github/workflows/validate.yml` -> frontend test step
+  - The new tests cover:
+    - graph-first YAML validation without `steps_reference_order`,
+    - YAML parsing from `firmware.steps`,
+    - Runtime 3 entry-step compilation from `firmware.initial_step`,
+    - builder output compatibility.
+  - Updated `tools/dev/local_studio_ai_gateway.py` so the generation prompt now asks for canonical Zacus V2 YAML with `firmware.initial_step` and `firmware.steps`.
+
+- Validation:
+  - `npm --prefix frontend-scratch-v2 install` -> PASS
+    - Note: npm reported `3 vulnerabilities` (`2 moderate`, `1 high`) but install completed.
+  - `npm --prefix frontend-scratch-v2 run test` -> PASS
+  - `bash tools/dev/zacus.sh frontend-test` -> PASS
+  - `make frontend-test` -> PASS
+  - `npm --prefix frontend-scratch-v2 run lint` -> PASS
+  - `npm --prefix frontend-scratch-v2 run build` -> PASS
+    - Warning only: Vite bundle size advisory still present.
+  - `bash tools/test/run_content_checks.sh --install-missing` -> PASS
+  - `python3 -m mkdocs build --strict` -> PASS
+
+- Evidence artifacts:
+  - Safety checkpoint:
+    - `/tmp/zacus_checkpoint/20260316-065010_wip.patch`
+    - `/tmp/zacus_checkpoint/20260316-065010_status.txt`
+
+- Remaining next steps:
+  - decide whether to address the npm audit findings in a dedicated dependency hygiene pass,
+  - remove the remaining `steps_reference_order` bridge from consumers,
+  - wire native Runtime 3 deploy actions into the studio once firmware accepts them.
+
+## [2026-03-16] Studio graph adoption + runbook cleanup
+
+- Objective:
+  - continue the migration after the canonical graph landing,
+  - make the studio consume graph-first scenario data without a hard dependency on `steps_reference_order`,
+  - clean more active runbook/agent references still pointing at the old tracker path.
+
+- Changes applied:
+  - Frontend graph adoption:
+    - `frontend-scratch-v2/src/lib/scenario.ts` now validates scenario order from `firmware.steps` first,
+      while still tolerating `steps_reference_order` as a compatibility bridge.
+    - `frontend-scratch-v2/src/lib/runtime3.ts` now resolves `entry_step_id` from `firmware.initial_step`
+      or the first firmware step before falling back to older fields.
+    - `frontend-scratch-v2/src/types.ts` makes `steps_reference_order` optional.
+  - Studio UX:
+    - `frontend-scratch-v2/src/components/Dashboard.tsx` now exposes a Runtime 3 adapter card
+      showing contract, load status, scenario id, entry step, migration mode, counts, schema, and bundle path.
+  - Active cleanup:
+    - updated more active agent/runbook files that still referenced `docs/AGENT_TODO.md`:
+      - `.github/agents/ALIGNMENT_COMPLETE.md`
+      - `.github/agents/PHASE_LAUNCH_PLAN.md`
+      - `hardware/firmware/AGENTS_DOCS.md`
+      - `hardware/firmware/AGENTS_FIRMWARE.md`
+      - `hardware/firmware/AGENTS_TESTS.md`
+      - `hardware/firmware/docs/QUICKSTART.md`
+      - `hardware/ui_freenove_allinone/RC_FINAL_BOARD.md`
+
+- Validation:
+  - `bash tools/test/run_content_checks.sh --install-missing` -> PASS
+  - `npm --prefix frontend-scratch-v2 run lint` -> PASS
+  - `npm --prefix frontend-scratch-v2 run build` -> PASS
+    - Warning only: Vite bundle size advisory still present.
+  - `python3 -m mkdocs build --strict` -> PASS
+  - `pio run -d hardware/firmware -e freenove_esp32s3` -> PASS
+    - RAM: `84.3%` (`276264 / 327680`)
+    - Flash: `39.7%` (`2496997 / 6291456`)
+  - `pio run -d hardware/firmware -e esp8266_oled` -> PASS
+
+- Evidence artifacts:
+  - Safety checkpoint:
+    - `/tmp/zacus_checkpoint/20260316-063851_wip.patch`
+    - `/tmp/zacus_checkpoint/20260316-063851_status.txt`
+
+- Remaining next steps:
+  - remove `steps_reference_order` once the remaining consumers are migrated,
+  - wire Runtime 3 deploy/refresh actions in the studio when the firmware adapter accepts native IR payloads,
+  - continue the cleanup pass on non-critical historical docs only after isolating it from the dirty worktree.
+
+## [2026-03-16] Runtime 3 graph migration + active cleanup pass
+
+- Objective:
+  - continue the refactor waves with the next real runtime slice,
+  - migrate the canonical scenario from ordered steps to explicit `firmware.steps`,
+  - clean active root-level legacy references without triggering a destructive cleanup pass.
+
+- Changes applied:
+  - Migrated `game/scenarios/zacus_v2.yaml` to an explicit firmware graph:
+    - added `firmware.initial_step`,
+    - added `firmware.steps`,
+    - preserved `firmware.steps_reference_order` temporarily as a compatibility bridge.
+  - Canonical transitions are now explicit in YAML:
+    - `STEP_LA_DETECTOR` uses `unlock`,
+    - `STEP_RTC_ESP_ETAPE1` and `STEP_RTC_ESP_ETAPE2` use `espnow`,
+    - `STEP_WIN_ETAPE1` uses `audio_done`,
+    - `STEP_QR_DETECTOR` uses `unlock`.
+  - Tightened validators and exports:
+    - `tools/scenario/validate_scenario.py` now validates `firmware.steps`,
+    - `tools/scenario/export_md.py` now prefers `firmware.steps`,
+    - `tools/scenario/verify_runtime3_pivots.py` now requires `migration_mode=firmware_import`.
+  - Runtime 3 tests now assert the canonical scenario compiles in `firmware_import` mode and preserves unlock semantics on the key detectors.
+  - CI cleanup:
+    - `.github/workflows/validate.yml` now installs docs dependencies and runs `mkdocs build --strict`.
+  - Active legacy cleanup:
+    - updated root agent/spec references still pointing to `zacus_v1` or stale `docs/AGENT_TODO.md` paths in active coordination files.
+
+- Validation:
+  - `bash tools/test/run_content_checks.sh --install-missing` -> PASS
+    - Runtime 3 compile result now shows `migration_mode=firmware_import`
+  - `python3 tools/scenario/export_runtime3_firmware_bundle.py game/scenarios/zacus_v2.yaml` -> PASS
+  - `npm --prefix frontend-scratch-v2 run lint` -> PASS
+  - `npm --prefix frontend-scratch-v2 run build` -> PASS
+    - Warning only: Vite bundle size advisory still present.
+  - `python3 -m mkdocs build --strict` -> PASS
+  - `pio run -d hardware/firmware -e freenove_esp32s3` -> PASS
+    - RAM: `84.3%` (`276264 / 327680`)
+    - Flash: `39.7%` (`2496997 / 6291456`)
+  - `pio run -d hardware/firmware -e esp8266_oled` -> PASS
+
+- Evidence artifacts:
+  - Safety checkpoint:
+    - `/tmp/zacus_checkpoint/20260316-063356_wip.patch`
+    - `/tmp/zacus_checkpoint/20260316-063356_status.txt`
+  - Firmware Runtime 3 artifact:
+    - `hardware/firmware/data/story/runtime3/DEFAULT.json`
+
+- Remaining next steps:
+  - remove the transitional `steps_reference_order` bridge after consumers fully adopt `firmware.steps`,
+  - surface Runtime 3 metadata as a first-class panel in the studio,
+  - validate the Runtime 3 adapter route on real hardware with flash/smoke evidence.
+
+## [2026-03-16] Runtime 3 adapter follow-through + validation closure
+
+- Objective:
+  - continue the Zacus refactor waves after the baseline slice,
+  - close the Runtime 3 adapter TODOs that were still open,
+  - keep the hardware evidence tracker aligned with the new canonical validation flow.
+
+- Changes applied:
+  - Added Runtime 3 regression tests in `tests/runtime3/test_runtime3_routes.py`.
+    - Covers the canonical route:
+      - `STEP_U_SON_PROTO`
+      - `STEP_LA_DETECTOR`
+      - `STEP_RTC_ESP_ETAPE1`
+      - `STEP_WIN_ETAPE1`
+      - `STEP_WARNING`
+      - `STEP_LEFOU_DETECTOR`
+      - `STEP_RTC_ESP_ETAPE2`
+      - `STEP_QR_DETECTOR`
+      - `STEP_FINAL_WIN`
+    - Covers explicit graph-priority behavior for `firmware.steps` fixtures.
+  - Added `runtime3-test` to:
+    - `Makefile`
+    - `tools/test/run_content_checks.sh`
+    - `tools/dev/zacus.sh`
+  - Exported the firmware Runtime 3 bundle to:
+    - `hardware/firmware/data/story/runtime3/DEFAULT.json`
+  - Firmware adapter path now exposes:
+    - `GET /api/runtime3/status`
+    - `GET /api/runtime3/document`
+    - `/api/status` now reports `story.runtime_contract` and `runtime3` metadata.
+  - Updated coordination docs/todos/plans to reflect:
+    - Runtime 3 adapter discovery is landed,
+    - canonical validation now includes Runtime 3 regression tests,
+    - remaining next slice is the full `firmware.steps` graph migration.
+  - Corrected top-level agent/doc references that still pointed to `docs/AGENT_TODO.md` or `zacus_v1` in the active coordination path.
+
+- Validation:
+  - `python3 tools/scenario/verify_runtime3_pivots.py --help` -> PASS
+  - `python3 tools/scenario/export_runtime3_firmware_bundle.py --help` -> PASS
+  - `bash tools/dev/zacus.sh --help` -> PASS
+  - `bash tools/test/run_content_checks.sh --help` -> PASS
+  - `bash tools/test/run_content_checks.sh --install-missing` -> PASS
+  - `python3 tools/scenario/export_runtime3_firmware_bundle.py game/scenarios/zacus_v2.yaml` -> PASS
+  - `bash tools/dev/zacus.sh runtime3-verify` -> PASS
+  - `bash tools/dev/zacus.sh runtime3-firmware-bundle` -> PASS
+  - `npm --prefix frontend-scratch-v2 run lint` -> PASS
+  - `npm --prefix frontend-scratch-v2 run build` -> PASS
+    - Warning only: Vite bundle still exceeds the 500 kB advisory threshold.
+  - `python3 -m mkdocs build --strict` -> PASS
+  - `pio run -d hardware/firmware -e freenove_esp32s3` -> PASS
+    - RAM: `84.3%` (`276264 / 327680`)
+    - Flash: `39.7%` (`2496997 / 6291456`)
+  - `pio run -d hardware/firmware -e esp8266_oled` -> PASS
+
+- Evidence artifacts:
+  - Safety checkpoint:
+    - `/tmp/zacus_checkpoint/20260316-054341_wip.patch`
+    - `/tmp/zacus_checkpoint/20260316-054341_status.txt`
+  - Firmware Runtime 3 artifact:
+    - `hardware/firmware/data/story/runtime3/DEFAULT.json`
+
+- Remaining next steps:
+  - migrate `game/scenarios/zacus_v2.yaml` from `firmware.steps_reference_order` to explicit `firmware.steps`,
+  - render Runtime 3 adapter metadata as a first-class panel in the studio,
+  - flash and smoke the Runtime 3 adapter route on real hardware.
+
+## [2026-03-16] Zacus refactor baseline + build recovery
+
+- Objective:
+  - land the first Runtime 3/tooling/docs/studio slice of the Zacus refactor,
+  - recover the broken React/Blockly build,
+  - restore Freenove build margin after the DRAM overflow.
+
+- Changes applied:
+  - Added refactor coordination canon under `memory/`, `plans/`, and `todos/`.
+  - Added Runtime 3 tooling:
+    - `tools/scenario/runtime3_common.py`
+    - `tools/scenario/compile_runtime3.py`
+    - `tools/scenario/simulate_runtime3.py`
+  - Updated `frontend-scratch-v2` for:
+    - Blockly transition authoring,
+    - YAML + Runtime 3 IR previews,
+    - TypeScript-safe API/runtime typing.
+  - Updated root docs/specs and MkDocs architecture maps.
+  - Updated `tools/test/run_content_checks.sh`, `tools/dev/zacus.sh`, `Makefile`, and CI validation flow.
+  - Reduced `UI_LV_MEM_SIZE_KB` from `128` to `120` in `hardware/firmware/platformio.ini`.
+
+- Validation:
+  - `bash tools/test/run_content_checks.sh --install-missing` -> PASS
+  - `bash tools/dev/zacus.sh runtime3-compile` -> PASS
+  - `npm --prefix frontend-scratch-v2 run lint` -> PASS
+  - `npm --prefix frontend-scratch-v2 run build` -> PASS
+  - `python3 -m mkdocs build --strict` -> PASS
+  - `pio run -d hardware/firmware -e freenove_esp32s3` -> PASS
+    - RAM: `84.3%` (`276120 / 327680`)
+    - Flash: `39.6%` (`2491997 / 6291456`)
+  - `pio run -d hardware/firmware -e esp8266_oled` -> PASS
+
+- Evidence artifacts:
+  - Safety checkpoint:
+    - `/tmp/zacus_checkpoint/20260316-051424_wip.patch`
+    - `/tmp/zacus_checkpoint/20260316-051424_status.txt`
+  - Runtime 3 artifact:
+    - `artifacts/runtime3/20260316-043303/`
+
+- Remaining next steps:
+  - load Runtime 3 artifacts from firmware instead of relying on migration-only generation,
+  - add fixture-based tests for `LA 440`, `LEFOU`, and `QR WIN`,
+  - continue quarantining legacy frontend/spec references before deletion.
+
 ## [2026-03-01] RESOLVED: A252 Audio Optimizations (3 Critical Fixes)
 
 **Status: ✅ COMPLETE & DEPLOYED**

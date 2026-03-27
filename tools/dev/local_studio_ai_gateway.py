@@ -388,15 +388,16 @@ def build_story_prompt(blueprint: dict[str, Any]) -> str:
     normalized_json = json.dumps(normalized, ensure_ascii=False, indent=2)
 
     return (
-        "Génère un YAML de scenario Zacus compatible Story V2 (format frontend).\n"
-        "Le YAML doit contenir id, version, title, steps, app_bindings, initial_step.\n"
+        "Génère un YAML de scénario Zacus V2 canonique, compatible studio + Runtime 3.\n"
+        "Le YAML doit contenir au minimum id, version, title, players, duration, canon, steps_narrative, firmware.initial_step et firmware.steps.\n"
         "Conserver le flow par défaut décrit ci-dessous (noms d'événements inchangés).\n"
         "Si certains champs manquent, utilise les valeurs ci-dessous.\n\n"
         f"{normalized_json}\n\n"
         "Règles techniques:\n"
-        "- transitions: trigger, event_type, event_name, target_step_id, after_ms, priority.\n"
-        "- event_name respecte exactement: BTN,NEXT,AUDIO_DONE,ACK_*,UNLOCK,FORCE_*,ETAPE2_DUE,QR_TIMEOUT,WIN_DUE.\n"
-        "- target_step_id accepte aussi SCENE_MEDIA_MANAGER.\n"
+        "- firmware.steps[*] contient: step_id, screen_scene_id, audio_pack_id, actions, apps, transitions.\n"
+        "- transitions: event_type, event_name, target_step_id, after_ms, priority.\n"
+        "- event_name respecte exactement: BTN_NEXT, AUDIO_DONE, ACK_*, UNLOCK_*, QR_TIMEOUT.\n"
+        "- garder un ordre cohérent entre steps_narrative et firmware.steps.\n"
     )
 
 

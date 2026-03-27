@@ -81,8 +81,8 @@ Logs/artifacts:
 - Toute modification de structure doit être répercutée dans la documentation et l'onboarding.
 - Les grosses reviews sont autorisees (rapport detaille + recommandations).
 - Les gates build/smoke sont recommandees, mais non obligatoires sauf demande explicite.
-- Consult et mettez à jour `docs/AGENT_TODO.md` avant toute opération importante : c’est le tracker canonique des tâches d’agent, mentionnez-y les étapes réalisées, les artefacts produits et toute impasse matérielle pour guider les agents suivants.
-- Les logs et artefacts (`logs/`, `artifacts/`, etc.) ne doivent pas être committés ; notez leur existence (chemins, horodatages) dans `docs/AGENT_TODO.md` ou dans le rapport final au lieu de les versionner.
+- Consult et mettez à jour `hardware/firmware/docs/AGENT_TODO.md` avant toute opération importante : c’est le tracker canonique des tâches d’agent, mentionnez-y les étapes réalisées, les artefacts produits et toute impasse matérielle pour guider les agents suivants.
+- Les logs et artefacts (`logs/`, `artifacts/`, etc.) ne doivent pas être committés ; notez leur existence (chemins, horodatages) dans `hardware/firmware/docs/AGENT_TODO.md` ou dans le rapport final au lieu de les versionner.
 
 ---
 

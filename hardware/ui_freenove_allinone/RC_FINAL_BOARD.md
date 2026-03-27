@@ -61,7 +61,7 @@ Recommandation : ajouter des commentaires dans ui_freenove_config.h et tester 
 3. **Utiliser le fallback I2S** : remplacer tout appel à `dacWrite` par une routine I2S (`i2sWriteSample`).
 4. **Initialiser I2S** : suivre l’exemple Espressif pour la configuration du canal, du clock, des slots et des GPIO.
 5. **Tester l’audio** : utiliser un signal simple (ex : sinusoïde) pour valider la sortie.
-6. **Documenter la traçabilité** : reporter les étapes, patchs et artefacts dans [docs/AGENT_TODO.md](docs/AGENT_TODO.md).
+6. **Documenter la traçabilité** : reporter les étapes, patchs et artefacts dans `hardware/firmware/docs/AGENT_TODO.md`.
 
 ### Liens techniques
 
@@ -109,7 +109,7 @@ Recommandation : ajouter des commentaires dans ui_freenove_config.h et tester 
 # UI link : retry et diagnostic
 
 - Le check UI link (connexion UI ESP32/ESP8266) intègre désormais une logique de retry automatique (3 essais par défaut, paramétrable via `ZACUS_UI_LINK_RETRIES`).
-- En cas d’échec, le script logue chaque tentative, synchronise l’évidence dans `docs/AGENT_TODO.md`, et produit un rapport détaillé dans les artefacts.
+- En cas d’échec, le script logue chaque tentative, synchronise l’évidence dans `hardware/firmware/docs/AGENT_TODO.md`, et produit un rapport détaillé dans les artefacts.
 - Toute évolution ou échec du protocole UI link est traçable dans les logs et la documentation.
 
 # cockpit.sh : automatisation smoke test
@@ -119,7 +119,7 @@ Recommandation : ajouter des commentaires dans ui_freenove_config.h et tester 
 
 # Synchronisation evidence/logs
 
-- Chaque run (succès ou échec) synchronise l’évidence (artefacts, logs, verdict) dans `docs/AGENT_TODO.md`.
+- Chaque run (succès ou échec) synchronise l’évidence (artefacts, logs, verdict) dans `hardware/firmware/docs/AGENT_TODO.md`.
 - Les artefacts et logs sont produits dans `hardware/firmware/artifacts/` et `hardware/firmware/logs/`.
 - La traçabilité est assurée pour chaque run, avec horodatage, chemin, et verdict.
 

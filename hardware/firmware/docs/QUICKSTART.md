@@ -215,4 +215,4 @@ SYS_RTOS_STATUS
 - Mapping I2S out Freenove: `BCK=42`, `WS=41`, `DOUT=1` (`FREENOVE_I2S_BCK`, `FREENOVE_I2S_WS`, `FREENOVE_I2S_DOUT`).
 - Mapping micro I2S in: `SCK=3`, `WS=14`, `DIN=46` (`FREENOVE_I2S_IN_SCK`, `FREENOVE_I2S_IN_WS`, `FREENOVE_I2S_IN_DIN`).
 - Tester avec `MIC_TUNER_STATUS ON 200` et `HW_STATUS_JSON` pour vérifier fréquence/confiance/niveau.
-- En cas d’échec, consigner l’evidence (artefact + log + commande) dans `docs/AGENT_TODO.md`.
+- En cas d’échec, consigner l’evidence (artefact + log + commande) dans `hardware/firmware/docs/AGENT_TODO.md`.

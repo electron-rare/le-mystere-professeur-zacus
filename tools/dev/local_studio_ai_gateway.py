@@ -310,7 +310,7 @@ def to_float(value: Any, fallback: float) -> float:
 
 
 def extract_yaml(payload: str) -> str:
-    block_match = re.search(r"```ya?ml\\s*\\n([\\s\\S]*?)```", payload, re.IGNORECASE)
+    block_match = re.search(r"```ya?ml\s*\n([\s\S]*?)```", payload, re.IGNORECASE)
     if block_match:
         return block_match.group(1).strip()
 
@@ -420,11 +420,11 @@ def build_printables_plan(scenario_id: str, title: str, selected: list[str] | No
 
     yaml_text = safe_dump(manifest_out, sort_keys=False, allow_unicode=True).strip()
     markdown = (
-        f"# Pack imprimables — {manifest_out['title']}\\n\\n"
-        f"- Scenario: {manifest_out['scenario_id']}\\n"
-        f"- Items: {len(filtered)}\\n\\n"
-        + "\\n".join(f"- {entry.get('id')} ({entry.get('category')})" for entry in filtered)
-        + "\\n\\nGénéré via gateway IA locale.\\n"
+        f"# Pack imprimables — {manifest_out['title']}\n\n"
+        f"- Scenario: {manifest_out['scenario_id']}\n"
+        f"- Items: {len(filtered)}\n\n"
+        + "\n".join(f"- {entry.get('id')} ({entry.get('category')})" for entry in filtered)
+        + "\n\nGénéré via gateway IA locale.\n"
     )
     return yaml_text, markdown
 

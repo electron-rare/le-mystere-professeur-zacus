@@ -358,6 +358,7 @@ async def voice_websocket(websocket: WebSocket, token: str = ""):
     await websocket.accept()
     client = f"{websocket.client.host}:{websocket.client.port}" if websocket.client else "unknown"
     logger.info("Client connected: %s", client)
+    device_id = None
 
     try:
         # --- Handshake ---
@@ -393,6 +394,8 @@ async def voice_websocket(websocket: WebSocket, token: str = ""):
 
     except WebSocketDisconnect:
         logger.info("Client disconnected: %s", client)
+        if device_id and device_id in _audio_sessions:
+            del _audio_sessions[device_id]
     except asyncio.TimeoutError:
         logger.warning("Handshake timeout: %s", client)
         if websocket.client_state == WebSocketState.CONNECTED:
@@ -505,8 +508,15 @@ async def _handle_audio(ws: WebSocket, frame: bytes, device_id: str):
             logger.info("[%s] Auto-STT (%.1fs): %s", device_id, t_stt, transcription[:80])
             await ws.send_json({"type": "stt", "text": transcription})
 
-            # Feed into LLM pipeline
-            response = await _query_llm(transcription)
+            # Feed into LLM pipeline — detect hint routing
+            hint_match = re.match(r'^\[HINT:(\w+):(\d)\]\s*(.*)', transcription)
+            if hint_match:
+                puzzle_id = hint_match.group(1)
+                hint_level = int(hint_match.group(2))
+                question = hint_match.group(3) or "Give me a hint"
+                response = await _query_hints(puzzle_id, question, hint_level, device_id)
+            else:
+                response = await _query_llm(transcription)
             await _send_tts_response(ws, response, device_id)
         else:
             logger.warning("[%s] Auto-STT returned empty", device_id)

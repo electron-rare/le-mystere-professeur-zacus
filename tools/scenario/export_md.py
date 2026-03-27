@@ -412,7 +412,7 @@ def build_brief_doc(model: dict) -> str:
 
 def write_file(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
+    path.write_text(content, encoding="utf-8")
 
 
 def export_files(scenario_path: Path, out_path: Path | None = None) -> None:

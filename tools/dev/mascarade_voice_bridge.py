@@ -88,6 +88,7 @@ OPUS_APPLICATION = "voip"      # opuslib application type
 TTS_OPUS_BITRATE = 24000       # 24kbps for TTS back to ESP32
 VAD_AGGRESSIVENESS = 2         # webrtcvad 0-3 (2 = balanced)
 VAD_SILENCE_FRAMES = 30        # ~600ms of silence to trigger end-of-speech
+MAX_HISTORY_TURNS = int(os.environ.get("ZACUS_MAX_HISTORY", "10"))  # conversation turns per session
 
 PROFESSOR_ZACUS_PROMPT = (
     "Tu es le Professeur Zacus, un scientifique excentrique et bienveillant. "
@@ -129,6 +130,7 @@ class AudioSessionManager:
         self._vad = None
         self._silence_count = 0
         self._speech_detected = False
+        self.conversation_history: list[dict[str, str]] = []
 
     def start(self):
         """Start a new recording session."""
@@ -444,7 +446,7 @@ async def _handle_message(ws: WebSocket, msg: dict, device_id: str):
                     question = hint_match.group(3) or "Give me a hint"
                     response = await _query_hints(puzzle_id, question, hint_level, device_id)
                 else:
-                    response = await _query_llm(transcription)
+                    response = await _query_llm(transcription, device_id)
 
                 # TTS response — encode to OPUS if available
                 await _send_tts_response(ws, response, device_id)
@@ -470,7 +472,7 @@ async def _handle_message(ws: WebSocket, msg: dict, device_id: str):
             question = hint_match.group(3) or "Give me a hint"
             response = await _query_hints(puzzle_id, question, hint_level, device_id)
         else:
-            response = await _query_llm(query)
+            response = await _query_llm(query, device_id)
 
         # TTS response (OPUS-encoded if available)
         await _send_tts_response(ws, response, device_id)
@@ -516,7 +518,7 @@ async def _handle_audio(ws: WebSocket, frame: bytes, device_id: str):
                 question = hint_match.group(3) or "Give me a hint"
                 response = await _query_hints(puzzle_id, question, hint_level, device_id)
             else:
-                response = await _query_llm(transcription)
+                response = await _query_llm(transcription, device_id)
             await _send_tts_response(ws, response, device_id)
         else:
             logger.warning("[%s] Auto-STT returned empty", device_id)
@@ -547,21 +549,26 @@ async def _query_hints(puzzle_id: str, question: str, hint_level: int, session_i
     except Exception as exc:
         logger.error("Hints error: %s", exc)
     # Fallback to generic LLM
-    return await _query_llm(question)
+    return await _query_llm(question, session_id)
 
 
-async def _query_llm(text: str) -> str:
-    """Query LLM via OpenAI-compatible API."""
+async def _query_llm(text: str, device_id: str = "unknown") -> str:
+    """Query LLM via OpenAI-compatible API with per-session conversation history."""
+    session = _get_session(device_id)
+
+    # Build messages: system + last N turns from history + current user message
+    messages: list[dict[str, str]] = [{"role": "system", "content": PROFESSOR_ZACUS_PROMPT}]
+    history_slice = session.conversation_history[-(MAX_HISTORY_TURNS * 2):]
+    messages.extend(history_slice)
+    messages.append({"role": "user", "content": text})
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
                 LLM_URL,
                 json={
                     "model": LLM_MODEL,
-                    "messages": [
-                        {"role": "system", "content": PROFESSOR_ZACUS_PROMPT},
-                        {"role": "user", "content": text},
-                    ],
+                    "messages": messages,
                     "max_tokens": 150,
                     "temperature": 0.8,
                 },
@@ -570,7 +577,11 @@ async def _query_llm(text: str) -> str:
                 data = resp.json()
                 choices = data.get("choices", [])
                 if choices:
-                    return choices[0].get("message", {}).get("content", "Hmm...")
+                    reply = choices[0].get("message", {}).get("content", "Hmm...")
+                    # Store turn in history
+                    session.conversation_history.append({"role": "user", "content": text})
+                    session.conversation_history.append({"role": "assistant", "content": reply})
+                    return reply
             logger.error("LLM HTTP %d: %s", resp.status_code, resp.text[:200])
     except Exception as exc:
         logger.error("LLM error: %s", exc)

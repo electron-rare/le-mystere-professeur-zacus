@@ -7,6 +7,10 @@ FW_ROOT="$REPO_ROOT/hardware/firmware"
 RC_RUNNER="$FW_ROOT/tools/dev/run_matrix_and_smoke.sh"
 SMOKE_SCRIPT="$FW_ROOT/tools/dev/serial_smoke.py"
 ZEROCLAW_PREFLIGHT="$SCRIPT_DIR/zeroclaw_hw_preflight.sh"
+VOICE_BRIDGE_SCRIPT="$SCRIPT_DIR/mascarade_voice_bridge.py"
+VOICE_BRIDGE_REQS="$SCRIPT_DIR/requirements-voice-bridge.txt"
+VOICE_BRIDGE_PID="/tmp/zacus_voice_bridge.pid"
+VOICE_BRIDGE_DEFAULT_PORT="8200"
 PROMPT_DIR="$SCRIPT_DIR/codex_prompts"
 ARTIFACT_ROOT="$REPO_ROOT/artifacts"
 PORTS_ARTIFACT_ROOT="$ARTIFACT_ROOT/ports"
@@ -621,6 +625,10 @@ cmd_menu() {
       printf ' 11) Codex (run prompt)\n'
       printf ' 12) Ports: resolve now\n'
       printf ' 13) ZeroClaw preflight\n'
+      printf ' 14) Voice bridge start\n'
+      printf ' 15) Voice bridge stop\n'
+      printf ' 16) Voice bridge status\n'
+      printf ' 17) Voice bridge test\n'
       printf '  0) Exit\n'
       read -rp 'Choice: ' choice
     fi
@@ -664,6 +672,18 @@ cmd_menu() {
       13|"ZeroClaw preflight")
         cmd_zeroclaw_preflight --require-port
         ;;
+      14|"Voice bridge start")
+        cmd_voice_bridge_start
+        ;;
+      15|"Voice bridge stop")
+        cmd_voice_bridge_stop
+        ;;
+      16|"Voice bridge status")
+        cmd_voice_bridge_status
+        ;;
+      17|"Voice bridge test")
+        cmd_voice_bridge_test
+        ;;
       0|"Exit")
         return 0
         ;;
@@ -672,6 +692,93 @@ cmd_menu() {
         ;;
     esac
   done
+}
+
+# ---------------------------------------------------------------------------
+# Voice bridge commands
+# ---------------------------------------------------------------------------
+VOICE_BRIDGE_PID="/tmp/zacus_voice_bridge.pid"
+VOICE_BRIDGE_PORT="${ZACUS_VOICE_BRIDGE_PORT:-8200}"
+VOICE_BRIDGE_SCRIPT="$REPO_ROOT/tools/dev/mascarade_voice_bridge.py"
+
+cmd_voice_bridge_start() {
+  if [[ -f "$VOICE_BRIDGE_PID" ]] && kill -0 "$(cat "$VOICE_BRIDGE_PID")" 2>/dev/null; then
+    printf 'Voice bridge already running (PID %s)\n' "$(cat "$VOICE_BRIDGE_PID")"
+    return 0
+  fi
+  printf 'Starting voice bridge on port %s...\n' "$VOICE_BRIDGE_PORT"
+  python3 "$VOICE_BRIDGE_SCRIPT" --port "$VOICE_BRIDGE_PORT" &
+  local pid=$!
+  echo "$pid" > "$VOICE_BRIDGE_PID"
+  sleep 2
+  if kill -0 "$pid" 2>/dev/null; then
+    printf '✓ Voice bridge started (PID %s, port %s)\n' "$pid" "$VOICE_BRIDGE_PORT"
+  else
+    printf '✗ Voice bridge failed to start\n'
+    rm -f "$VOICE_BRIDGE_PID"
+    return 1
+  fi
+}
+
+cmd_voice_bridge_stop() {
+  if [[ ! -f "$VOICE_BRIDGE_PID" ]]; then
+    printf 'Voice bridge not running (no PID file)\n'
+    return 0
+  fi
+  local pid
+  pid="$(cat "$VOICE_BRIDGE_PID")"
+  if kill "$pid" 2>/dev/null; then
+    printf '✓ Voice bridge stopped (PID %s)\n' "$pid"
+  else
+    printf 'Process %s already dead\n' "$pid"
+  fi
+  rm -f "$VOICE_BRIDGE_PID"
+}
+
+cmd_voice_bridge_status() {
+  if [[ -f "$VOICE_BRIDGE_PID" ]] && kill -0 "$(cat "$VOICE_BRIDGE_PID")" 2>/dev/null; then
+    local pid
+    pid="$(cat "$VOICE_BRIDGE_PID")"
+    local uptime
+    uptime="$(ps -o etime= -p "$pid" 2>/dev/null | xargs)"
+    printf '✓ Voice bridge running — PID %s, port %s, uptime %s\n' "$pid" "$VOICE_BRIDGE_PORT" "$uptime"
+  else
+    printf '✗ Voice bridge not running\n'
+    return 1
+  fi
+}
+
+cmd_voice_bridge_test() {
+  printf 'Sending test query to ws://localhost:%s/voice/ws ...\n' "$VOICE_BRIDGE_PORT"
+  python3 -c "
+import asyncio, json
+try:
+    import websockets
+except ImportError:
+    print('ERROR: pip install websockets')
+    exit(1)
+
+async def test():
+    uri = 'ws://localhost:${VOICE_BRIDGE_PORT}/voice/ws'
+    async with websockets.connect(uri) as ws:
+        await ws.send(json.dumps({'type': 'hello', 'device_id': 'zacus-test'}))
+        ack = json.loads(await asyncio.wait_for(ws.recv(), 5))
+        print(f'  hello_ack: {ack}')
+        await ws.send(json.dumps({'type': 'text_query', 'text': 'Bonjour Professeur Zacus'}))
+        while True:
+            msg = await asyncio.wait_for(ws.recv(), 30)
+            if isinstance(msg, str):
+                data = json.loads(msg)
+                print(f'  {data[\"type\"]}: {json.dumps(data, ensure_ascii=False)[:200]}')
+                if data.get('type') == 'tts' and data.get('state') == 'stop':
+                    break
+                if data.get('type') == 'error':
+                    break
+            else:
+                print(f'  [binary frame: {len(msg)} bytes]')
+
+asyncio.run(test())
+" 2>&1
 }
 
 command="${1:-help}"
@@ -727,6 +834,18 @@ case "$command" in
     ;;
   codex)
     cmd_codex "$@"
+    ;;
+  voice-bridge-start|vb-start)
+    cmd_voice_bridge_start
+    ;;
+  voice-bridge-stop|vb-stop)
+    cmd_voice_bridge_stop
+    ;;
+  voice-bridge-status|vb-status)
+    cmd_voice_bridge_status
+    ;;
+  voice-bridge-test|vb-test)
+    cmd_voice_bridge_test
     ;;
   menu)
     cmd_menu "$@"

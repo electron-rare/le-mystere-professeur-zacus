@@ -1,0 +1,3 @@
+[submodule "ESP32_ZACUS"]
+	path = ESP32_ZACUS
+	url = https://github.com/electron-rare/ESP32_ZACUS.git

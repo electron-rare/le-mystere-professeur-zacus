@@ -1,0 +1,51 @@
+diff --git a/hardware/firmware/hardware/firmware/esp32_audio/src/la_detector.cpp b/hardware/firmware/hardware/firmware/esp32_audio/src/la_detector.cpp
+index 5f8947e..d7ac178 100644
+--- a/hardware/firmware/hardware/firmware/esp32_audio/src/la_detector.cpp
++++ b/hardware/firmware/hardware/firmware/esp32_audio/src/la_detector.cpp
+@@ -63,8 +63,8 @@ bool LaDetector::beginI2sInput() {
+   i2sConfig.mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_RX);
+   i2sConfig.sample_rate = static_cast<int>(config::kDetectFs);
+   i2sConfig.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
+-  i2sConfig.channel_format = config::kMicI2SUseLeftChannel ? I2S_CHANNEL_FMT_ONLY_LEFT
+-                                                            : I2S_CHANNEL_FMT_ONLY_RIGHT;
++  // Mono mic: use ONLY_LEFT format (compatible with I2S_CHANNEL_MONO below)
++  i2sConfig.channel_format = I2S_CHANNEL_FMT_ONLY_LEFT;
+   i2sConfig.communication_format = I2S_COMM_FORMAT_STAND_I2S;
+   i2sConfig.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
+   i2sConfig.dma_buf_count = 4;
+diff --git a/hardware/firmware/hardware/firmware/esp32_audio/src/services/network/wifi_service.cpp b/hardware/firmware/hardware/firmware/esp32_audio/src/services/network/wifi_service.cpp
+index c3deae3..98f2476 100644
+--- a/hardware/firmware/hardware/firmware/esp32_audio/src/services/network/wifi_service.cpp
++++ b/hardware/firmware/hardware/firmware/esp32_audio/src/services/network/wifi_service.cpp
+@@ -131,7 +131,7 @@ void WifiService::update(uint32_t nowMs) {
+ 
+   if (apAutoFallback_ && WiFi.status() != WL_CONNECTED && !snap_.apEnabled &&
+       static_cast<int32_t>(nowMs - lastStaAttemptMs_) >= static_cast<int32_t>(kApFallbackDelayMs)) {
+-    enableAp("U-SON-RADIO", "usonradio", "AP_FALLBACK");
++    enableAp("U-SON-RADIO", "zacus-radio-42", "AP_FALLBACK");
+   }
+ 
+   updateSnapshot(nowMs);
+@@ -165,7 +165,7 @@ bool WifiService::connectSta(const char* ssid, const char* pass, const char* rea
+ 
+ bool WifiService::enableAp(const char* ssid, const char* pass, const char* reason) {
+   const char* apSsid = (ssid != nullptr && ssid[0] != '\0') ? ssid : "U-SON-RADIO";
+-  const char* apPass = (pass != nullptr) ? pass : "usonradio";
++  const char* apPass = (pass != nullptr) ? pass : "zacus-radio-42";
+ 
+   WiFi.mode(WIFI_AP_STA);
+   const bool ok = WiFi.softAP(apSsid, apPass);
+diff --git a/hardware/firmware/hardware/firmware/esp32_audio/src/services/web/web_ui_service.cpp b/hardware/firmware/hardware/firmware/esp32_audio/src/services/web/web_ui_service.cpp
+index c4ca1e1..3d1bf50 100644
+--- a/hardware/firmware/hardware/firmware/esp32_audio/src/services/web/web_ui_service.cpp
++++ b/hardware/firmware/hardware/firmware/esp32_audio/src/services/web/web_ui_service.cpp
+@@ -170,7 +170,8 @@ void WebUiService::begin(WifiService* wifi,
+     return;
+   }
+ 
+-  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
++  // CORS: restrict to local origins only (no wildcard)
++  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "http://localhost");
+   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+   DefaultHeaders::Instance().addHeader("Access-Control-Max-Age", "3600");

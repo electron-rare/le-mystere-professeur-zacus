@@ -9,6 +9,8 @@ import type {
   VariableSetAction,
   PuzzleNode,
   NPCAction,
+  HardwareAction,
+  DeployConfig,
 } from '../types';
 
 // ─── Workspace → ScenarioGraph ───
@@ -139,6 +141,83 @@ function readNpcActions(workspace: Blockly.Workspace): NPCAction[] {
   return actions;
 }
 
+// ─── Hardware blocks → HardwareAction[] ───
+
+function readHardwareActions(workspace: Blockly.Workspace): HardwareAction[] {
+  const actions: HardwareAction[] = [];
+  for (const block of workspace.getAllBlocks(true)) {
+    switch (block.type) {
+      case 'hw_gpio_write':
+        actions.push({
+          type: 'gpio_write',
+          pin: Number(block.getFieldValue('PIN') ?? 4),
+          state: String(block.getFieldValue('STATE') ?? 'HIGH') as 'HIGH' | 'LOW',
+        });
+        break;
+      case 'hw_gpio_read':
+        actions.push({
+          type: 'gpio_read',
+          pin: Number(block.getFieldValue('PIN') ?? 4),
+          variable: String(block.getFieldValue('VARIABLE') ?? 'pin_value'),
+        });
+        break;
+      case 'hw_led_set':
+        actions.push({
+          type: 'led_set',
+          color: String(block.getFieldValue('COLOR') ?? '#00FF00'),
+          animation: String(block.getFieldValue('ANIMATION') ?? 'solid'),
+        });
+        break;
+      case 'hw_buzzer_tone':
+        actions.push({
+          type: 'buzzer',
+          frequency: Number(block.getFieldValue('FREQUENCY') ?? 440),
+          duration_ms: Number(block.getFieldValue('DURATION_MS') ?? 500),
+        });
+        break;
+      case 'hw_play_audio':
+        actions.push({
+          type: 'play_audio',
+          filename: String(block.getFieldValue('FILENAME') ?? 'audio.mp3'),
+        });
+        break;
+      case 'hw_qr_scan':
+        actions.push({ type: 'qr_scan' });
+        break;
+    }
+  }
+  return actions;
+}
+
+// ─── Deploy blocks → DeployConfig ───
+
+function readDeployConfig(workspace: Blockly.Workspace): DeployConfig {
+  const config: DeployConfig = {};
+  for (const block of workspace.getAllBlocks(true)) {
+    switch (block.type) {
+      case 'deploy_config_wifi':
+        config.wifi = {
+          ssid: String(block.getFieldValue('SSID') ?? ''),
+          password: String(block.getFieldValue('PASSWORD') ?? ''),
+        };
+        break;
+      case 'deploy_config_tts':
+        config.tts = {
+          url: String(block.getFieldValue('URL') ?? 'http://192.168.0.120:8001'),
+          voice: String(block.getFieldValue('VOICE') ?? 'tom-medium'),
+        };
+        break;
+      case 'deploy_config_llm':
+        config.llm = {
+          url: String(block.getFieldValue('URL') ?? 'http://kxkm-ai:11434'),
+          model: String(block.getFieldValue('MODEL') ?? 'devstral'),
+        };
+        break;
+    }
+  }
+  return config;
+}
+
 /**
  * Walk workspace top blocks and build a ScenarioGraph.
  * Works with both WorkspaceSvg and headless Workspace.
@@ -177,8 +256,10 @@ export function buildScenarioGraph(workspace: Blockly.Workspace): ScenarioGraph 
   }
 
   const npcActions = readNpcActions(workspace);
+  const hardwareActions = readHardwareActions(workspace);
+  const deploy = readDeployConfig(workspace);
 
-  return { scenes, puzzles, npcActions };
+  return { scenes, puzzles, npcActions, hardwareActions, deploy };
 }
 
 // ─── ScenarioGraph → Firmware YAML ───
@@ -244,8 +325,8 @@ export function scenarioGraphToFirmwareYaml(graph: ScenarioGraph): string {
       step_id: stepId,
       screen_scene_id: stepId,
       audio_pack_id: '',
-      actions: [],
-      apps: [],
+      actions: [] as Record<string, unknown>[],
+      apps: [] as string[],
       transitions,
     };
   });
@@ -258,10 +339,34 @@ export function scenarioGraphToFirmwareYaml(graph: ScenarioGraph): string {
     hints_count: p.hints.length,
   }));
 
-  const firmware = {
+  // Map hardware actions to firmware action entries
+  const hwActions = graph.hardwareActions.map((a) => {
+    const entry: Record<string, unknown> = { type: a.type };
+    if (a.pin !== undefined) entry.pin = a.pin;
+    if (a.state !== undefined) entry.state = a.state;
+    if (a.variable !== undefined) entry.variable = a.variable;
+    if (a.color !== undefined) entry.color = a.color;
+    if (a.animation !== undefined) entry.animation = a.animation;
+    if (a.frequency !== undefined) entry.frequency = a.frequency;
+    if (a.duration_ms !== undefined) entry.duration_ms = a.duration_ms;
+    if (a.filename !== undefined) entry.filename = a.filename;
+    return entry;
+  });
+
+  // Attach hardware actions to the first step (default assignment)
+  if (steps.length > 0 && hwActions.length > 0) {
+    steps[0].actions = hwActions;
+  }
+
+  const deploy = graph.deploy;
+  const hasDeployConfig =
+    deploy.wifi !== undefined || deploy.tts !== undefined || deploy.llm !== undefined;
+
+  const firmware: Record<string, unknown> = {
     initial_step: steps[0]?.step_id ?? 'STEP_BOOT',
     steps,
     ...(puzzleEvents.length > 0 ? { puzzles: puzzleEvents } : {}),
+    ...(hasDeployConfig ? { deploy } : {}),
   };
 
   return YAML.stringify({ firmware });
@@ -317,9 +422,28 @@ export function scenarioGraphToDisplayYaml(graph: ScenarioGraph): string {
     return entry;
   });
 
+  const hardware = graph.hardwareActions.map((a) => {
+    const entry: Record<string, unknown> = { type: a.type };
+    if (a.pin !== undefined) entry.pin = a.pin;
+    if (a.state !== undefined) entry.state = a.state;
+    if (a.variable !== undefined) entry.variable = a.variable;
+    if (a.color !== undefined) entry.color = a.color;
+    if (a.animation !== undefined) entry.animation = a.animation;
+    if (a.frequency !== undefined) entry.frequency = a.frequency;
+    if (a.duration_ms !== undefined) entry.duration_ms = a.duration_ms;
+    if (a.filename !== undefined) entry.filename = a.filename;
+    return entry;
+  });
+
+  const deploy = graph.deploy;
+  const hasDeployConfig =
+    deploy.wifi !== undefined || deploy.tts !== undefined || deploy.llm !== undefined;
+
   const doc: Record<string, unknown> = { scenes };
   if (puzzles.length > 0) doc.puzzles = puzzles;
   if (npc.length > 0) doc.npc = npc;
+  if (hardware.length > 0) doc.hardware = hardware;
+  if (hasDeployConfig) doc.deploy = deploy;
 
   return YAML.stringify(doc);
 }

@@ -4,6 +4,8 @@ import 'blockly/blocks';
 import { ensureScenarioBlocks } from './blocks/scene';
 import { registerPuzzleBlocks } from './blocks/puzzle';
 import { registerNpcBlocks } from './blocks/npc';
+import { registerHardwareBlocks } from './blocks/hardware';
+import { registerDeployBlocks } from './blocks/deploy';
 import { SCENARIO_TOOLBOX } from './toolbox';
 import {
   buildScenarioGraph,
@@ -43,6 +45,8 @@ export function ScenarioEditor() {
     ensureScenarioBlocks();
     registerPuzzleBlocks();
     registerNpcBlocks();
+    registerHardwareBlocks();
+    registerDeployBlocks();
     const workspace = Blockly.inject(hostRef.current, {
       toolbox: SCENARIO_TOOLBOX,
       trashcan: true,

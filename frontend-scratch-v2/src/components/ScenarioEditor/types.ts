@@ -57,9 +57,31 @@ export interface NPCAction {
   systemPrompt?: string;
 }
 
+/** A hardware action (GPIO, LED, buzzer, audio, QR) */
+export interface HardwareAction {
+  type: 'gpio_write' | 'gpio_read' | 'led_set' | 'buzzer' | 'play_audio' | 'qr_scan';
+  pin?: number;
+  state?: 'HIGH' | 'LOW';
+  variable?: string;
+  color?: string;
+  animation?: string;
+  frequency?: number;
+  duration_ms?: number;
+  filename?: string;
+}
+
+/** Deploy configuration for ESP32 targets */
+export interface DeployConfig {
+  wifi?: { ssid: string; password: string };
+  tts?: { url: string; voice: string };
+  llm?: { url: string; model: string };
+}
+
 /** The full scenario graph extracted from the Blockly workspace */
 export interface ScenarioGraph {
   scenes: SceneNode[];
   puzzles: PuzzleNode[];
   npcActions: NPCAction[];
+  hardwareActions: HardwareAction[];
+  deploy: DeployConfig;
 }

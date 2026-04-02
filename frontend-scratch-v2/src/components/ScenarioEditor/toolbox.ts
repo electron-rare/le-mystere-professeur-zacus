@@ -38,5 +38,29 @@ export const SCENARIO_TOOLBOX: Blockly.utils.toolbox.ToolboxInfo = {
         { kind: 'block', type: 'npc_conversation' },
       ],
     },
+    {
+      kind: 'category',
+      name: 'Hardware',
+      colour: '30',
+      contents: [
+        { kind: 'block', type: 'hw_gpio_write' },
+        { kind: 'block', type: 'hw_gpio_read' },
+        { kind: 'block', type: 'hw_led_set' },
+        { kind: 'block', type: 'hw_buzzer_tone' },
+        { kind: 'block', type: 'hw_play_audio' },
+        { kind: 'block', type: 'hw_qr_scan' },
+      ],
+    },
+    {
+      kind: 'category',
+      name: 'Deploy',
+      colour: '0',
+      contents: [
+        { kind: 'block', type: 'deploy_config_wifi' },
+        { kind: 'block', type: 'deploy_config_tts' },
+        { kind: 'block', type: 'deploy_config_llm' },
+        { kind: 'block', type: 'deploy_export' },
+      ],
+    },
   ],
 };

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, useCallback, lazy, Suspense } from 'react'
 import * as Blockly from 'blockly';
 import 'blockly/blocks';
 import { ensureScenarioBlocks } from './blocks/scene';
+import { registerPuzzleBlocks } from './blocks/puzzle';
+import { registerNpcBlocks } from './blocks/npc';
 import { SCENARIO_TOOLBOX } from './toolbox';
 import {
   buildScenarioGraph,
@@ -39,6 +41,8 @@ export function ScenarioEditor() {
     if (!hostRef.current) return;
 
     ensureScenarioBlocks();
+    registerPuzzleBlocks();
+    registerNpcBlocks();
     const workspace = Blockly.inject(hostRef.current, {
       toolbox: SCENARIO_TOOLBOX,
       trashcan: true,

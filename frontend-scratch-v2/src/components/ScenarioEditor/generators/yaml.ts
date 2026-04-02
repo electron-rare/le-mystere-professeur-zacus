@@ -7,6 +7,8 @@ import type {
   SceneAction,
   TimerAction,
   VariableSetAction,
+  PuzzleNode,
+  NPCAction,
 } from '../types';
 
 // ─── Workspace → ScenarioGraph ───
@@ -59,30 +61,124 @@ function readTransitions(block: Blockly.Block): TransitionEdge[] {
   return transitions;
 }
 
+// ─── Puzzle blocks → PuzzleNode ───
+
+function readPuzzleHints(block: Blockly.Block): Array<{ level: number; text: string }> {
+  const hints: Array<{ level: number; text: string }> = [];
+  let cursor = block.getInputTargetBlock('HINTS');
+  while (cursor) {
+    if (cursor.type === 'npc_hint') {
+      hints.push({
+        level: Number(cursor.getFieldValue('LEVEL') ?? 1),
+        text: String(cursor.getFieldValue('TEXT') ?? ''),
+      });
+    }
+    cursor = cursor.getNextBlock();
+  }
+  return hints;
+}
+
+function readPuzzleSolution(block: Blockly.Block): string | undefined {
+  const target = block.getInputTargetBlock('SOLUTION');
+  if (!target) return undefined;
+  if (target.type === 'puzzle_validation_qr') {
+    return `qr:${target.getFieldValue('EXPECTED') ?? ''}`;
+  }
+  if (target.type === 'puzzle_validation_button') {
+    return `button:${target.getFieldValue('PIN') ?? 4}`;
+  }
+  return target.type;
+}
+
+// ─── NPC blocks → NPCAction[] ───
+
+function readNpcActions(workspace: Blockly.Workspace): NPCAction[] {
+  const actions: NPCAction[] = [];
+  for (const block of workspace.getAllBlocks(true)) {
+    switch (block.type) {
+      case 'npc_say':
+        actions.push({
+          type: 'say',
+          text: String(block.getFieldValue('TEXT') ?? ''),
+          mood: String(block.getFieldValue('MOOD') ?? 'neutral'),
+        });
+        break;
+      case 'npc_mood_set':
+        actions.push({
+          type: 'mood',
+          mood: String(block.getFieldValue('MOOD') ?? 'neutral'),
+        });
+        break;
+      case 'npc_hint':
+        // Only collect standalone hints (not those inside puzzle_definition)
+        if (!block.getParent() || block.getParent()?.type !== 'puzzle_definition') {
+          actions.push({
+            type: 'hint',
+            level: Number(block.getFieldValue('LEVEL') ?? 1),
+            text: String(block.getFieldValue('TEXT') ?? ''),
+            puzzleId: String(block.getFieldValue('PUZZLE_ID') ?? ''),
+          });
+        }
+        break;
+      case 'npc_react':
+        actions.push({
+          type: 'react',
+          condition: readConditionText(block, 'CONDITION'),
+          text: String(block.getFieldValue('RESPONSE') ?? ''),
+        });
+        break;
+      case 'npc_conversation':
+        actions.push({
+          type: 'conversation',
+          systemPrompt: String(block.getFieldValue('SYSTEM_PROMPT') ?? ''),
+          text: String(block.getFieldValue('CONTEXT') ?? ''),
+        });
+        break;
+    }
+  }
+  return actions;
+}
+
 /**
  * Walk workspace top blocks and build a ScenarioGraph.
  * Works with both WorkspaceSvg and headless Workspace.
  */
 export function buildScenarioGraph(workspace: Blockly.Workspace): ScenarioGraph {
   const scenes: SceneNode[] = [];
+  const puzzles: PuzzleNode[] = [];
   const seen = new Set<string>();
 
   for (const block of workspace.getTopBlocks(true)) {
-    if (block.type !== 'scenario_scene') continue;
-    const id = block.id;
-    if (seen.has(id)) continue;
-    seen.add(id);
+    if (block.type === 'scenario_scene') {
+      const id = block.id;
+      if (seen.has(id)) continue;
+      seen.add(id);
 
-    scenes.push({
-      name: String(block.getFieldValue('NAME') ?? 'SCENE_NEW'),
-      description: String(block.getFieldValue('DESCRIPTION') ?? ''),
-      durationMax: Number(block.getFieldValue('DURATION_MAX') ?? 300),
-      actions: readActions(block, 'ACTIONS'),
-      transitions: readTransitions(block),
-    });
+      scenes.push({
+        name: String(block.getFieldValue('NAME') ?? 'SCENE_NEW'),
+        description: String(block.getFieldValue('DESCRIPTION') ?? ''),
+        durationMax: Number(block.getFieldValue('DURATION_MAX') ?? 300),
+        actions: readActions(block, 'ACTIONS'),
+        transitions: readTransitions(block),
+      });
+    } else if (block.type === 'puzzle_definition') {
+      const id = block.id;
+      if (seen.has(id)) continue;
+      seen.add(id);
+
+      puzzles.push({
+        id,
+        name: String(block.getFieldValue('NAME') ?? 'PUZZLE_NEW'),
+        type: String(block.getFieldValue('PUZZLE_TYPE') ?? 'free') as PuzzleNode['type'],
+        solution: readPuzzleSolution(block),
+        hints: readPuzzleHints(block),
+      });
+    }
   }
 
-  return { scenes };
+  const npcActions = readNpcActions(workspace);
+
+  return { scenes, puzzles, npcActions };
 }
 
 // ─── ScenarioGraph → Firmware YAML ───
@@ -154,9 +250,18 @@ export function scenarioGraphToFirmwareYaml(graph: ScenarioGraph): string {
     };
   });
 
+  // Map puzzles to firmware events
+  const puzzleEvents = graph.puzzles.map((p) => ({
+    puzzle_id: p.name.toUpperCase().replace(/[^A-Z0-9_]/g, '_'),
+    type: p.type,
+    solution: p.solution ?? '',
+    hints_count: p.hints.length,
+  }));
+
   const firmware = {
     initial_step: steps[0]?.step_id ?? 'STEP_BOOT',
     steps,
+    ...(puzzleEvents.length > 0 ? { puzzles: puzzleEvents } : {}),
   };
 
   return YAML.stringify({ firmware });
@@ -194,5 +299,27 @@ export function scenarioGraphToDisplayYaml(graph: ScenarioGraph): string {
     })),
   }));
 
-  return YAML.stringify({ scenes });
+  const puzzles = graph.puzzles.map((p) => ({
+    name: p.name,
+    type: p.type,
+    solution: p.solution ?? undefined,
+    hints: p.hints.map((h) => ({ level: h.level, text: h.text })),
+  }));
+
+  const npc = graph.npcActions.map((a) => {
+    const entry: Record<string, unknown> = { type: a.type };
+    if (a.text !== undefined) entry.text = a.text;
+    if (a.mood !== undefined) entry.mood = a.mood;
+    if (a.level !== undefined) entry.level = a.level;
+    if (a.puzzleId !== undefined) entry.puzzle_id = a.puzzleId;
+    if (a.condition) entry.condition = a.condition;
+    if (a.systemPrompt) entry.system_prompt = a.systemPrompt;
+    return entry;
+  });
+
+  const doc: Record<string, unknown> = { scenes };
+  if (puzzles.length > 0) doc.puzzles = puzzles;
+  if (npc.length > 0) doc.npc = npc;
+
+  return YAML.stringify(doc);
 }

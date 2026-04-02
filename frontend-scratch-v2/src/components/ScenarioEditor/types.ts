@@ -37,7 +37,29 @@ export interface VariableSetAction {
 
 export type SceneAction = TimerAction | VariableSetAction;
 
+/** A puzzle definition in the scenario */
+export interface PuzzleNode {
+  id: string;
+  name: string;
+  type: 'qr' | 'button' | 'sequence' | 'free';
+  solution?: string;
+  hints: Array<{ level: number; text: string }>;
+}
+
+/** An NPC action (say, mood change, hint, react, conversation) */
+export interface NPCAction {
+  type: 'say' | 'mood' | 'hint' | 'react' | 'conversation';
+  text?: string;
+  mood?: string;
+  level?: number;
+  puzzleId?: string;
+  condition?: string;
+  systemPrompt?: string;
+}
+
 /** The full scenario graph extracted from the Blockly workspace */
 export interface ScenarioGraph {
   scenes: SceneNode[];
+  puzzles: PuzzleNode[];
+  npcActions: NPCAction[];
 }

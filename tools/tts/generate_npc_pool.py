@@ -8,7 +8,7 @@ Usage:
     python3 generate_npc_pool.py [options]
 
     --tts-url    Piper TTS base URL (default: http://192.168.0.120:8001)
-    --voice      TTS voice name (default: tom-medium)
+    --voice      TTS voice name (default: zacus)
     --output     Output directory for MP3 files (default: hotline_tts)
     --manifest   Path to output manifest JSON (default: hotline_tts/manifest.json)
     --phrases    Path to npc_phrases.yaml (default: game/scenarios/npc_phrases.yaml)
@@ -90,18 +90,23 @@ def key_to_filename(key: str) -> str:
 # TTS synthesis
 # ---------------------------------------------------------------------------
 
-def synthesize(text: str, voice: str, tts_url: str, timeout_s: float = 10.0) -> bytes:
-    """POST text to Piper TTS API and return raw audio bytes (MP3 or WAV).
+def synthesize(text: str, voice: str, tts_url: str, timeout_s: float = 30.0) -> bytes:
+    """POST text to OpenAI-compatible TTS API and return raw MP3 bytes.
 
-    Piper TTS API (Tower:8001):
-        POST /api/tts
-        Body: {"text": "...", "voice": "..."}
-        Response: audio/mpeg or audio/wav binary
+    openedai-speech on Tower:8001 (OpenAI-compatible):
+        POST /v1/audio/speech
+        Body: {"model": "tts-1", "voice": "...", "input": "...", "response_format": "mp3"}
+        Response: audio/mpeg binary
 
     Raises requests.HTTPError on non-2xx responses.
     """
-    url = tts_url.rstrip("/") + "/api/tts"
-    payload = {"text": text, "voice": voice}
+    url = tts_url.rstrip("/") + "/v1/audio/speech"
+    payload = {
+        "model": "tts-1",
+        "voice": voice,
+        "input": text,
+        "response_format": "mp3",
+    }
     resp = requests.post(url, json=payload, timeout=timeout_s)
     resp.raise_for_status()
     return resp.content
@@ -123,8 +128,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--voice",
-        default="tom-medium",
-        help="TTS voice name (default: tom-medium)",
+        default="zacus",
+        help="TTS voice name (default: zacus)",
     )
     parser.add_argument(
         "--output",

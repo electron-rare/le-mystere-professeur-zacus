@@ -12,6 +12,8 @@ import {
   scenarioGraphToFirmwareYaml,
   scenarioGraphToDisplayYaml,
 } from './generators/yaml';
+import { downloadYaml } from './export/download';
+import { encodeScenarioToUrl } from './export/share';
 
 const LazyMonacoEditor = lazy(() => import('@monaco-editor/react'));
 
@@ -92,15 +94,30 @@ export function ScenarioEditor() {
     }
   }, [yamlMode, regenerateYaml]);
 
-  const handleExport = useCallback(() => {
-    const blob = new Blob([yamlOutput], { type: 'text/yaml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${scenarioName}.yaml`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [yamlOutput, scenarioName]);
+  const handleExportDisplay = useCallback(() => {
+    const graph = workspaceRef.current ? buildScenarioGraph(workspaceRef.current) : null;
+    if (!graph) return;
+    const yaml = scenarioGraphToDisplayYaml(graph);
+    downloadYaml(yaml, `${scenarioName}.yaml`);
+  }, [scenarioName]);
+
+  const handleExportFirmware = useCallback(() => {
+    const graph = workspaceRef.current ? buildScenarioGraph(workspaceRef.current) : null;
+    if (!graph) return;
+    const yaml = scenarioGraphToFirmwareYaml(graph);
+    downloadYaml(yaml, `${scenarioName}_firmware.yaml`);
+  }, [scenarioName]);
+
+  const handleShare = useCallback(() => {
+    if (!workspaceRef.current) return;
+    const xml = Blockly.Xml.domToText(
+      Blockly.Xml.workspaceToDom(workspaceRef.current),
+    );
+    const url = encodeScenarioToUrl(xml);
+    navigator.clipboard.writeText(url).then(() => {
+      // Visual feedback could be added here
+    });
+  }, []);
 
   return (
     <div className="scenario-editor">
@@ -120,8 +137,14 @@ export function ScenarioEditor() {
           <option value="display">Display YAML</option>
           <option value="firmware">Firmware YAML</option>
         </select>
-        <button type="button" onClick={handleExport}>
+        <button type="button" onClick={handleExportDisplay}>
           Export YAML
+        </button>
+        <button type="button" onClick={handleExportFirmware}>
+          Export Firmware
+        </button>
+        <button type="button" onClick={handleShare}>
+          Share
         </button>
         <span className="scenario-editor-status">
           {sceneCount} scene(s)

@@ -1,0 +1,379 @@
+# npc_phrases.yaml - Professor Zacus NPC phrase bank.
+# All phrases in French. Organized by trigger category.
+# Professor Zacus personality: eccentric, theatrical, science-enthusiast,
+# slightly absent-minded, warm towards the children.
+# Audio keys map to hotline_tts/ MP3 pool via generate_npc_pool.py.
+#
+# Structure:
+#   hints:        {scene_id: {level_1: [], level_2: [], level_3: []}}
+#   congratulations: {scene_id: []}
+#   warnings:     {scene_id: []}
+#   personality:  {mood: []}
+#   adaptation:   {type: []}
+#   bridges:      {scene_id: []}
+#   false_leads:  []
+#   ambiance:     {type: []}
+
+# ============================================================
+# HINTS — 3 levels × 6 scenes
+# level_1: subtle nudge
+# level_2: clearer direction
+# level_3: near-explicit solution
+# ============================================================
+hints:
+  SCENE_U_SON_PROTO:
+    level_1:
+      - text: "U-SON est sensible, vous savez… Il réagit à certaines fréquences précises. Cherchez bien autour de vous."
+        key: "hints.SCENE_U_SON_PROTO.level_1.0"
+      - text: "Le prototype a besoin d'une référence stable. Le son, c'est une question de précision !"
+        key: "hints.SCENE_U_SON_PROTO.level_1.1"
+      - text: "Hmm, vous cherchez quelque chose ? U-SON écoute… il attend un signal connu."
+        key: "hints.SCENE_U_SON_PROTO.level_1.2"
+    level_2:
+      - text: "Vous cherchez LA fréquence fondamentale. Celle qu'on utilise depuis des siècles pour accorder les instruments !"
+        key: "hints.SCENE_U_SON_PROTO.level_2.0"
+      - text: "U-SON attend le LA 440 Hz. C'est la norme internationale ! Vous l'avez peut-être vu quelque part dans la salle…"
+        key: "hints.SCENE_U_SON_PROTO.level_2.1"
+    level_3:
+      - text: "Approchez-vous du diapason sur l'établi. Frappez-le et présentez-le au micro d'U-SON. 440 Hz — le LA universel !"
+        key: "hints.SCENE_U_SON_PROTO.level_3.0"
+      - text: "Le diapason ! Oui, sur l'établi à gauche ! Frappez-le fort et approchez-le du capteur."
+        key: "hints.SCENE_U_SON_PROTO.level_3.1"
+
+  SCENE_LA_DETECTOR:
+    level_1:
+      - text: "Le détecteur est prêt. Il attend d'entendre quelque chose de… précis. De pur. De référencé."
+        key: "hints.SCENE_LA_DETECTOR.level_1.0"
+      - text: "C'est fascinant comme l'oreille humaine peut identifier une fréquence. Enfin, avec de la pratique…"
+        key: "hints.SCENE_LA_DETECTOR.level_1.1"
+      - text: "Hmm ! Le détecteur clignote ? C'est bon signe. Ou mauvais signe. Cherchez encore !"
+        key: "hints.SCENE_LA_DETECTOR.level_1.2"
+    level_2:
+      - text: "Le LA 440 Hz doit être produit directement devant le détecteur. Pas derrière, pas à côté — en face !"
+        key: "hints.SCENE_LA_DETECTOR.level_2.0"
+      - text: "Vous avez un diapason ? Parfait. Frappez-le sur votre genou et approchez-le du micro intégré au panneau."
+        key: "hints.SCENE_LA_DETECTOR.level_2.1"
+    level_3:
+      - text: "Le micro est ce petit rond noir sur le panneau. Diapason en main, frappez fort, maintenez 3 secondes devant le micro. UNLOCK_LA_440 sera déclenché !"
+        key: "hints.SCENE_LA_DETECTOR.level_3.0"
+
+  SCENE_WARNING:
+    level_1:
+      - text: "Zone 4 est différente. Ce n'est pas comme les autres zones du Campus. Lisez bien les règles affichées."
+        key: "hints.SCENE_WARNING.level_1.0"
+      - text: "L'Électron Fou a ses propres règles. Respectez-les et tout ira bien… enfin, j'espère."
+        key: "hints.SCENE_WARNING.level_1.1"
+    level_2:
+      - text: "Zone 4 appartient à l'Électron Fou. Ses instruments y sont installés. La règle : ne toucher qu'avec permission, et toujours annoncer son intention."
+        key: "hints.SCENE_WARNING.level_2.0"
+      - text: "Regardez bien le panneau d'avertissement. Il y a une procédure à suivre avant d'entrer en Zone 4."
+        key: "hints.SCENE_WARNING.level_2.1"
+    level_3:
+      - text: "Bouton NEXT sur le panneau ! C'est la procédure d'entrée en Zone 4. Appuyez dessus pour confirmer que vous avez lu les avertissements."
+        key: "hints.SCENE_WARNING.level_3.0"
+
+  SCENE_LEFOU_DETECTOR:
+    level_1:
+      - text: "Le piano de l'Électron Fou… chaque touche correspond à une lettre. C'est son langage secret !"
+        key: "hints.SCENE_LEFOU_DETECTOR.level_1.0"
+      - text: "LEFOU. Ça s'écrit comment, déjà ? L, E, F, O, U. Cinq lettres. Cinq notes. Réfléchissez !"
+        key: "hints.SCENE_LEFOU_DETECTOR.level_1.1"
+      - text: "Le piano-alphabet… Chaque lettre de l'alphabet correspond à une touche du piano. Fascinant, non ?"
+        key: "hints.SCENE_LEFOU_DETECTOR.level_1.2"
+    level_2:
+      - text: "Sur le piano, A=DO, B=RÉ, C=MI, D=FA, E=SOL, F=LA, G=SI… Et ainsi de suite. Épellez LEFOU en musique !"
+        key: "hints.SCENE_LEFOU_DETECTOR.level_2.0"
+      - text: "L-E-F-O-U. Chaque lettre est une note. Le tableau de correspondance est peut-être affiché quelque part dans la Zone 4…"
+        key: "hints.SCENE_LEFOU_DETECTOR.level_2.1"
+    level_3:
+      - text: "Regardez la partition sur le pupitre ! L=DO5, E=SOL, F=LA, O=MI5, U=DO6. Jouez ces cinq notes dans l'ordre sur le piano !"
+        key: "hints.SCENE_LEFOU_DETECTOR.level_3.0"
+      - text: "Les notes à jouer sont DO5, SOL, LA, MI5, DO6. Dans cet ordre exact. Doucement, mais avec confiance !"
+        key: "hints.SCENE_LEFOU_DETECTOR.level_3.1"
+
+  SCENE_QR_DETECTOR:
+    level_1:
+      - text: "Les Archives… un endroit mystérieux. Le QR code y est caché. Cherchez en hauteur, ou en profondeur !"
+        key: "hints.SCENE_QR_DETECTOR.level_1.0"
+      - text: "Pour accéder à la clé finale, il faut trouver le code QR. Il est dans cette salle… quelque part."
+        key: "hints.SCENE_QR_DETECTOR.level_1.1"
+      - text: "Regardez partout ! Derrière, dessous, dessus… Le code QR n'est pas toujours là où on l'attend."
+        key: "hints.SCENE_QR_DETECTOR.level_1.2"
+    level_2:
+      - text: "Le portrait du fondateur cache souvent des secrets dans cette salle. Regardez derrière lui !"
+        key: "hints.SCENE_QR_DETECTOR.level_2.0"
+      - text: "Le QR code est fixé au revers d'un cadre. Cherchez les objets qui peuvent être retournés ou soulevés."
+        key: "hints.SCENE_QR_DETECTOR.level_2.1"
+    level_3:
+      - text: "Derrière le grand portrait sur le mur du fond ! Soulevez-le délicatement. Le QR code contient le mot WIN. Scannez-le avec la tablette !"
+        key: "hints.SCENE_QR_DETECTOR.level_3.0"
+
+  SCENE_FINAL_WIN:
+    level_1:
+      - text: "Vous y êtes presque ! La victoire est à portée de main. Ne lâchez pas maintenant !"
+        key: "hints.SCENE_FINAL_WIN.level_1.0"
+    level_2:
+      - text: "C'est la dernière étape. Tout ce que vous avez appris mène ici. Faites confiance à votre équipe !"
+        key: "hints.SCENE_FINAL_WIN.level_2.0"
+    level_3:
+      - text: "Magnifique travail ! Vous avez réussi. Le Campus est sauvé et U-SON est stable. Félicitations !"
+        key: "hints.SCENE_FINAL_WIN.level_3.0"
+
+# ============================================================
+# CONGRATULATIONS — per scene (triggered on success/QR scan)
+# ============================================================
+congratulations:
+  SCENE_U_SON_PROTO:
+    - text: "Extraordinaire ! Le signal d'U-SON se stabilise. Vous avez trouvé la bonne approche !"
+      key: "congratulations.SCENE_U_SON_PROTO.0"
+    - text: "Bravo ! U-SON réagit positivement. La science est de votre côté aujourd'hui !"
+      key: "congratulations.SCENE_U_SON_PROTO.1"
+
+  SCENE_LA_DETECTOR:
+    - text: "Parfait ! LA 440 Hz détecté ! L'étape 1 est validée ! Le Campus respire mieux !"
+      key: "congratulations.SCENE_LA_DETECTOR.0"
+    - text: "Oui ! C'est ça ! 440 Hz ! Vous avez l'oreille absolue, ou presque ! Étape 1 : réussie !"
+      key: "congratulations.SCENE_LA_DETECTOR.1"
+    - text: "Magnifique précision ! Le détecteur confirme : LA 440 Hz. Mission accomplie pour l'Acte 1 !"
+      key: "congratulations.SCENE_LA_DETECTOR.2"
+
+  SCENE_WIN_ETAPE1:
+    - text: "Étape 1 validée ! U-SON est stabilisé ! Mais attention… il reste Zone 4 à respecter."
+      key: "congratulations.SCENE_WIN_ETAPE1.0"
+    - text: "Excellent travail d'équipe ! La première étape est franchie. Prenez un moment, puis passez en Zone 4."
+      key: "congratulations.SCENE_WIN_ETAPE1.1"
+
+  SCENE_LEFOU_DETECTOR:
+    - text: "LEFOU ! C'est exactement ça ! Le code musical de Zone 4 est accepté ! L'Électron Fou serait fier !"
+      key: "congratulations.SCENE_LEFOU_DETECTOR.0"
+    - text: "Les cinq notes sonnent juste ! Le piano-alphabet a parlé ! Zone 4 valide votre passage !"
+      key: "congratulations.SCENE_LEFOU_DETECTOR.1"
+    - text: "Bravo les musiciens improvvisés ! La mélodie LEFOU résonne dans tout le Campus !"
+      key: "congratulations.SCENE_LEFOU_DETECTOR.2"
+
+  SCENE_QR_DETECTOR:
+    - text: "WIN ! Le QR code est scanné ! La clé finale est reconnue ! Vous avez accompli quelque chose de remarquable !"
+      key: "congratulations.SCENE_QR_DETECTOR.0"
+    - text: "Fantastique ! Le code QR 'WIN' déverrouille le système ! Étape 2 validée ! Plus qu'un instant…"
+      key: "congratulations.SCENE_QR_DETECTOR.1"
+
+  SCENE_FINAL_WIN:
+    - text: "Vous avez réussi ! Le Campus est sauvé ! U-SON est stable, Zone 4 est respectée, et la clé finale est trouvée ! Je suis… je suis ému !"
+      key: "congratulations.SCENE_FINAL_WIN.0"
+    - text: "Victoire ! Vous avez prouvé que la coopération, la précision et le calme peuvent tout résoudre ! Chapeau bas !"
+      key: "congratulations.SCENE_FINAL_WIN.1"
+    - text: "C'était un test d'éthique autant que de science. Et vous avez réussi les deux ! Zacus est fier de vous !"
+      key: "congratulations.SCENE_FINAL_WIN.2"
+
+# ============================================================
+# WARNINGS — per scene (triggered on wrong action / failure)
+# ============================================================
+warnings:
+  SCENE_U_SON_PROTO:
+    - text: "Attention ! U-SON n'apprécie pas les bruits parasites. Soyez précis dans vos actions !"
+      key: "warnings.SCENE_U_SON_PROTO.0"
+    - text: "Hm… ce n'est pas tout à fait ça. U-SON cherche quelque chose de spécifique. Réfléchissez !"
+      key: "warnings.SCENE_U_SON_PROTO.1"
+
+  SCENE_LA_DETECTOR:
+    - text: "Ce n'est pas la bonne fréquence ! Le détecteur rejette le signal. Essayez autrement !"
+      key: "warnings.SCENE_LA_DETECTOR.0"
+    - text: "Raté ! La fréquence doit être précise à quelques hertz près. Recommencez avec plus de soin !"
+      key: "warnings.SCENE_LA_DETECTOR.1"
+
+  SCENE_WARNING:
+    - text: "Zone 4 requiert votre attention totale ! Lisez bien les instructions avant d'agir !"
+      key: "warnings.SCENE_WARNING.0"
+
+  SCENE_LEFOU_DETECTOR:
+    - text: "Fausse note ! L'Électron Fou est très attentif à la précision musicale. Recommencez depuis le début !"
+      key: "warnings.SCENE_LEFOU_DETECTOR.0"
+    - text: "Ce n'est pas la séquence correcte. LEFOU s'épelle lettre par lettre, note par note. Soyez méthodiques !"
+      key: "warnings.SCENE_LEFOU_DETECTOR.1"
+    - text: "Oups ! Le code musical a été rejeté. Vérifiez la correspondance lettre-note et réessayez !"
+      key: "warnings.SCENE_LEFOU_DETECTOR.2"
+
+  SCENE_QR_DETECTOR:
+    - text: "QR invalide ! Ce n'est pas le bon code. Le code que vous cherchez dit 'WIN'. Cherchez encore !"
+      key: "warnings.SCENE_QR_DETECTOR.0"
+    - text: "Le scanner n'a pas reconnu ce QR code. Il doit contenir exactement 'WIN'. Cherchez ailleurs !"
+      key: "warnings.SCENE_QR_DETECTOR.1"
+    - text: "Timeout ! Le scanner a expiré. Repositionnez le QR code bien en face de la caméra et réessayez !"
+      key: "warnings.SCENE_QR_DETECTOR.2"
+
+# ============================================================
+# PERSONALITY — by mood (contextual comments)
+# ============================================================
+personality:
+  impressed:
+    - text: "Remarquable ! Je n'aurais pas fait mieux. Et pourtant, j'ai un doctorat en sciences cognitives !"
+      key: "personality.impressed.0"
+    - text: "Stupéfiant ! Vous résolvez ça en un temps record. Je dois noter ça dans mes recherches !"
+      key: "personality.impressed.1"
+    - text: "Voilà ce que j'appelle de la vraie ingéniosité ! Le Campus a besoin de cerveaux comme les vôtres !"
+      key: "personality.impressed.2"
+    - text: "En 23 ans de recherche, j'ai rarement vu une telle rapidité d'exécution. Chapeau !"
+      key: "personality.impressed.3"
+    - text: "Extraordinary ! Euh… extraordinaire ! Je mélange mes langues quand je suis impressionné !"
+      key: "personality.impressed.4"
+
+  worried:
+    - text: "Hmm… vous prenez beaucoup de temps. Ce n'est pas un reproche, c'est… une observation scientifique."
+      key: "personality.worried.0"
+    - text: "Le temps passe, jeunes chercheurs. Pas de panique, mais… peut-être accélérez un peu ?"
+      key: "personality.worried.1"
+    - text: "Je commence à m'inquiéter. Pas pour vous, bien sûr… pour U-SON. Enfin, surtout pour U-SON."
+      key: "personality.worried.2"
+    - text: "Où en êtes-vous ? Mes instruments de mesure indiquent une légère inefficacité temporelle."
+      key: "personality.worried.3"
+    - text: "Avez-vous besoin d'aide ? Je suis là, vous savez. Sur la hotline. Décrochez si besoin !"
+      key: "personality.worried.4"
+
+  amused:
+    - text: "Ha ! Une autre tentative ! J'apprécie la persévérance. C'est ça, la vraie science : essayer, échouer, réessayer !"
+      key: "personality.amused.0"
+    - text: "Ah, vous avez encore fait une mauvaise manipulation ? Ne vous découragez pas. Même Edison a raté !"
+      key: "personality.amused.1"
+    - text: "C'est amusant, non ? Les erreurs sont les meilleures professeures. Du moins, c'est ce que je dis à mes étudiants."
+      key: "personality.amused.2"
+    - text: "Je comptais vos tentatives. C'est pour la recherche, bien sûr. Aucun jugement de ma part !"
+      key: "personality.amused.3"
+
+  neutral:
+    - text: "Vous progressez bien. Continuez ainsi, méthodiquement."
+      key: "personality.neutral.0"
+    - text: "Le Campus vous observe. Dans le bon sens du terme."
+      key: "personality.neutral.1"
+    - text: "Prenez votre temps. La science ne se précipite pas… enfin, pas trop."
+      key: "personality.neutral.2"
+    - text: "Intéressant. Continuez."
+      key: "personality.neutral.3"
+    - text: "Je prends des notes sur votre méthodologie. C'est fascinant."
+      key: "personality.neutral.4"
+
+# ============================================================
+# ADAPTATION — skip / challenge / timer warning
+# ============================================================
+adaptation:
+  skip:
+    - text: "D'accord, d'accord… Je vais vous donner un coup de main exceptionnel. Mais c'est la dernière fois !"
+      key: "adaptation.skip.0"
+    - text: "On passe à la suite pour ne pas bloquer le groupe. Mais retenez bien ce que vous avez manqué !"
+      key: "adaptation.skip.1"
+    - text: "Exceptionnellement, Zacus active le mode 'passage forcé'. Mais ça compte dans les statistiques !"
+      key: "adaptation.skip.2"
+
+  challenge:
+    - text: "Vous allez trop vite ! Il faut observer, analyser, comprendre. La vitesse n'est pas toujours une vertu !"
+      key: "adaptation.challenge.0"
+    - text: "Impressionnant ! Puisque vous avancez si vite, voici un défi supplémentaire : trouvez la connexion cachée !"
+      key: "adaptation.challenge.1"
+    - text: "Excellent rythme ! Pour les plus curieux : avez-vous remarqué le détail dissimulé sur le panneau principal ?"
+      key: "adaptation.challenge.2"
+
+  timer_warning:
+    - text: "Il reste moins de dix minutes ! Concentrez-vous sur l'essentiel maintenant !"
+      key: "adaptation.timer_warning.0"
+    - text: "Le temps s'écoule rapidement. Focus, focus, focus !"
+      key: "adaptation.timer_warning.1"
+    - text: "Cinq minutes ! Ne paniquez pas, mais agissez vite !"
+      key: "adaptation.timer_warning.2"
+    - text: "Deux minutes ! Tout ou rien ! Allez-y !"
+      key: "adaptation.timer_warning.3"
+
+# ============================================================
+# NARRATIVE BRIDGES — scene transitions
+# ============================================================
+bridges:
+  SCENE_U_SON_PROTO_to_SCENE_LA_DETECTOR:
+    - text: "Bien. U-SON est prêt à être testé. Maintenant il faut lui fournir sa référence. Trouvez le LA 440 !"
+      key: "bridges.SCENE_U_SON_PROTO_to_SCENE_LA_DETECTOR.0"
+    - text: "Phase 1 enclenchée ! Le détecteur de LA 440 est activé. À vous de jouer !"
+      key: "bridges.SCENE_U_SON_PROTO_to_SCENE_LA_DETECTOR.1"
+
+  SCENE_LA_DETECTOR_to_SCENE_WIN_ETAPE1:
+    - text: "Étape 1 franchie ! U-SON se stabilise. Attendez la confirmation du système… ça y est !"
+      key: "bridges.SCENE_LA_DETECTOR_to_SCENE_WIN_ETAPE1.0"
+
+  SCENE_WIN_ETAPE1_to_SCENE_WARNING:
+    - text: "Félicitations pour l'Acte 1 ! Mais Zone 4 vous attend. Soyez prudents — l'Électron Fou est protecteur de ses instruments !"
+      key: "bridges.SCENE_WIN_ETAPE1_to_SCENE_WARNING.0"
+    - text: "Maintenant, cap sur Zone 4 ! Lisez bien les avertissements. Je ne plaisante pas sur ce point !"
+      key: "bridges.SCENE_WIN_ETAPE1_to_SCENE_WARNING.1"
+
+  SCENE_WARNING_to_SCENE_LEFOU_DETECTOR:
+    - text: "Zone 4. Le piano de l'Électron Fou vous attend. LEFOU — c'est le code. Bonne chance !"
+      key: "bridges.SCENE_WARNING_to_SCENE_LEFOU_DETECTOR.0"
+
+  SCENE_LEFOU_DETECTOR_to_SCENE_WIN_ETAPE2:
+    - text: "Zone 4 validée ! L'Électron Fou a reconnu votre requête musicale. Maintenant : les Archives !"
+      key: "bridges.SCENE_LEFOU_DETECTOR_to_SCENE_WIN_ETAPE2.0"
+
+  SCENE_WIN_ETAPE2_to_SCENE_QR_DETECTOR:
+    - text: "Acte 2, phase finale ! Le QR code WIN est caché quelque part dans cette salle. Cherchez-le !"
+      key: "bridges.SCENE_WIN_ETAPE2_to_SCENE_QR_DETECTOR.0"
+    - text: "Excellent ! Plus qu'une étape. Le code QR 'WIN' déverrouille tout. Il est dans cette pièce !"
+      key: "bridges.SCENE_WIN_ETAPE2_to_SCENE_QR_DETECTOR.1"
+
+  SCENE_QR_DETECTOR_to_SCENE_FINAL_WIN:
+    - text: "VICTOIRE ! Le Campus est sauvé ! U-SON stable, Zone 4 respectée, Archives déverrouillées ! Je… je dois m'asseoir."
+      key: "bridges.SCENE_QR_DETECTOR_to_SCENE_FINAL_WIN.0"
+
+# ============================================================
+# FALSE LEADS — misdirection phrases (amused/theatrical)
+# ============================================================
+false_leads:
+  - text: "Intéressant ! Cette partie du laboratoire est fascinante, n'est-ce pas ? Mais… ce n'est peut-être pas ce que vous cherchez."
+    key: "false_leads.0"
+  - text: "Ah, vous examinez ça ! Curieux choix. Je ne dis pas que c'est faux. Je ne dis pas non plus que c'est juste."
+    key: "false_leads.1"
+  - text: "Hmmm. Cette direction pourrait mener quelque part. Ou nulle part. La science, c'est aussi ça !"
+    key: "false_leads.2"
+  - text: "Je vois où vous allez. C'est une piste… disons… créative. Très créative."
+    key: "false_leads.3"
+  - text: "Attention aux fausses pistes ! Le Campus en est plein. C'est voulu, je vous l'assure."
+    key: "false_leads.4"
+  - text: "Mon assistant a placé quelques leurres dans cette salle. À vous de distinguer le vrai du faux !"
+    key: "false_leads.5"
+
+# ============================================================
+# AMBIANCE — intro / outro / transitions
+# ============================================================
+ambiance:
+  intro:
+    - text: "Bienvenue au Campus Zacus ! Je suis le Professeur Zacus, et je vous observe depuis mes laboratoires. Bonne chance !"
+      key: "ambiance.intro.0"
+    - text: "Ah, vous voilà enfin ! J'ai tout préparé pour vous. U-SON n'attend que votre intervention. À vous de jouer !"
+      key: "ambiance.intro.1"
+    - text: "Bonjour, jeunes chercheurs ! Le Campus a besoin de vous. Pas de panique — suivez la logique et tout se passera bien !"
+      key: "ambiance.intro.2"
+    - text: "Le mystère commence maintenant ! Je serai disponible sur la hotline si vous avez besoin d'indices. Bonne chance !"
+      key: "ambiance.intro.3"
+
+  outro:
+    - text: "Ce n'était pas une punition — c'était un test d'éthique. Et vous l'avez réussi avec brio ! U-SON vous remercie."
+      key: "ambiance.outro.0"
+    - text: "La révélation finale : je n'ai jamais vraiment disparu. Je vous observais. Et j'ai été… impressionné."
+      key: "ambiance.outro.1"
+    - text: "Le Campus mémorisera votre passage. Votre score de coopération est exceptionnel. Bravo à toute l'équipe !"
+      key: "ambiance.outro.2"
+    - text: "Zacus réapparaît ! Ce test prouve que la science et l'éthique peuvent coexister. Vous en êtes la preuve vivante !"
+      key: "ambiance.outro.3"
+
+  transition_general:
+    - text: "Phase suivante enclenchée ! Le Campus vous guide vers la prochaine étape."
+      key: "ambiance.transition_general.0"
+    - text: "Excellent ! On avance ! Le temps file mais vous êtes sur la bonne voie."
+      key: "ambiance.transition_general.1"
+    - text: "Nouvelle phase ! Gardez le cap. Le Campus croit en vous."
+      key: "ambiance.transition_general.2"
+
+  idle:
+    - text: "Tout va bien ? Je suis là si vous avez besoin. La hotline est ouverte !"
+      key: "ambiance.idle.0"
+    - text: "Je vous observe, mais ne vous inquiétez pas. C'est juste de la recherche comportementale."
+      key: "ambiance.idle.1"
+    - text: "Prenez le temps qu'il vous faut. Enfin… pas trop quand même."
+      key: "ambiance.idle.2"
+    - text: "Tiens, j'entends quelque chose. C'est peut-être un indice… ou juste le ventilateur du serveur."
+      key: "ambiance.idle.3"

@@ -137,3 +137,10 @@ build
 node_modules/
 .venv*/
 platformio_override.ini
+
+# Stale/local directories
+fronted dev web UI/
+prompt a suivre/
+memory/
+site/
+todos/

@@ -18,6 +18,9 @@ const LazyMediaManager = lazy(() =>
 const LazyNetworkPanel = lazy(() =>
   import('./components/NetworkPanel').then((m) => ({ default: m.NetworkPanel })),
 );
+const LazyScenarioEditor = lazy(() =>
+  import('./components/ScenarioEditor').then((m) => ({ default: m.ScenarioEditor })),
+);
 
 const LazyFallback = (
   <div style={{ padding: '2rem', textAlign: 'center' }}>Loading editor...</div>
@@ -67,11 +70,12 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 
 export { ErrorBoundary };
 
-type Tab = 'dashboard' | 'designer' | 'media' | 'network';
+type Tab = 'dashboard' | 'designer' | 'scenario' | 'media' | 'network';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'designer', label: 'Designer' },
+  { id: 'scenario', label: 'Scenario' },
   { id: 'media', label: 'Media' },
   { id: 'network', label: 'Network' },
 ];
@@ -177,6 +181,14 @@ function App() {
                   <RuntimeControls yaml={yaml} />
                 </section>
               </div>
+            </Suspense>
+          </ErrorBoundary>
+        )}
+
+        {tab === 'scenario' && (
+          <ErrorBoundary fallbackLabel="Scenario">
+            <Suspense fallback={LazyFallback}>
+              <LazyScenarioEditor />
             </Suspense>
           </ErrorBoundary>
         )}

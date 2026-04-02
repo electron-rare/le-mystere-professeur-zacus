@@ -451,3 +451,61 @@ label {
 .network-panel {
   max-width: 720px;
 }
+
+/* ─── Scenario Editor ─── */
+.scenario-editor {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 120px);
+}
+
+.scenario-editor-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.scenario-editor-toolbar select {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.scenario-editor-status {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-left: auto;
+}
+
+.scenario-editor-split {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+.scenario-editor-blockly {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  min-height: 400px;
+}
+
+.scenario-editor-preview {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  min-height: 400px;
+}
+
+@media (max-width: 900px) {
+  .scenario-editor-split {
+    grid-template-columns: 1fr;
+  }
+}

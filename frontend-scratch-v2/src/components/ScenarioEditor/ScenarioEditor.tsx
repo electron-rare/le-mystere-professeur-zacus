@@ -14,6 +14,7 @@ import {
 } from './generators/yaml';
 import { downloadYaml } from './export/download';
 import { encodeScenarioToUrl } from './export/share';
+import { validateScenarioGraph, formatValidationSummary } from './validators/workspace';
 
 const LazyMonacoEditor = lazy(() => import('@monaco-editor/react'));
 
@@ -27,11 +28,16 @@ export function ScenarioEditor() {
   const [yamlOutput, setYamlOutput] = useState('');
   const [yamlMode, setYamlMode] = useState<YamlMode>('display');
   const [sceneCount, setSceneCount] = useState(0);
+  const [validationSummary, setValidationSummary] = useState('');
+  const [validationErrors, setValidationErrors] = useState(0);
 
   const regenerateYaml = useCallback(
     (workspace: Blockly.WorkspaceSvg, mode: YamlMode) => {
       const graph = buildScenarioGraph(workspace);
       setSceneCount(graph.scenes.length);
+      const issues = validateScenarioGraph(graph);
+      setValidationSummary(formatValidationSummary(graph, issues));
+      setValidationErrors(issues.filter((i) => i.severity === 'error').length);
       const yaml =
         mode === 'firmware'
           ? scenarioGraphToFirmwareYaml(graph)
@@ -175,6 +181,21 @@ export function ScenarioEditor() {
             />
           </Suspense>
         </div>
+      </div>
+      <div
+        style={{
+          height: 24,
+          padding: '0 12px',
+          display: 'flex',
+          alignItems: 'center',
+          fontSize: 12,
+          borderTop: '1px solid #333',
+          color: validationErrors > 0 ? '#ff6b6b' : '#888',
+          backgroundColor: '#1a1a2e',
+        }}
+        data-testid="validation-status"
+      >
+        {validationSummary}
       </div>
     </div>
   );

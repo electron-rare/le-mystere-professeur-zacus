@@ -377,3 +377,101 @@ ambiance:
       key: "ambiance.idle.2"
     - text: "Tiens, j'entends quelque chose. C'est peut-être un indice… ou juste le ventilateur du serveur."
       key: "ambiance.idle.3"
+
+# ============================================================
+# CONVERSATION — generic responses when players chat with Zacus
+# outside puzzle context
+# ============================================================
+conversation:
+  greeting:
+    - text: "Ah, vous voilà ! Je vous attendais… enfin, je crois."
+      key: "conversation.greeting.0"
+    - text: "Bienvenue dans mon humble laboratoire ! Ne touchez à rien… ou touchez à tout, je ne sais plus."
+      key: "conversation.greeting.1"
+  off_topic:
+    - text: "Hmm, intéressante question, mais concentrons-nous sur l'enquête, voulez-vous ?"
+      key: "conversation.off_topic.0"
+    - text: "Nous aurons le temps d'en discuter après avoir résolu ce mystère !"
+      key: "conversation.off_topic.1"
+    - text: "Focus, focus ! Le temps presse, mes petits scientifiques !"
+      key: "conversation.off_topic.2"
+  encouragement:
+    - text: "Vous êtes sur la bonne piste, je le sens dans mes circuits !"
+      key: "conversation.encouragement.0"
+    - text: "Ah, excellent raisonnement ! Dr Electron serait fier !"
+      key: "conversation.encouragement.1"
+    - text: "Continue comme ça, la science est avec toi !"
+      key: "conversation.encouragement.2"
+  confusion:
+    - text: "Hmm, je ne suis pas sûr de comprendre… Pouvez-vous reformuler ?"
+      key: "conversation.confusion.0"
+    - text: "Mes neurones font des courts-circuits… Réessayez ?"
+      key: "conversation.confusion.1"
+
+# ============================================================
+# PUZZLE_SPECIFIC — reactions for each puzzle
+# ============================================================
+puzzle_specific:
+  la_detector:
+    on_attempt:
+      - text: "Je capte des vibrations… mais ce n'est pas encore le bon LA !"
+        key: "puzzle_specific.la_detector.on_attempt.0"
+      - text: "Presque ! Le diapason doit vibrer plus près du microphone."
+        key: "puzzle_specific.la_detector.on_attempt.1"
+    on_success:
+      - text: "LA ! 440 Hertz ! Parfait ! U-SON reprend vie !"
+        key: "puzzle_specific.la_detector.on_success.0"
+      - text: "Magnifique ! Cette fréquence… c'est de la musique pure !"
+        key: "puzzle_specific.la_detector.on_success.1"
+  lefou_piano:
+    on_attempt:
+      - text: "Ces notes… presque ! Mais ce n'est pas le bon ordre."
+        key: "puzzle_specific.lefou_piano.on_attempt.0"
+      - text: "L'Électron Fou avait un nom… 5 lettres, 5 notes."
+        key: "puzzle_specific.lefou_piano.on_attempt.1"
+    on_success:
+      - text: "L-E-F-O-U ! Bien sûr ! L'Électron Fou nous montre le chemin !"
+        key: "puzzle_specific.lefou_piano.on_success.0"
+      - text: "Bravo ! Le piano de l'Électron Fou chante à nouveau !"
+        key: "puzzle_specific.lefou_piano.on_success.1"
+  qr_archives:
+    on_attempt:
+      - text: "Les archives cachent leurs secrets… Cherchez bien !"
+        key: "puzzle_specific.qr_archives.on_attempt.0"
+      - text: "Le portrait… il y a quelque chose derrière, non ?"
+        key: "puzzle_specific.qr_archives.on_attempt.1"
+    on_success:
+      - text: "Le QR code ! Les Archives sont ouvertes ! Victoire !"
+        key: "puzzle_specific.qr_archives.on_success.0"
+      - text: "Stupéfiant ! Vous avez trouvé le secret du portrait !"
+        key: "puzzle_specific.qr_archives.on_success.1"
+
+# ============================================================
+# ENDINGS — adaptive ending phrases based on performance
+# ============================================================
+endings:
+  fast:
+    - text: "Stupéfiant ! Record du Campus Zacus ! Vous êtes des génies !"
+      key: "endings.fast.0"
+    - text: "En moins d'une heure ! Dr Electron n'y croyait pas possible !"
+      key: "endings.fast.1"
+  normal:
+    - text: "Excellent travail d'équipe ! Le Campus Zacus est fier de vous !"
+      key: "endings.normal.0"
+    - text: "Mission accomplie ! Vous avez l'étoffe de vrais scientifiques !"
+      key: "endings.normal.1"
+  slow:
+    - text: "La persévérance paie toujours ! Et vous l'avez prouvé !"
+      key: "endings.slow.0"
+    - text: "Chaque minute comptait, et vous n'avez jamais abandonné. Bravo !"
+      key: "endings.slow.1"
+  no_hints:
+    - text: "Sans aucun indice ! Impressionnant ! Vous n'avez pas eu besoin de la hotline !"
+      key: "endings.no_hints.0"
+    - text: "Zéro indice ! Mme Fréquence va être jalouse de votre intelligence !"
+      key: "endings.no_hints.1"
+  many_hints:
+    - text: "Merci d'avoir utilisé la hotline ! C'est fait pour ça, après tout !"
+      key: "endings.many_hints.0"
+    - text: "Les indices sont là pour aider, et vous les avez bien utilisés !"
+      key: "endings.many_hints.1"

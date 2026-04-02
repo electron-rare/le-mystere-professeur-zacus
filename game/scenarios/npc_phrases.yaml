@@ -475,3 +475,181 @@ endings:
       key: "endings.many_hints.0"
     - text: "Les indices sont là pour aider, et vous les avez bien utilisés !"
       key: "endings.many_hints.1"
+
+# ============================================================
+# V3 PUZZLE-SPECIFIC HINTS (P1–P7)
+# ============================================================
+  P1_SON:
+    level_1:
+      - text: "La musique a une mémoire, dit-on. Le professeur en est convaincu. Écoutez bien… puis répétez."
+        key: "hints.P1_SON.level_1.0"
+      - text: "Quatre boutons. Quatre notes. Un seul ordre correct. Votre oreille est votre meilleur instrument."
+        key: "hints.P1_SON.level_1.1"
+    level_2:
+      - text: "La séquence commence toujours par le bouton ROUGE. Le reste suit une logique musicale simple."
+        key: "hints.P1_SON.level_2.0"
+      - text: "Vous avez entendu la mélodie ? Elle se rejoue si vous attendez 10 secondes. Prenez des notes !"
+        key: "hints.P1_SON.level_2.1"
+    level_3:
+      - text: "Rouge, Bleu, Jaune, Rouge, Vert. Dans cet ordre exact. Appuyez lentement et attendez le bip de confirmation."
+        key: "hints.P1_SON.level_3.0"
+
+  P2_CIRCUIT:
+    level_1:
+      - text: "L'électricité aime les chemins fermés. Si la LED ne brille pas… le circuit n'est pas complet."
+        key: "hints.P2_CIRCUIT.level_1.0"
+      - text: "Regardez les picots magnétiques. Certains sont ronds, d'autres sont carrés. Ce n'est pas un hasard."
+        key: "hints.P2_CIRCUIT.level_1.1"
+    level_2:
+      - text: "Il faut une résistance entre la pile et la LED. Sans quoi… *explosion dramatique* … enfin, presque."
+        key: "hints.P2_CIRCUIT.level_2.0"
+      - text: "Le schéma est inscrit sous le panneau en petits caractères. Cherchez bien. J'y ai mis des heures !"
+        key: "hints.P2_CIRCUIT.level_2.1"
+    level_3:
+      - text: "Pile → fil rouge → résistance 220Ω → LED (longue patte vers la résistance) → fil noir → pile. C'est tout !"
+        key: "hints.P2_CIRCUIT.level_3.0"
+
+  P3_QR:
+    level_1:
+      - text: "Six enveloppes. Six secrets. Mais l'ordre… l'ordre est gravé dans les étoiles. Ou dans ce laboratoire."
+        key: "hints.P3_QR.level_1.0"
+      - text: "Chaque QR code porte un numéro invisible à l'œil nu. Regardez sous chaque carte."
+        key: "hints.P3_QR.level_1.1"
+    level_2:
+      - text: "L'ordre est: numéros croissants des cachettes. La cachette 1 est toujours visible depuis l'entrée."
+        key: "hints.P3_QR.level_2.0"
+      - text: "Commencez par scanner le QR code collé sur la porte d'entrée. C'est le numéro 1."
+        key: "hints.P3_QR.level_2.1"
+    level_3:
+      - text: "Ordre: porte → étagère gauche → tiroir rouge → sous la table → fenêtre → boîte bleue. Scannez avec BOX-3."
+        key: "hints.P3_QR.level_3.0"
+
+  P4_RADIO:
+    level_1:
+      - text: "Les ondes radio… fascinantes ! Ma fréquence préférée se trouve quelque part entre 800 et 1800 hertz."
+        key: "hints.P4_RADIO.level_1.0"
+      - text: "Quand vous approchez de la bonne fréquence, un petit indicateur s'allume. Chaud… froid… chaud !"
+        key: "hints.P4_RADIO.level_1.1"
+    level_2:
+      - text: "1337. C'est un nombre que les informaticiens connaissent bien. Un nombre légendaire dans les cercles geek."
+        key: "hints.P4_RADIO.level_2.0"
+      - text: "La fréquence est un nombre à 4 chiffres. Commençant par 1. Très précis. Tournez doucement."
+        key: "hints.P4_RADIO.level_2.1"
+    level_3:
+      - text: "1337 hertz ! LEET en langage de hacker. Tournez jusqu'à ce que l'écran affiche 1337. Exactement."
+        key: "hints.P4_RADIO.level_3.0"
+
+  P5_MORSE:
+    level_1:
+      - text: "Le code morse… inventé en 1836 ! Long-court-long. Tiret-point-tiret. Écoutez le rythme."
+        key: "hints.P5_MORSE.level_1.0"
+      - text: "Vous avez une fiche de référence quelque part dans cette salle. Cherchez-la. Je l'y ai laissée exprès."
+        key: "hints.P5_MORSE.level_1.1"
+    level_2:
+      - text: "Le message contient cinq lettres. C'est mon nom… enfin, mon nom de code. Commençant par Z."
+        key: "hints.P5_MORSE.level_2.0"
+      - text: "Z=--.. A=.- C=-.-. U=..- S=... Voilà l'alphabet morse pour ces lettres précises."
+        key: "hints.P5_MORSE.level_2.1"
+    level_3:
+      - text: "ZACUS en morse: TIRET-TIRET-POINT-POINT  POINT-TIRET  TIRET-POINT-TIRET-POINT  POINT-POINT-TIRET  POINT-POINT-POINT. Tapez sur le télégraphe !"
+        key: "hints.P5_MORSE.level_3.0"
+
+  P6_SYMBOLES:
+    level_1:
+      - text: "L'alchimie obéit à une logique ancienne. Terre, Eau, Feu, Air… puis les métaux. Il y a un ordre naturel."
+        key: "hints.P6_SYMBOLES.level_1.0"
+      - text: "Chaque symbole a un poids. Les légers en haut, les lourds en bas. Comme dans la nature."
+        key: "hints.P6_SYMBOLES.level_1.1"
+    level_2:
+      - text: "L'ordre suit la table alchimique classique. Elle est affichée dans le couloir sous un cadre doré."
+        key: "hints.P6_SYMBOLES.level_2.0"
+      - text: "Commencez par placer les quatre éléments primordiaux dans les coins. Puis remplissez le centre."
+        key: "hints.P6_SYMBOLES.level_2.1"
+    level_3:
+      - text: "Feu (coin haut-gauche) → Eau → Terre → Air → Or → Argent → Mercure → Soufre → Sel → Antimoine → Arsenic → Plomb. De gauche à droite, haut en bas."
+        key: "hints.P6_SYMBOLES.level_3.0"
+
+  P7_COFFRE:
+    level_1:
+      - text: "Vous avez tous les fragments ? Chaque puzzle vous a donné un ou deux chiffres. Assemblez-les dans l'ordre des puzzles."
+        key: "hints.P7_COFFRE.level_1.0"
+
+# ============================================================
+# V3 ADAPTATION PHRASES (profiling + dynamic parcours)
+# ============================================================
+v3_adaptation:
+  group_tech_detected:
+    - text: "Hmm. Groupe technique détecté ! Excellente nouvelle. Je vais sortir mes puzzles… avancés."
+      key: "v3_adaptation.group_tech_detected.0"
+    - text: "Vous avez résolu le circuit en un temps record. Intéressant ! Passons aux choses sérieuses."
+      key: "v3_adaptation.group_tech_detected.1"
+
+  group_non_tech_detected:
+    - text: "Ah ! Des artistes, des créatifs. Parfait. J'ai préparé des énigmes qui correspondent à votre sensibilité."
+      key: "v3_adaptation.group_non_tech_detected.0"
+    - text: "Le circuit n'était pas votre fort ? Pas grave ! La logique prend mille formes. Voici la vôtre."
+      key: "v3_adaptation.group_non_tech_detected.1"
+
+  group_mixed_detected:
+    - text: "Groupe éclectique ! Moitié techniciens, moitié artistes. Mon scénario préféré. Tout le monde travaille !"
+      key: "v3_adaptation.group_mixed_detected.0"
+
+  bonus_puzzle_added:
+    - text: "Impressionnant ! Vous allez trop vite. J'ai décidé d'ajouter… une petite surprise."
+      key: "v3_adaptation.bonus_puzzle_added.0"
+    - text: "Trop facile ? Très bien. Voici un défi supplémentaire que je réserve aux meilleurs groupes."
+      key: "v3_adaptation.bonus_puzzle_added.1"
+
+  puzzle_skipped:
+    - text: "Hmm. Le temps passe. Je vais vous faire grâce de cette épreuve. Pour aujourd'hui."
+      key: "v3_adaptation.puzzle_skipped.0"
+    - text: "Je saute une étape. Non par pitié — mais parce que le temps est une expérience en soi."
+      key: "v3_adaptation.puzzle_skipped.1"
+
+  duration_warning:
+    - text: "Attention ! Vous avez consommé 80% du temps imparti. Le Professeur s'impatiente légèrement."
+      key: "v3_adaptation.duration_warning.0"
+
+# ============================================================
+# V3 AMBIANCE (intro / outro per profile type)
+# ============================================================
+v3_ambiance:
+  intro:
+    - text: "Bienvenue dans mon laboratoire… portable. Aujourd'hui, c'est VOUS qui êtes l'expérience."
+      key: "v3_ambiance.intro.0"
+    - text: "Je suis le Professeur Zacus. Scientifique, inventeur, et… testeur de groupes humains depuis 1987."
+      key: "v3_ambiance.intro.1"
+    - text: "Vous avez soixante minutes. Soixante petites minutes pour prouver que votre espèce mérite de continuer."
+      key: "v3_ambiance.intro.2"
+
+  outro_success:
+    - text: "Extraordinaire ! Vous avez passé mon test. Je dois admettre… je suis impressionné. Légèrement."
+      key: "v3_ambiance.outro_success.0"
+    - text: "Félicitations ! Le diplôme du Professeur Zacus vous est accordé. Avec mention… passable."
+      key: "v3_ambiance.outro_success.1"
+
+  outro_success_tech:
+    - text: "Groupe technique remarquable ! Vous avez décodé chaque signal avec une précision chirurgicale. Respect."
+      key: "v3_ambiance.outro_success_tech.0"
+    - text: "Les ingénieurs du futur sont parmi nous. J'en suis certain maintenant. Bravo !"
+      key: "v3_ambiance.outro_success_tech.1"
+
+  outro_success_non_tech:
+    - text: "Qui a dit que la technologie était réservée aux ingénieurs ? Vous venez de prouver le contraire !"
+      key: "v3_ambiance.outro_success_non_tech.0"
+    - text: "L'intuition et la créativité ont triomphé. Le Professeur Zacus est bluffé. Vraiment."
+      key: "v3_ambiance.outro_success_non_tech.1"
+
+  outro_success_mixed:
+    - text: "Un groupe mixte en parfaite harmonie. Techniciens et créatifs côte à côte. C'est ce qui sauve le monde."
+      key: "v3_ambiance.outro_success_mixed.0"
+
+  outro_partial:
+    - text: "Hmm. Vous n'avez pas tout résolu. Mais vous avez essayé. C'est… acceptable. Pour un humain."
+      key: "v3_ambiance.outro_partial.0"
+
+  outro_timeout:
+    - text: "Le temps est écoulé ! L'expérience se termine. Ne vous inquiétez pas — j'ai noté tout ce que vous avez fait."
+      key: "v3_ambiance.outro_timeout.0"
+    - text: "Soixante minutes, et vous avez donné tout ce que vous aviez. C'est tout ce que je demandais."
+      key: "v3_ambiance.outro_timeout.1"

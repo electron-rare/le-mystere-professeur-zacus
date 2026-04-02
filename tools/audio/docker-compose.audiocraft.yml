@@ -1,0 +1,30 @@
+# docker-compose.audiocraft.yml — AudioCraft MusicGen deployment on KXKM-AI
+# Run: docker compose -f docker-compose.audiocraft.yml run audiocraft
+# Output: ./output/*.wav (mounted from host)
+version: "3.9"
+
+services:
+  audiocraft:
+    image: pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime
+    container_name: audiocraft_gen
+    working_dir: /workspace
+    command: python3 generate_tracks.py
+    volumes:
+      - ./:/workspace
+      - audiocraft_output:/workspace/output
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - PYTHONUNBUFFERED=1
+      - HF_HOME=/workspace/.cache/huggingface
+    # pip install audiocraft is run at container start via entrypoint below
+    entrypoint: >
+      bash -c "pip install -q audiocraft torchaudio && python3 generate_tracks.py"
+
+volumes:
+  audiocraft_output:

@@ -1,0 +1,313 @@
+# game/scenarios/zacus_v3_complete.yaml
+# V3 Complete — 7 puzzle objects, adaptive NPC, ESP-NOW mesh
+id: zacus_v3_complete
+version: "3.1"
+title: "Le Mystère du Professeur Zacus — V3 Complete"
+theme: "Escape room mobile adaptatif, laboratoire du Professeur"
+
+players:
+  min: 4
+  max: 15
+
+ages: "8+ ans (corporate et enfants)"
+
+duration:
+  target_minutes: 60       # game master configures at boot (30–90)
+  min_minutes: 30
+  max_minutes: 90
+  profiling_minutes: 10
+  climax_minutes: 10
+  outro_minutes: 5
+
+# ============================================================
+# HARDWARE TOPOLOGY
+# ============================================================
+hardware:
+  hub:
+    - id: RTC_PHONE
+      type: custom_esp32_slic
+      role: voice_hub
+      comm: esp_now
+    - id: BOX_3
+      type: esp32s3_box3
+      role: orchestrator_display_camera
+      comm: esp_now_master
+
+  puzzles:
+    - id: P1_SON
+      name: "Séquence Sonore"
+      type: esp32s3_devkit
+      profile: BOTH
+      phase: profiling
+    - id: P2_CIRCUIT
+      name: "Circuit LED"
+      type: esp32_devkit
+      profile: TECH
+      phase: profiling
+    - id: P3_QR
+      name: "QR Treasure"
+      type: box3_camera
+      profile: BOTH
+      phase: adaptive
+    - id: P4_RADIO
+      name: "Fréquence Radio"
+      type: esp32_devkit
+      profile: TECH
+      phase: adaptive
+    - id: P5_MORSE
+      name: "Code Morse"
+      type: esp32_devkit
+      profile: MIXED
+      phase: adaptive
+    - id: P6_SYMBOLES
+      name: "Symboles Alchimiques"
+      type: esp32_devkit
+      profile: NON_TECH
+      phase: adaptive
+    - id: P7_COFFRE
+      name: "Coffre Final"
+      type: esp32_devkit
+      profile: BOTH
+      phase: climax
+
+# ============================================================
+# SCORING SYSTEM
+# ============================================================
+scoring:
+  base_score: 1000
+  time_penalty_per_minute: 10      # deducted after target_minutes
+  hint_penalty: 50                 # per hint given
+  bonus_fast_completion: 200       # if finished < 80% of target
+  bonus_no_hints: 300              # if zero hints used
+  bonus_perfect_morse: 100         # P5 decoded on first attempt
+  max_score: 1600
+
+# ============================================================
+# PHASES
+# ============================================================
+phases:
+
+  intro:
+    id: PHASE_INTRO
+    duration_minutes: 5
+    trigger: game_start
+    npc_audio: "intro/welcome"
+    description: >
+      Phone rings. Professor introduces himself. Players learn
+      the rules through the Professor's monologue.
+
+  profiling:
+    id: PHASE_PROFILING
+    duration_minutes: 10
+    puzzles: [P1_SON, P2_CIRCUIT]
+    expected_time_each_seconds: 300
+    npc_audio: "profiling/start"
+    profiling_thresholds:
+      fast_seconds: 180       # < 3 min = fast on this puzzle
+      slow_seconds: 480       # > 8 min = slow on this puzzle
+    group_classification:
+      TECH:
+        condition: "P2_fast AND (P1_normal OR P1_slow)"
+        parcours: [P2_CIRCUIT, P4_RADIO, P5_MORSE, P3_QR, P7_COFFRE]
+      NON_TECH:
+        condition: "P1_fast AND (P2_normal OR P2_slow)"
+        parcours: [P1_SON, P6_SYMBOLES, P3_QR, P5_MORSE_LIGHT, P7_COFFRE]
+      MIXED:
+        condition: "default"
+        parcours: [P1_SON, P2_CIRCUIT, P3_QR, P5_MORSE, P6_SYMBOLES, P7_COFFRE]
+
+  adaptive:
+    id: PHASE_ADAPTIVE
+    duration_minutes: 20  # to 60, dynamically adjusted
+    fast_threshold_pct: 60
+    slow_threshold_pct: 130
+    max_bonus_puzzles: 2
+    npc_mood_rules:
+      - condition: "pct < 60"
+        mood: IMPRESSED
+        action: add_bonus_puzzle
+      - condition: "pct > 130"
+        mood: WORRIED
+        action: proactive_hint
+      - condition: "pct > 160 AND hints_maxed"
+        mood: WORRIED
+        action: skip_to_next
+
+  climax:
+    id: PHASE_CLIMAX
+    duration_minutes: 10
+    puzzle: P7_COFFRE
+    requires_all_codes: true
+    description: >
+      Final code assembled from all previous puzzle solutions.
+      All players must cooperate to enter 8-digit code.
+    code_assembly:
+      P1_SON: digits 1-2
+      P2_CIRCUIT: digit 3
+      P4_RADIO: digit 4
+      P5_MORSE: digit 5
+      P6_SYMBOLES: digits 6-7
+      P3_QR: digit 8
+
+  outro:
+    id: PHASE_OUTRO
+    duration_minutes: 5
+    npc_audio: "outro/verdict"
+    outputs:
+      - diplome_pdf: true
+      - stats_display: true      # score, time, hints, rating
+
+# ============================================================
+# PUZZLE DEFINITIONS (timing, expected durations)
+# ============================================================
+puzzles:
+
+  P1_SON:
+    id: P1_SON
+    name: "Séquence Sonore"
+    object: "Boîte avec haut-parleur + 4 boutons arcade"
+    interaction: "Écouter la mélodie, reproduire la séquence"
+    expected_duration_seconds: 300
+    max_hints: 3
+    code_contribution: "digits 1-2 (index de la séquence correcte, base-10)"
+    difficulty_variants:
+      TECH: sequence_length_5
+      NON_TECH: sequence_length_3
+      MIXED: sequence_length_4
+    hint_keys:
+      level_1: "hints.P1_SON.level_1"
+      level_2: "hints.P1_SON.level_2"
+      level_3: "hints.P1_SON.level_3"
+
+  P2_CIRCUIT:
+    id: P2_CIRCUIT
+    name: "Circuit LED"
+    object: "Breadboard magnétique 60×40cm pliable"
+    interaction: "Placer les composants pour allumer la LED"
+    expected_duration_seconds: 360
+    max_hints: 3
+    code_contribution: "digit 3 (numéro de la configuration validée, 1-9)"
+    difficulty_variants:
+      TECH: full_circuit_5_components
+      NON_TECH: guided_circuit_3_components
+    hint_keys:
+      level_1: "hints.P2_CIRCUIT.level_1"
+      level_2: "hints.P2_CIRCUIT.level_2"
+      level_3: "hints.P2_CIRCUIT.level_3"
+
+  P3_QR:
+    id: P3_QR
+    name: "QR Treasure"
+    object: "6 QR codes plastifiés A5 cachés dans la salle"
+    interaction: "Scanner dans l'ordre correct via BOX-3"
+    expected_duration_seconds: 240
+    max_hints: 3
+    code_contribution: "digit 8 (checksum des QR scannés)"
+    hint_keys:
+      level_1: "hints.P3_QR.level_1"
+      level_2: "hints.P3_QR.level_2"
+      level_3: "hints.P3_QR.level_3"
+
+  P4_RADIO:
+    id: P4_RADIO
+    name: "Fréquence Radio"
+    object: "Boîtier radio rétro 3D imprimé"
+    interaction: "Trouver la bonne fréquence au codeur rotatif"
+    expected_duration_seconds: 300
+    max_hints: 3
+    code_contribution: "digit 4 (fréquence cible encodée sur 1 chiffre)"
+    target_frequency_hz: 1337
+    frequency_range: [800, 1800]
+    tolerance_hz: 10
+    hint_keys:
+      level_1: "hints.P4_RADIO.level_1"
+      level_2: "hints.P4_RADIO.level_2"
+      level_3: "hints.P4_RADIO.level_3"
+
+  P5_MORSE:
+    id: P5_MORSE
+    name: "Code Morse"
+    object: "Télégraphe en bois + laiton"
+    interaction: "Décoder le message morse du Professeur"
+    expected_duration_seconds: 420
+    max_hints: 3
+    code_contribution: "digit 5 (dernier chiffre du message morse)"
+    morse_message: "ZACUS"    # Z=--.. A=.- C=-.-. U=..- S=...
+    difficulty_variants:
+      TECH: full_morse_decode
+      NON_TECH: morse_light_mode   # visual light pulses instead of sound
+    hint_keys:
+      level_1: "hints.P5_MORSE.level_1"
+      level_2: "hints.P5_MORSE.level_2"
+      level_3: "hints.P5_MORSE.level_3"
+
+  P6_SYMBOLES:
+    id: P6_SYMBOLES
+    name: "Symboles Alchimiques"
+    object: "Tablette en bois découpée laser 30×20cm"
+    interaction: "Placer les 12 symboles NFC dans l'ordre correct"
+    expected_duration_seconds: 360
+    max_hints: 3
+    code_contribution: "digits 6-7 (index de la configuration, 10-99)"
+    nfc_tags: 12
+    correct_order: [7, 2, 11, 4, 9, 1, 8, 3, 12, 6, 10, 5]
+    hint_keys:
+      level_1: "hints.P6_SYMBOLES.level_1"
+      level_2: "hints.P6_SYMBOLES.level_2"
+      level_3: "hints.P6_SYMBOLES.level_3"
+
+  P7_COFFRE:
+    id: P7_COFFRE
+    name: "Coffre Final"
+    object: "Coffre en bois 25×20×15cm avec verrou électronique"
+    interaction: "Entrer le code 8 chiffres assemblé des puzzles précédents"
+    expected_duration_seconds: 300
+    max_hints: 1    # minimal hints for final puzzle
+    hint_keys:
+      level_1: "hints.P7_COFFRE.level_1"
+
+# ============================================================
+# DURATION MODES (game master selects at boot)
+# ============================================================
+duration_modes:
+  mode_30:
+    target_minutes: 30
+    profiling_minutes: 5
+    adaptive_minutes: 15
+    climax_minutes: 5
+    outro_minutes: 5
+    puzzles_required: 4    # skip lowest-priority adaptive puzzles
+
+  mode_45:
+    target_minutes: 45
+    profiling_minutes: 8
+    adaptive_minutes: 25
+    climax_minutes: 7
+    outro_minutes: 5
+    puzzles_required: 5
+
+  mode_60:
+    target_minutes: 60
+    profiling_minutes: 10
+    adaptive_minutes: 35
+    climax_minutes: 10
+    outro_minutes: 5
+    puzzles_required: 6
+
+  mode_90:
+    target_minutes: 90
+    profiling_minutes: 10
+    adaptive_minutes: 60
+    climax_minutes: 10
+    outro_minutes: 10
+    puzzles_required: 7    # all puzzles + bonus possible
+
+# ============================================================
+# HINT ESCALATION TIMERS
+# ============================================================
+hint_escalation:
+  first_hint_after_seconds: 120     # offer level_1 after 2 min stuck
+  second_hint_after_seconds: 240    # offer level_2 after 4 min stuck
+  third_hint_after_seconds: 360     # offer level_3 after 6 min stuck
+  auto_skip_after_seconds: 540      # skip puzzle after 9 min (if enabled)
+  proactive_hint_interval_seconds: 90

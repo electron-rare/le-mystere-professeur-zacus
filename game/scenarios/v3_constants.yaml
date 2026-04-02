@@ -1,0 +1,120 @@
+# game/scenarios/v3_constants.yaml
+# V3 runtime constants — NPC engine, scoring, profiling, hint escalation.
+# All thresholds centralized here. Referenced by npc_engine.cpp and
+# the adaptive parcours logic in compile_runtime3.py.
+
+# ============================================================
+# NPC ENGINE THRESHOLDS
+# ============================================================
+npc:
+  # Adaptive mood triggers (% of expected puzzle duration elapsed)
+  fast_threshold_pct: 60       # < 60% elapsed → mood IMPRESSED, add bonus puzzle
+  slow_threshold_pct: 130      # > 130% elapsed → mood WORRIED, proactive hint
+  critical_threshold_pct: 160  # > 160% elapsed + hints maxed → skip_to_next
+
+  # Stuck detection
+  stuck_timeout_seconds: 120          # no progress for 2 min → trigger hint offer
+  proactive_hint_interval_seconds: 90 # re-offer if still stuck after 90s
+  max_hint_level: 3
+
+  # Time warning trigger
+  duration_warning_pct: 80    # warn when 80% of target_minutes consumed
+
+# ============================================================
+# SCORING CONSTANTS
+# ============================================================
+scoring:
+  base: 1000
+  hint_penalty: 50             # per hint given (any level)
+  time_penalty_per_minute: 10  # each full minute over target_minutes
+  bonus_fast: 200              # finished before fast_threshold_pct of target
+  bonus_no_hints: 300          # zero hints used across entire game
+  bonus_perfect_morse: 100     # P5 decoded on first attempt (no retries)
+  max_score: 1600
+
+# ============================================================
+# PROFILING PHASE THRESHOLDS
+# ============================================================
+profiling:
+  fast_seconds: 180    # < 3 min on a profiling puzzle → "fast" tag
+  slow_seconds: 480    # > 8 min on a profiling puzzle → "slow" tag
+  # "normal" = between fast_seconds and slow_seconds
+  tech_time_seconds: 180    # PROFILING_TECH_TIME: P2_CIRCUIT fast threshold
+
+# ============================================================
+# TARGET DURATIONS PER MODE
+# ============================================================
+duration_modes:
+  mode_30:
+    target_minutes: 30
+    profiling_minutes: 5
+    adaptive_minutes: 15
+    climax_minutes: 5
+    outro_minutes: 5
+    puzzles_required: 4
+
+  mode_45:
+    target_minutes: 45
+    profiling_minutes: 8
+    adaptive_minutes: 25
+    climax_minutes: 7
+    outro_minutes: 5
+    puzzles_required: 5
+
+  mode_60:
+    target_minutes: 60
+    profiling_minutes: 10
+    adaptive_minutes: 35
+    climax_minutes: 10
+    outro_minutes: 5
+    puzzles_required: 6
+
+  mode_90:
+    target_minutes: 90
+    profiling_minutes: 10
+    adaptive_minutes: 60
+    climax_minutes: 10
+    outro_minutes: 10
+    puzzles_required: 7
+
+# ============================================================
+# HINT ESCALATION TIMERS
+# ============================================================
+hint_escalation:
+  first_hint_after_seconds: 120   # level_1 offered after 2 min stuck
+  second_hint_after_seconds: 240  # level_2 offered after 4 min stuck
+  third_hint_after_seconds: 360   # level_3 offered after 6 min stuck
+  auto_skip_after_seconds: 540    # auto-skip after 9 min (if game_master enabled)
+
+# ============================================================
+# PER-PUZZLE EXPECTED DURATIONS AND LIMITS
+# ============================================================
+puzzles:
+  P1_SON:
+    expected_s: 300
+    max_hints: 3
+    phase: profiling
+  P2_CIRCUIT:
+    expected_s: 360
+    max_hints: 3
+    phase: profiling
+  P3_QR:
+    expected_s: 240
+    max_hints: 3
+    phase: adaptive
+  P4_RADIO:
+    expected_s: 300
+    max_hints: 3
+    phase: adaptive
+  P5_MORSE:
+    expected_s: 420
+    max_hints: 3
+    phase: adaptive
+  P6_SYMBOLES:
+    expected_s: 360
+    max_hints: 3
+    phase: adaptive
+  P7_COFFRE:
+    expected_s: 300
+    max_hints: 1
+    phase: climax

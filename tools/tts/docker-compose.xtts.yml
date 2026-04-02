@@ -1,0 +1,85 @@
+# docker-compose.xtts.yml — XTTS-v2 deployment on KXKM-AI (RTX 4090)
+# OpenAI-compatible /v1/audio/speech endpoint with Professor Zacus voice clone.
+#
+# Deploy:
+#   scp tools/tts/docker-compose.xtts.yml kxkm@kxkm-ai:~/zacus-tts/
+#   scp voices/zacus_reference.wav kxkm@kxkm-ai:~/zacus-tts/voices/
+#   ssh kxkm@kxkm-ai "cd ~/zacus-tts && docker compose -f docker-compose.xtts.yml up -d"
+#
+# Test:
+#   curl -X POST http://kxkm-ai:5002/v1/audio/speech \
+#     -H "Content-Type: application/json" \
+#     -d '{"input": "Bienvenue dans mon laboratoire portable."}' \
+#     --output /tmp/test.wav
+version: "3.9"
+
+services:
+  xtts:
+    image: ghcr.io/coqui-ai/tts:latest
+    container_name: xtts_zacus
+    restart: unless-stopped
+    environment:
+      - COQUI_TOS_AGREED=1
+    command: >
+      python3 -c "
+      from TTS.api import TTS
+      import uvicorn
+      from fastapi import FastAPI, Request
+      from fastapi.responses import StreamingResponse, JSONResponse
+      import io, soundfile as sf, numpy as np, sys
+
+      print('Loading XTTS-v2 model...', flush=True)
+      tts = TTS('tts_models/multilingual/multi-dataset/xtts_v2', gpu=True)
+      app = FastAPI(title='XTTS-v2 Zacus Voice Clone')
+
+      @app.post('/v1/audio/speech')
+      async def synthesize(req: Request):
+          body = await req.json()
+          text = body.get('input', '')
+          if not text:
+              return JSONResponse({'error': 'input required'}, status_code=400)
+          if len(text) > 500:
+              return JSONResponse({'error': 'input too long (max 500 chars)'}, status_code=400)
+          wav = tts.tts(
+              text=text,
+              speaker_wav='/voices/zacus_reference.wav',
+              language='fr'
+          )
+          buf = io.BytesIO()
+          sf.write(buf, np.array(wav), 24000, format='wav')
+          buf.seek(0)
+          return StreamingResponse(
+              buf,
+              media_type='audio/wav',
+              headers={'Content-Disposition': 'attachment; filename=speech.wav'}
+          )
+
+      @app.get('/health')
+      def health():
+          return {'status': 'ok', 'model': 'xtts_v2', 'voice': 'zacus'}
+
+      print('XTTS-v2 ready on :5002', flush=True)
+      uvicorn.run(app, host='0.0.0.0', port=5002)
+      "
+    ports:
+      - "5002:5002"
+    volumes:
+      - ./voices:/voices:ro           # mount voice reference samples (read-only)
+      - xtts_cache:/root/.local/share/tts
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s   # model loading takes ~60s on first start
+
+volumes:
+  xtts_cache:
+    # Persists downloaded XTTS-v2 model weights (~1.8 GB) across container restarts

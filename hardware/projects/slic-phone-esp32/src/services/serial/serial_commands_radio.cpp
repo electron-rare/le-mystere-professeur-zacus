@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "../../config.h"
 #include "serial_dispatch.h"
 #include "../network/wifi_service.h"
 #include "../radio/radio_service.h"
@@ -267,7 +268,9 @@ bool serialProcessRadioCommand(const SerialCommand& cmd,
     char ssid[33] = {};
     char pass[65] = {};
     if (args[0] == '\0') {
-      const bool ok = ctx.wifi->enableAp("U-SON-RADIO", "usonradio", "serial_ap_on");
+      const bool ok = ctx.wifi->enableAp(config::kApFallbackSsid,
+                                         config::kApFallbackPassword,
+                                         "serial_ap_on");
       serialDispatchReply(out, "WIFI", ok ? SerialDispatchResult::kOk : SerialDispatchResult::kBusy, "ap_on");
       return true;
     }

@@ -2,6 +2,9 @@
 
 #include <ArduinoJson.h>
 #include <WiFi.h>
+#include <cstring>
+
+#include "../../config.h"
 
 namespace {
 
@@ -131,7 +134,12 @@ void WifiService::update(uint32_t nowMs) {
 
   if (apAutoFallback_ && WiFi.status() != WL_CONNECTED && !snap_.apEnabled &&
       static_cast<int32_t>(nowMs - lastStaAttemptMs_) >= static_cast<int32_t>(kApFallbackDelayMs)) {
-    enableAp("U-SON-RADIO", "zacus-radio-42", "AP_FALLBACK");
+    if (strlen(config::kApFallbackPassword) < 8U) {
+      setError("AP_PASS_UNSET");
+      setEvent("AP_FALLBACK_DISABLED");
+    } else {
+      enableAp(config::kApFallbackSsid, config::kApFallbackPassword, "AP_FALLBACK");
+    }
   }
 
   updateSnapshot(nowMs);
@@ -164,8 +172,13 @@ bool WifiService::connectSta(const char* ssid, const char* pass, const char* rea
 }
 
 bool WifiService::enableAp(const char* ssid, const char* pass, const char* reason) {
-  const char* apSsid = (ssid != nullptr && ssid[0] != '\0') ? ssid : "U-SON-RADIO";
-  const char* apPass = (pass != nullptr) ? pass : "zacus-radio-42";
+  const char* apSsid = (ssid != nullptr && ssid[0] != '\0') ? ssid : config::kApFallbackSsid;
+  const char* apPass = (pass != nullptr && pass[0] != '\0') ? pass : config::kApFallbackPassword;
+
+  if (apPass == nullptr || strlen(apPass) < 8U) {
+    setError("AP_PASS_SHORT");
+    return false;
+  }
 
   WiFi.mode(WIFI_AP_STA);
   const bool ok = WiFi.softAP(apSsid, apPass);

@@ -1124,6 +1124,18 @@ bool startAudioFromFsAsync(fs::FS& storage,
     return false;
   }
 
+  fs::File audioFile = storage.open(path, FILE_READ);
+  if (!audioFile) {
+    Serial.printf("[AUDIO_ASYNC] %s cannot open file: %s\n", source, path);
+    return false;
+  }
+  const size_t sizeBytes = static_cast<size_t>(audioFile.size());
+  audioFile.close();
+  if (sizeBytes == 0U) {
+    Serial.printf("[AUDIO_ASYNC] %s empty file rejected: %s\n", source, path);
+    return false;
+  }
+
   setBootAudioPaEnabled(true, source);
   printBootAudioOutputInfo(source);
   if (!audioService().startBaseFs(storage, path, gain, maxDurationMs, source)) {
@@ -1297,12 +1309,9 @@ void startBootAudioLoopCycle(uint32_t nowMs, const char* source) {
   stopBootRadioScan("boot_proto_cycle");
   audioService().stopBase("boot_proto_cycle");
 
-  // TODO: Boot audio disabled temporarily due to corrupted MP3 in LittleFS
-  // This prevents crashes from loop budget saturation during heavy I/O
-  bool startedAudio = false;  // DISABLED: startRandomTokenFxAsync("BOOT", source, false);
+  bool startedAudio = startBootAudioPrimaryFxAsync(source);
   if (!startedAudio) {
-    // DISABLED: startedAudio = startBootAudioPrimaryFxAsync(source);
-    Serial.println("[BOOT_PROTO] Boot audio disabled (corrupted file recovery).");
+    Serial.println("[BOOT_PROTO] Audio replay unavailable, fallback radio scan.");
   }
   if (!g_bootAudioProtocol.active) {
     Serial.printf("[BOOT_PROTO] LOOP aborted after key action (%s)\n", source);
@@ -3331,7 +3340,11 @@ void app_orchestrator::setup() {
   setupInternalLittleFs();
   storyFsManager().init();
   g_wifi.begin("uson-esp32");
-  g_web.begin(&g_wifi, nullptr, &g_mp3, 8080U, nullptr);
+  WebUiService::Config webConfig = {};
+  webConfig.authEnabled = config::kWebUiAuthEnabled;
+  snprintf(webConfig.user, sizeof(webConfig.user), "%s", config::kWebUiAuthUser);
+  snprintf(webConfig.pass, sizeof(webConfig.pass), "%s", config::kWebUiAuthPass);
+  g_web.begin(&g_wifi, nullptr, &g_mp3, 8080U, &webConfig);
   g_web.setStoryContext(&storyV2Controller(), &storyFsManager());
   g_radioRuntime.begin(config::kEnableRadioRuntimeTasks, &g_wifi, nullptr, &g_web);
   g_web.setRuntime(&g_radioRuntime);

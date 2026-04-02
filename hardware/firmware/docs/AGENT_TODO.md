@@ -5125,3 +5125,6 @@
     - `[MAIN] credits boot audio scene=SCENE_CREDITS track=/music/SCENE_WIN.mp3 source=forced prev=/music/boot_radio.mp3`
     - `AUDIO_STATUS ... track=/music/SCENE_WIN.mp3 ...`
   - Dernier upload TENTATIVE FAIL: port `/dev/cu.usbmodem5AB90753301` disparu (USB non detecte au moment de la commande).
+2026-04-02T17:28:02Z plan_runner --agent domains/firmware-tooling - executed 3 commands
+2026-04-02T17:28:03Z plan_runner --agent domains/docs - executed 2 commands
+[20260402-172814] Run artefacts: /Users/electron/Documents/Projets_Creatifs/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_esp8266_oled_20260402-172814, logs: /Users/electron/Documents/Projets_Creatifs/le-mystere-professeur-zacus/hardware/firmware/logs/rc_live, summary: /Users/electron/Documents/Projets_Creatifs/le-mystere-professeur-zacus/hardware/firmware/artifacts/rc_live/freenove_esp32s3_esp8266_oled_20260402-172814/summary.md

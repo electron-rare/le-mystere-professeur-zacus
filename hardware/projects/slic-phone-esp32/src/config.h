@@ -26,6 +26,26 @@
 #define USON_ENABLE_CODEC_OPUS 0
 #endif
 
+#ifndef USON_AP_FALLBACK_SSID
+#define USON_AP_FALLBACK_SSID "U-SON-RADIO"
+#endif
+
+#ifndef USON_AP_FALLBACK_PASSWORD
+#define USON_AP_FALLBACK_PASSWORD ""
+#endif
+
+#ifndef USON_WEBUI_AUTH_ENABLE
+#define USON_WEBUI_AUTH_ENABLE 1
+#endif
+
+#ifndef USON_WEBUI_AUTH_USER
+#define USON_WEBUI_AUTH_USER "admin"
+#endif
+
+#ifndef USON_WEBUI_AUTH_PASS
+#define USON_WEBUI_AUTH_PASS ""
+#endif
+
 namespace config {
 
 constexpr uint8_t kPinLedR = 16;
@@ -96,6 +116,11 @@ constexpr bool kPreferLittleFsBootFx = false;  // DISABLED: temp fix for audio i
 constexpr char kBootFxLittleFsPath[] = "";  // EMPTY: disable boot audio file entirely
 constexpr float kBootFxLittleFsGain = 0.24f;
 constexpr uint32_t kBootFxLittleFsMaxDurationMs = 22000;
+constexpr char kApFallbackSsid[] = USON_AP_FALLBACK_SSID;
+constexpr char kApFallbackPassword[] = USON_AP_FALLBACK_PASSWORD;
+constexpr bool kWebUiAuthEnabled = (USON_WEBUI_AUTH_ENABLE != 0);
+constexpr char kWebUiAuthUser[] = USON_WEBUI_AUTH_USER;
+constexpr char kWebUiAuthPass[] = USON_WEBUI_AUTH_PASS;
 
 // UI link v2: UART bidirectionnel ESP32 <-> UI (OLED/TFT) en 3.3V TTL.
 // On garde ces valeurs stables pour permettre le hot-swap UI sans reflasher l'ESP32.

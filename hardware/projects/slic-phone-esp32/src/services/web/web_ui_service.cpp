@@ -16,6 +16,7 @@
 #include "../../runtime/radio_runtime.h"
 #include "fs/story_fs_manager.h"
 #include "generated/scenarios_gen.h"
+#include "../../config.h"
 #include "../network/wifi_service.h"
 #include "../radio/radio_service.h"
 #include "../serial/serial_commands_story.h"
@@ -155,6 +156,12 @@ void WebUiService::begin(WifiService* wifi,
   config_ = Config();
   if (cfg != nullptr) {
     config_ = *cfg;
+  }
+  if (config_.authEnabled && config_.pass[0] == '\0') {
+    const uint32_t chipSuffix = static_cast<uint32_t>(ESP.getEfuseMac() & 0x00FFFFFFULL);
+    snprintf(config_.pass, sizeof(config_.pass), "esp32-%06lx", static_cast<unsigned long>(chipSuffix));
+    setError("AUTH_PASS_AUTO");
+    Serial.printf("[WEB] Auth enabled with auto-generated password for user '%s'.\n", config_.user);
   }
   snap_ = Snapshot();
   snap_.port = port;
@@ -609,8 +616,8 @@ void WebUiService::setupRoutes() {
       request->send(200, "application/json", "{\"ok\":true}");
       return;
     }
-    String ssid = "U-SON-RADIO";
-    String pass = "usonradio";
+    String ssid = config::kApFallbackSsid;
+    String pass = config::kApFallbackPassword;
     if (request->hasParam("ssid")) {
       ssid = request->getParam("ssid")->value();
     }

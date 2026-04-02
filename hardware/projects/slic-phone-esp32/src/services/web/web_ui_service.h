@@ -19,7 +19,7 @@ class WebUiService {
   struct Config {
     bool authEnabled = false;
     char user[33] = "admin";
-    char pass[65] = "usonradio";
+    char pass[65] = "";
   };
 
   struct Snapshot {

@@ -37,6 +37,7 @@ import os
 import re
 import struct
 import sys
+import threading
 import time
 import wave
 from typing import Optional
@@ -99,6 +100,28 @@ PROFESSOR_ZACUS_PROMPT = (
 )
 
 # ---------------------------------------------------------------------------
+# Game State Store (thread-safe)
+# ---------------------------------------------------------------------------
+
+class GameStateStore:
+    """Thread-safe store for per-device game state, updated by the ESP32."""
+
+    def __init__(self):
+        self._state: dict[str, dict] = {}
+        self._lock = threading.Lock()
+
+    def update(self, device_id: str, state: dict):
+        with self._lock:
+            self._state[device_id] = state
+
+    def get(self, device_id: str = "default") -> dict:
+        with self._lock:
+            return self._state.get(device_id, {})
+
+
+game_state_store = GameStateStore()
+
+# ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
 
@@ -108,6 +131,36 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger("voice_bridge")
+
+
+def build_system_prompt(device_id: str = "default") -> str:
+    """Build the full system prompt: static personality + dynamic game state."""
+    # Read static personality from file
+    prompt_path = os.path.join(
+        os.path.dirname(__file__), '../../game/prompts/zacus_system_prompt.txt'
+    )
+    try:
+        with open(prompt_path) as f:
+            static = f.read()
+    except FileNotFoundError:
+        logger.warning("System prompt file not found at %s, using fallback", prompt_path)
+        static = PROFESSOR_ZACUS_PROMPT
+
+    # Append dynamic state if available
+    state = game_state_store.get(device_id)
+    if state:
+        dynamic = (
+            "\n--- ETAT DU JEU ---\n"
+            f"Scene active: {state.get('scene_id', 'unknown')}\n"
+            f"Temps ecoule: {state.get('elapsed_min', 0)} min\n"
+            f"Indices donnes: {state.get('hints_given', 0)}\n"
+            f"Humeur: {state.get('mood', 'neutral')}\n"
+            f"Tentatives echouees: {state.get('failed_attempts', 0)}\n"
+            f"Objectif: {state.get('objective', '')}\n"
+            "--- FIN ETAT ---\n"
+        )
+        return static + "\n" + dynamic
+    return static
 
 # ---------------------------------------------------------------------------
 # Audio Session Manager
@@ -349,6 +402,28 @@ async def health():
     }
 
 
+@app.post("/game_state")
+async def update_game_state(request_body: dict):
+    """Receive game state updates from ESP32 or web client.
+
+    Expected JSON fields:
+        device_id (str): device identifier (default: "default")
+        scene_id (str): current scene
+        elapsed_min (int): minutes elapsed
+        hints_given (int): hints already delivered
+        mood (str): neutral | impressed | worried | amused
+        failed_attempts (int): wrong answers count
+        objective (str): current puzzle objective text
+    """
+    device_id = request_body.get("device_id", "default")
+    game_state_store.update(device_id, request_body)
+    logger.info("[%s] Game state updated: scene=%s mood=%s",
+                device_id,
+                request_body.get("scene_id", "?"),
+                request_body.get("mood", "?"))
+    return {"ok": True}
+
+
 @app.websocket("/voice/ws")
 async def voice_websocket(websocket: WebSocket, token: str = ""):
     """WebSocket endpoint for ESP32 voice pipeline."""
@@ -557,7 +632,8 @@ async def _query_llm(text: str, device_id: str = "unknown") -> str:
     session = _get_session(device_id)
 
     # Build messages: system + last N turns from history + current user message
-    messages: list[dict[str, str]] = [{"role": "system", "content": PROFESSOR_ZACUS_PROMPT}]
+    system_prompt = build_system_prompt(device_id)
+    messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
     history_slice = session.conversation_history[-(MAX_HISTORY_TURNS * 2):]
     messages.extend(history_slice)
     messages.append({"role": "user", "content": text})

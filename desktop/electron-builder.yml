@@ -1,0 +1,56 @@
+appId: fr.lelectronrare.zacus-studio
+productName: Zacus Studio
+copyright: "Copyright © 2026 L'Electron Rare"
+
+directories:
+  output: release
+  buildResources: resources
+
+files:
+  - dist/**/*
+  - node_modules/**/*
+  - "!node_modules/**/{CHANGELOG.md,README.md,readme.md,readme}"
+  - "!node_modules/**/{test,__tests__,tests,powered-test,example,examples}"
+  - "!node_modules/*.d.ts"
+
+# macOS config
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  bundleVersion: "1"
+  category: public.app-category.developer-tools
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: resources/entitlements.plist
+  entitlementsInherit: resources/entitlements.plist
+  icon: resources/icon.icns
+  minimumSystemVersion: "14.0"
+  extendInfo:
+    NSBluetoothAlwaysUsageDescription: "Zacus Studio needs Bluetooth to communicate with puzzle devices."
+    NSBluetoothPeripheralUsageDescription: "Zacus Studio needs Bluetooth to communicate with puzzle devices."
+    NSLocalNetworkUsageDescription: "Zacus Studio needs local network access to discover and update puzzle devices."
+    NSBonjourServices:
+      - _zacus._tcp
+
+dmg:
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+  window:
+    width: 540
+    height: 380
+  sign: false
+
+# Auto-updater
+publish:
+  provider: github
+  owner: electron-rare
+  repo: le-mystere-professeur-zacus
+  releaseType: release

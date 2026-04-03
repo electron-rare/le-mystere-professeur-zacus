@@ -1,0 +1,39 @@
+{
+  "name": "zacus-studio",
+  "version": "1.0.0",
+  "description": "Zacus Studio — macOS control hub for Professeur Zacus escape room kits",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:renderer\" \"npm run dev:main\"",
+    "dev:main": "tsc -p tsconfig.main.json --watch & sleep 2 && electron .",
+    "dev:renderer": "vite",
+    "build": "npm run build:renderer && npm run build:main",
+    "build:renderer": "vite build",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:mac": "npm run build && electron-builder --mac --universal",
+    "build:mac-arm64": "npm run build && electron-builder --mac --arm64",
+    "notarize": "node scripts/notarize.js",
+    "rebuild-native": "electron-rebuild -f -w zacus-native",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.0",
+    "serialport": "^12.0.0",
+    "node-addon-api": "^8.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "concurrently": "^9.0.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "electron-rebuild": "^3.2.9",
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0",
+    "vite-plugin-electron": "^0.28.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

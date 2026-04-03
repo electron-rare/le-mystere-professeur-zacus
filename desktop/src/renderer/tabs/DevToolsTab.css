@@ -1,0 +1,49 @@
+.devtools-layout {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
+.devtools-nav {
+  width: 110px;
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 6px;
+}
+
+.devtools-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  transition: all 0.12s ease;
+  width: 100%;
+}
+
+.devtools-nav-btn:hover {
+  background: var(--accent-dim);
+  color: var(--text-primary);
+}
+
+.devtools-nav-btn.active {
+  background: var(--accent);
+  color: white;
+}
+
+.devtools-content {
+  flex: 1;
+  overflow: auto;
+  background: var(--bg-primary);
+}

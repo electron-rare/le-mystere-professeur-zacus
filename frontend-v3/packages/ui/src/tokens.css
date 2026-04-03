@@ -1,0 +1,57 @@
+/* Theme FER — CSS custom properties for @zacus/ui design system */
+
+:root {
+  /* Brand accent */
+  --fer-accent: #0071e3;
+  --fer-accent-hover: #0077ed;
+  --fer-accent-active: #006cd9;
+
+  /* Surfaces */
+  --fer-bg: #000000;
+  --fer-surface: #1c1c1e;
+  --fer-card: #2c2c2e;
+  --fer-card-hover: #3a3a3c;
+  --fer-separator: rgba(255, 255, 255, 0.12);
+
+  /* Text */
+  --fer-text-primary: #ffffff;
+  --fer-text-secondary: rgba(255, 255, 255, 0.6);
+  --fer-text-tertiary: rgba(255, 255, 255, 0.3);
+  --fer-text-muted: #636366;
+
+  /* Status */
+  --fer-success: #34c759;
+  --fer-warning: #ff9500;
+  --fer-danger: #ff3b30;
+  --fer-purple: #af52de;
+  --fer-teal: #5ac8fa;
+
+  /* NPC Mood glows */
+  --fer-mood-neutral: #0071e3;
+  --fer-mood-impressed: #34c759;
+  --fer-mood-worried: #ff9500;
+  --fer-mood-amused: #af52de;
+
+  /* Spacing */
+  --fer-radius-sm: 0.5rem;
+  --fer-radius-md: 0.75rem;
+  --fer-radius-lg: 1rem;
+  --fer-radius-xl: 1.5rem;
+
+  /* Shadows */
+  --fer-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --fer-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --fer-shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.6);
+  --fer-shadow-accent: 0 0 20px rgba(0, 113, 227, 0.4);
+
+  /* Transitions */
+  --fer-transition: 150ms ease;
+  --fer-transition-slow: 300ms ease;
+
+  /* Z-index scale */
+  --fer-z-base: 0;
+  --fer-z-dropdown: 100;
+  --fer-z-overlay: 200;
+  --fer-z-modal: 300;
+  --fer-z-toast: 400;
+}

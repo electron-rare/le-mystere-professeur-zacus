@@ -1,0 +1,3 @@
+session_id,date,group_size,target_duration,actual_duration,group_profile_detected,group_profile_actual,puzzles_solved,puzzles_skipped,hints_total,nps_score,notes
+beta_001,,,,,,,,,,,
+beta_002,,,,,,,,,,,

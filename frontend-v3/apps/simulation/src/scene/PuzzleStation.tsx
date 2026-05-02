@@ -13,7 +13,7 @@ interface Props {
  */
 export function PuzzleStation({ position, label, onClick, children }: Props) {
   return (
-    <group position={position} onClick={onClick}>
+    <group position={position} {...(onClick ? { onClick } : {})}>
       {children}
       <Text position={[0, 0.6, 0]} fontSize={0.1} color="white" anchorX="center">
         {label}

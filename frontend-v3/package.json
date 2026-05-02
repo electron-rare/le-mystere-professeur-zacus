@@ -1,6 +1,7 @@
 {
   "name": "zacus-frontend-v3",
   "private": true,
+  "packageManager": "pnpm@10.33.2",
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",

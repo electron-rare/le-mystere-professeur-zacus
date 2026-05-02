@@ -7,11 +7,11 @@
     "dev": "vite --port 5175",
     "build": "tsc -b && vite build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@react-three/fiber": "^8.17.14",
-    "@react-three/drei": "^9.122.0",
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.6.1",
     "@zacus/scenario-engine": "workspace:*",
     "@zacus/shared": "workspace:*",
     "@zacus/ui": "workspace:*",

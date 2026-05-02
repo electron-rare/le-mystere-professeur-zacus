@@ -36,7 +36,7 @@ function YamlLine({ line }: { line: string }) {
 
   const commentMatch = /^(\s*)(#.*)$/.exec(line);
   if (commentMatch) {
-    const [, indent, comment] = commentMatch;
+    const [, indent = '', comment = ''] = commentMatch;
     parts.push({ text: indent, color: '#fff' });
     parts.push({ text: comment, color: '#6b7280' });
     return <span style={{ display: 'block' }}>{parts.map((p, i) => <span key={i} style={{ color: p.color }}>{p.text}</span>)}{'\n'}</span>;
@@ -44,7 +44,7 @@ function YamlLine({ line }: { line: string }) {
 
   const kvMatch = /^(\s*)([^:]+)(:)(\s*.*)$/.exec(line);
   if (kvMatch) {
-    const [, indent, key, colon, rest] = kvMatch;
+    const [, indent = '', key = '', colon = '', rest = ''] = kvMatch;
     const valueColor = rest.trim().startsWith('"') ? '#fbbf24' : '#a3e635';
     return (
       <span style={{ display: 'block' }}>

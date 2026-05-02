@@ -112,7 +112,7 @@ export function registerPuzzleBlocks(): void {
   for (const def of PUZZLE_BLOCK_DEFS) {
     Blockly.Blocks[def.type] = {
       init(this: Blockly.Block) {
-        this.jsonInit(def as Blockly.blocks.BlockDefinition);
+        this.jsonInit(def);
       },
     };
   }

@@ -65,7 +65,7 @@ export function registerFlowBlocks(): void {
   for (const def of FLOW_BLOCK_DEFS) {
     Blockly.Blocks[def.type] = {
       init(this: Blockly.Block) {
-        this.jsonInit(def as Blockly.blocks.BlockDefinition);
+        this.jsonInit(def);
       },
     };
   }

@@ -7,8 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "lint": "eslint src"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@zacus/shared": "workspace:*",

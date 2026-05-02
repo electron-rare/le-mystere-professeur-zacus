@@ -31,7 +31,7 @@ export const BlocklyWorkspace = forwardRef<BlocklyWorkspaceHandle, BlocklyWorksp
         toolbox: TOOLBOX_XML,
         grid: { spacing: 20, length: 3, colour: '#2c2c2e', snap: true },
         zoom: { controls: true, wheel: true, startScale: 0.9 },
-        theme: Blockly.Themes.Dark,
+        theme: Blockly.Themes.Classic,
         renderer: 'zelos',
         trashcan: true,
         move: { scrollbars: true, drag: true, wheel: false },

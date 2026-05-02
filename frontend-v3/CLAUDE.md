@@ -7,9 +7,8 @@ pnpm + turbo monorepo. Apps in flux: editor + simulation are being fused into at
 ```
 apps/
   dashboard/         # Live game-master dashboard (analytics, control)
-  atelier/           # Scratch-like authoring studio (Blockly + 3D stage) — fusion target
-  editor/            # Legacy: being absorbed into atelier (migrated in P3)
-  simulation/        # Legacy: being absorbed into atelier (migrated in P4)
+  atelier/           # Scratch-like authoring studio (Blockly + 3D stage)
+  simulation/        # Legacy: being absorbed into atelier (P4)
 packages/
   scenario-engine/   # Runtime 3 IR + execution (shared core)
   shared/            # Cross-app utilities, types, constants

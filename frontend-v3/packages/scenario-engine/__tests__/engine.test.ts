@@ -22,8 +22,7 @@ describe('ZacusScenarioEngine', () => {
     expect(state.phase).toBe('PROFILING');
   });
 
-  // TODO(phase4): scenario.puzzles is not iterable in current YAML structure — fix during atelier migration
-  it.skip('records solved puzzles on puzzle_solved event', () => {
+  it('records solved puzzles on puzzle_solved event', () => {
     const decisions = engine.onEvent({
       type: 'puzzle_solved',
       timestamp: Date.now(),
@@ -39,12 +38,16 @@ describe('ZacusScenarioEngine', () => {
     expect(engine.getState().hintsGiven['P2_CIRCUIT']).toBe(2);
   });
 
-  // TODO(phase4): scoring formula changed (base + bonus = 1200, not 1000) — realign expectation during atelier migration
-  it.skip('getScore returns base_score when no time exceeded and no hints', () => {
+  it('getScore at game start: base + fast-completion bonus, no penalties', () => {
+    // At t=0, elapsedMin (0) < targetMin * 0.8 (48), so the
+    // bonus_fast_completion (200) applies on top of base_score (1000).
+    // The engine reports score continuously, not only at game end.
     const score = engine.getScore();
     expect(score.baseScore).toBe(1000);
     expect(score.timePenalty).toBe(0);
-    expect(score.total).toBe(1000);
+    expect(score.hintPenalty).toBe(0);
+    expect(score.bonus).toBe(200);
+    expect(score.total).toBe(1200);
   });
 
   it('sets groupProfile on profile_detected event', () => {
@@ -59,8 +62,7 @@ describe('ZacusScenarioEngine', () => {
     expect(['CLIMAX', 'OUTRO']).toContain(state.phase);
   });
 
-  // TODO(phase4): scenario.puzzles is not iterable in current YAML structure — fix during atelier migration
-  it.skip('assembles code digits on puzzle_solved', () => {
+  it('assembles code digits on puzzle_solved', () => {
     engine.onEvent({
       type: 'puzzle_solved',
       timestamp: Date.now(),

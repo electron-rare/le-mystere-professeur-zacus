@@ -5,7 +5,7 @@ import { Room } from './Room.js';
 import { PuzzleStations } from './PuzzleStations.js';
 import { RtcPhone } from './RtcPhone.js';
 import { NpcBubble } from './NpcBubble.js';
-import { useSimStore } from '../store/simStore.js';
+import { useSimStore } from '../stores/simStore.js';
 import { DemoCameraController } from '../modes/DemoMode.js';
 
 export function RoomScene() {

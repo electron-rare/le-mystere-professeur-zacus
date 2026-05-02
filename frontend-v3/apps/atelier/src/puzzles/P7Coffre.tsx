@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Text } from '@react-three/drei';
-import { useSimStore } from '../store/simStore.js';
+import { useSimStore } from '../stores/simStore.js';
 
 interface Props {
   position: [number, number, number];

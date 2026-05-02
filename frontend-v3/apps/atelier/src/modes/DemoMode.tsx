@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { useSimStore } from '../store/simStore.js';
+import { useSimStore } from '../stores/simStore.js';
 
 // Cinematic camera waypoints (position + target)
 const WAYPOINTS: Array<{ pos: [number, number, number]; target: [number, number, number]; duration: number }> = [

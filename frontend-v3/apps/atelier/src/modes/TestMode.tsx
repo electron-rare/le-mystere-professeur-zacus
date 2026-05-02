@@ -1,14 +1,23 @@
 import { useEffect } from 'react';
-import { useSimStore } from '../store/simStore.js';
+import { useSimStore } from '../stores/simStore.js';
 
-/**
- * TestMode: accelerated engine + diagnostic overlay.
- * Ticks the engine every 100ms (10x speed).
- */
+const HUD_STYLE: React.CSSProperties = {
+  position: 'absolute',
+  bottom: 16,
+  left: 16,
+  background: 'rgba(0, 0, 0, 0.8)',
+  color: '#fff',
+  borderRadius: 16,
+  padding: 16,
+  fontSize: 12,
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  backdropFilter: 'blur(8px)',
+  WebkitBackdropFilter: 'blur(8px)',
+};
+
 export function TestMode() {
   const { engineState, solvedPuzzles, tickEngine } = useSimStore();
 
-  // Accelerated tick (10x speed)
   useEffect(() => {
     const interval = setInterval(() => {
       tickEngine(Date.now());
@@ -17,15 +26,19 @@ export function TestMode() {
   }, [tickEngine]);
 
   return (
-    <div className="absolute bottom-4 left-4 bg-black/80 text-white rounded-2xl p-4 text-xs font-mono backdrop-blur-md">
-      <div className="font-bold mb-2 text-[#0071e3]">Test Mode (10x speed)</div>
+    <div style={HUD_STYLE}>
+      <div style={{ fontWeight: 700, marginBottom: 8, color: '#0071e3' }}>
+        Test Mode (10x speed)
+      </div>
       <div>Phase: {engineState?.phase ?? '—'}</div>
       <div>Profile: {engineState?.groupProfile ?? 'detecting...'}</div>
       <div>Solved: {solvedPuzzles.join(', ') || 'none'}</div>
       <div>Code: {engineState?.codeAssembled ?? '________'}</div>
       <div>Mood: {engineState?.npcMood ?? '—'}</div>
       <div>Elapsed: {engineState ? Math.round(engineState.elapsedMs / 1000) : 0}s</div>
-      <div className="mt-2 text-white/40">Click puzzles to solve them</div>
+      <div style={{ marginTop: 8, color: 'rgba(255,255,255,0.4)' }}>
+        Click puzzles to solve them
+      </div>
     </div>
   );
 }

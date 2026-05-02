@@ -1,5 +1,5 @@
 import { Html } from '@react-three/drei';
-import { useSimStore } from '../store/simStore.js';
+import { useSimStore } from '../stores/simStore.js';
 
 export function NpcBubble() {
   const npcLastPhrase = useSimStore((s) => s.npcLastPhrase);

@@ -40,7 +40,7 @@ YAML scenario → compile_runtime3.py → Runtime 3 IR → ESP32 / Web player
 
 Key surfaces:
 - **Scenario IR**: `game/scenarios/zacus_v2.yaml` → `tools/scenario/compile_runtime3.py` → portable Runtime 3 IR. Contract: `specs/ZACUS_RUNTIME_3_SPEC.md`.
-- **Authoring**: `frontend-v3/` (pnpm monorepo, dashboard + editor + simulation; editor + simulation will fuse into `apps/atelier/` per `docs/superpowers/specs/2026-05-01-v3-fusion-atelier-design.md`).
+- **Authoring**: `frontend-v3/` (pnpm monorepo: `apps/atelier/` Scratch-like studio + `apps/dashboard/` game-master live view).
 - **Firmware**: `ESP32_ZACUS/` submodule (separate repo, separate CI). Freenove ESP32-S3 + PlatformIO. NPC engine, voice pipeline, vision/QR, media manager.
 - **Voice / NPC**: Piper TTS on Tower:8001 (zacus voice = tom-medium). NPC phrases in `game/scenarios/npc_phrases.yaml`. MP3 pool generator: `tools/tts/generate_npc_pool.py`.
 - **MCP hardware**: `tools/dev/mcp_hardware_server.py` (stdio, 6 tools).

@@ -17,6 +17,18 @@ export function parseScenarioYaml(raw: string): ScenarioYaml {
       throw new Error(`Invalid scenario YAML: missing key "${key}"`);
     }
   }
+
+  // The YAML keeps `puzzles:` as a dict keyed by id (P1_SON, P2_CIRCUIT, ...)
+  // for human readability. The TS contract is PuzzleConfig[]. Convert here
+  // so consumers can use array methods (find, map, reduce) safely.
+  if (
+    scenario.puzzles &&
+    typeof scenario.puzzles === 'object' &&
+    !Array.isArray(scenario.puzzles)
+  ) {
+    scenario.puzzles = Object.values(scenario.puzzles);
+  }
+
   return scenario as unknown as ScenarioYaml;
 }
 

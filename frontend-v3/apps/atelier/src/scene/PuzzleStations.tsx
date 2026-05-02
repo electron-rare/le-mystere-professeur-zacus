@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { Text } from '@react-three/drei';
 import * as THREE from 'three';
-import { useSimStore } from '../store/simStore.js';
+import { useSimStore } from '../stores/simStore.js';
 import { P1Sound } from '../puzzles/P1Sound.js';
 import { P5Morse } from '../puzzles/P5Morse.js';
 import { P6Symbols } from '../puzzles/P6Symbols.js';

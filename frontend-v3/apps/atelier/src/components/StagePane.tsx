@@ -1,23 +1,36 @@
 import { lazy, Suspense } from 'react';
 import { useRuntimeStore } from '../stores/runtimeStore.js';
+import { useSimStore } from '../stores/simStore.js';
 
-const ThreeStageLazy = lazy(async () => {
-  await import('@react-three/fiber');
-  return {
-    default: function ThreeStagePlaceholder() {
-      return (
-        <div className="atelier-pane atelier-pane--stage">
-          <span>3D simulation stage (P4)</span>
-        </div>
-      );
-    },
-  };
+const RoomSceneLazy = lazy(async () => {
+  const mod = await import('../scene/RoomScene.js');
+  return { default: mod.RoomScene };
+});
+
+const SandboxModeLazy = lazy(async () => {
+  const mod = await import('../modes/SandboxMode.js');
+  return { default: mod.SandboxMode };
+});
+
+const DemoModeLazy = lazy(async () => {
+  const mod = await import('../modes/DemoMode.js');
+  return { default: mod.DemoMode };
+});
+
+const TestModeLazy = lazy(async () => {
+  const mod = await import('../modes/TestMode.js');
+  return { default: mod.TestMode };
 });
 
 export function StagePane() {
   const isStale = useRuntimeStore((s) => s.isStale);
+  const mode = useSimStore((s) => s.mode);
+
+  const ModeOverlay =
+    mode === 'demo' ? DemoModeLazy : mode === 'test' ? TestModeLazy : SandboxModeLazy;
+
   return (
-    <div style={{ position: 'relative', height: '100%' }}>
+    <div style={{ position: 'relative', height: '100%', background: '#000' }}>
       <Suspense
         fallback={
           <div className="atelier-pane atelier-pane--stage">
@@ -25,7 +38,8 @@ export function StagePane() {
           </div>
         }
       >
-        <ThreeStageLazy />
+        <RoomSceneLazy />
+        <ModeOverlay />
       </Suspense>
       {isStale ? (
         <div
@@ -39,6 +53,7 @@ export function StagePane() {
             fontSize: 12,
             fontWeight: 600,
             borderRadius: 4,
+            zIndex: 20,
           }}
         >
           stale — click Run

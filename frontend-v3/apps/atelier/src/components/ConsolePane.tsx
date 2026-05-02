@@ -1,7 +1,7 @@
-import { useRuntimeStore, type SimulationMode } from '../stores/runtimeStore.js';
+import { useSimStore, type SimMode } from '../stores/simStore.js';
 import { useValidationStore, type ValidationEntry } from '../stores/validationStore.js';
 
-const MODES: SimulationMode[] = ['sandbox', 'demo', 'test'];
+const MODES: SimMode[] = ['sandbox', 'demo', 'test'];
 
 const SEVERITY_COLOR: Record<ValidationEntry['severity'], string> = {
   error: '#fca5a5',
@@ -10,8 +10,8 @@ const SEVERITY_COLOR: Record<ValidationEntry['severity'], string> = {
 };
 
 export function ConsolePane() {
-  const mode = useRuntimeStore((s) => s.mode);
-  const setMode = useRuntimeStore((s) => s.setMode);
+  const mode = useSimStore((s) => s.mode);
+  const setMode = useSimStore((s) => s.setMode);
   const entries = useValidationStore((s) => s.entries);
 
   const errorCount = entries.filter((e) => e.severity === 'error').length;

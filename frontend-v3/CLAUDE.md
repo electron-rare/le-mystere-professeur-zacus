@@ -1,14 +1,13 @@
 # Frontend V3 (Monorepo)
 
-pnpm + turbo monorepo. Apps in flux: editor + simulation are being fused into atelier (see `docs/superpowers/specs/2026-05-01-v3-fusion-atelier-design.md`). Node ≥20, pnpm ≥9.
+pnpm + turbo monorepo. Two apps + three shared packages. Node ≥20, pnpm ≥9.
 
 ## Layout
 
 ```
 apps/
   dashboard/         # Live game-master dashboard (analytics, control)
-  atelier/           # Scratch-like authoring studio (Blockly + 3D stage)
-  simulation/        # Legacy: being absorbed into atelier (P4)
+  atelier/           # Scratch-like authoring studio (Blockly editor + 3D stage)
 packages/
   scenario-engine/   # Runtime 3 IR + execution (shared core)
   shared/            # Cross-app utilities, types, constants

@@ -8,9 +8,9 @@ DESKTOP_DIST="$REPO_ROOT/desktop/dist/renderer/apps"
 echo "Building frontend-v3 apps..."
 mkdir -p "$DESKTOP_DIST"
 
-for app in editor dashboard simulation; do
+for app in atelier dashboard; do
   echo "  -> Building $app..."
-  (cd "$FRONTEND_V3/apps/$app" && npm run build -- --outDir "$DESKTOP_DIST/$app" --base "./apps/$app/")
+  (cd "$FRONTEND_V3/apps/$app" && pnpm build -- --outDir "$DESKTOP_DIST/$app" --base "./apps/$app/")
 done
 
 echo "Done: frontend-v3 apps built to $DESKTOP_DIST"

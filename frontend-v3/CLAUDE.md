@@ -7,7 +7,7 @@ pnpm + turbo monorepo. Three apps + three shared packages. Node ≥20, pnpm ≥9
 ```
 apps/
   dashboard/         # Live game-master dashboard (analytics, control)
-  editor/            # Scenario editor (V3 successor of frontend-scratch-v2)
+  editor/            # Scenario editor (will fuse with simulation into atelier — see docs/superpowers/specs/2026-05-01-v3-fusion-atelier-design.md)
   simulation/        # Runtime simulator / playtest UI
 packages/
   scenario-engine/   # Runtime 3 IR + execution (shared core)
@@ -33,12 +33,6 @@ pnpm lint               # turbo run lint
 - All cross-app types live in `packages/shared` — never copy-paste types between apps.
 - Components shared across ≥2 apps move to `packages/ui`. Keep app-local components in `apps/<app>/src/components`.
 - Turbo cache keys: ensure `inputs` in `turbo.json` cover all source paths; missing globs cause stale cache.
-
-## V2 vs V3
-
-- `frontend-scratch-v2/` is the legacy single-app Vite playground. V3 is the production target.
-- When porting features from V2, extract reusable logic into `packages/scenario-engine` or `packages/shared` first.
-- Do not symlink or import across V2/V3 boundaries.
 
 ## Anti-Patterns
 

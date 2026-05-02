@@ -21,7 +21,7 @@ Contracts between firmware, frontends, tooling, and AI agents. Treat each spec a
 - A spec change is a contract change. List affected consumers in the PR description.
 - Bump the version header at the top of the file when altering existing fields; never silently rename keys.
 - New spec docs must be linked from root `CLAUDE.md` "Canonical Files" if they introduce a new contract.
-- Pair runtime/frontend spec changes — the matching `tools/scenario/compile_runtime3.py` and `frontend-scratch-v2/src/lib/runtime3.ts` updates ship in the same PR.
+- Pair runtime/frontend spec changes — the matching `tools/scenario/compile_runtime3.py` and `frontend-v3/packages/scenario-engine/src/engine.ts` updates ship in the same PR.
 
 ## Anti-Patterns
 

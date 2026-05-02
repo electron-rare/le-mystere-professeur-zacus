@@ -17,7 +17,7 @@ PORTS_ARTIFACT_ROOT="$ARTIFACT_ROOT/ports"
 LATEST_PORTS_JSON="$PORTS_ARTIFACT_ROOT/latest_ports_resolve.json"
 CODEX_ARTIFACT_ROOT="$ARTIFACT_ROOT/codex"
 RUNTIME3_ARTIFACT_ROOT="$ARTIFACT_ROOT/runtime3"
-FRONTEND_ROOT="$REPO_ROOT/frontend-scratch-v2"
+FRONTEND_ROOT="$REPO_ROOT/frontend-v3"
 DEFAULT_SCENARIO="$REPO_ROOT/game/scenarios/zacus_v2.yaml"
 DEFAULT_PORTS_FIXTURE="$REPO_ROOT/tools/test/fixtures/ports_list_macos.txt"
 LAST_RESOLVED_JSON=""
@@ -46,9 +46,9 @@ Commands:
   runtime3-verify  Verify Runtime 3 pivot coverage on the canonical scenario
   runtime3-test    Run Runtime 3 unit tests
   runtime3-firmware-bundle Export Runtime 3 JSON into the firmware LittleFS tree
-  frontend-lint    Run the React/Blockly studio lint gate
-  frontend-test    Run the React/Blockly studio test gate
-  frontend-build   Run the React/Blockly studio build gate
+  frontend-typecheck Run the V3 monorepo typecheck gate
+  frontend-test    Run the V3 monorepo test gate
+  frontend-build   Run the V3 monorepo build gate
   docs-build       Build the MkDocs site in strict mode
   artifacts-summary Show recent Zacus artifact directories
   artifacts-prune  Delete old Zacus artifact directories (explicit --yes required)
@@ -353,19 +353,19 @@ HELP
   (cd "$REPO_ROOT" && python3 tools/scenario/export_runtime3_firmware_bundle.py "$scenario" -o "$out_file")
 }
 
-cmd_frontend_lint() {
-  info "running frontend lint"
-  (cd "$FRONTEND_ROOT" && npm run lint)
+cmd_frontend_typecheck() {
+  info "running frontend typecheck"
+  (cd "$FRONTEND_ROOT" && pnpm typecheck)
 }
 
 cmd_frontend_test() {
   info "running frontend tests"
-  (cd "$FRONTEND_ROOT" && npm run test)
+  (cd "$FRONTEND_ROOT" && pnpm test)
 }
 
 cmd_frontend_build() {
   info "running frontend build"
-  (cd "$FRONTEND_ROOT" && npm run build)
+  (cd "$FRONTEND_ROOT" && pnpm build)
 }
 
 cmd_docs_build() {
@@ -802,8 +802,8 @@ case "$command" in
   runtime3-firmware-bundle)
     cmd_runtime3_firmware_bundle "$@"
     ;;
-  frontend-lint)
-    cmd_frontend_lint "$@"
+  frontend-typecheck)
+    cmd_frontend_typecheck "$@"
     ;;
   frontend-test)
     cmd_frontend_test "$@"

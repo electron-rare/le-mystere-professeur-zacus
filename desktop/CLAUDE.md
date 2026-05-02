@@ -42,4 +42,3 @@ npm run rebuild-native       # zacus-native addon for current Electron ABI
 - Calling `require('serialport')` from renderer (security: nodeIntegration must stay false)
 - Hardcoding device paths (`/dev/cu.usbserial-*`) — enumerate at runtime via `serialport.list()`
 - Skipping notarization on release builds (Gatekeeper will block)
-- Bundling V2 frontend instead of V3 — V2 is dev-only

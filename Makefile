@@ -1,8 +1,8 @@
 PYTHON ?= python3
 SCENARIO ?= game/scenarios/zacus_v2.yaml
-FRONTEND_DIR ?= frontend-scratch-v2
+FRONTEND_DIR ?= frontend-v3
 
-.PHONY: bootstrap-validators bootstrap-docs scenario-validate audio-validate printables-validate export validate-runtime-bundle content-checks runtime3-compile runtime3-simulate runtime3-verify runtime3-test runtime3-firmware-bundle frontend-lint frontend-test frontend-build docs-build docs-serve all-validate images
+.PHONY: bootstrap-validators bootstrap-docs scenario-validate audio-validate printables-validate export validate-runtime-bundle content-checks runtime3-compile runtime3-simulate runtime3-verify runtime3-test runtime3-firmware-bundle frontend-typecheck frontend-test frontend-build docs-build docs-serve all-validate images
 
 bootstrap-validators:
 	bash tools/setup/install_validators.sh
@@ -43,14 +43,14 @@ runtime3-test:
 runtime3-firmware-bundle:
 	$(PYTHON) tools/scenario/export_runtime3_firmware_bundle.py $(SCENARIO)
 
-frontend-lint:
-	cd $(FRONTEND_DIR) && npm run lint
+frontend-typecheck:
+	cd $(FRONTEND_DIR) && pnpm typecheck
 
 frontend-test:
-	cd $(FRONTEND_DIR) && npm run test
+	cd $(FRONTEND_DIR) && pnpm test
 
 frontend-build:
-	cd $(FRONTEND_DIR) && npm run build
+	cd $(FRONTEND_DIR) && pnpm build
 
 docs-build:
 	$(PYTHON) -m mkdocs build --strict

@@ -40,7 +40,7 @@ YAML scenario → compile_runtime3.py → Runtime 3 IR → ESP32 / Web player
 
 Key surfaces:
 - **Scenario IR**: `game/scenarios/zacus_v2.yaml` → `tools/scenario/compile_runtime3.py` → portable Runtime 3 IR. Contract: `specs/ZACUS_RUNTIME_3_SPEC.md`.
-- **Authoring**: `frontend-scratch-v2/` (legacy single-app) and `frontend-v3/` (pnpm monorepo, dashboard + editor + simulation).
+- **Authoring**: `frontend-v3/` (pnpm monorepo, dashboard + editor + simulation; editor + simulation will fuse into `apps/atelier/` per `docs/superpowers/specs/2026-05-01-v3-fusion-atelier-design.md`).
 - **Firmware**: `ESP32_ZACUS/` submodule (separate repo, separate CI). Freenove ESP32-S3 + PlatformIO. NPC engine, voice pipeline, vision/QR, media manager.
 - **Voice / NPC**: Piper TTS on Tower:8001 (zacus voice = tom-medium). NPC phrases in `game/scenarios/npc_phrases.yaml`. MP3 pool generator: `tools/tts/generate_npc_pool.py`.
 - **MCP hardware**: `tools/dev/mcp_hardware_server.py` (stdio, 6 tools).
@@ -52,8 +52,7 @@ Key surfaces:
 |------|----------|
 | Edit scenarios, NPC phrases, prompts | `game/` |
 | Modify Runtime 3 compiler / validators / TTS pool / dev CLI | `tools/` |
-| Authoring UI (legacy) | `frontend-scratch-v2/` |
-| Authoring UI / dashboard / simulation (current) | `frontend-v3/` |
+| Authoring UI / dashboard / simulation | `frontend-v3/` |
 | Zacus Studio macOS app | `desktop/` |
 | Add or change a contract spec | `specs/` |
 | Python tests (Runtime 3, NPC) | `tests/` |
@@ -87,4 +86,4 @@ User speaks French → respond in French. Code, comments, commits, docs → Engl
 Domain-specific rules live in nested `CLAUDE.md` files and load automatically when you read files in those directories. Closest file wins. Current nested:
 
 - `game/`, `tools/`, `tests/`, `specs/`
-- `frontend-scratch-v2/`, `frontend-v3/`, `desktop/`
+- `frontend-v3/`, `desktop/`

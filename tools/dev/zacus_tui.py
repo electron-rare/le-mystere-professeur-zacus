@@ -204,16 +204,16 @@ def action_python_tests():
 def action_frontend_tests():
     return run_command(
         "Run Frontend Tests",
-        "npx vitest run",
-        cwd=str(REPO_ROOT / "frontend-scratch-v2"),
+        "pnpm test",
+        cwd=str(REPO_ROOT / "frontend-v3"),
     )
 
 
 def action_build_frontend():
     return run_command(
         "Build Frontend",
-        "npm run build",
-        cwd=str(REPO_ROOT / "frontend-scratch-v2"),
+        "pnpm build",
+        cwd=str(REPO_ROOT / "frontend-v3"),
     )
 
 

@@ -1,0 +1,103 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  background: #1a1a1d;
+  color: #e8e8e8;
+}
+
+.atelier-shell {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.atelier-pane {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #232327;
+  border: 1px solid #2c2c2e;
+  color: #9a9a9d;
+  font-size: 14px;
+  user-select: none;
+}
+
+.atelier-pane--toolbox {
+  background: #1f1f22;
+}
+
+.atelier-pane--editor {
+  background: #25252a;
+}
+
+.atelier-pane--stage {
+  background: #181820;
+}
+
+.atelier-pane--console {
+  background: #15151a;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 8px 12px;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.atelier-resizer {
+  background: #0e0e10;
+  transition: background 120ms ease;
+}
+
+.atelier-resizer:hover,
+.atelier-resizer[data-resize-handle-state='hover'],
+.atelier-resizer[data-resize-handle-state='drag'] {
+  background: #4d4d52;
+}
+
+.atelier-resizer--vertical {
+  width: 4px;
+  cursor: col-resize;
+}
+
+.atelier-resizer--horizontal {
+  height: 4px;
+  cursor: row-resize;
+}
+
+.atelier-mode-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.atelier-mode-tab {
+  padding: 4px 10px;
+  border: 1px solid #2c2c2e;
+  border-radius: 4px;
+  background: #232327;
+  color: #9a9a9d;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.atelier-mode-tab--active {
+  background: #3c3c4a;
+  color: #fff;
+  border-color: #4d4d52;
+}

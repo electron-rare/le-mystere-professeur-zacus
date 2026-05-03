@@ -2,8 +2,24 @@
 # Spec: docs/superpowers/specs/2026-05-03-tts-stt-llm-macstudio-design.md §2.4
 
 model_list:
-  # ── LLM tier (Ollama local) ──────────────────────────────
+  # ── LLM tier (MLX-LM local) ──────────────────────────────
+  # npc-fast: MLX-LM 7B Q4 (~11.7 tok/s warm, 5.9 GB RSS, FR-fluent, Zacus tone OK)
+  # Replaces ollama 7B Q8 (~10.5 tok/s warm, 9.7 GB, 18s cold) — see P1 part6 bench.
   - model_name: npc-fast
+    litellm_params:
+      model: openai/mlx-community/Qwen2.5-7B-Instruct-4bit
+      api_base: http://localhost:8501/v1
+      api_key: dummy
+
+  # MLX 7B Q4 explicit alias (same backend as npc-fast)
+  - model_name: npc-mlx-7b
+    litellm_params:
+      model: openai/mlx-community/Qwen2.5-7B-Instruct-4bit
+      api_base: http://localhost:8501/v1
+      api_key: dummy
+
+  # Archived ollama 7B route — kept as fallback / quality sanity check
+  - model_name: npc-ollama-7b
     litellm_params:
       model: ollama/qwen2.5:7b-instruct-q8_0
       api_base: http://localhost:11434

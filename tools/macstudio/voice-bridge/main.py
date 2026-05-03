@@ -1,4 +1,4 @@
-"""voice-bridge — FastAPI daemon (P1 part7 + part9b cache + part11/part12 WS).
+"""voice-bridge — FastAPI daemon (P1 part7 + part9b cache + part11/part12 WS + part13 NPC prompt/CORS).
 
 Spec: docs/superpowers/specs/2026-05-03-tts-stt-llm-macstudio-design.md §2.5
 
@@ -28,6 +28,22 @@ Design notes
   uses the same key format so pre-warming is straightforward.
 * TTS fallback chain on cache miss: F5 → Piper Tower :8001 → ``service_down.wav``
   if both fail. F5 errors / timeouts are logged then bypassed.
+
+P1 part13 additions
+-------------------
+* CORS middleware (origins via $CORS_ORIGINS, comma-separated allow-list,
+  defaults to Vite dev/preview ports on localhost). ``*`` is intentionally
+  forbidden because we keep ``allow_credentials=True``: browsers reject the
+  combination per the Fetch spec. Adjust the env var per deployment when
+  exposing the dashboard from a non-localhost origin.
+* NPC system prompt injection (env $NPC_SYSTEM_PROMPT, multiline allowed):
+  every call to LiteLLM ``npc-fast`` from ``/voice/intent`` and ``/voice/ws``
+  is prefixed with a system message that anchors the LLM to the Professeur
+  Zacus persona and explicitly tolerates whisper transliteration drift on
+  the name (« Zaku » / « Zacusse » → still addressed to Zacus). The system
+  message is *only* injected when the caller has not already supplied a
+  ``system`` role / ``messages`` override in the request context, so power
+  users keep full control.
 """
 from __future__ import annotations
 
@@ -60,6 +76,7 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -98,6 +115,36 @@ ADMIN_KEY = os.getenv("VOICE_BRIDGE_ADMIN_KEY")  # None = no auth on DELETE
 
 # Rate limit on /tts (per client IP). slowapi syntax: "<n>/<unit>".
 TTS_RATE_LIMIT = os.getenv("TTS_RATE_LIMIT", "10/second")
+
+# CORS allow-list (P1 part13): comma-separated origins. Default covers the
+# local Vite dev server (5174 = atelier, 5173 = dashboard alt port) and the
+# vite preview build (4173). Override per-deployment via $CORS_ORIGINS when
+# the dashboard ships from a remote origin (Tailscale, prod hostname, etc.).
+# NOTE: ``*`` is forbidden by browsers when ``allow_credentials=True`` (Fetch
+# spec); we therefore enumerate explicit origins.
+CORS_ORIGINS = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:5174,http://localhost:5173,http://localhost:4173",
+)
+
+# NPC system prompt (P1 part13): prefixed to every LiteLLM ``npc-fast`` call
+# coming through ``/voice/intent`` and ``/voice/ws`` so the LLM stays in the
+# Professeur Zacus persona and tolerates whisper-side name drift. Override
+# per-deployment via $NPC_SYSTEM_PROMPT (multiline allowed in shell via $'…').
+NPC_SYSTEM_PROMPT = os.getenv(
+    "NPC_SYSTEM_PROMPT",
+    (
+        "Tu es le Professeur Zacus, savant excentrique et théâtral, dans un "
+        "escape room français. Le joueur peut prononcer ton nom de plusieurs "
+        "façons (« Zacus », « Zaku », « Zacusse ») suite aux imperfections de "
+        "la transcription audio — accepte toutes les variantes comme te "
+        "désignant. Réponds toujours en français, deux phrases maximum, ton "
+        "dramatique mais clair. Ne révèle jamais directement la solution "
+        "d'une énigme — propose seulement un indice subtil ou une réflexion "
+        "qui guide le joueur. Si le joueur demande de l'aide, suggère qu'il "
+        "décroche le téléphone du Professeur pour recevoir un indice complet."
+    ),
+)
 
 # /voice/ws constants — must mirror firmware-side framing (chantier C_slice7).
 WS_EXPECTED_VERSION = 1
@@ -330,6 +377,20 @@ limiter = Limiter(key_func=get_remote_address, default_limits=[])
 app = FastAPI(title="voice-bridge", version="0.4.0")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS (P1 part13). Mounted before any router/route so preflight OPTIONS hits
+# the middleware first. Methods enumerated explicitly (GET/POST/DELETE/OPTIONS)
+# rather than ``*`` to keep the surface small and predictable; add new verbs
+# here when introducing new routes (e.g. PUT for cache invalidation patterns).
+_cors_allow_origins = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_allow_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+)
+_jlog("boot_cors_configured", origins=_cors_allow_origins)
 
 
 @app.on_event("startup")
@@ -769,14 +830,50 @@ async def intent(payload: IntentRequest) -> JSONResponse:
     """
     request_id = str(uuid.uuid4())
     text = payload.text.strip()
-    context = payload.context
+    context = payload.context or {}
     if not text:
         raise HTTPException(status_code=400, detail="payload.text is required")
 
+    # P1 part13: prefix every npc-fast call with the Professeur Zacus persona
+    # system prompt unless the caller already specified its own. Priority order:
+    #   1. caller-supplied ``messages`` array (verbatim, no injection)
+    #   2. caller-supplied ``system`` string (used as system role)
+    #   3. default NPC_SYSTEM_PROMPT
+    # When the caller passes an opaque ``context`` dict (legacy shape), we keep
+    # forwarding it as a system message *after* the persona prompt so the LLM
+    # sees both the Zacus framing and the per-request scenario hints.
     messages: list[dict[str, str]] = []
-    if context:
-        messages.append({"role": "system", "content": str(context)})
-    messages.append({"role": "user", "content": text})
+    explicit_messages = context.get("messages") if isinstance(context, dict) else None
+    if isinstance(explicit_messages, list) and explicit_messages:
+        # Caller takes full control — pass through as-is (validate roles loosely).
+        for m in explicit_messages:
+            if isinstance(m, dict) and "role" in m and "content" in m:
+                messages.append({"role": str(m["role"]),
+                                 "content": str(m["content"])})
+        # Still append the user text if they didn't include it themselves.
+        if not any(m.get("role") == "user" for m in messages):
+            messages.append({"role": "user", "content": text})
+    else:
+        explicit_system = (
+            context.get("system") if isinstance(context, dict) else None
+        )
+        system_prompt = (
+            str(explicit_system).strip()
+            if isinstance(explicit_system, str) and explicit_system.strip()
+            else NPC_SYSTEM_PROMPT
+        )
+        messages.append({"role": "system", "content": system_prompt})
+        # Legacy: a non-string context dict (without ``messages``/``system``
+        # keys) gets serialized as a secondary system message so existing
+        # callers keep working — we just sandwich it after the persona prompt.
+        if (
+            isinstance(context, dict)
+            and context
+            and "messages" not in context
+            and "system" not in context
+        ):
+            messages.append({"role": "system", "content": str(context)})
+        messages.append({"role": "user", "content": text})
 
     started = time.monotonic()
     try:
@@ -942,8 +1039,15 @@ async def _intent_complete(text: str) -> Optional[str]:
     Used by the WS handler in opportunistic mode — if the call fails we still
     deliver the transcript and close cleanly (firmware can fall back to its
     local hint/grammar matching).
+
+    P1 part13: also prepends the NPC_SYSTEM_PROMPT so the WS path stays
+    persona-aligned and tolerates whisper transliteration drift on the
+    Professeur Zacus name (« Zaku » / « Zacusse » → still bound to Zacus).
     """
-    messages = [{"role": "user", "content": text}]
+    messages = [
+        {"role": "system", "content": NPC_SYSTEM_PROMPT},
+        {"role": "user", "content": text},
+    ]
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.post(

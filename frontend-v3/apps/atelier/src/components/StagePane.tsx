@@ -43,7 +43,10 @@ export function StagePane() {
     mode === 'demo' ? DemoModeLazy : mode === 'test' ? TestModeLazy : SandboxModeLazy;
 
   return (
-    <div style={{ position: 'relative', height: '100%', background: '#000' }}>
+    <div
+      data-testid="stage-pane"
+      style={{ position: 'relative', height: '100%', background: '#000' }}
+    >
       <Suspense
         fallback={
           <div className="atelier-pane atelier-pane--stage">

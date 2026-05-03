@@ -152,6 +152,102 @@ export interface PhaseDefinition {
   }>;
 }
 
+// ============================================================
+// HINTS ENGINE TYPES (mirror tools/hints/server.py Pydantic schema)
+// ============================================================
+
+/** Group profile sent to /hints/ask. Mirrors GROUP_PROFILES in server.py. */
+export type HintsGroupProfile = 'TECH' | 'NON_TECH' | 'MIXED' | 'BOTH';
+
+/** Per-puzzle entry as returned by GET /hints/sessions. */
+export interface HintsSessionEntry {
+  puzzle_id: string;
+  count: number;
+  last_at_ms: number;
+  total_penalty: number;
+  cooldown_until_ms: number;
+  puzzle_started_at_ms: number;
+  failed_attempts_for_puzzle: number;
+}
+
+/** Per-session aggregate as returned by GET /hints/sessions. */
+export interface HintsSession {
+  session_id: string;
+  puzzles: HintsSessionEntry[];
+  total_penalty: number;
+  total_hints: number;
+}
+
+/** Adaptive profile config (mirror compute_level_floor inputs). */
+export interface HintsAdaptiveProfile {
+  base_modifier: number;
+  stuck_minutes_per_bump: number;
+  max_auto_bump: number;
+}
+
+export interface HintsAdaptiveConfig {
+  enabled: boolean;
+  profiles: Record<string, HintsAdaptiveProfile>;
+  failed_attempts: { bump_every: number; max_bump: number };
+}
+
+export interface HintsTrackerConfig {
+  cooldown_s: number;
+  max_per_puzzle: number;
+  penalty_per_level: Record<string, number>;
+  adaptive: HintsAdaptiveConfig;
+}
+
+/** GET /hints/sessions envelope. */
+export interface HintsSessionsResponse {
+  sessions: HintsSession[];
+  total_sessions: number;
+  config: HintsTrackerConfig;
+  now_ms: number;
+}
+
+/** GET /healthz envelope (subset relevant for the dashboard). */
+export interface HintsHealthz {
+  status: string;
+  phrases_loaded: number;
+  puzzles_loaded: number;
+  phrases_path: string;
+  safety_puzzles_loaded: number;
+  safety_path: string;
+  litellm_url: string;
+  llm_model: string;
+  adaptive_enabled: boolean;
+  adaptive_path: string;
+  adaptive_profiles: string[];
+}
+
+/** POST /hints/ask response — mirrors HintAskResponse in server.py. */
+export interface HintAskResponse {
+  refused: boolean;
+  reason: string | null;
+  hint: string | null;
+  hint_static: string | null;
+  hint_rewritten: string | null;
+  level: number | null;
+  level_requested: number | null;
+  level_served: number | null;
+  puzzle_id: string;
+  source: string;
+  model_used: string;
+  latency_ms: number;
+  count: number;
+  score_penalty: number;
+  total_penalty: number;
+  cooldown_until_ms: number;
+  retry_in_s: number;
+  details: string | null;
+  // Adaptive surface (P4)
+  level_floor_adaptive: number;
+  stuck_minutes: number;
+  failed_attempts: number;
+  group_profile_used: HintsGroupProfile | null;
+}
+
 export interface ScenarioYaml {
   id: string;
   version: string;

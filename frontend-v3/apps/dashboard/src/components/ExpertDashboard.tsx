@@ -5,6 +5,7 @@ import { PuzzleCard } from './PuzzleCard.js';
 import { NpcPanel } from './NpcPanel.js';
 import { Timeline } from './Timeline.js';
 import { ControlPanel } from './ControlPanel.js';
+import { HintsAdaptivePanel } from './HintsAdaptivePanel.js';
 
 export function ExpertDashboard() {
   const {
@@ -62,6 +63,9 @@ export function ExpertDashboard() {
 
         {/* Timeline */}
         <Timeline />
+
+        {/* Hints adaptive (P4) */}
+        <HintsAdaptivePanel />
 
         {/* Controls */}
         <ControlPanel />

@@ -23,3 +23,8 @@ export const FER_CARD = '#2c2c2e';
 export const BOX3_MDNS_HOST = 'zacus-box3.local';
 export const BOX3_WS_PORT = 81;
 export const BOX3_WS_RECONNECT_MS = 3000;
+
+// Hints engine REST defaults — overridden via VITE_HINTS_BASE_URL / VITE_HINTS_POLL_MS
+export const HINTS_DEFAULT_BASE_URL = 'http://localhost:8311';
+export const HINTS_DEFAULT_POLL_MS = 5000;
+export const HINTS_GROUP_PROFILES = ['TECH', 'NON_TECH', 'MIXED', 'BOTH'] as const;

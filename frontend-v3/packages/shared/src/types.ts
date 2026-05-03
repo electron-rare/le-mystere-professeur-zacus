@@ -283,6 +283,59 @@ export interface VoiceBridgeCacheStats {
   hit_rate_since_boot: number;
 }
 
+/**
+ * Per-bucket LLM token counters as returned under the `npc_fast` and
+ * `hints_deep` keys of `GET /usage/stats`. Mirrors the
+ * `_usage_blank_state()` shape in `tools/macstudio/voice-bridge/main.py`.
+ */
+export interface VoiceUsageLlmBucket {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  calls: number;
+}
+
+/** TTS sub-section of `GET /usage/stats` (F5 calls + cache hits). */
+export interface VoiceUsageTtsBucket {
+  f5_calls: number;
+  f5_seconds: number;
+  cache_hits: number;
+}
+
+/** STT sub-section of `GET /usage/stats` (whisper.cpp proxy). */
+export interface VoiceUsageSttBucket {
+  calls: number;
+  audio_seconds: number;
+}
+
+/**
+ * GET /usage/stats envelope — aggregate cost-audit numbers since boot
+ * (or since the last `POST /usage/reset`). Stable schema, dashboard
+ * polls this every 5 s by default.
+ */
+export interface VoiceUsageStats {
+  /** ISO-8601 UTC timestamp marking the start of the current accounting window. */
+  since: string;
+  /** Seconds elapsed since `since` (computed server-side at read time). */
+  uptime_s: number;
+  npc_fast: VoiceUsageLlmBucket;
+  hints_deep: VoiceUsageLlmBucket;
+  tts: VoiceUsageTtsBucket;
+  stt: VoiceUsageSttBucket;
+}
+
+/**
+ * One in-memory snapshot kept by the dashboard for delta/sparkline math.
+ * Holds the wire payload plus the local clock at fetch time so we can
+ * compute tokens-per-minute over a rolling window without trusting the
+ * server clock skew.
+ */
+export interface VoiceUsageBucket {
+  /** Local wall-clock at the time the snapshot was received (ms). */
+  receivedAtMs: number;
+  stats: VoiceUsageStats;
+}
+
 export interface ScenarioYaml {
   id: string;
   version: string;

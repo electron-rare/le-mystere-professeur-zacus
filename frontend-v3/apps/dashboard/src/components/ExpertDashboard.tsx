@@ -7,6 +7,7 @@ import { Timeline } from './Timeline.js';
 import { ControlPanel } from './ControlPanel.js';
 import { HintsAdaptivePanel } from './HintsAdaptivePanel.js';
 import { VoiceActivityPanel } from './VoiceActivityPanel.js';
+import { VoiceUsagePanel } from './VoiceUsagePanel.js';
 
 export function ExpertDashboard() {
   const {
@@ -70,6 +71,9 @@ export function ExpertDashboard() {
 
         {/* Voice bridge activity (P5) */}
         <VoiceActivityPanel />
+
+        {/* Voice-bridge cost-audit usage stats (P5) */}
+        <VoiceUsagePanel />
 
         {/* Controls */}
         <ControlPanel />

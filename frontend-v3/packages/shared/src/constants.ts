@@ -34,6 +34,15 @@ export const HINTS_GROUP_PROFILES = ['TECH', 'NON_TECH', 'MIXED', 'BOTH'] as con
 export const VOICE_BRIDGE_DEFAULT_BASE_URL = 'http://100.116.92.12:8200';
 export const VOICE_BRIDGE_DEFAULT_POLL_MS = 2000;
 
+// /usage/stats poll cadence — slower than /health/ready (the cost-audit dial
+// only needs ~minute-scale resolution). 60 samples × 5 s = 5 min sparkline.
+export const VOICE_USAGE_DEFAULT_POLL_MS = 5000;
+export const VOICE_USAGE_DEFAULT_HISTORY = 60;
+// Above this rate (combined npc_fast + hints_deep tokens/min) the panel
+// flips its status indicator to "burst". Mirrors the dashboard cost-audit
+// threshold called out in tools/macstudio/voice-bridge/main.py:976.
+export const VOICE_USAGE_BURST_TPM = 1000;
+
 // ESP32 master REST defaults — overridden via VITE_ESP32_BASE_URL.
 // Slice 12 firmware exposes POST/GET /game/group_profile via mDNS.
 export const ESP32_DEFAULT_BASE_URL = 'http://zacus-master.local';

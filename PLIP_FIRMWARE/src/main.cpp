@@ -15,6 +15,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+#include "zacus_hook_client.h"
+
 extern void start_phone_task();
 extern void start_audio_task();
 extern void start_network_task();
@@ -27,6 +29,11 @@ void setup() {
   // TODO(bringup): I2C init + ES8388 codec init before audio task starts.
   // TODO(bringup): SD.begin() before audio task.
   // TODO(bringup): WiFi.begin() inside network_task.
+
+  // Hook client must be ready before phone_task starts emitting events.
+  // master_url=nullptr selects the compile-time default (zacus-master.local
+  // in slice 12 mDNS, overridable via -DZACUS_MASTER_URL).
+  zacus_hook_client_init(nullptr);
 
   start_phone_task();
   start_audio_task();

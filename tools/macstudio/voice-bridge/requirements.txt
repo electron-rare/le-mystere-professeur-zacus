@@ -1,3 +1,9 @@
 fastapi>=0.115
 httpx>=0.27
+numpy>=1.26
+python-multipart>=0.0.9
+soundfile>=0.12
 uvicorn[standard]>=0.30
+# F5-TTS in-process backend (Apple Silicon MLX)
+f5-tts-mlx>=0.2.6
+mlx>=0.31

@@ -1,0 +1,50 @@
+# LiteLLM proxy config — MacStudio (P1 part4)
+# Spec: docs/superpowers/specs/2026-05-03-tts-stt-llm-macstudio-design.md §2.4
+
+model_list:
+  # ── LLM tier (Ollama local) ──────────────────────────────
+  - model_name: npc-fast
+    litellm_params:
+      model: ollama/qwen2.5:7b-instruct-q8_0
+      api_base: http://localhost:11434
+
+  - model_name: hints-deep
+    litellm_params:
+      model: ollama/qwen2.5:72b-instruct-q8_0
+      api_base: http://localhost:11434
+
+  # ── STT tier (whisper.cpp HTTP server :8300, part2) ──────
+  - model_name: whisper-fr
+    litellm_params:
+      model: openai/whisper-1
+      api_base: http://localhost:8300
+      api_key: dummy
+
+  # spec §2.4 alias: stt-fr (mirror)
+  - model_name: stt-fr
+    litellm_params:
+      model: openai/whisper-1
+      api_base: http://localhost:8300
+      api_key: dummy
+
+  # ── TTS tier (voice-bridge :8200, F5 primary, part3) ─────
+  - model_name: tts-zacus-primary
+    litellm_params:
+      model: openai/tts-1
+      api_base: http://localhost:8200
+      api_key: dummy
+
+  # ── TTS fallback (Piper Tower :8001) ─────────────────────
+  - model_name: tts-zacus-fallback
+    litellm_params:
+      model: openai/tts-1
+      api_base: http://192.168.0.120:8001
+      api_key: dummy
+
+general_settings:
+  master_key: sk-zacus-local-dev-do-not-share
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  request_timeout: 120

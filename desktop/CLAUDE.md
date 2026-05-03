@@ -19,12 +19,20 @@ resources/           # Bundled frontend artefacts + assets
 
 ```bash
 npm install                  # Triggers electron-builder install-app-deps + electron-rebuild
+npm install --ignore-scripts # Skip native rebuild (sufficient for unit tests)
 npm run dev                  # Concurrent main + renderer
 npm run build                # tsc main + vite renderer
 npm run build:mac            # Universal (x64 + arm64) installer
 npm run build:mac-arm64      # Apple Silicon only
 npm run rebuild-native       # zacus-native addon for current Electron ABI
+npm test                     # Vitest unit tests (mocks electron + serialport)
 ```
+
+## Tests
+
+Unit tests live in `src/**/__tests__/**/*.test.ts` and run via Vitest in node env. `electron`, `fs`, `os`, and `http` are mocked via `vi.mock` so tests need neither a real ESP32 nor the native serialport rebuild.
+
+Out of scope here: Playwright Electron mode (would launch the packaged app), HTTP-flow OTA tests (need server fixture), BLE/USB delegation paths.
 
 ## Patterns
 

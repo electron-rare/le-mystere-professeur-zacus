@@ -9,7 +9,8 @@ Python unittest suite covering Runtime 3 IR, NPC engine integration, and scenari
 | `test_npc_engine.py` | NPC state machine (triggers, mood, rule firing) |
 | `test_npc_integration.py` | NPC ↔ TTS ↔ phrase bank wiring |
 | `test_npc_phrases_schema.py` | `npc_phrases.yaml` schema invariants |
-| `runtime3/` | Runtime 3 compiler/IR/pivot tests |
+| `runtime3/test_runtime3_routes.py` | Runtime 3 compiler/IR/pivot tests |
+| `runtime3/test_firmware_bundle.py` | E2E pipeline: scenario YAML → IR → firmware bundle JSON (subprocess) |
 
 ## Running
 

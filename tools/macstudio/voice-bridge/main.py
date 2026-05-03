@@ -1,4 +1,4 @@
-"""voice-bridge — FastAPI daemon (P1 part7 + part9b cache + part11/part12 WS + part13 NPC prompt/CORS).
+"""voice-bridge — FastAPI daemon (P1 part7 + part9b cache + part11/part12 WS + part13 NPC prompt/CORS + part14 usage stats).
 
 Spec: docs/superpowers/specs/2026-05-03-tts-stt-llm-macstudio-design.md §2.5
 
@@ -16,6 +16,10 @@ WS   /voice/ws            → STT streaming for ESP32 firmware (PCM16 16 kHz mon
                             Hello-handshake, binary frames, end → whisper.cpp →
                             optional intent forward → optional F5 TTS reply
                             stream (PCM16 24 kHz, chunked binary), then close.
+GET  /usage/stats         → aggregate LLM tokens (npc-fast, hints-deep) + TTS
+                            audio seconds (F5 + cache hits) + STT audio seconds
+                            since boot (or last reset). LAN-only, no auth.
+POST /usage/reset         → reset the usage counters (admin key if set).
 
 Design notes
 ------------
@@ -58,6 +62,7 @@ import struct
 import subprocess
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -191,6 +196,109 @@ def _hash8(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
 
 
+# ── usage-stats helpers (P1 part14) ────────────────────────────────────────
+def _coerce_int(value: Any) -> int:
+    """Best-effort int coercion for LiteLLM ``usage`` payload integers.
+
+    LiteLLM normally returns ints, but some upstream providers occasionally
+    surface stringified counts. We swallow non-coercible values silently
+    rather than letting an arithmetic error bubble up into the request path.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+async def _usage_record_llm(bucket: str, usage: Optional[dict[str, Any]]) -> None:
+    """Increment LLM token counters for ``bucket`` (``npc_fast`` or ``hints_deep``).
+
+    Safe to call with ``usage=None``: we still bump ``calls`` so we can
+    distinguish "0 calls" from "calls without usage payload". LiteLLM
+    returns ``{prompt_tokens, completion_tokens, total_tokens}``; we sum
+    each independently in case the upstream omits ``total_tokens``.
+    """
+    if _USAGE_LOCK is None:
+        return
+    if bucket not in {"npc_fast", "hints_deep"}:
+        return
+    prompt = _coerce_int((usage or {}).get("prompt_tokens"))
+    completion = _coerce_int((usage or {}).get("completion_tokens"))
+    total = _coerce_int((usage or {}).get("total_tokens")) or (prompt + completion)
+    async with _USAGE_LOCK:
+        slot = _USAGE_STATS[bucket]
+        slot["prompt_tokens"] += prompt
+        slot["completion_tokens"] += completion
+        slot["total_tokens"] += total
+        slot["calls"] += 1
+
+
+async def _usage_record_tts_f5(audio_seconds: float) -> None:
+    """Record one F5 synthesis (cache miss) and the audio duration produced."""
+    if _USAGE_LOCK is None:
+        return
+    async with _USAGE_LOCK:
+        _USAGE_STATS["tts"]["f5_calls"] += 1
+        _USAGE_STATS["tts"]["f5_seconds"] += float(audio_seconds)
+
+
+async def _usage_record_tts_cache_hit() -> None:
+    """Record one cache hit (no compute cost, just disk I/O)."""
+    if _USAGE_LOCK is None:
+        return
+    async with _USAGE_LOCK:
+        _USAGE_STATS["tts"]["cache_hits"] += 1
+
+
+async def _usage_record_stt(audio_seconds: float) -> None:
+    """Record one STT call and the audio duration sent to whisper."""
+    if _USAGE_LOCK is None:
+        return
+    async with _USAGE_LOCK:
+        _USAGE_STATS["stt"]["calls"] += 1
+        _USAGE_STATS["stt"]["audio_seconds"] += float(audio_seconds)
+
+
+def _pcm16_seconds(pcm_bytes: int, sample_rate: int) -> float:
+    """Audio duration (seconds) for ``pcm_bytes`` of PCM16 mono @ ``sample_rate``."""
+    if sample_rate <= 0:
+        return 0.0
+    return pcm_bytes / float(sample_rate * 2)
+
+
+async def _usage_snapshot() -> dict[str, Any]:
+    """Return a deep copy of the usage dict + computed ``uptime_s``."""
+    if _USAGE_LOCK is None:
+        snap = json.loads(json.dumps(_USAGE_STATS))
+    else:
+        async with _USAGE_LOCK:
+            snap = json.loads(json.dumps(_USAGE_STATS))
+    try:
+        since_dt = datetime.fromisoformat(snap["since"])
+        uptime = (datetime.now(timezone.utc) - since_dt).total_seconds()
+    except (ValueError, KeyError):
+        uptime = 0.0
+    snap["uptime_s"] = round(uptime, 3)
+    return snap
+
+
+async def _usage_tick_loop() -> None:
+    """Background task: dump a snapshot of usage stats every 5 minutes.
+
+    Intended for ``grep`` / Loki-style historical querying — not a metric
+    pipeline. The /usage/stats endpoint stays the source of truth for live
+    reads. Cancellation propagates cleanly via asyncio.CancelledError so
+    uvicorn shutdown stays graceful.
+    """
+    try:
+        while True:
+            await asyncio.sleep(_USAGE_TICK_INTERVAL_S)
+            snap = await _usage_snapshot()
+            _jlog("usage_tick", **snap)
+    except asyncio.CancelledError:
+        return
+
+
 # ── globals (filled at startup) ─────────────────────────────────────────────
 _F5_MODEL_OBJ: Any = None
 _REF_AUDIO_PATH: Optional[Path] = None
@@ -208,6 +316,47 @@ _CACHE_INDEX: dict[str, Path] = {}
 _CACHE_LOCK: Optional[asyncio.Lock] = None
 _CACHE_HITS: int = 0
 _CACHE_MISSES: int = 0
+
+# ── usage stats (P1 part14) ────────────────────────────────────────────────
+# Aggregate counters for LLM token consumption (npc-fast, hints-deep) and
+# TTS / STT audio seconds since boot (or last `POST /usage/reset`). Read
+# back via `GET /usage/stats`. asyncio.Lock-protected; every recorded path
+# does only a dict increment under the lock so the per-call overhead stays
+# < 1 ms (lock acquire is uncontended in steady state).
+_USAGE_LOCK: Optional[asyncio.Lock] = None
+_USAGE_TICK_TASK: Optional[asyncio.Task[None]] = None
+_USAGE_TICK_INTERVAL_S = float(os.getenv("USAGE_TICK_INTERVAL_S", "300"))
+
+
+def _usage_blank_state() -> dict[str, Any]:
+    """Return a fresh zeroed usage-stats dict (used at boot + on reset)."""
+    return {
+        "since": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "npc_fast": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "calls": 0,
+        },
+        "hints_deep": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "calls": 0,
+        },
+        "tts": {
+            "f5_calls": 0,
+            "f5_seconds": 0.0,
+            "cache_hits": 0,
+        },
+        "stt": {
+            "calls": 0,
+            "audio_seconds": 0.0,
+        },
+    }
+
+
+_USAGE_STATS: dict[str, Any] = _usage_blank_state()
 
 
 # ── request models (Pydantic v2) ────────────────────────────────────────────
@@ -375,7 +524,7 @@ async def _run_f5(text: str, steps: int) -> bytes:
 # (see decorator list below) — they must remain hammerable by Tailscale probes.
 limiter = Limiter(key_func=get_remote_address, default_limits=[])
 
-app = FastAPI(title="voice-bridge", version="0.4.0")
+app = FastAPI(title="voice-bridge", version="0.5.0")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -398,9 +547,15 @@ _jlog("boot_cors_configured", origins=_cors_allow_origins)
 async def _boot() -> None:
     global _F5_MODEL_OBJ, _REF_AUDIO_PATH, _REF_AUDIO_HASH, _WARMUP_MS
     global _F5_LOAD_ERR, _F5_LOCK, _CACHE_INDEX, _CACHE_LOCK
+    global _USAGE_LOCK, _USAGE_STATS, _USAGE_TICK_TASK
 
     _F5_LOCK = asyncio.Lock()
     _CACHE_LOCK = asyncio.Lock()
+    _USAGE_LOCK = asyncio.Lock()
+    # Reset `since` to actual boot time (not module-import time).
+    _USAGE_STATS = _usage_blank_state()
+    _USAGE_TICK_TASK = asyncio.create_task(_usage_tick_loop())
+    _jlog("boot_usage_tick_started", interval_s=_USAGE_TICK_INTERVAL_S)
 
     # Security warning: the placeholder LITELLM master key is publicly
     # known (committed to the public repo as the default). Acceptable on a
@@ -443,6 +598,19 @@ async def _boot() -> None:
     except Exception as exc:  # pragma: no cover
         _F5_LOAD_ERR = f"f5: {exc}"
         _jlog("boot_f5_failed", err=str(exc))
+
+
+@app.on_event("shutdown")
+async def _shutdown() -> None:
+    """Cancel the usage-tick background task so uvicorn shuts down cleanly."""
+    global _USAGE_TICK_TASK
+    if _USAGE_TICK_TASK is not None and not _USAGE_TICK_TASK.done():
+        _USAGE_TICK_TASK.cancel()
+        try:
+            await _USAGE_TICK_TASK
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+    _USAGE_TICK_TASK = None
 
 
 @app.get("/health")
@@ -625,6 +793,7 @@ async def tts(request: Request) -> Response:
         try:
             wav_bytes = cached_path.read_bytes()
             _CACHE_HITS += 1
+            await _usage_record_tts_cache_hit()
             latency_ms = int((time.monotonic() - started) * 1000)
             _jlog("tts", request_id=request_id, tts_backend_used="cache",
                   latency_ms=latency_ms, phrase_len=len(text),
@@ -655,11 +824,16 @@ async def tts(request: Request) -> Response:
                 timeout=F5_TIMEOUT_S,
             )
             await _write_cache(cache_key, wav_bytes)
+            # Audio duration = PCM payload bytes / (sample_rate * 2 bytes/sample).
+            audio_seconds = _pcm16_seconds(
+                len(_wav_to_pcm16(wav_bytes)), F5_SAMPLE_RATE
+            )
+            await _usage_record_tts_f5(audio_seconds)
             latency_ms = int((time.monotonic() - started) * 1000)
             _jlog("tts", request_id=request_id, tts_backend_used="f5",
                   latency_ms=latency_ms, phrase_len=len(text),
                   text_hash=_hash8(text), voice_ref=voice_ref, steps=steps,
-                  cache_key=cache_key)
+                  cache_key=cache_key, audio_s=round(audio_seconds, 3))
             return Response(
                 content=wav_bytes,
                 media_type="audio/wav",
@@ -798,7 +972,100 @@ async def cache_clear(
     return {"removed": removed}
 
 
+# ── /usage/{stats,reset} (P1 part14, dashboard cost audit) ──────────────────
+@app.get("/usage/stats")
+async def usage_stats() -> JSONResponse:
+    """Aggregate LLM tokens + TTS/STT audio seconds since boot or last reset.
+
+    Schema (stable, dashboard-consumable):
+        {
+          "since": "<iso-8601 utc>",
+          "uptime_s": <float>,
+          "npc_fast":   {"prompt_tokens", "completion_tokens",
+                         "total_tokens", "calls"},
+          "hints_deep": {... same shape ...},
+          "tts":        {"f5_calls", "f5_seconds", "cache_hits"},
+          "stt":        {"calls", "audio_seconds"}
+        }
+
+    No auth (LAN-only assumption, mirrors ``/health`` and ``/tts/cache/stats``).
+    Dashboard polls this once per minute; the response is small (< 1 KB) and
+    served behind ``Cache-Control: no-cache`` so intermediate proxies never
+    serve stale numbers.
+    """
+    snap = await _usage_snapshot()
+    return JSONResponse(content=snap, headers={"Cache-Control": "no-cache"})
+
+
+@app.post("/usage/reset")
+async def usage_reset(
+    x_admin_key: Optional[str] = Header(default=None, alias="X-Admin-Key"),
+) -> dict[str, Any]:
+    """Reset all usage counters and stamp a fresh ``since`` timestamp.
+
+    Auth pattern matches ``DELETE /tts/cache``: when ``VOICE_BRIDGE_ADMIN_KEY``
+    is set in the environment, the header is required and must match;
+    otherwise the endpoint is open (LAN-only assumption).
+    """
+    if ADMIN_KEY and x_admin_key != ADMIN_KEY:
+        raise HTTPException(status_code=403, detail="invalid admin key")
+    global _USAGE_STATS
+    if _USAGE_LOCK is None:
+        _USAGE_STATS = _usage_blank_state()
+    else:
+        async with _USAGE_LOCK:
+            _USAGE_STATS = _usage_blank_state()
+    _jlog("usage_reset", since=_USAGE_STATS["since"])
+    return {"reset": True, "since": _USAGE_STATS["since"]}
+
+
 # ── /voice/transcribe (multipart proxy → whisper.cpp) ───────────────────────
+def _sniff_wav_duration(multipart_body: bytes) -> float:
+    """Best-effort scan of a multipart body for an embedded WAV ``data`` chunk.
+
+    Returns the audio duration in seconds, or ``0.0`` if no parseable RIFF
+    header is found. Used by ``/voice/transcribe`` to opportunistically log
+    STT audio seconds without paying the cost of full multipart parsing —
+    we only need a coarse aggregate for the cost dashboard.
+    """
+    riff = multipart_body.find(b"RIFF")
+    if riff < 0 or riff + 44 > len(multipart_body):
+        return 0.0
+    if multipart_body[riff + 8:riff + 12] != b"WAVE":
+        return 0.0
+    # Walk chunks looking for fmt (sample rate) + data (payload size).
+    pos = riff + 12
+    sample_rate = 0
+    bits_per_sample = 16
+    n_channels = 1
+    data_bytes = 0
+    while pos + 8 <= len(multipart_body):
+        chunk_id = multipart_body[pos:pos + 4]
+        try:
+            chunk_size = struct.unpack(
+                "<I", multipart_body[pos + 4:pos + 8]
+            )[0]
+        except struct.error:
+            return 0.0
+        if chunk_id == b"fmt " and pos + 8 + 16 <= len(multipart_body):
+            try:
+                _, n_channels, sample_rate, _, _, bits_per_sample = struct.unpack(
+                    "<HHIIHH", multipart_body[pos + 8:pos + 24]
+                )
+            except struct.error:
+                return 0.0
+        elif chunk_id == b"data":
+            data_bytes = chunk_size
+            break
+        pos += 8 + chunk_size + (chunk_size % 2)
+    if sample_rate <= 0 or n_channels <= 0 or bits_per_sample <= 0:
+        return 0.0
+    bytes_per_second = sample_rate * n_channels * (bits_per_sample // 8)
+    if bytes_per_second <= 0:
+        return 0.0
+    return data_bytes / float(bytes_per_second)
+
+
 @app.post("/voice/transcribe")
 async def transcribe(request: Request) -> Response:
     request_id = str(uuid.uuid4())
@@ -816,8 +1083,15 @@ async def transcribe(request: Request) -> Response:
                 },
             )
         latency_ms = int((time.monotonic() - started) * 1000)
+        # P1 part14: record STT call + sniffed audio duration. The proxy
+        # path forwards the multipart verbatim so we have to peek into the
+        # body ourselves; failure to parse just keeps audio_seconds at 0
+        # (calls counter still increments).
+        audio_s = _sniff_wav_duration(body)
+        await _usage_record_stt(audio_s)
         _jlog("transcribe", request_id=request_id, status=resp.status_code,
-              bytes=len(body), latency_ms=latency_ms)
+              bytes=len(body), latency_ms=latency_ms,
+              audio_s=round(audio_s, 3))
         return Response(
             content=resp.content,
             status_code=resp.status_code,
@@ -902,15 +1176,31 @@ async def intent(payload: IntentRequest) -> JSONResponse:
             return JSONResponse(content=resp.json(), status_code=resp.status_code)
         body = resp.json()
         content = body.get("choices", [{}])[0].get("message", {}).get("content", "")
+        usage_payload = body.get("usage")
+        # Route to the right bucket based on the upstream model name. We only
+        # know two LiteLLM aliases today (npc-fast, hints-deep). Fall back to
+        # ``npc_fast`` when the model field is absent so we never silently
+        # drop counts on an unrecognised model — operators can grep
+        # ``intent_unknown_model`` to discover new aliases worth tracking.
+        model_name = str(body.get("model") or "npc-fast").lower()
+        if "hints" in model_name or "deep" in model_name:
+            bucket = "hints_deep"
+        else:
+            bucket = "npc_fast"
+            if "npc" not in model_name and "fast" not in model_name:
+                _jlog("intent_unknown_model", request_id=request_id,
+                      model=model_name)
+        await _usage_record_llm(bucket, usage_payload)
         _jlog("intent", request_id=request_id, latency_ms=latency_ms,
               text_len=len(text), reply_len=len(content),
-              text_hash=_hash8(text))
+              text_hash=_hash8(text), usage_bucket=bucket,
+              usage=usage_payload)
         return JSONResponse(
             content={
                 "request_id": request_id,
                 "content": content,
                 "model": body.get("model", "npc-fast"),
-                "usage": body.get("usage"),
+                "usage": usage_payload,
                 "latency_ms": latency_ms,
             },
         )
@@ -1071,6 +1361,10 @@ async def _intent_complete(text: str) -> Optional[str]:
                   body=resp.text[:200])
             return None
         body = resp.json()
+        # P1 part14: track LLM token usage for the WS path too. WS only ever
+        # invokes ``npc-fast`` today (hints_deep would go through a future
+        # /voice/intent?model= override — see helper for the routing rule).
+        await _usage_record_llm("npc_fast", body.get("usage"))
         return body.get("choices", [{}])[0].get("message", {}).get("content", "")
     except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPError) as exc:
         _jlog("ws_intent_backend_down", err=type(exc).__name__)
@@ -1190,11 +1484,15 @@ async def voice_ws(ws: WebSocket) -> None:
         return
 
     stt_ms = int((time.monotonic() - started) * 1000)
+    # P1 part14: record STT call + audio duration (PCM16 16 kHz mono).
+    stt_audio_s = _pcm16_seconds(len(buf), WS_EXPECTED_SR)
+    await _usage_record_stt(stt_audio_s)
     await ws.send_text(json.dumps(
         {"type": "stt", "text": transcript, "final": True}
     ))
     _jlog("ws_stt_done", request_id=request_id, session_id=session_id,
-          bytes=len(buf), text_len=len(transcript), latency_ms=stt_ms)
+          bytes=len(buf), text_len=len(transcript), latency_ms=stt_ms,
+          audio_s=round(stt_audio_s, 3))
 
     # ── 4. Optional intent forward (LiteLLM npc-fast) ────────────────────
     intent_content: Optional[str] = None
@@ -1245,6 +1543,7 @@ async def voice_ws(ws: WebSocket) -> None:
                     wav_bytes = cached_path.read_bytes()
                     pcm = _wav_to_pcm16(wav_bytes)
                     tts_backend_used = "cache"
+                    await _usage_record_tts_cache_hit()
                     _jlog("ws_tts_cache_hit", request_id=request_id,
                           cache_key=cache_key, bytes=len(pcm))
                 except OSError as exc:
@@ -1260,6 +1559,10 @@ async def voice_ws(ws: WebSocket) -> None:
                         timeout=F5_TIMEOUT_S,
                     )
                     tts_backend_used = "f5"
+                    # P1 part14: count synthesised audio seconds (PCM16 24 kHz mono).
+                    await _usage_record_tts_f5(
+                        _pcm16_seconds(len(pcm), WS_TTS_OUTPUT_SR)
+                    )
                     # Persist a WAV copy alongside /tts cache entries so the
                     # next request (HTTP or WS) hits the cache.
                     try:

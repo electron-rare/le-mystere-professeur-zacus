@@ -1,17 +1,30 @@
-"""Hints engine — Phase P2 FastAPI server.
+"""Hints engine — Phase P3 FastAPI server.
 
-Static phrase lookup (P1) + LLM rewrite layer via LiteLLM `hints-deep` (P2).
+Static phrase lookup (P1) + LLM rewrite layer via LiteLLM `hints-deep` (P2)
++ in-memory anti-cheat (cap 3 / cooldown / progressive penalties) (P3).
+
 The rewriter restyles the static base phrase in the Professor Zacus voice
 without inventing new content. Safety filter blocks rewrites that leak
 solution tokens. On timeout / error / safety trip, the engine falls back
 to the verbatim static phrase so the game never blocks.
 
+Anti-cheat (P3):
+  Per `(session_id, puzzle_id)` we track `count`, `last_at_ms`, `total_penalty`.
+  Refusals returned as **HTTP 200 + `{refused: true, reason, ...}`** rather
+  than 4xx/429 — the ESP32 firmware state machine is much simpler when it
+  always parses a coherent JSON envelope. The transport layer remains a
+  success ; the body conveys business outcome.
+
 Endpoints:
-  - GET  /healthz            — liveness probe + phrases-loaded count
-  - POST /hints/ask          — return base phrase, optionally LLM-rewritten
-                               (?rewrite=false to bypass LLM)
-  - POST /hints/rewrite      — debug: rewrite-only path, no static fallback
-  - GET  /hints/coverage     — per-puzzle level coverage audit
+  - GET  /healthz                       — liveness + counts
+  - POST /hints/ask                     — base phrase, optionally LLM-rewritten,
+                                          with anti-cheat (cap/cooldown/penalty).
+                                          ?rewrite=false bypasses LLM.
+  - POST /hints/rewrite                 — debug: rewrite-only, no static fallback,
+                                          no anti-cheat accounting.
+  - GET  /hints/coverage                — per-puzzle level coverage audit
+  - GET  /hints/sessions                — admin: list active sessions/state
+  - DELETE /hints/sessions/{session_id} — admin: reset session state
 
 Run:
   uv run --with fastapi --with uvicorn --with pyyaml --with pydantic \
@@ -19,15 +32,22 @@ Run:
       uvicorn tools.hints.server:app --reload --port 8300
 
 Env:
-  LITELLM_URL          (default http://192.168.0.120:4000)
-  LITELLM_MASTER_KEY   (default sk-zacus-local-dev-do-not-share)
-  HINTS_LLM_MODEL      (default hints-deep)
-  HINTS_LLM_TIMEOUT_S  (default 8.0)
-  HINTS_SAFETY_PATH    (default game/scenarios/hints_safety.yaml)
+  LITELLM_URL            (default http://192.168.0.120:4000)
+  LITELLM_MASTER_KEY     (default sk-zacus-local-dev-do-not-share)
+  HINTS_LLM_MODEL        (default hints-deep)
+  HINTS_LLM_TIMEOUT_S    (default 8.0)
+  HINTS_SAFETY_PATH      (default game/scenarios/hints_safety.yaml)
   ZACUS_NPC_PHRASES_PATH (default game/scenarios/npc_phrases.yaml)
+  HINTS_COOLDOWN_S       (default 60)   — minimum gap between hints per puzzle
+  HINTS_MAX_PER_PUZZLE   (default 3)    — hard cap per (session, puzzle)
+  HINTS_PENALTY_L1       (default 50)   — score penalty for level_1 hint
+  HINTS_PENALTY_L2       (default 100)  — score penalty for level_2 hint
+  HINTS_PENALTY_L3       (default 200)  — score penalty for level_3 hint
+  HINTS_ADMIN_KEY        (default unset) — when set, admin endpoints require
+                                           matching `X-Admin-Key` header.
 
-Spec: docs/superpowers/specs/2026-05-03-hints-engine-design.md §4
-P3 (anti-cheat) and P4 (adaptive level) are intentionally NOT in scope here.
+Spec: docs/superpowers/specs/2026-05-03-hints-engine-design.md §4-§5
+P4 (adaptive level) and P6 (auto-trigger) are NOT yet implemented here.
 """
 from __future__ import annotations
 
@@ -77,7 +97,198 @@ ZACUS_SYSTEM_PROMPT = (
 PUZZLE_ID_PATTERN = re.compile(r"^P\d+_[A-Z0-9_]+$")
 ALL_LEVELS = (1, 2, 3)
 
+# P3 anti-cheat defaults (overridable via env at app startup)
+DEFAULT_COOLDOWN_S = 60
+DEFAULT_MAX_PER_PUZZLE = 3
+DEFAULT_PENALTY_L1 = 50
+DEFAULT_PENALTY_L2 = 100
+DEFAULT_PENALTY_L3 = 200
+
 LOG = logging.getLogger("hints.server")
+
+
+# ---------------------------------------------------------------------------
+# Clock provider — overridable in tests
+# ---------------------------------------------------------------------------
+
+
+class Clock:
+    """Wall-clock provider returning epoch milliseconds.
+
+    Tests inject a `MutableClock` to advance virtual time without sleeping.
+    """
+
+    def now_ms(self) -> int:
+        return int(time.time() * 1000)
+
+
+class MutableClock(Clock):
+    """Deterministic clock for tests. Set `now_ms_value` to advance time."""
+
+    def __init__(self, start_ms: int = 0) -> None:
+        self.now_ms_value = start_ms
+
+    def now_ms(self) -> int:  # type: ignore[override]
+        return self.now_ms_value
+
+    def advance(self, delta_ms: int) -> None:
+        self.now_ms_value += delta_ms
+
+
+# ---------------------------------------------------------------------------
+# Anti-cheat session tracker (in-memory, single-process)
+# ---------------------------------------------------------------------------
+
+
+class SessionTracker:
+    """Per-`(session_id, puzzle_id)` counters for anti-cheat enforcement.
+
+    State is in-memory only ; lost on restart, which is acceptable for the
+    duration of a single escape-room session. Single-process FastAPI means
+    a plain dict + per-call mutation is race-safe enough (FastAPI runs each
+    request handler to completion on one event loop).
+    """
+
+    def __init__(
+        self,
+        *,
+        cooldown_s: int,
+        max_per_puzzle: int,
+        penalty_per_level: Dict[int, int],
+        clock: Clock,
+    ) -> None:
+        self.cooldown_s = cooldown_s
+        self.max_per_puzzle = max_per_puzzle
+        self.penalty_per_level = penalty_per_level
+        self.clock = clock
+        # (session_id, puzzle_id) -> {count, last_at_ms, total_penalty}
+        self._state: Dict[Tuple[str, str], Dict[str, int]] = {}
+
+    # -- read helpers -------------------------------------------------------
+
+    def get(self, session_id: str, puzzle_id: str) -> Dict[str, int]:
+        return self._state.get((session_id, puzzle_id), {
+            "count": 0, "last_at_ms": 0, "total_penalty": 0,
+        })
+
+    def cooldown_until_ms(self, entry: Dict[str, int]) -> int:
+        return int(entry.get("last_at_ms", 0)) + self.cooldown_s * 1000
+
+    def penalty_for_level(self, level: int) -> int:
+        return int(self.penalty_per_level.get(level, 0))
+
+    # -- decisions ----------------------------------------------------------
+
+    def check(
+        self, session_id: str, puzzle_id: str, level_requested: int,
+    ) -> Dict[str, Any]:
+        """Decide whether a hint can be served and what level to serve.
+
+        Returns a dict describing the decision. Does NOT mutate state ;
+        caller calls `commit()` if it wants the served hint accounted for.
+
+        Decision keys:
+          - allow:           bool
+          - reason:          "rate_limit" | "cooldown" | None
+          - level_served:    int (auto-bumped if needed)
+          - level_requested: int (echoed)
+          - count_before:    int
+          - cooldown_until_ms: int
+          - retry_in_s:      int (only meaningful when reason == "cooldown")
+        """
+        now_ms = self.clock.now_ms()
+        entry = self.get(session_id, puzzle_id)
+        count = int(entry.get("count", 0))
+        last_at_ms = int(entry.get("last_at_ms", 0))
+
+        # Cap: if we've already served `max_per_puzzle`, no more hints.
+        if count >= self.max_per_puzzle:
+            return {
+                "allow": False,
+                "reason": "rate_limit",
+                "level_served": min(count, max(ALL_LEVELS)),
+                "level_requested": level_requested,
+                "count_before": count,
+                "cooldown_until_ms": self.cooldown_until_ms(entry),
+                "retry_in_s": 0,
+            }
+
+        # Cooldown: minimum gap between two served hints for same puzzle.
+        if count > 0 and self.cooldown_s > 0:
+            cooldown_end = last_at_ms + self.cooldown_s * 1000
+            if now_ms < cooldown_end:
+                return {
+                    "allow": False,
+                    "reason": "cooldown",
+                    "level_served": max(level_requested, count + 1),
+                    "level_requested": level_requested,
+                    "count_before": count,
+                    "cooldown_until_ms": cooldown_end,
+                    "retry_in_s": max(0, (cooldown_end - now_ms + 999) // 1000),
+                }
+
+        # Auto-bump: a player cannot redemand an easier hint than their progress.
+        # If they ask level=1 after already getting 1 hint, force level=2.
+        level_served = max(level_requested, count + 1)
+        if level_served > max(ALL_LEVELS):
+            level_served = max(ALL_LEVELS)
+
+        return {
+            "allow": True,
+            "reason": None,
+            "level_served": level_served,
+            "level_requested": level_requested,
+            "count_before": count,
+            "cooldown_until_ms": last_at_ms + self.cooldown_s * 1000,
+            "retry_in_s": 0,
+        }
+
+    def commit(
+        self, session_id: str, puzzle_id: str, level_served: int,
+    ) -> Dict[str, int]:
+        """Account for a served hint — bump counters, return updated entry."""
+        now_ms = self.clock.now_ms()
+        key = (session_id, puzzle_id)
+        entry = self._state.get(key, {
+            "count": 0, "last_at_ms": 0, "total_penalty": 0,
+        })
+        entry["count"] = int(entry.get("count", 0)) + 1
+        entry["last_at_ms"] = now_ms
+        entry["total_penalty"] = (
+            int(entry.get("total_penalty", 0)) + self.penalty_for_level(level_served)
+        )
+        self._state[key] = entry
+        return dict(entry)
+
+    # -- admin --------------------------------------------------------------
+
+    def list_sessions(self) -> List[Dict[str, Any]]:
+        """Group state by session_id for admin debug."""
+        by_session: Dict[str, List[Dict[str, Any]]] = {}
+        for (sid, pid), entry in self._state.items():
+            by_session.setdefault(sid, []).append({
+                "puzzle_id": pid,
+                "count": int(entry.get("count", 0)),
+                "last_at_ms": int(entry.get("last_at_ms", 0)),
+                "total_penalty": int(entry.get("total_penalty", 0)),
+                "cooldown_until_ms": self.cooldown_until_ms(entry),
+            })
+        out = []
+        for sid, puzzles in sorted(by_session.items()):
+            out.append({
+                "session_id": sid,
+                "puzzles": sorted(puzzles, key=lambda p: p["puzzle_id"]),
+                "total_penalty": sum(p["total_penalty"] for p in puzzles),
+                "total_hints": sum(p["count"] for p in puzzles),
+            })
+        return out
+
+    def reset_session(self, session_id: str) -> int:
+        """Remove all entries for `session_id`. Returns # entries removed."""
+        keys = [k for k in self._state if k[0] == session_id]
+        for k in keys:
+            del self._state[k]
+        return len(keys)
 
 
 # ---------------------------------------------------------------------------
@@ -322,18 +533,37 @@ async def _call_litellm(
 class HintAskRequest(BaseModel):
     puzzle_id: str = Field(..., min_length=1)
     level: conint(ge=1, le=3)  # type: ignore[valid-type]
+    # session_id is logically required (validated in handler → HTTP 400).
+    # Kept Optional[str] in the model so we can return a friendly 400 body
+    # rather than Pydantic's 422 envelope, which the firmware doesn't parse.
     session_id: Optional[str] = None
 
 
 class HintAskResponse(BaseModel):
-    hint: str
-    hint_static: str
+    """Successful served hint OR refusal envelope (transport always 200).
+
+    Refusal: `refused=True` + `reason in {"rate_limit", "cooldown"}`.
+    Served:  `refused=False` + populated `hint` / `hint_static`.
+    """
+    refused: bool = False
+    reason: Optional[str] = None
+    hint: Optional[str] = None
+    hint_static: Optional[str] = None
     hint_rewritten: Optional[str] = None
-    level: int
+    level: Optional[int] = None
+    level_requested: Optional[int] = None
+    level_served: Optional[int] = None
     puzzle_id: str
-    source: str  # "static" | "llm_rewritten" | "llm_fallback_static"
+    source: str  # "static" | "llm_rewritten" | "llm_fallback_static" | "refused"
     model_used: str  # "hints-deep" | "none"
     latency_ms: float
+    # Anti-cheat surface (always present, even on refusal)
+    count: int = 0
+    score_penalty: int = 0
+    total_penalty: int = 0
+    cooldown_until_ms: int = 0
+    retry_in_s: int = 0
+    details: Optional[str] = None
 
 
 class HintRewriteRequest(BaseModel):
@@ -378,8 +608,10 @@ def _emit_log(record: Dict[str, Any]) -> None:
 def create_app(
     phrases_path: Optional[Path] = None,
     safety_path: Optional[Path] = None,
+    *,
+    clock: Optional[Clock] = None,
 ) -> FastAPI:
-    """Build the FastAPI app. Pass paths for tests, defaults for prod."""
+    """Build the FastAPI app. Pass paths/clock for tests, defaults for prod."""
     p_path = phrases_path or _resolve_phrases_path()
     s_path = safety_path or _resolve_safety_path()
     bank = load_phrase_bank(p_path)
@@ -389,10 +621,11 @@ def create_app(
 
     app = FastAPI(
         title="Zacus Hints Engine",
-        version="0.2.0-P2",
+        version="0.3.0-P3",
         description=(
-            "Static NPC hint phrase lookup + LLM rewrite via LiteLLM hints-deep. "
-            "Phase P2 of the hints engine spec."
+            "Static NPC hint phrase lookup + LLM rewrite via LiteLLM hints-deep "
+            "+ in-memory anti-cheat (cap/cooldown/penalty). "
+            "Phase P3 of the hints engine spec."
         ),
     )
 
@@ -407,6 +640,25 @@ def create_app(
     app.state.llm_model = os.environ.get("HINTS_LLM_MODEL", DEFAULT_LLM_MODEL)
     app.state.llm_timeout_s = float(
         os.environ.get("HINTS_LLM_TIMEOUT_S", str(DEFAULT_LLM_TIMEOUT_S))
+    )
+
+    # P3 anti-cheat config
+    cooldown_s = int(os.environ.get("HINTS_COOLDOWN_S", str(DEFAULT_COOLDOWN_S)))
+    max_per_puzzle = int(
+        os.environ.get("HINTS_MAX_PER_PUZZLE", str(DEFAULT_MAX_PER_PUZZLE))
+    )
+    penalty_per_level = {
+        1: int(os.environ.get("HINTS_PENALTY_L1", str(DEFAULT_PENALTY_L1))),
+        2: int(os.environ.get("HINTS_PENALTY_L2", str(DEFAULT_PENALTY_L2))),
+        3: int(os.environ.get("HINTS_PENALTY_L3", str(DEFAULT_PENALTY_L3))),
+    }
+    app.state.admin_key = os.environ.get("HINTS_ADMIN_KEY")  # None → no auth
+    app.state.clock = clock or Clock()
+    app.state.tracker = SessionTracker(
+        cooldown_s=cooldown_s,
+        max_per_puzzle=max_per_puzzle,
+        penalty_per_level=penalty_per_level,
+        clock=app.state.clock,
     )
 
     def _resolve_static(puzzle_id: str, level: int) -> str:
@@ -496,6 +748,14 @@ def create_app(
     def coverage() -> Dict[str, Any]:
         return app.state.coverage
 
+    def _require_admin(request: Request) -> None:
+        configured = app.state.admin_key
+        if not configured:
+            return  # no auth configured (dev mode)
+        provided = request.headers.get("X-Admin-Key")
+        if provided != configured:
+            raise HTTPException(status_code=401, detail="invalid or missing X-Admin-Key")
+
     @app.post("/hints/ask", response_model=HintAskResponse)
     async def hints_ask(
         payload: HintAskRequest,
@@ -508,17 +768,70 @@ def create_app(
         model_used = "none"
         safety_triggered: Optional[str] = None
         tokens_used: Optional[int] = None
-        hint_static = ""
+        hint_static: Optional[str] = None
         hint_rewritten: Optional[str] = None
+        decision: Dict[str, Any] = {}
+        committed: Dict[str, int] = {}
         try:
-            hint_static = _resolve_static(payload.puzzle_id, payload.level)
+            # session_id is logically required for anti-cheat accounting.
+            if not payload.session_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="session_id is required for /hints/ask (anti-cheat)",
+                )
+
+            tracker: SessionTracker = app.state.tracker
+            decision = tracker.check(
+                payload.session_id, payload.puzzle_id, payload.level,
+            )
+
+            # ---- Refusal envelope (HTTP 200 + refused=true) -------------
+            if not decision["allow"]:
+                source = "refused"
+                entry = tracker.get(payload.session_id, payload.puzzle_id)
+                latency_ms = round((time.perf_counter() - started) * 1000, 2)
+                if decision["reason"] == "rate_limit":
+                    details = (
+                        f"max {tracker.max_per_puzzle} hints per puzzle reached"
+                    )
+                else:  # cooldown
+                    details = (
+                        f"cooldown active, retry in {decision['retry_in_s']}s"
+                    )
+                return HintAskResponse(
+                    refused=True,
+                    reason=decision["reason"],
+                    puzzle_id=payload.puzzle_id,
+                    level=None,
+                    level_requested=payload.level,
+                    level_served=decision.get("level_served"),
+                    source=source,
+                    model_used="none",
+                    latency_ms=latency_ms,
+                    count=int(entry.get("count", 0)),
+                    score_penalty=0,
+                    total_penalty=int(entry.get("total_penalty", 0)),
+                    cooldown_until_ms=int(decision.get("cooldown_until_ms", 0)),
+                    retry_in_s=int(decision.get("retry_in_s", 0)),
+                    details=details,
+                )
+
+            # ---- Served path -------------------------------------------
+            level_served = int(decision["level_served"])
+            try:
+                hint_static = _resolve_static(payload.puzzle_id, level_served)
+            except HTTPException as resolve_exc:
+                # Don't account for an unresolvable hint: counters stay clean.
+                # Re-raise as-is (404 / etc) for transport-layer fidelity.
+                raise
+
             if not rewrite:
                 source = "static"
                 model_used = "none"
                 final_hint = hint_static
             else:
                 rewritten, source, safety_triggered, tokens_used = await _try_rewrite(
-                    hint_static, payload.puzzle_id, payload.level
+                    hint_static, payload.puzzle_id, level_served
                 )
                 if rewritten is not None:
                     hint_rewritten = rewritten
@@ -528,16 +841,30 @@ def create_app(
                     final_hint = hint_static
                     model_used = "none"
 
+            # Commit the served hint to the tracker (after we know we have a phrase).
+            committed = tracker.commit(
+                payload.session_id, payload.puzzle_id, level_served,
+            )
+
             latency_ms = round((time.perf_counter() - started) * 1000, 2)
             return HintAskResponse(
+                refused=False,
+                reason=None,
                 hint=final_hint,
                 hint_static=hint_static,
                 hint_rewritten=hint_rewritten,
-                level=payload.level,
+                level=level_served,
+                level_requested=payload.level,
+                level_served=level_served,
                 puzzle_id=payload.puzzle_id,
                 source=source,
                 model_used=model_used,
                 latency_ms=latency_ms,
+                count=int(committed.get("count", 0)),
+                score_penalty=tracker.penalty_for_level(level_served),
+                total_penalty=int(committed.get("total_penalty", 0)),
+                cooldown_until_ms=tracker.cooldown_until_ms(committed),
+                retry_in_s=0,
             )
         except HTTPException as exc:
             status_code = exc.status_code
@@ -547,7 +874,8 @@ def create_app(
                 "ts": time.time(),
                 "event": "hints_ask",
                 "puzzle_id": payload.puzzle_id,
-                "level": payload.level,
+                "level_requested": payload.level,
+                "level_served": decision.get("level_served"),
                 "session_id": payload.session_id,
                 "client": request.client.host if request.client else None,
                 "rewrite_requested": rewrite,
@@ -555,6 +883,12 @@ def create_app(
                 "model_used": model_used,
                 "tokens_used": tokens_used,
                 "safety_triggered": safety_triggered,
+                "refused": (not decision.get("allow", True)) if decision else False,
+                "refused_reason": decision.get("reason") if decision else None,
+                "count": int(committed.get("count", 0)) if committed else (
+                    int(decision.get("count_before", 0)) if decision else 0
+                ),
+                "total_penalty": int(committed.get("total_penalty", 0)) if committed else 0,
                 "latency_ms": round((time.perf_counter() - started) * 1000, 2),
                 "status": status_code,
             })
@@ -622,6 +956,29 @@ def create_app(
                 "latency_ms": round((time.perf_counter() - started) * 1000, 2),
                 "status": status_code,
             })
+
+    @app.get("/hints/sessions")
+    def admin_list_sessions(request: Request) -> Dict[str, Any]:
+        _require_admin(request)
+        tracker: SessionTracker = app.state.tracker
+        sessions = tracker.list_sessions()
+        return {
+            "sessions": sessions,
+            "total_sessions": len(sessions),
+            "config": {
+                "cooldown_s": tracker.cooldown_s,
+                "max_per_puzzle": tracker.max_per_puzzle,
+                "penalty_per_level": tracker.penalty_per_level,
+            },
+            "now_ms": app.state.clock.now_ms(),
+        }
+
+    @app.delete("/hints/sessions/{session_id}")
+    def admin_reset_session(session_id: str, request: Request) -> Dict[str, Any]:
+        _require_admin(request)
+        tracker: SessionTracker = app.state.tracker
+        removed = tracker.reset_session(session_id)
+        return {"session_id": session_id, "entries_removed": removed, "ok": True}
 
     return app
 

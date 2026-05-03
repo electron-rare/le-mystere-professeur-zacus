@@ -115,6 +115,63 @@ python3 tools/tts/generate_npc_pool.py \
 Cache key derivation must mirror `voice-bridge/main.py::_voice_ref_token`. See
 `tools/CLAUDE.md` for backend semantics.
 
+## E2E smoke test (`smoke_e2e.py`)
+
+End-to-end probe of the live voice loop without needing the ESP32 firmware
+flashed. Talks to the same `/tts` and `/voice/ws` endpoints the master
+firmware does, so it doubles as a regression guard whenever the voice-bridge
+is touched.
+
+```bash
+make smoke-voice
+# equivalent:
+uv run --with websockets --with httpx \
+  python tools/macstudio/smoke_e2e.py --mode full
+```
+
+Modes (`--mode`):
+
+| Mode | What it does |
+|------|--------------|
+| `tts` | POST `/tts` with `--text`, save the WAV, log latency / backend / cache_hit |
+| `ws`  | Connect `/voice/ws`, stream `--audio` (16 kHz PCM16), collect `stt` + `intent` + binary `speak_*` frames, save the received PCM as 24 kHz WAV |
+| `full` | (1) poll `/health/ready` until 200 (max 30 s) → (2) snapshot `/tts/cache/stats` → (3) run `tts` probe → (4) run `ws` probe → (5) snapshot `/tts/cache/stats` again and report the hit/miss delta |
+
+### Prerequisites
+
+- voice-bridge réachable (Tailscale `100.116.92.12:8200` ou `studio:8200`).
+  Si injoignable, le script exit `2` proprement (pas `1`) — utile pour
+  auto-skip en CI.
+- macOS host pour le fixture FR : `say -v Thomas` + `afconvert` génèrent
+  `/tmp/zacus_smoke_in.wav` (PCM16 16 kHz mono) si `--audio` n'existe pas.
+- `uv` installé localement (déjà standard pour ce repo).
+
+### Sorties
+
+- `/tmp/zacus_smoke_out_tts.wav` — réponse `/tts`
+- `/tmp/zacus_smoke_out_ws.wav` — audio TTS reçu sur `/voice/ws`
+- `/tmp/zacus_smoke_report.json` — manifeste structuré (latences, transcription,
+  intent content, backends, cache delta)
+- `/tmp/zacus_smoke.jsonl` — log JSON ligne-par-ligne (override via
+  `ZACUS_SMOKE_LOG`)
+
+### Exit codes
+
+| Code | Sens |
+|------|------|
+| `0` | Toutes les probes OK |
+| `1` | Au moins une probe en échec (HTTP non-200, transcription vide, etc.) |
+| `2` | Voice-bridge injoignable (pas de Tailscale, port fermé) |
+
+### Latences typiques (P5, voice-bridge warm, cache miss)
+
+| Probe | Attendu |
+|-------|---------|
+| `/health/ready` | < 100 ms |
+| `/tts` cache hit | < 50 ms |
+| `/tts` F5 cold | 4–8 s (steps=4) |
+| `/voice/ws` total (STT + intent + TTS) | 8–15 s sur phrase courte FR |
+
 ## Network
 
 Studio is multi-homed. The `192.168.0.150` IP previously hardcoded in some

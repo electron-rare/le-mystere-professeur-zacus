@@ -2,7 +2,7 @@ PYTHON ?= python3
 SCENARIO ?= game/scenarios/zacus_v2.yaml
 FRONTEND_DIR ?= frontend-v3
 
-.PHONY: bootstrap-validators bootstrap-docs scenario-validate audio-validate printables-validate export validate-runtime-bundle content-checks runtime3-compile runtime3-simulate runtime3-verify runtime3-test runtime3-firmware-bundle frontend-typecheck frontend-test frontend-build docs-build docs-serve all-validate images playtest hints-serve hints-test
+.PHONY: bootstrap-validators bootstrap-docs scenario-validate audio-validate printables-validate export validate-runtime-bundle content-checks runtime3-compile runtime3-simulate runtime3-verify runtime3-test runtime3-firmware-bundle frontend-typecheck frontend-test frontend-build docs-build docs-serve all-validate images playtest hints-serve hints-test smoke-voice
 
 bootstrap-validators:
 	bash tools/setup/install_validators.sh
@@ -77,3 +77,7 @@ hints-serve:
 hints-test:
 	uv run --with fastapi --with uvicorn --with pyyaml --with pydantic --with pytest --with httpx --with sse-starlette \
 		pytest tests/hints/ -v
+
+smoke-voice:
+	uv run --with websockets --with httpx \
+		python tools/macstudio/smoke_e2e.py --mode full

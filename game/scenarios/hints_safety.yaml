@@ -1,0 +1,41 @@
+# Hints safety filter — banned words/numbers per puzzle.
+#
+# When the LLM rewrites a hint (Phase P2 of hints engine), its output is
+# scanned for any token in the per-puzzle banned list (case-insensitive,
+# accent-insensitive). If a hit is detected, the rewrite is rejected and
+# the engine falls back to the verbatim base phrase.
+#
+# The intent is to prevent the LLM from accidentally leaking the literal
+# solution while it is rewording a level-1 or level-2 hint. Bans here are
+# intentionally narrow — only the *answer* tokens, not the puzzle vocabulary.
+# Default (no entry for a puzzle): no filtering.
+#
+# Spec: docs/superpowers/specs/2026-05-03-hints-engine-design.md §4 ("Safety rail")
+
+banned_per_puzzle:
+  # Sound puzzle: 5-button colour sequence Rouge/Bleu/Jaune/Rouge/Vert.
+  # The full ordered solution lives at level_3; we forbid the rewriter from
+  # echoing the full sequence at level_1 or level_2.
+  P1_SON:
+    - "rouge bleu jaune"
+    - "bleu jaune rouge vert"
+
+  # QR cache hunt: the level_3 hint enumerates the 6-cache scan order.
+  # Any of these landmark words leaking would skip the deduction.
+  P3_QR:
+    - "etagere gauche"
+    - "tiroir rouge"
+    - "boite bleue"
+    - "box-3"
+
+  # Radio frequency: the answer is literally 1337 Hz ("LEET").
+  P4_RADIO:
+    - "1337"
+    - "leet"
+
+  # Morse code: the message is "ZACUS". The level_3 hint also contains the
+  # raw dot/dash transcription. Rewriter must not pre-spell either.
+  P5_MORSE:
+    - "zacus"
+    - "z=--.."
+    - "tiret-tiret-point"

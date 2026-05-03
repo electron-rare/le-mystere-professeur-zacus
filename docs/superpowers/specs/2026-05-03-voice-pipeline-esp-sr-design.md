@@ -168,13 +168,13 @@ If `confidence < 0.6`: server returns `{"action": "noop", "reason": "low_confide
 
 | Phase | Scope | Acceptance | Effort |
 |-------|-------|------------|--------|
-| **P1** | Master firmware Arduino → ESP-IDF migration. **Gating**. Convert `main.cpp` and the ~30 modules ; preserve features parity. | `pio run` succeeds in IDF mode ; flashed device passes the same boot test (SD mount, LittleFS, 30 s monitor no panic) | 100-160 h |
-| **P2** | Voice-bridge FastAPI app on MacStudio (`/voice/transcribe`, `/voice/intent`, reuses `/tts`). | `curl` smoke tests ; transcribe a known FR clip with whisper-large-v3-turbo and get expected text | 4-6 h |
-| **P3** | esp-sr integration (AFE + wakenet "hi_esp" placeholder). VAD chunk capture. POST to `/voice/transcribe`. | Saying "hi ESP" wakes the device ; the next ≤10 s of speech is transcribed and printed to serial | 8-12 h |
-| **P4** | Custom wakenet "Professeur Zacus" trained + flashed. Replace placeholder. | False-accept < 1/h ambient ; false-reject < 10% at 2 m (hand-tested) | 1-2 day train + 4 h integration |
-| **P5** | Voice dispatcher: keyword fast-path (4 commands) → game_coordinator events. Plays acknowledgement TTS phrase. | "Professeur Zacus, je veux un indice" triggers the existing hints flow ; latency wake → audio out ≤ 3 s p95 | 6-8 h |
+| **P1** ✅ **livré 2026-05-03** (slices 1–7, commits `8a6f4e3` → `479e92e` dans le submodule `ESP32_ZACUS`) | Master firmware Arduino → ESP-IDF migration. **Gating**. Convert `main.cpp` and the ~30 modules ; preserve features parity. Sous-tâches : **slice 1** IDF migration scaffold ✅ ; **slice 2** Wi-Fi STA + OTA wiring ✅ ; **slice 3** `media_manager` port ✅ ; **slice 4** NPC engine port ✅ ; **slice 5** `voice_pipeline` scaffold + `hints_client` HTTP ✅ ; **slice 6** esp-sr WakeNet9 placeholder `wn9_hiesp` (EN) ✅ — wake custom « Professeur Zacus » = action externe Espressif **PENDING** ; **slice 7** STT WebSocket streaming vers `/voice/ws` MacStudio ✅. | `pio run` succeeds in IDF mode ; flashed device passes the same boot test (SD mount, LittleFS, 30 s monitor no panic). Builds verts livrés sur la plage `8a6f4e3` → `479e92e`. | 100-160 h |
+| **P2** | Voice-bridge FastAPI app on MacStudio (`/voice/transcribe`, `/voice/intent`, reuses `/tts`). ✅ couvert par le spec sœur `2026-05-03-tts-stt-llm-macstudio-design.md` (voice-bridge 0.4.0 livré 2026-05-03, part11). | `curl` smoke tests ; transcribe a known FR clip with whisper-large-v3-turbo and get expected text | 4-6 h |
+| **P3** | esp-sr integration (AFE + wakenet `wn9_hiesp` placeholder). VAD chunk capture. POST to `/voice/transcribe`. ✅ partiellement livré via slice 6 (placeholder EN actif) ; reste : VAD chunking et POST end-to-end intégrés au game_coordinator. | Saying "hi ESP" wakes the device ; the next ≤10 s of speech is transcribed and printed to serial | 8-12 h |
+| **P4** | Custom wakenet "Professeur Zacus" trained + flashed. Replace placeholder. **PENDING** — action externe Espressif (commande payante du modèle custom WakeNet9, délai 2-4 sem). | False-accept < 1/h ambient ; false-reject < 10% at 2 m (hand-tested) | 1-2 day train + 4 h integration |
+| **P5** | Voice dispatcher: keyword fast-path (4 commands) → game_coordinator events. Plays acknowledgement TTS phrase. **PENDING** côté firmware hints integration (D_part5 : `puzzle_start`, `attempt_failed`, `group_profile` NVS). | "Professeur Zacus, je veux un indice" triggers the existing hints flow ; latency wake → audio out ≤ 3 s p95 | 6-8 h |
 | **P6** | LLM intent fallback via Qwen 7B JSON mode. Confidence threshold + "pardon je n'ai pas compris" handler. | Synthetic ambiguous transcript ("euh, professeur, je sais pas, tu peux faire un truc") routes to LLM, returns `noop` low-confidence | 4-6 h |
-| **P7** | Mute-during-TTS gate. Cooldown after wake to avoid double-trigger. | Speaker plays a 5 s NPC line ; mic doesn't re-trigger wake during that window | 2-3 h |
+| **P7** | Mute-during-TTS gate. Cooldown after wake to avoid double-trigger. **PENDING** (slice 9 firmware : TTS playback inverse + mute-during-TTS). | Speaker plays a 5 s NPC line ; mic doesn't re-trigger wake during that window | 2-3 h |
 | **P8** | (optional) Software AEC via esp-sr if mute-only proves disruptive (player wants to interrupt the NPC). | Player can say wake word during NPC playback, NPC stops, listens | 6-10 h |
 
 **Total core (P1-P7)**: ~125-200 h. **P1 (IDF migration) is 80% of the cost** — the rest is bounded once the framework switch is done.
@@ -192,13 +192,16 @@ If `confidence < 0.6`: server returns `{"action": "noop", "reason": "low_confide
 
 ## 7. Acceptance gates (whole pipeline)
 
-- [ ] Wake → STT → keyword route → audio out ≤ 3 s p95 (hint flow)
-- [ ] Wake → STT → LLM intent → audio out ≤ 5 s p95 (ambiguous flow)
-- [ ] False-accept rate of "Professeur Zacus" < 1 / hour ambient
-- [ ] False-reject rate < 10 % at 2 m distance (3 voice samples per direction)
+- [x] **Builds verts livrés sur la plage `8a6f4e3` → `479e92e`** (submodule `ESP32_ZACUS`, slices 1–7 P1, livré 2026-05-03) — `pio run` IDF mode OK, boot test SD/LittleFS/30 s monitor sans panic
+- [x] **Voice-bridge MacStudio `/voice/{ws,transcribe,intent}` opérationnel** — couvert par le spec sœur `2026-05-03-tts-stt-llm-macstudio-design.md` (voice-bridge 0.4.0, part11)
+- [x] **STT WebSocket streaming end-to-end** (slice 7) — firmware → `/voice/ws` → whisper → intent dispatch
+- [ ] Wake → STT → keyword route → audio out ≤ 3 s p95 (hint flow) → **PENDING** (gating sur slice 9 + D_part5)
+- [ ] Wake → STT → LLM intent → audio out ≤ 5 s p95 (ambiguous flow) → **PENDING**
+- [ ] False-accept rate of "Professeur Zacus" < 1 / hour ambient → **PENDING** (gating sur P4 wake custom Espressif)
+- [ ] False-reject rate < 10 % at 2 m distance (3 voice samples per direction) → **PENDING** (gating sur P4)
 - [ ] Voice flow degrades gracefully when MacStudio voice-bridge unreachable (button-only mode)
 - [ ] Playtest harness has ≥ 1 voice-driven scenario (mocked transcripts replay through voice dispatcher)
-- [ ] No false re-triggering during NPC TTS playback (mute gate verified)
+- [ ] No false re-triggering during NPC TTS playback (mute gate verified) → **PENDING** (slice 9)
 - [ ] ESP-IDF master firmware passes the same playtest set as the Arduino version (no regression vs P1 baseline)
 
 ## 8. Out of scope

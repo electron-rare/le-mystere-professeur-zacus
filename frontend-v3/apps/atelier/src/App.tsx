@@ -1,4 +1,5 @@
 import { Layout } from './components/Layout.js';
+import { GameConfigPanel } from './components/GameConfigPanel.js';
 import { useLiveDiff } from './lib/useLiveDiff.js';
 import { useEditorStore } from './stores/editorStore.js';
 import { useRuntimeStore } from './stores/runtimeStore.js';
@@ -19,5 +20,20 @@ if (import.meta.env.DEV) {
 
 export function App() {
   useLiveDiff();
-  return <Layout />;
+  return (
+    <>
+      <Layout />
+      <div
+        style={{
+          position: 'fixed',
+          top: 12,
+          right: 12,
+          zIndex: 50,
+          pointerEvents: 'auto',
+        }}
+      >
+        <GameConfigPanel />
+      </div>
+    </>
+  );
 }

@@ -33,3 +33,17 @@ export const HINTS_GROUP_PROFILES = ['TECH', 'NON_TECH', 'MIXED', 'BOTH'] as con
 // 100.116.92.12:8200 = MacStudio Tailscale IP, where the F5-TTS bridge runs.
 export const VOICE_BRIDGE_DEFAULT_BASE_URL = 'http://100.116.92.12:8200';
 export const VOICE_BRIDGE_DEFAULT_POLL_MS = 2000;
+
+// ESP32 master REST defaults — overridden via VITE_ESP32_BASE_URL.
+// Slice 12 firmware exposes POST/GET /game/group_profile via mDNS.
+export const ESP32_DEFAULT_BASE_URL = 'http://zacus-master.local';
+
+// French labels for the 4 GameProfile values, surfaced in the atelier UI.
+export const GAME_PROFILE_LABELS: Record<'TECH' | 'NON_TECH' | 'MIXED' | 'BOTH', string> = {
+  TECH: 'Tech',
+  NON_TECH: 'Non-tech',
+  MIXED: 'Mixte',
+  BOTH: 'Les deux',
+};
+
+export const GAME_PROFILES = ['TECH', 'NON_TECH', 'MIXED', 'BOTH'] as const;

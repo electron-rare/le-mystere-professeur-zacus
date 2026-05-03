@@ -159,6 +159,20 @@ export interface PhaseDefinition {
 /** Group profile sent to /hints/ask. Mirrors GROUP_PROFILES in server.py. */
 export type HintsGroupProfile = 'TECH' | 'NON_TECH' | 'MIXED' | 'BOTH';
 
+/**
+ * GameProfile — canonical 4-value group profile used end-to-end by the
+ * adaptive hints engine and the ESP32 master firmware
+ * (`POST /game/group_profile` in slice 12). Mirrors `HintsGroupProfile`
+ * but lives in its own alias for callers that don't want to leak the
+ * "Hints"-prefixed name into the firmware-config layer.
+ */
+export type GameProfile = 'TECH' | 'NON_TECH' | 'MIXED' | 'BOTH';
+
+/** GET /game/group_profile envelope returned by the ESP32 master. */
+export interface GameGroupProfileResponse {
+  group_profile: GameProfile;
+}
+
 /** Per-puzzle entry as returned by GET /hints/sessions. */
 export interface HintsSessionEntry {
   puzzle_id: string;

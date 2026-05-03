@@ -86,7 +86,8 @@ from slowapi.util import get_remote_address
 # ── config (env-overridable) ────────────────────────────────────────────────
 WHISPER_URL = os.getenv("WHISPER_URL", "http://localhost:8300")
 LITELLM_URL = os.getenv("LITELLM_URL", "http://localhost:4000")
-LITELLM_KEY = os.environ.get("LITELLM_MASTER_KEY", "sk-zacus-local-dev-do-not-share")
+LITELLM_DEFAULT_KEY = "sk-zacus-local-dev-do-not-share"  # placeholder, log warns at boot
+LITELLM_KEY = os.environ.get("LITELLM_MASTER_KEY", LITELLM_DEFAULT_KEY)
 PIPER_URL = os.getenv("PIPER_URL", "http://192.168.0.120:8001")
 F5_TIMEOUT_S = float(os.getenv("F5_TIMEOUT_S", "8.0"))
 F5_MODEL = os.getenv("F5_MODEL", "lucasnewman/f5-tts-mlx")
@@ -400,6 +401,16 @@ async def _boot() -> None:
 
     _F5_LOCK = asyncio.Lock()
     _CACHE_LOCK = asyncio.Lock()
+
+    # Security warning: the placeholder LITELLM master key is publicly
+    # known (committed to the public repo as the default). Acceptable on a
+    # closed LAN, never on a public deployment. See tools/macstudio/.env.example.
+    if LITELLM_KEY == LITELLM_DEFAULT_KEY:
+        _jlog("boot_warn_default_litellm_key",
+              hint="set LITELLM_MASTER_KEY in ~/.zacus.env (see .env.example)")
+    if not ADMIN_KEY:
+        _jlog("boot_warn_no_admin_key",
+              hint="set VOICE_BRIDGE_ADMIN_KEY to protect DELETE /tts/cache")
 
     # Cache directory + initial index (cheap; just lists .wav stems).
     CACHE_DIR.mkdir(parents=True, exist_ok=True)

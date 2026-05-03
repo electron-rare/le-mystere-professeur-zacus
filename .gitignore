@@ -96,3 +96,17 @@ hotline_tts/
 
 # Hardcoded TTS assets (not generated)
 !tools/macstudio/voice-bridge/service_down.wav
+
+# Secrets — NEVER commit. Use *.env files locally and pass via env vars.
+.env
+.env.*
+!.env.example
+*.secret
+secrets.yaml
+secrets.yml
+secrets.json
+**/credentials.json
+**/*-secret.*
+
+# Tailscale auth-keys / OAuth client files
+tailscale-*.key

@@ -5,6 +5,34 @@ Deployment configs for the MacStudio M3 Ultra (`ssh studio`,
 whisper.cpp, F5-TTS, and the LiteLLM proxy. Spec:
 `docs/superpowers/specs/2026-05-03-tts-stt-llm-macstudio-design.md`.
 
+## ⚠️ Security model — read first
+
+The voice-bridge (`:8200`), LiteLLM proxy (`:4000`), MLX-LM servers (`:8500`/
+`:8501`), whisper (`:8300`) and ollama (`:11434`) are **LAN-only** and bind on
+`0.0.0.0` for the home/Tailscale network. **Never expose them to the public
+internet** (Cloudflare tunnel, port-forward, etc.):
+
+- The committed `LITELLM_MASTER_KEY` (`sk-zacus-local-dev-do-not-share`) is
+  a public placeholder. Anyone with internet access to `:4000` could burn
+  inference compute on it.
+- `/voice/ws`, `/tts`, `/voice/intent` have **no auth** beyond the rate-limit
+  on `/tts`. Closed LAN is acceptable; public exposure is not.
+- `DELETE /tts/cache` and `/hints/sessions` admin endpoints fall back to
+  open-by-default if the corresponding `*_ADMIN_KEY` env is unset.
+
+Before any non-LAN deployment:
+
+1. Copy `tools/macstudio/.env.example` to `~/.zacus.env` (gitignored) and
+   set `LITELLM_MASTER_KEY`, `VOICE_BRIDGE_ADMIN_KEY`, `HINTS_ADMIN_KEY` to
+   strong random values (`openssl rand -hex 24`).
+2. Source `~/.zacus.env` before launching the daemons (or load it from the
+   crontab `@reboot` lines via `bash -c 'source ~/.zacus.env && exec ...'`).
+3. Audit Cloudflare tunnel (`cloudflared`) routes — confirm only
+   `atelier.zacus.saillant.cc` and `dashboard.zacus.saillant.cc` are
+   exposed, never `:8200`/`:4000`/`:8500`/`:8501`/`:8300`.
+4. Re-run smoke (`make smoke-voice`) with the new key — services boot
+   without `boot_warn_default_litellm_key` log lines.
+
 ## Stack live (post-P1 part1-9)
 
 Inference and voice stack runs entirely on studio. Tower no longer participates

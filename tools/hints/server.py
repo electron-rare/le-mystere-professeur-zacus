@@ -1027,6 +1027,17 @@ def create_app(
         3: int(os.environ.get("HINTS_PENALTY_L3", str(DEFAULT_PENALTY_L3))),
     }
     app.state.admin_key = os.environ.get("HINTS_ADMIN_KEY")  # None → no auth
+
+    # Security warning: the placeholder LITELLM master key is publicly known
+    # (committed to the public repo as a default). Acceptable for a closed
+    # LAN, never for a public deployment. See tools/macstudio/.env.example.
+    if app.state.litellm_key == DEFAULT_LITELLM_KEY:
+        log.warning("HINTS using default LITELLM_MASTER_KEY — set a real one "
+                    "via env (see tools/macstudio/.env.example)")
+    if not app.state.admin_key:
+        log.warning("HINTS_ADMIN_KEY unset — /hints/sessions admin endpoints "
+                    "are open. Set HINTS_ADMIN_KEY to gate them.")
+
     app.state.clock = clock or Clock()
     app.state.tracker = SessionTracker(
         cooldown_s=cooldown_s,

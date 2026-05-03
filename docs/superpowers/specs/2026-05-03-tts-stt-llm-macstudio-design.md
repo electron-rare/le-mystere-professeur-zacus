@@ -30,26 +30,33 @@ Consolidate the project's three inference workloads — TTS (pivot from Piper to
 ## 1. Architecture — "Native daemons + LiteLLM proxy"
 
 ```
-                 ┌─────────────────────────────────────────────┐
-                 │  MacStudio M3 Ultra (LAN: studio.local)         │
-                 │                                             │
-ESP32 / Atelier ─┤  :4000  LiteLLM proxy (OpenAI API)            │
-                 │     │                                        │
-                 │     ├─→ :11434  ollama (LLM tier)             │
-                 │     │       qwen2.5:7b                        │
-                 │     │       qwen2.5:72b-instruct-q8_0         │
-                 │     │                                        │
-                 │     ├─→ :8300   whisper.cpp server            │
-                 │     │       large-v3-turbo (FR multi)         │
-                 │     │                                        │
-                 │     └─→ :8200   voice-bridge (FastAPI)        │
-                 │             /voice/ws (mic stream)            │
-                 │             /tts → F5-TTS local (MLX/Metal)   │
-                 │             steps=4 default, timeout 8 s →    │
-                 │             fallback Piper Tower              │
-                 │                                             │
-                 │  Three local services managed by launchd       │
-                 └─────────────────────────────────────────────┘
+                 ┌──────────────────────────────────────────────────┐
+                 │  MacStudio M3 Ultra (LAN: 192.168.0.150)         │
+                 │                                                  │
+ESP32 / Atelier ─┤  :4000  LiteLLM proxy (OpenAI API)               │
+                 │     │                                            │
+                 │     ├─→ :8501  MLX-LM server (npc-fast)          │
+                 │     │       mlx-community/Qwen2.5-7B-Instruct-4bit│
+                 │     │                                            │
+                 │     ├─→ :8500  MLX-LM server (hints-deep)        │
+                 │     │       mlx-community/Qwen2.5-32B-Instruct-4bit│
+                 │     │                                            │
+                 │     ├─→ :11434 ollama (legacy / A-B aliases)     │
+                 │     │       qwen2.5:7b-q8 (npc-ollama-7b)        │
+                 │     │       qwen2.5:72b-q8 (hints-ollama-72b)    │
+                 │     │                                            │
+                 │     ├─→ :8300  whisper.cpp server                │
+                 │     │       large-v3-turbo-q5_0 (FR multi)       │
+                 │     │                                            │
+                 │     └─→ :8200  voice-bridge (FastAPI)            │
+                 │             /voice/{ws,transcribe,intent}        │
+                 │             /tts → F5-TTS in-process (MLX/Metal) │
+                 │             steps=4 default, timeout 8 s →       │
+                 │             fallback Piper Tower:8001            │
+                 │                                                  │
+                 │  Local services persist via crontab @reboot      │
+                 │  (macOS 26 headless: launchctl over SSH broken)  │
+                 └──────────────────────────────────────────────────┘
 
                  ┌─────────────────────────────────────┐
                  │  Tower (192.168.0.120) — fallback only  │
@@ -94,18 +101,30 @@ Tower's existing Piper service stays untouched (no `.onnx` migration to MacStudi
 - Latence observée (warm) : **1.2 s pour clip 11 s (JFK sample)** — sous le budget cible.
 - Server: `whisper.cpp/server` with HTTP `/inference` endpoint on `:8300` (voice-bridge consumes it; `:8200` is the public client port owned by the voice-bridge for `/voice/ws` and `/tts`).
 
-### 2.3 LLM — dual-tier Qwen 2.5
+### 2.3 LLM — dual-tier MLX-LM (Qwen 2.5 4-bit)
 
-| Model | Quant | Disk | Use case | Throughput target |
-|-------|-------|------|----------|-------------------|
-| `qwen2.5:7b-instruct-q8_0` | Q8 | ~7.5 GB | NPC dialogue, fast turns | ≥ 50 tok/s |
-| `qwen2.5:72b-instruct-q8_0` | Q8 | ~75 GB | Hints engine reasoning, anti-cheat scoring | ≥ 12 tok/s |
+**Décision révisée P1 part5/6** : la stack LLM est passée en **MLX-LM in-process** (Metal-natif M3 Ultra) plutôt qu'Ollama GGUF Q8. Gains mesurés :
 
-Both pulled via `ollama pull`. LiteLLM routes on model name: clients ask for `npc-fast` (alias to 7B) or `hints-deep` (alias to 72B).
+| Alias | Backend retenu | Disk | Latence (warm 50 tok) | Throughput | RAM |
+|-------|----------------|------|-----------------------|------------|-----|
+| `npc-fast` | `mlx-community/Qwen2.5-7B-Instruct-4bit` (MLX-LM `:8501`) | ~4 GB | 6.18 s | **11.7 tok/s** | 5.9 GB |
+| `hints-deep` | `mlx-community/Qwen2.5-32B-Instruct-4bit` (MLX-LM `:8500`) | ~17 GB | 11.4 s | **4.4 tok/s** | 18 GB |
 
-**Note P1 livré 2026-05-03** : `npc-fast` et `hints-deep` ont été livrés en backend **MLX in-process** (chargés directement par le voice-bridge) plutôt qu'via Ollama HTTP, pour éliminer le saut localhost et exploiter le partage mémoire unified du M3 Ultra. La table d'alias §2.4 reste valide côté contrat client (mêmes noms, mêmes endpoints LiteLLM) ; seul le backend physique change. Ollama reste installé pour A/B et pour servir les `/v1/chat/completions` legacy.
+**Comparaison vs Ollama Q8 (legacy, gardé en A/B)** :
 
-Both tiers fit comfortably in 512 GB unified RAM with headroom for whisper + F5-TTS + OS (~87 GB total active inference, ~425 GB free; F5-TTS adds ~1–2 GB resident).
+| Alias legacy | Backend Ollama | Latence warm | Throughput | RAM |
+|--------------|----------------|--------------|------------|-----|
+| `npc-ollama-7b` | `qwen2.5:7b-instruct-q8_0` | 8.75 s | 10.5 tok/s | 9.7 GB |
+| `hints-ollama-72b` | `qwen2.5:72b-instruct-q8_0` | 25.3 s | 1.97 tok/s | 91 GB |
+
+**Pivot rationale** :
+- MLX 32B Q4 est **2.2× plus rapide** que Ollama 72B Q8 et utilise **5× moins de RAM** ; la qualité FR sur prompts hints reste équivalente ou meilleure (plus précise on-topic, voir bench part5).
+- MLX 7B Q4 est **30 % plus rapide** que Ollama 7B Q8, qualité Zacus tone préservée.
+- Choix de garder Ollama 7B/72B installés mais sous aliases `npc-ollama-7b` / `hints-ollama-72b` pour A/B sanity checks et fallback de qualité (72B Q8 reste disponible si une régression est observée sur une catégorie de hints).
+
+Les modèles MLX 4-bit étaient déjà présents dans le HF cache (`~/.cache/huggingface/hub/models--mlx-community--Qwen2.5-{7B,32B}-Instruct-4bit`) — zéro pull nécessaire. Le 72B MLX (`mlx-community/Qwen2.5-72B-Instruct-4bit`, ~40 GB) reste un follow-up si la qualité 32B Q4 dérive sur des sessions playtest réelles.
+
+Both tiers tiennent largement dans 512 GB unified RAM avec headroom : ~25 GB total chargé pour MLX 32B + MLX 7B + LiteLLM + whisper + voice-bridge + F5-TTS, soit < 5 % de la RAM système.
 
 ### 2.4 LiteLLM aliases
 
@@ -113,10 +132,14 @@ LiteLLM `config.yaml` exposes the TTS routing duality as named aliases so client
 
 | Alias | Backend | Endpoint |
 |-------|---------|----------|
-| `npc-fast` | Ollama Qwen 2.5 7B (local) | `http://localhost:11434` |
-| `hints-deep` | Ollama Qwen 2.5 72B (local) | `http://localhost:11434` |
-| `stt-fr` | whisper.cpp large-v3-turbo (local) | `http://localhost:8300/inference` |
-| `tts-zacus-primary` | F5-TTS local with `zacus_reference.wav` clone | `http://localhost:8200/tts` (voice-bridge) |
+| `npc-fast` | MLX-LM Qwen 2.5 7B 4-bit (local) | `http://localhost:8501/v1` |
+| `npc-mlx-7b` | MLX-LM Qwen 2.5 7B 4-bit (mirror de `npc-fast`) | `http://localhost:8501/v1` |
+| `npc-ollama-7b` | Ollama Qwen 2.5 7B Q8 (legacy A/B) | `http://localhost:11434` |
+| `hints-deep` | MLX-LM Qwen 2.5 32B 4-bit (local) | `http://localhost:8500/v1` |
+| `hints-mlx-32b` | MLX-LM Qwen 2.5 32B 4-bit (mirror de `hints-deep`) | `http://localhost:8500/v1` |
+| `hints-ollama-72b` | Ollama Qwen 2.5 72B Q8 (legacy A/B) | `http://localhost:11434` |
+| `whisper-fr` / `stt-fr` | whisper.cpp `large-v3-turbo-q5_0` (local) | `http://localhost:8300/inference` |
+| `tts-zacus-primary` | F5-TTS in-process (`zacus_reference.wav` clone) | `http://localhost:8200/tts` (voice-bridge) |
 | `tts-zacus-fallback` | Piper Tower (`tom-medium`) | `http://192.168.0.120:8001/tts` |
 
 The voice-bridge (§3) is the single `/tts` entrypoint clients hit; LiteLLM aliases above are mostly bookkeeping for observability and for the rare client that wants to force a specific backend (smoke tests, A/B comparisons).
@@ -149,11 +172,12 @@ Tableau récapitulatif :
 - **MacStudio** sits on the home LAN at the IP currently assigned to it (today: `studio.local` resolves via mDNS).
 - **Static IP recommended**: pin the MacStudio at e.g. `192.168.0.150` via the home router DHCP reservation, or set a manual static lease. Clients (ESP32, atelier) hardcode the IP rather than relying on mDNS, which can be flaky on ESP32-S3.
 - **Tailscale stays installed** for remote ops, not for primary client traffic.
-- Existing client URLs:
-  - Voice WS: `ws://192.168.0.120:8200/voice/ws` → `ws://192.168.0.150:8200/voice/ws`
-  - TTS: `http://192.168.0.120:8001/tts` → `http://192.168.0.150:8200/tts` (voice-bridge: F5 primary, Piper Tower fallback handled server-side)
-  - Piper Tower stays reachable at `http://192.168.0.120:8001/tts` for the fallback path and for direct smoke tests
-  - Hints engine: KXKM-AI URL → `http://192.168.0.150:4000/v1/chat/completions` (LiteLLM proxy)
+- Client URLs (P1 livré 2026-05-03) — tous neufs côté MacStudio, sans pseudo-redirect d'un legacy inexistant :
+  - Voice WS / transcribe / intent : `ws://192.168.0.150:8200/voice/ws` (et POST `:8200/voice/{transcribe,intent}`) — endpoint **neuf** porté par le voice-bridge ; ni Tower ni KXKM-AI n'hébergeaient ces routes auparavant.
+  - TTS : `http://192.168.0.150:8200/tts` (voice-bridge ; F5 primaire, Piper Tower fallback géré server-side).
+  - LLM / STT (OpenAI-compat) : `http://192.168.0.150:4000/v1/...` (LiteLLM proxy ; aliases §2.4).
+  - **Fallback Piper** : `http://192.168.0.120:8001/tts` (Tower) — joignable directement pour smoke tests, sinon utilisé en interne par le voice-bridge.
+  - **Hints engine** : `http://192.168.0.150:8302/hints/ask` (à déployer sur MacStudio en P2 — actuellement le service tourne en local dev via `make hints-serve`).
 
 ---
 

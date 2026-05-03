@@ -172,6 +172,37 @@ Modes (`--mode`):
 | `/tts` F5 cold | 4–8 s (steps=4) |
 | `/voice/ws` total (STT + intent + TTS) | 8–15 s sur phrase courte FR |
 
+### CI smoke (GitHub Actions)
+
+Le workflow `.github/workflows/smoke-voice.yml` exécute `make smoke-voice` contre
+le voice-bridge live (`100.116.92.12:8200`, joignable uniquement via Tailscale)
+toutes les 6 h, plus déclenchement manuel.
+
+```bash
+gh workflow run smoke-voice
+```
+
+Étapes : checkout → `tailscale/github-action@v2` (auth OAuth) → `astral-sh/setup-uv@v6`
+(Python 3.14) → probe `/health` (curl 5 s timeout) → `make smoke-voice` si
+reachable → upload artefacts (`/tmp/zacus_smoke_*.{wav,json,jsonl}`, 7 j de
+rétention) → `jq` summary dans `$GITHUB_STEP_SUMMARY`.
+
+**Secrets requis** (à provisionner dans `Settings → Secrets and variables → Actions`) :
+
+| Secret | Source |
+|--------|--------|
+| `TAILSCALE_OAUTH_CLIENT_ID` | Tailscale admin → OAuth clients (scope `devices`, tag `tag:ci`) |
+| `TAILSCALE_OAUTH_SECRET` | idem (révélé une seule fois à la création) |
+
+Le tag `tag:ci` doit être déclaré dans `tailnet policy` (ACLs) avec une règle
+permettant l'accès au port `8200` de `studio`.
+
+**Comportement no-op** — `continue-on-error: true` au niveau du job + probe
+préalable : si Tailscale fail ou voice-bridge injoignable, le workflow reste
+vert avec un `::warning::` (pas de faux-positif rouge sur le repo). Si le
+voice-bridge répond mais que `smoke_e2e.py` exit `1`, le job apparaît rouge dans
+les logs mais n'échoue pas le commit.
+
 ## Network
 
 Studio is multi-homed. The `192.168.0.150` IP previously hardcoded in some

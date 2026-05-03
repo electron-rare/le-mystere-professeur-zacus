@@ -1,0 +1,60 @@
+name: smoke-voice
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'   # toutes les 6 h
+  workflow_dispatch:        # manuel
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true   # ne pas casser le repo si voice-bridge down
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tailscale connect
+        uses: tailscale/github-action@v2
+        with:
+          oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TAILSCALE_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.14'
+
+      - name: Probe voice-bridge reachability
+        id: probe
+        run: |
+          if curl -fsSL --max-time 5 http://100.116.92.12:8200/health; then
+            echo "reachable=true" >> $GITHUB_OUTPUT
+          else
+            echo "reachable=false" >> $GITHUB_OUTPUT
+            echo "::warning::voice-bridge unreachable, smoke will report exit 2"
+          fi
+
+      - name: Run smoke
+        if: steps.probe.outputs.reachable == 'true'
+        run: make smoke-voice
+
+      - name: Upload artefacts
+        if: always() && hashFiles('/tmp/zacus_smoke_report.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-${{ github.run_id }}
+          path: |
+            /tmp/zacus_smoke_in.wav
+            /tmp/zacus_smoke_out_*.wav
+            /tmp/zacus_smoke_report.json
+            /tmp/zacus_smoke.jsonl
+          retention-days: 7
+
+      - name: Summarize
+        if: always()
+        run: |
+          if [ -f /tmp/zacus_smoke_report.json ]; then
+            echo "## Smoke voice loop" >> $GITHUB_STEP_SUMMARY
+            jq '.' /tmp/zacus_smoke_report.json >> $GITHUB_STEP_SUMMARY
+          fi

@@ -52,6 +52,14 @@ PIPER_URL = os.getenv("PIPER_URL", "http://192.168.0.120:8001")
 F5_TIMEOUT_S = float(os.getenv("F5_TIMEOUT_S", "8.0"))
 F5_MODEL = os.getenv("F5_MODEL", "lucasnewman/f5-tts-mlx")
 F5_DEFAULT_STEPS = int(os.getenv("F5_DEFAULT_STEPS", "4"))
+# Hard bounds on F5 sampling steps: prevents trivial DoS via large `steps`
+# values (each step is a forward pass through the diffusion network and
+# blocks the asyncio loop because MLX runs in-thread). Override via env.
+F5_STEPS_MIN = int(os.getenv("F5_STEPS_MIN", "1"))
+F5_STEPS_MAX = int(os.getenv("F5_STEPS_MAX", "32"))
+# Hard cap on `text` length to bound per-request synthesis time / memory.
+# 2000 chars ≈ a long paragraph; well above any realistic NPC line.
+TTS_TEXT_MAX_CHARS = int(os.getenv("TTS_TEXT_MAX_CHARS", "2000"))
 F5_SAMPLE_RATE = 24_000
 
 REF_AUDIO_HOME = Path(os.path.expanduser("~/zacus_reference.wav"))
@@ -376,7 +384,19 @@ async def tts(payload: dict[str, Any]) -> Response:
     text = (payload.get("text") or payload.get("input") or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="payload.text is required")
-    steps = int(payload.get("steps", F5_DEFAULT_STEPS))
+    if len(text) > TTS_TEXT_MAX_CHARS:
+        _jlog("tts_text_too_long", request_id=request_id,
+              text_len=len(text), max=TTS_TEXT_MAX_CHARS)
+        raise HTTPException(
+            status_code=400,
+            detail=f"text too long, max {TTS_TEXT_MAX_CHARS} chars",
+        )
+    raw_steps = int(payload.get("steps", F5_DEFAULT_STEPS))
+    steps = max(F5_STEPS_MIN, min(F5_STEPS_MAX, raw_steps))
+    if steps != raw_steps:
+        _jlog("tts_steps_clamped", request_id=request_id,
+              requested=raw_steps, clamped=steps,
+              min=F5_STEPS_MIN, max=F5_STEPS_MAX)
     voice_ref = payload.get("voice_ref")  # accepted; reserved for multi-voice
 
     started = time.monotonic()

@@ -115,17 +115,43 @@ python3 tools/tts/generate_npc_pool.py \
 Cache key derivation must mirror `voice-bridge/main.py::_voice_ref_token`. See
 `tools/CLAUDE.md` for backend semantics.
 
+## Network
+
+Studio is multi-homed. The `192.168.0.150` IP previously hardcoded in some
+scripts was wrong — studio is **not** on the `192.168.0.0/24` LAN. Use the
+Tailscale address from any non-local context.
+
+| Surface | Address | Reachable from | Notes |
+|---------|---------|----------------|-------|
+| Tailscale | `100.116.92.12` | any tailnet node (incl. dev workstation, Tower, KXKM-AI) | recommended default |
+| Tailscale MagicDNS | `studio` (in-tailnet) | any tailnet node with MagicDNS enabled | shorter alias |
+| Studio LAN | `192.168.13.100` | studio's local subnet only (not the home `192.168.0.0/24`) | hardware-pinned ; SSH only via `ProxyJump` from outside |
+| mDNS | `MacStudio-de-MonsieurB.local` | studio's local subnet via Bonjour | not stable across networks |
+| (legacy) `192.168.0.150` | — | nowhere | **wrong IP**, do not use ; was in older script defaults |
+
+Probe results (from a `192.168.0.0/24` dev host, 2026-05-03):
+
+| Address | ping | `:8200/health` |
+|---------|------|----------------|
+| `100.116.92.12` (Tailscale) | OK | 200, ~76 ms |
+| `192.168.13.100` (studio LAN) | TIMEOUT | TIMEOUT |
+| `192.168.0.150` (legacy, wrong) | TIMEOUT | refused |
+
+`tools/tts/generate_npc_pool.py` default `--voice-bridge-url` was updated
+accordingly to `http://100.116.92.12:8200`.
+
+LiteLLM proxy (`:4000`) and voice-bridge (`:8200`) both bind to
+`0.0.0.0`, so the same address table applies. Keep `host: 0.0.0.0` in
+`litellm-config.yaml` — without it, the Tailscale and LAN paths break.
+
 ## Known issues / TODO
 
-- **`steps` non borné** côté payload `/tts` — un client malicieux peut envoyer
-  `steps=999` et saturer la GPU queue. Ajouter `steps: int = Field(ge=1, le=64)`
-  dans le schéma Pydantic de voice-bridge.
-- **Default `--voice-bridge-url 192.168.0.150`** dans certains scripts — IP LAN
-  studio à confirmer selon le réseau du client. En itinérance préférer le
-  Tailscale `100.116.92.12` (ou alias DNS `studio`).
 - **`zacus_reference.wav`** à enregistrer (action humaine, prereq P2). Sans ce
   fichier, F5-TTS-MLX tombe sur le checkpoint multilingue de base — qualité
   acceptable mais pas de Zacus voice clone.
+- **`steps` borné [1..32]** et **`text` ≤ 2000 chars** dans le handler `/tts`
+  (P1 part10) — overridables via env `F5_STEPS_MIN`/`F5_STEPS_MAX`/
+  `TTS_TEXT_MAX_CHARS`. Pas encore de rate-limiter par client : voir follow-up.
 
 ## Anti-patterns
 

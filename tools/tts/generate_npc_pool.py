@@ -16,8 +16,13 @@ Usage (Piper, legacy):
 Usage (F5 via voice-bridge):
     python3 generate_npc_pool.py \
         --backend f5 \
-        --voice-bridge-url http://192.168.0.150:8200 \
+        --voice-bridge-url http://100.116.92.12:8200 \
         --steps 8
+
+The default voice-bridge URL targets studio's Tailscale IP, which is
+reachable from any node in the tailnet (dev workstation, Tower, etc.).
+On studio's local LAN you can also use ``http://192.168.13.100:8200`` or
+``http://studio:8200`` if you have the SSH alias resolving locally.
 
 Common flags:
     --output         Output directory (default: hotline_tts)
@@ -216,8 +221,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # F5-specific
     parser.add_argument(
         "--voice-bridge-url",
-        default="http://192.168.0.150:8200",
-        help="voice-bridge base URL (default: http://192.168.0.150:8200).",
+        default="http://100.116.92.12:8200",
+        help=(
+            "voice-bridge base URL (default: http://100.116.92.12:8200, "
+            "studio's Tailscale IP — works from any tailnet node)."
+        ),
     )
     parser.add_argument(
         "--steps",

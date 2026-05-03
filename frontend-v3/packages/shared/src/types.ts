@@ -58,6 +58,8 @@ export interface EngineState {
   npcMood: NpcMood;
   elapsedMs: number;
   codeAssembled: string;
+  /** True once the game_end event has fired. Drives bonus eligibility in getScore(). */
+  completed: boolean;
 }
 
 export interface ScoreResult {

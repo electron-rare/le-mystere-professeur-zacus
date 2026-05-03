@@ -122,6 +122,7 @@ export class ZacusScenarioEngine implements ScenarioEngine {
 
       case 'game_end': {
         this.state.phase = 'OUTRO';
+        this.state.completed = true;
         decisions.push({
           action: 'speak',
           data: { category: 'narrative', scene: 'outro' },
@@ -150,7 +151,12 @@ export class ZacusScenarioEngine implements ScenarioEngine {
 
     const timePenalty = Math.max(0, Math.round((elapsedMin - targetMin) * scoring.time_penalty_per_minute));
     const hintPenalty = totalHints * scoring.hint_penalty;
-    const bonus = elapsedMin < targetMin * 0.8 ? scoring.bonus_fast_completion : 0;
+    // Bonus only counts when the game is actually finished — otherwise
+    // an in-progress game would always show inflated scores at t=0.
+    const bonus =
+      this.state.completed && elapsedMin < targetMin * 0.8
+        ? scoring.bonus_fast_completion
+        : 0;
     const total = Math.max(0, scoring.base_score - timePenalty - hintPenalty + bonus);
 
     return {
@@ -178,6 +184,7 @@ export class ZacusScenarioEngine implements ScenarioEngine {
       npcMood: 'neutral',
       elapsedMs: 0,
       codeAssembled: '',
+      completed: false,
     };
   }
 

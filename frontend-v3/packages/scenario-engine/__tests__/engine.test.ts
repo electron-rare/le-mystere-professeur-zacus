@@ -38,14 +38,23 @@ describe('ZacusScenarioEngine', () => {
     expect(engine.getState().hintsGiven['P2_CIRCUIT']).toBe(2);
   });
 
-  it('getScore at game start: base + fast-completion bonus, no penalties', () => {
-    // At t=0, elapsedMin (0) < targetMin * 0.8 (48), so the
-    // bonus_fast_completion (200) applies on top of base_score (1000).
-    // The engine reports score continuously, not only at game end.
+  it('getScore in progress: base only, no bonus until completion', () => {
+    // At t=0 the game is not yet finished (state.completed === false).
+    // The fast-completion bonus must not be promised pre-emptively.
     const score = engine.getScore();
     expect(score.baseScore).toBe(1000);
     expect(score.timePenalty).toBe(0);
     expect(score.hintPenalty).toBe(0);
+    expect(score.bonus).toBe(0);
+    expect(score.total).toBe(1000);
+  });
+
+  it('getScore after game_end with fast time: base + fast bonus', () => {
+    // game_end at t=0 (elapsedMin = 0 < 48 = targetMin * 0.8) earns the
+    // bonus_fast_completion (200) on top of base_score (1000).
+    engine.onEvent({ type: 'game_end', timestamp: Date.now(), data: {} });
+    const score = engine.getScore();
+    expect(score.baseScore).toBe(1000);
     expect(score.bonus).toBe(200);
     expect(score.total).toBe(1200);
   });

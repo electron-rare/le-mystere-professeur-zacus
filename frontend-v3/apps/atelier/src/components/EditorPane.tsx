@@ -1,5 +1,6 @@
-import { lazy, Suspense, useCallback } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef } from 'react';
 import type * as Blockly from 'blockly';
+import type { BlocklyWorkspaceHandle } from './BlocklyWorkspace.js';
 import { useEditorStore } from '../stores/editorStore.js';
 import { useValidationStore } from '../stores/validationStore.js';
 
@@ -11,9 +12,25 @@ const BlocklyWorkspaceLazy = lazy(async () => {
 });
 
 export function EditorPane() {
+  const wsHandleRef = useRef<BlocklyWorkspaceHandle>(null);
   const setBlocklyJson = useEditorStore((s) => s.setBlocklyJson);
   const pushValidation = useValidationStore((s) => s.push);
   const clearValidation = useValidationStore((s) => s.clear);
+
+  // Dev-only: expose the workspace handle to e2e specs so a block can be
+  // inserted via Blockly's programmatic API instead of brittle DnD.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    type AtelierWindow = {
+      __atelierBlockly?: { getWorkspace: () => Blockly.WorkspaceSvg | null };
+    };
+    (window as unknown as AtelierWindow).__atelierBlockly = {
+      getWorkspace: () => wsHandleRef.current?.getWorkspace() ?? null,
+    };
+    return () => {
+      delete (window as unknown as AtelierWindow).__atelierBlockly;
+    };
+  }, []);
 
   const handleWorkspaceChange = useCallback(
     async (ws: Blockly.WorkspaceSvg) => {
@@ -65,7 +82,7 @@ export function EditorPane() {
         </div>
       }
     >
-      <BlocklyWorkspaceLazy onWorkspaceChange={handleWorkspaceChange} />
+      <BlocklyWorkspaceLazy ref={wsHandleRef} onWorkspaceChange={handleWorkspaceChange} />
     </Suspense>
   );
 }

@@ -100,3 +100,61 @@ test.describe('atelier — Run button stale flow', () => {
     });
   });
 });
+
+test.describe('atelier — Blockly editor pipeline', () => {
+  test('inserting a block via API updates editor store and shows Run button', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.locator('.blockly-container')).toBeVisible({ timeout: 15_000 });
+
+    // Wait for the lazy Blockly chunk to load AND the workspace handle to be
+    // wired into window.__atelierBlockly.
+    await page.waitForFunction(
+      () =>
+        (window as unknown as { __atelierBlockly?: { getWorkspace: () => unknown } })
+          .__atelierBlockly?.getWorkspace() !== null,
+      undefined,
+      { timeout: 10_000 },
+    );
+
+    // Run button absent before any edit.
+    await expect(page.getByRole('button', { name: /Run|stale/ })).toHaveCount(0);
+
+    // Insert a real Blockly block via the workspace API. This triggers the
+    // BlocklyWorkspace change listener -> editorStore.setBlocklyJson ->
+    // useLiveDiff debounce -> runtimeStore.pendingIr -> isStale -> Run button.
+    const blocklyJsonAfter = await page.evaluate(() => {
+      type WS = {
+        newBlock: (type: string) => { initSvg: () => void; render: () => void };
+      };
+      const ws = (
+        window as unknown as { __atelierBlockly: { getWorkspace: () => WS } }
+      ).__atelierBlockly.getWorkspace();
+      const block = ws.newBlock('puzzle_sequence_sonore');
+      block.initSvg();
+      block.render();
+      // Give Blockly its synchronous tick to fire change events.
+      return new Promise<string | null>((resolve) => {
+        setTimeout(() => {
+          const stores = (
+            window as unknown as {
+              __atelierStores: { editor: { getState: () => { blocklyJson: string | null } } };
+            }
+          ).__atelierStores;
+          resolve(stores.editor.getState().blocklyJson);
+        }, 100);
+      });
+    });
+
+    // The editor store now reflects the inserted block (yaml-export emitted
+    // something — content varies by block type but must be non-empty).
+    expect(blocklyJsonAfter).not.toBeNull();
+    expect(blocklyJsonAfter?.length ?? 0).toBeGreaterThan(0);
+
+    // After the 500 ms live-diff debounce, the Run button surfaces.
+    await expect(page.getByRole('button', { name: /Run|stale/ })).toBeVisible({
+      timeout: 2_000,
+    });
+  });
+});

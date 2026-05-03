@@ -1,15 +1,20 @@
-"""voice-bridge — FastAPI daemon (P1 part7 + part9b on-disk cache).
+"""voice-bridge — FastAPI daemon (P1 part7 + part9b cache + part11 hardening).
 
 Spec: docs/superpowers/specs/2026-05-03-tts-stt-llm-macstudio-design.md §2.5
 
 Routes
 ------
-GET  /health              → readiness, F5 warm-up, ref audio, cache stats
+GET  /health              → liveness probe (always 200 once process is up)
+GET  /health/ready        → readiness probe (503 until F5 warm-up done)
 POST /tts                 → on-disk cache → F5-TTS-MLX → Piper Tower fallback
+                            Pydantic-validated body, per-IP rate-limited.
 GET  /tts/cache/stats     → cache count / size / hit rate (since boot)
 DELETE /tts/cache         → clear the on-disk cache (admin key required)
 POST /voice/transcribe    → multipart proxy → whisper.cpp :8300 /inference
 POST /voice/intent        → forward → LiteLLM npc-fast (model="npc-fast")
+WS   /voice/ws            → STT streaming for ESP32 firmware (PCM16 16 kHz mono).
+                            Hello-handshake, binary frames, end → whisper.cpp →
+                            optional intent forward, then close.
 
 Design notes
 ------------
@@ -32,17 +37,33 @@ import json
 import logging
 import os
 import shutil
+import struct
 import subprocess
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 import httpx
 import numpy as np
 import soundfile as sf
-from fastapi import FastAPI, File, Header, HTTPException, Request, Response, UploadFile
+from fastapi import (
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 # ── config (env-overridable) ────────────────────────────────────────────────
 WHISPER_URL = os.getenv("WHISPER_URL", "http://localhost:8300")
@@ -73,6 +94,18 @@ SERVICE_DOWN_WAV = Path(os.path.expanduser(
     os.getenv("SERVICE_DOWN_WAV", "~/voice-bridge/service_down.wav")
 ))
 ADMIN_KEY = os.getenv("VOICE_BRIDGE_ADMIN_KEY")  # None = no auth on DELETE
+
+# Rate limit on /tts (per client IP). slowapi syntax: "<n>/<unit>".
+TTS_RATE_LIMIT = os.getenv("TTS_RATE_LIMIT", "10/second")
+
+# /voice/ws constants — must mirror firmware-side framing (chantier C_slice7).
+WS_EXPECTED_VERSION = 1
+WS_EXPECTED_FORMAT = "pcm_s16"
+WS_EXPECTED_SR = 16_000
+WS_BYTES_PER_SAMPLE = 2  # PCM 16-bit mono
+WS_MAX_DURATION_S = 30
+WS_MAX_BYTES = WS_EXPECTED_SR * WS_BYTES_PER_SAMPLE * WS_MAX_DURATION_S  # 960 KB
+WS_FORWARD_INTENT = os.getenv("WS_FORWARD_INTENT", "1") not in {"0", "false", "no"}
 
 # ── logging (single-line JSON) ──────────────────────────────────────────────
 logging.basicConfig(
@@ -108,6 +141,34 @@ _CACHE_INDEX: dict[str, Path] = {}
 _CACHE_LOCK: Optional[asyncio.Lock] = None
 _CACHE_HITS: int = 0
 _CACHE_MISSES: int = 0
+
+
+# ── request models (Pydantic v2) ────────────────────────────────────────────
+# Backwards-compat: Pydantic accepts the same JSON shape as the previous
+# `dict[str, Any]` handler (text/steps/voice_ref). Validation now returns
+# 422 on malformed bodies (length, type), instead of generic 400/500s.
+class TtsRequest(BaseModel):
+    # `text` is required and capped (cap also enforced explicitly in the
+    # handler so we keep the existing structured 400 error message). Pydantic
+    # emits 422 with a clear schema error if the field is missing entirely.
+    text: str = Field(min_length=1, max_length=TTS_TEXT_MAX_CHARS)
+    # `steps` is intentionally *not* clamped here: the handler still applies
+    # max(MIN, min(MAX, raw_steps)) for backwards compatibility with existing
+    # smoke tests that pass values like 99 and expect a 200 + clamp log
+    # rather than a 422. Pydantic only ensures the value is an int.
+    steps: int = Field(default=F5_DEFAULT_STEPS)
+    voice_ref: Optional[str] = None
+    # Legacy alias for the older daemon ("input" instead of "text") is handled
+    # in the handler before validation, so the schema stays small.
+
+    model_config = {"extra": "ignore"}
+
+
+class IntentRequest(BaseModel):
+    text: str = Field(min_length=1)
+    context: Optional[Dict[str, Any]] = None
+
+    model_config = {"extra": "ignore"}
 
 
 # ── reference audio bootstrap ───────────────────────────────────────────────
@@ -242,7 +303,14 @@ async def _run_f5(text: str, steps: int) -> bytes:
 
 
 # ── FastAPI app ──────────────────────────────────────────────────────────────
-app = FastAPI(title="voice-bridge", version="0.3.0")
+# slowapi limiter keyed by client IP. Rate is configurable via $TTS_RATE_LIMIT.
+# Health probes, cache stats and the static service_down asset are exempt
+# (see decorator list below) — they must remain hammerable by Tailscale probes.
+limiter = Limiter(key_func=get_remote_address, default_limits=[])
+
+app = FastAPI(title="voice-bridge", version="0.4.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 @app.on_event("startup")
@@ -288,10 +356,16 @@ async def _boot() -> None:
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
+    """Liveness probe — always 200 once the process accepts connections.
+
+    Use ``/health/ready`` for readiness (i.e. F5 warmed up). Splitting the two
+    lets watchdogs distinguish "process dead, restart now" (no /health) from
+    "process up but not ready yet" (200 here, 503 on /ready).
+    """
     cache_size_b = sum(p.stat().st_size for p in _CACHE_INDEX.values()
                        if p.exists())
     return {
-        "status": "ok" if _F5_MODEL_OBJ is not None else "degraded",
+        "status": "ok",
         "version": app.version,
         "f5_loaded": _F5_MODEL_OBJ is not None,
         "f5_load_error": _F5_LOAD_ERR,
@@ -311,6 +385,25 @@ async def health() -> dict[str, Any]:
             "piper_fallback": PIPER_URL,
         },
     }
+
+
+@app.get("/health/ready")
+async def health_ready() -> JSONResponse:
+    """Readiness probe — 503 until F5 is loaded *and* warmed up.
+
+    Body is the same regardless of status so callers can parse safely:
+        {"ready": bool, "f5_loaded": bool, "warmup_ms": int|None,
+         "cache_size": int}
+    """
+    ready = _F5_MODEL_OBJ is not None and _WARMUP_MS is not None
+    body = {
+        "ready": ready,
+        "f5_loaded": _F5_MODEL_OBJ is not None,
+        "warmup_ms": _WARMUP_MS,
+        "cache_size": len(_CACHE_INDEX),
+    }
+    code = status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE
+    return JSONResponse(content=body, status_code=code)
 
 
 # ── /tts (cache → F5 primary, Piper fallback, service_down last) ─────────────
@@ -377,11 +470,36 @@ async def _write_cache(cache_key: str, wav_bytes: bytes) -> None:
 
 
 @app.post("/tts")
-async def tts(payload: dict[str, Any]) -> Response:
+@limiter.limit(TTS_RATE_LIMIT)
+async def tts(request: Request) -> Response:
+    """Synthesize one phrase. Pydantic-validated body, per-IP rate limit.
+
+    The slowapi decorator requires ``request: Request`` as a positional arg
+    so it can extract the client IP. We hand-parse the body afterwards so we
+    can keep accepting the legacy ``input`` alias and emit the same custom
+    errors as before.
+    """
     global _CACHE_HITS, _CACHE_MISSES
 
     request_id = str(uuid.uuid4())
-    text = (payload.get("text") or payload.get("input") or "").strip()
+
+    # Parse + validate. We map the legacy "input" key to "text" before handing
+    # the dict to Pydantic so the model schema stays clean.
+    try:
+        raw_body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid JSON body")
+    if not isinstance(raw_body, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+    if "text" not in raw_body and "input" in raw_body:
+        raw_body = {**raw_body, "text": raw_body["input"]}
+    try:
+        payload_model = TtsRequest.model_validate(raw_body)
+    except Exception as exc:
+        # Pydantic ValidationError → 422
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    text = payload_model.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="payload.text is required")
     if len(text) > TTS_TEXT_MAX_CHARS:
@@ -391,13 +509,13 @@ async def tts(payload: dict[str, Any]) -> Response:
             status_code=400,
             detail=f"text too long, max {TTS_TEXT_MAX_CHARS} chars",
         )
-    raw_steps = int(payload.get("steps", F5_DEFAULT_STEPS))
+    raw_steps = int(payload_model.steps)
     steps = max(F5_STEPS_MIN, min(F5_STEPS_MAX, raw_steps))
     if steps != raw_steps:
         _jlog("tts_steps_clamped", request_id=request_id,
               requested=raw_steps, clamped=steps,
               min=F5_STEPS_MIN, max=F5_STEPS_MAX)
-    voice_ref = payload.get("voice_ref")  # accepted; reserved for multi-voice
+    voice_ref = payload_model.voice_ref  # accepted; reserved for multi-voice
 
     started = time.monotonic()
 
@@ -624,10 +742,15 @@ async def transcribe(request: Request) -> Response:
 
 # ── /voice/intent (LiteLLM npc-fast) ────────────────────────────────────────
 @app.post("/voice/intent")
-async def intent(payload: dict[str, Any]) -> JSONResponse:
+async def intent(payload: IntentRequest) -> JSONResponse:
+    """Forward a user prompt to LiteLLM ``npc-fast`` (MLX 7B Q4 alias).
+
+    Pydantic enforces ``text`` non-empty + optional ``context`` dict; FastAPI
+    returns 422 automatically for malformed bodies.
+    """
     request_id = str(uuid.uuid4())
-    text = (payload.get("text") or "").strip()
-    context = payload.get("context")
+    text = payload.text.strip()
+    context = payload.context
     if not text:
         raise HTTPException(status_code=400, detail="payload.text is required")
 
@@ -668,6 +791,209 @@ async def intent(payload: dict[str, Any]) -> JSONResponse:
         _jlog("intent_backend_down", request_id=request_id,
               url=LITELLM_URL, err=type(exc).__name__)
         raise HTTPException(status_code=502, detail=f"LiteLLM unreachable: {exc}")
+
+
+# ── /voice/ws (firmware STT streaming, P1 part11) ───────────────────────────
+def _wrap_pcm16_as_wav(pcm: bytes, sample_rate: int = WS_EXPECTED_SR) -> bytes:
+    """Prepend a 44-byte RIFF/WAVE header to raw PCM16 mono samples.
+
+    whisper.cpp's HTTP server expects a real WAV file; doing the wrap here
+    keeps the firmware payload to pure raw PCM (saves bytes on the wire and
+    makes the ESP32 codec path simpler).
+    """
+    n_samples_bytes = len(pcm)
+    n_channels = 1
+    bits_per_sample = 16
+    byte_rate = sample_rate * n_channels * bits_per_sample // 8
+    block_align = n_channels * bits_per_sample // 8
+    fmt_chunk = struct.pack(
+        "<4sIHHIIHH",
+        b"fmt ", 16, 1, n_channels, sample_rate,
+        byte_rate, block_align, bits_per_sample,
+    )
+    data_chunk = struct.pack("<4sI", b"data", n_samples_bytes) + pcm
+    riff_size = 4 + len(fmt_chunk) + len(data_chunk)
+    header = struct.pack("<4sI4s", b"RIFF", riff_size, b"WAVE")
+    return header + fmt_chunk + data_chunk
+
+
+async def _whisper_transcribe_pcm(pcm: bytes) -> str:
+    """POST a wrapped WAV to whisper.cpp /inference, return transcript text.
+
+    Raises ``RuntimeError`` on transport / parsing failure so the WS handler
+    can decide how to surface the error to the firmware.
+    """
+    wav = _wrap_pcm16_as_wav(pcm)
+    files = {"file": ("clip.wav", wav, "audio/wav")}
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(f"{WHISPER_URL}/inference", files=files)
+    if resp.status_code != 200:
+        raise RuntimeError(f"whisper {resp.status_code}: {resp.text[:200]}")
+    try:
+        data = resp.json()
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"whisper non-JSON response: {exc}")
+    text = (data.get("text") or "").strip()
+    return text
+
+
+async def _intent_complete(text: str) -> Optional[str]:
+    """Call LiteLLM npc-fast and return the assistant content, or None on fail.
+
+    Used by the WS handler in opportunistic mode — if the call fails we still
+    deliver the transcript and close cleanly (firmware can fall back to its
+    local hint/grammar matching).
+    """
+    messages = [{"role": "user", "content": text}]
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.post(
+                f"{LITELLM_URL}/v1/chat/completions",
+                headers={"Authorization": f"Bearer {LITELLM_KEY}"},
+                json={"model": "npc-fast", "messages": messages},
+            )
+        if resp.status_code != 200:
+            _jlog("ws_intent_upstream_err", status=resp.status_code,
+                  body=resp.text[:200])
+            return None
+        body = resp.json()
+        return body.get("choices", [{}])[0].get("message", {}).get("content", "")
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPError) as exc:
+        _jlog("ws_intent_backend_down", err=type(exc).__name__)
+        return None
+
+
+@app.websocket("/voice/ws")
+async def voice_ws(ws: WebSocket) -> None:
+    """STT streaming endpoint for the ESP32 firmware (P1 part11 + C_slice7).
+
+    Protocol (text framing in JSON, payload framing in binary):
+
+        client → server : {"type":"hello","version":1,
+                           "sample_rate":16000,"format":"pcm_s16",
+                           "session_id":"<mac>"}
+        client → server : <binary PCM16 mono frames, any size>...
+        client → server : {"type":"end"}
+        server → client : {"type":"stt","text":"...","final":true}
+        server → client : {"type":"intent","content":"...","model":"npc-fast"}
+                          (only if WS_FORWARD_INTENT and the call succeeded)
+        server closes   : 1000 normal
+
+    Error close codes:
+        1003 unsupported  — bad hello (version/format/sample_rate)
+        1009 message too big — buffer would exceed 30 s of audio
+        1011 internal     — STT pipeline failure
+    """
+    await ws.accept()
+    request_id = str(uuid.uuid4())
+    session_id: Optional[str] = None
+    started = time.monotonic()
+
+    # ── 1. Hello handshake ───────────────────────────────────────────────
+    try:
+        hello_raw = await asyncio.wait_for(ws.receive_text(), timeout=5.0)
+    except (asyncio.TimeoutError, WebSocketDisconnect):
+        _jlog("ws_hello_timeout", request_id=request_id)
+        await ws.close(code=1002, reason="hello timeout")
+        return
+    try:
+        hello = json.loads(hello_raw)
+    except json.JSONDecodeError:
+        _jlog("ws_hello_bad_json", request_id=request_id)
+        await ws.close(code=1003, reason="hello not JSON")
+        return
+
+    if (
+        hello.get("type") != "hello"
+        or int(hello.get("version", 0)) != WS_EXPECTED_VERSION
+        or hello.get("format") != WS_EXPECTED_FORMAT
+        or int(hello.get("sample_rate", 0)) != WS_EXPECTED_SR
+    ):
+        _jlog("ws_hello_unsupported", request_id=request_id, hello=hello)
+        await ws.close(code=1003, reason="unsupported hello")
+        return
+    session_id = hello.get("session_id")
+    _jlog("ws_hello_ok", request_id=request_id, session_id=session_id)
+
+    # ── 2. Streaming loop: binary frames + text "end" ────────────────────
+    buf = bytearray()
+    try:
+        while True:
+            msg = await ws.receive()
+            # FastAPI / Starlette receive() returns a dict with either "bytes"
+            # or "text" populated; closing handshakes are surfaced as a
+            # "websocket.disconnect" type.
+            if msg.get("type") == "websocket.disconnect":
+                _jlog("ws_client_disconnect_midstream",
+                      request_id=request_id, bytes=len(buf))
+                return
+            if (data := msg.get("bytes")) is not None:
+                if len(buf) + len(data) > WS_MAX_BYTES:
+                    _jlog("ws_buffer_overflow", request_id=request_id,
+                          have=len(buf), max=WS_MAX_BYTES)
+                    await ws.close(code=1009, reason="audio > 30 s cap")
+                    return
+                buf.extend(data)
+                continue
+            if (text := msg.get("text")) is not None:
+                try:
+                    ctrl = json.loads(text)
+                except json.JSONDecodeError:
+                    _jlog("ws_ctrl_bad_json", request_id=request_id)
+                    continue
+                if ctrl.get("type") == "end":
+                    break
+                # Unknown control message — log and ignore (forward-compat).
+                _jlog("ws_ctrl_unknown", request_id=request_id,
+                      ctrl_type=ctrl.get("type"))
+    except WebSocketDisconnect:
+        _jlog("ws_disconnect", request_id=request_id, bytes=len(buf))
+        return
+
+    if not buf:
+        _jlog("ws_end_empty", request_id=request_id)
+        await ws.close(code=1003, reason="no audio")
+        return
+
+    # ── 3. Whisper STT on the buffered PCM ──────────────────────────────
+    try:
+        transcript = await _whisper_transcribe_pcm(bytes(buf))
+    except (RuntimeError, httpx.HTTPError) as exc:
+        _jlog("ws_stt_failed", request_id=request_id, err=str(exc))
+        # Best-effort: tell the client and close. Firmware can decide.
+        try:
+            await ws.send_text(json.dumps(
+                {"type": "error", "stage": "stt", "detail": str(exc)[:200]}
+            ))
+        finally:
+            await ws.close(code=1011, reason="stt failed")
+        return
+
+    stt_ms = int((time.monotonic() - started) * 1000)
+    await ws.send_text(json.dumps(
+        {"type": "stt", "text": transcript, "final": True}
+    ))
+    _jlog("ws_stt_done", request_id=request_id, session_id=session_id,
+          bytes=len(buf), text_len=len(transcript), latency_ms=stt_ms)
+
+    # ── 4. Optional intent forward (LiteLLM npc-fast) ────────────────────
+    if WS_FORWARD_INTENT and transcript:
+        intent_started = time.monotonic()
+        content = await _intent_complete(transcript)
+        if content is not None:
+            await ws.send_text(json.dumps(
+                {"type": "intent", "content": content, "model": "npc-fast"}
+            ))
+            _jlog("ws_intent_done", request_id=request_id,
+                  reply_len=len(content),
+                  latency_ms=int((time.monotonic() - intent_started) * 1000))
+
+    # ── 5. Clean close ──────────────────────────────────────────────────
+    try:
+        await ws.close(code=1000, reason="done")
+    except RuntimeError:
+        # Client may have already closed; that's fine.
+        pass
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -8,7 +8,7 @@
 
 ## Goal
 
-Consolidate the project's three inference workloads — Piper TTS (currently on `Tower:8001`), whisper STT (planned, no production today), and LLM inference for the hints engine + NPC dialogue (currently on `KXKM-AI` RTX 4090) — onto a single Mac Studio M3 Ultra (32 cores, 512 GB unified RAM, 7.3 TB disk). Hard cutover over a single weekend; Tower and KXKM-AI's inference roles are retired; their hosts remain for other duties (Suite Numérique on Tower, fine-tuning on KXKM-AI).
+Consolidate the project's three inference workloads — TTS (pivot from Piper to **F5-TTS as primary**, with Piper retained as production fallback on `Tower:8001`), whisper STT (planned, no production today), and LLM inference for the hints engine + NPC dialogue (currently on `KXKM-AI` RTX 4090) — onto a single Mac Studio M3 Ultra (32 cores, 512 GB unified RAM, 7.3 TB disk). Hard cutover over a single weekend; KXKM-AI's inference role is retired (its host stays for fine-tuning); Tower keeps its Piper service alive as the TTS fallback path. The TTS pivot is greenfield-friendly: nothing in production runs F5-TTS today, so we are not breaking existing clients on this host.
 
 ## Non-Goals
 
@@ -20,7 +20,7 @@ Consolidate the project's three inference workloads — Piper TTS (currently on 
 ## Constraints
 
 - **Hard cutover**: one weekend, no parallel run. Rollback path = restart Tower's Piper service + repoint clients back. Documented but never exercised.
-- **French**: voice content stays French (NPC = Zacus voice = `tom-medium`, no English fallback).
+- **French**: voice content stays French (NPC = Zacus voice cloned via F5-TTS from a studio-recorded reference; Piper `tom-medium` remains the fallback voice). No English fallback.
 - **Latency budget**: end-to-end voice command (ESP32 mic → STT → hints LLM → TTS → ESP32 speaker) target ≤ 3 s on M3 Ultra.
 - **LAN-local**: clients reach MacStudio over the home LAN (`192.168.0.x`). Tailscale stays available for remote ops but is not the primary path.
 - **Open-source bias**: prefer open weights / open-source daemons over Apple closed APIs (AVSpeechSynthesizer is rejected for the NPC voice).
@@ -30,45 +30,65 @@ Consolidate the project's three inference workloads — Piper TTS (currently on 
 ## 1. Architecture — "Native daemons + LiteLLM proxy"
 
 ```
+                 ┌─────────────────────────────────────────────┐
+                 │  MacStudio M3 Ultra (LAN: studio.local)         │
+                 │                                             │
+ESP32 / Atelier ─┤  :4000  LiteLLM proxy (OpenAI API)            │
+                 │     │                                        │
+                 │     ├─→ :11434  ollama (LLM tier)             │
+                 │     │       qwen2.5:7b                        │
+                 │     │       qwen2.5:72b-instruct-q8_0         │
+                 │     │                                        │
+                 │     ├─→ :8300   whisper.cpp server            │
+                 │     │       large-v3-turbo (FR multi)         │
+                 │     │                                        │
+                 │     └─→ :8200   voice-bridge (FastAPI)        │
+                 │             /voice/ws (mic stream)            │
+                 │             /tts → F5-TTS local (MLX/Metal)   │
+                 │             timeout > 3 s → fallback Piper    │
+                 │                                             │
+                 │  Three local services managed by launchd       │
+                 └─────────────────────────────────────────────┘
+
                  ┌─────────────────────────────────────┐
-                 │  MacStudio M3 Ultra (LAN: studio.local) │
-                 │                                     │
-ESP32 / Atelier ─┤  :4000  LiteLLM proxy (OpenAI API)    │
-                 │     │                                │
-                 │     ├─→ :11434  ollama (LLM tier)     │
-                 │     │       qwen2.5:7b                │
-                 │     │       qwen2.5:72b-instruct-q8_0 │
-                 │     │                                │
-                 │     ├─→ :8200   whisper.cpp server    │
-                 │     │       large-v3-turbo (FR multi) │
-                 │     │                                │
-                 │     └─→ :8001   Piper TTS server      │
-                 │             tom-medium / siwis / upmc │
-                 │                                     │
-                 │  All four services managed by launchd  │
+                 │  Tower (192.168.0.120) — fallback only  │
+                 │     :8001  Piper TTS server             │
+                 │            tom-medium / siwis / upmc    │
                  └─────────────────────────────────────┘
 ```
 
-Mirror of the existing `Tower` pattern (LiteLLM in front, Piper underneath) so client contracts stay stable: clients keep talking OpenAI-compatible API on a single endpoint and don't care which model handles a request.
+Mirror of the existing `Tower` pattern (LiteLLM in front, model service underneath) so client contracts stay stable: clients keep talking OpenAI-compatible API on a single endpoint and don't care which TTS backend handles a request. The voice-bridge owns the F5 → Piper fallback decision; clients see a single `/tts` URL.
 
 ## 2. Model choices
 
-### 2.1 TTS — Piper, status quo
+### 2.1 TTS — F5-TTS primary, Piper fallback
+
+Decision recorded 2026-05-03 after qualité/latence comparison: Piper FR voices (tom-medium / siwis / upmc) are intelligible but flat in prosody and immediately recognisable as TTS. F5-TTS is current SOTA on prosodic naturalness, supports zero-shot voice cloning from a 5–10 s reference clip, and ships under MIT licence. M3 Ultra (32 cores, 512 GB unified RAM, Metal 4) handles F5-TTS comfortably; latency lands at 1–2 s for short phrases, which is narratively coherent — the « Professeur Zacus » NPC can plausibly *réfléchir* before speaking.
+
+**Primary (MacStudio, local)**:
+
+| Component | Artifact | Use |
+|-----------|----------|-----|
+| F5-TTS engine | `f5-tts-mlx` if available on M3 Ultra (Metal-accelerated), else upstream `f5-tts` (PyTorch) | Local inference daemon |
+| F5-TTS base model | Pre-trained checkpoint (multilingual, FR-capable) | Zero-shot synthesis |
+| `zacus_reference.wav` | 5–10 s studio recording of the canonical Zacus voice-over (to be recorded in P2 prereq) | Voice cloning reference |
+
+**Fallback (Tower:8001, kept alive)**:
 
 | Voice | Model file | Use |
 |-------|------------|-----|
-| `tom-medium` | `fr_FR-tom-medium.onnx` | Zacus NPC (canonical) |
-| `siwis` | `fr_FR-siwis-medium.onnx` | Auxiliary NPCs |
-| `upmc` | `fr_FR-upmc-medium.onnx` | Auxiliary NPCs |
+| `tom-medium` | `fr_FR-tom-medium.onnx` | Zacus NPC fallback voice |
+| `siwis` | `fr_FR-siwis-medium.onnx` | Auxiliary NPC fallback |
+| `upmc` | `fr_FR-upmc-medium.onnx` | Auxiliary NPC fallback |
 
-`.onnx` files copied verbatim from `clems@192.168.0.120:/path/to/piper/models/` to MacStudio. No retraining, no swap. Continuity wins.
+Tower's existing Piper service stays untouched (no `.onnx` migration to MacStudio for the primary path). The voice-bridge on MacStudio routes to Piper Tower when F5-TTS exceeds the latency budget or returns an error — see §4 for routing details.
 
 ### 2.2 STT — whisper.cpp `large-v3-turbo`
 
 - Quantization: Q5_K (~1.5 GB on disk, fits the AppleNeural Engine + Metal GPU pipeline).
 - French-multilingual model (not the `.en` variant).
 - Latency budget: ≤ 400 ms on a 5 s clip on M3 Ultra (verified via `whisper.cpp/main -m large-v3-turbo.bin -f sample.wav -l fr` benchmark).
-- Server: `whisper.cpp/server` with HTTP `/inference` endpoint on `:8200`.
+- Server: `whisper.cpp/server` with HTTP `/inference` endpoint on `:8300` (voice-bridge consumes it; `:8200` is the public client port owned by the voice-bridge for `/voice/ws` and `/tts`).
 
 ### 2.3 LLM — dual-tier Qwen 2.5
 
@@ -79,7 +99,31 @@ Mirror of the existing `Tower` pattern (LiteLLM in front, Piper underneath) so c
 
 Both pulled via `ollama pull`. LiteLLM routes on model name: clients ask for `npc-fast` (alias to 7B) or `hints-deep` (alias to 72B).
 
-Both tiers fit comfortably in 512 GB unified RAM with headroom for whisper + Piper + OS (~85 GB total active inference, ~427 GB free).
+Both tiers fit comfortably in 512 GB unified RAM with headroom for whisper + F5-TTS + OS (~87 GB total active inference, ~425 GB free; F5-TTS adds ~1–2 GB resident).
+
+### 2.4 LiteLLM aliases
+
+LiteLLM `config.yaml` exposes the TTS routing duality as named aliases so clients pick *intent*, not *backend*:
+
+| Alias | Backend | Endpoint |
+|-------|---------|----------|
+| `npc-fast` | Ollama Qwen 2.5 7B (local) | `http://localhost:11434` |
+| `hints-deep` | Ollama Qwen 2.5 72B (local) | `http://localhost:11434` |
+| `stt-fr` | whisper.cpp large-v3-turbo (local) | `http://localhost:8300/inference` |
+| `tts-zacus-primary` | F5-TTS local with `zacus_reference.wav` clone | `http://localhost:8200/tts` (voice-bridge) |
+| `tts-zacus-fallback` | Piper Tower (`tom-medium`) | `http://192.168.0.120:8001/tts` |
+
+The voice-bridge (§3) is the single `/tts` entrypoint clients hit; LiteLLM aliases above are mostly bookkeeping for observability and for the rare client that wants to force a specific backend (smoke tests, A/B comparisons).
+
+### 2.5 Voice-bridge `/tts` routing
+
+A FastAPI service co-located on MacStudio listens on `:8200/tts` and owns the F5 → Piper fallback decision:
+
+- **Default route**: F5-TTS local (Metal/MLX-accelerated on M3 Ultra GPU).
+- **Timeout policy**: if F5-TTS does not return audio within **3 s** (synthesis start to first byte), the request is automatically reissued against `tts-zacus-fallback` (Piper Tower:8001).
+- **Hard error**: if F5-TTS raises (OOM, model not loaded, exception), same fallback path.
+- **Structured logging**: every `/tts` request emits a JSON log line including `tts_backend_used` ∈ {`f5`, `piper_fallback`}, `latency_ms`, `phrase_len`, `request_id`. Soak (P3) consumes these logs to compute the fallback ratio.
+- **Cache (optional, post-cutover)**: voice-bridge may cache F5 outputs by `(phrase_hash, reference_hash)` to amortize repeated NPC lines — out of scope for the cutover itself.
 
 ## 3. Network
 
@@ -88,7 +132,8 @@ Both tiers fit comfortably in 512 GB unified RAM with headroom for whisper + Pip
 - **Tailscale stays installed** for remote ops, not for primary client traffic.
 - Existing client URLs:
   - Voice WS: `ws://192.168.0.120:8200/voice/ws` → `ws://192.168.0.150:8200/voice/ws`
-  - Piper TTS: `http://192.168.0.120:8001/tts` → `http://192.168.0.150:8001/tts`
+  - TTS: `http://192.168.0.120:8001/tts` → `http://192.168.0.150:8200/tts` (voice-bridge: F5 primary, Piper Tower fallback handled server-side)
+  - Piper Tower stays reachable at `http://192.168.0.120:8001/tts` for the fallback path and for direct smoke tests
   - Hints engine: KXKM-AI URL → `http://192.168.0.150:4000/v1/chat/completions` (LiteLLM proxy)
 
 ---
@@ -97,13 +142,13 @@ Both tiers fit comfortably in 512 GB unified RAM with headroom for whisper + Pip
 
 | Phase | Scope | Acceptance | Effort |
 |-------|-------|------------|--------|
-| **P0** | Provision MacStudio (ollama, whisper.cpp, Piper, LiteLLM, launchd plists, static IP) | All four services start on `launchd reload`, respond to `curl localhost:<port>/<probe>`. Models downloaded (~85 GB total). | 3-5 h |
-| **P1** | Smoke-test each service in isolation. Compare outputs to Tower / KXKM-AI equivalents on a fixed prompt set | TTS: WAV byte-identical for `tom-medium` ; STT: same transcript on a 10-clip FR set ; LLM: hints engine response within ±10% latency of KXKM-AI baseline | 1-2 h |
-| **P2** | Hard cutover (Saturday): repoint all clients to `192.168.0.150`, restart, smoke-test E2E | ESP32_ZACUS Voice WS connects ; atelier hints query resolves ; NPC speaks via TTS ; full puzzle voice loop ≤ 3 s end-to-end | 2-3 h |
-| **P3** | Soak (Sunday): 24 h running, watch logs for crashes / OOM / latency creep | No service crash, no OOM, p95 latency stable at < 2 s | 24 h passive |
-| **P4** | Decommission Tower Piper service + KXKM-AI ollama service. Update root CLAUDE.md Infrastructure section. Document the rollback path. | Tower's port 8001 returns connection refused ; KXKM-AI's ollama process stopped ; CLAUDE.md mentions MacStudio as primary | 1 h |
+| **P0** | Provision MacStudio (ollama, whisper.cpp, voice-bridge, LiteLLM, launchd plists, static IP) | All local services start on `launchd reload`, respond to `curl localhost:<port>/<probe>`. LLM/STT models downloaded (~83 GB total). | 3-5 h |
+| **P1** | Install F5-TTS on MacStudio (`pip install f5-tts` or `mlx_audio` if MLX port available), download base checkpoint (~1–2 GB), smoke-test on a fixed FR phrase against a generic reference clip. Smoke-test STT (10-clip FR set) and LLM (hints engine response within ±10% latency of KXKM-AI baseline). | F5-TTS produces audible FR audio for the smoke phrase ; STT transcript stable ; LLM latency within budget ; voice-bridge `/tts` returns audio with `tts_backend_used=f5` | 2-3 h |
+| **P2** | **Prereq**: record `zacus_reference.wav` (≤10 s, canonical voice-off du jeu, studio quality). Hard cutover (Saturday): wire reference into voice-bridge, repoint all clients to `192.168.0.150:8200/tts`, restart, smoke-test E2E. Tower's Piper service stays running as fallback. | Reference audio committed to repo (or secrets store) ; ESP32_ZACUS Voice WS connects ; atelier hints query resolves ; NPC speaks via F5 with cloned Zacus voice ; forced-fallback test (kill F5 process) routes to Piper Tower ; full puzzle voice loop ≤ 3 s end-to-end | 3-4 h |
+| **P3** | Soak (Sunday): 24 h running, watch logs for crashes / OOM / latency creep / fallback rate | No service crash, no OOM, p95 latency stable at < 2 s, **Piper fallback ratio < 5 %** measured from voice-bridge structured logs (`tts_backend_used`) | 24 h passive |
+| **P4** | Decommission KXKM-AI ollama service. **Keep Tower's Piper service running** (it is now the production TTS fallback). Update root CLAUDE.md Infrastructure section. Document the rollback path. | KXKM-AI's ollama process stopped ; Tower's port 8001 still responds (intentional) ; CLAUDE.md mentions MacStudio F5-TTS primary + Tower Piper fallback | 1 h |
 
-**Total wall-clock**: P0 + P1 = pre-cutover prep (5-7 h, can spread across the week). P2 + P3 + P4 = cutover weekend (3-4 h active + 24 h soak).
+**Total wall-clock**: P0 + P1 = pre-cutover prep (5-8 h, can spread across the week). P2 + P3 + P4 = cutover weekend (4-5 h active + 24 h soak).
 
 ## 5. Risks + rollback
 
@@ -114,19 +159,25 @@ Both tiers fit comfortably in 512 GB unified RAM with headroom for whisper + Pip
 | ESP32 firmware caches old IP via mDNS | Medium | Use static IP, update NVS WiFi config explicitly |
 | whisper-large-v3-turbo FR accuracy regression vs current solution | Low (no current STT in prod) | This is greenfield — no baseline to regress |
 | Network change breaks the VOICE_WS init order on ESP32 | Already fixed this session (network_boot_deferred guard) | Verify the guard remains active when new IP is configured |
-| 24 h soak surfaces OOM | Low (85 GB / 512 GB) | macOS Activity Monitor + watch ollama process VSZ |
+| 24 h soak surfaces OOM | Low (87 GB / 512 GB) | macOS Activity Monitor + watch ollama / F5 process VSZ |
+| F5-TTS checkpoint footprint (~1–2 GB) saturates disk | Negligible (1.1 TiB free on MacStudio) | Confirm `df -h` headroom in P0 |
+| F5-TTS latency variability (1–5 s on cold model, GPU contention) | Medium | Voice-bridge auto-fallback to Piper Tower at 3 s timeout ; warm model with periodic keep-alive synth ; soak measures p95 |
+| Quality drift between F5 (cloned Zacus) and Piper (`tom-medium`) audible to players when fallback fires | Medium (timbre + prosody differ) | P3 measures fallback ratio < 5 % ; if exceeded, investigate root cause (model load, network) before hiding the drift behind smoothing |
+| F5-TTS reference audio quality drives clone fidelity | Medium | Record `zacus_reference.wav` in studio conditions (clean mic, no reverb, full prosodic range) — P2 prereq |
 
-**Rollback procedure**: stop MacStudio's launchd services, re-enable Tower's Piper service (`systemctl start piper-tts`), re-enable KXKM-AI's ollama service, repoint clients back to `192.168.0.120` IP. Total rollback ≤ 30 min if practiced.
+**Rollback procedure**: stop MacStudio's launchd services (F5-TTS, voice-bridge, ollama, whisper, LiteLLM), re-enable KXKM-AI's ollama service, repoint clients back to `192.168.0.120` IP for TTS (Tower Piper still up — already the fallback) and to KXKM-AI for hints. Total rollback ≤ 30 min if practiced.
 
 ---
 
-## 6. Acceptance gates before retiring Tower / KXKM-AI
+## 6. Acceptance gates before retiring KXKM-AI (Tower Piper stays up as fallback)
 
-- [ ] All four MacStudio daemons green for ≥ 24 h continuous (P3 soak)
+- [ ] All MacStudio daemons (F5-TTS, voice-bridge, ollama, whisper, LiteLLM) green for ≥ 24 h continuous (P3 soak)
 - [ ] ESP32_ZACUS Voice WS reconnects after firmware reboot, no panic
 - [ ] Atelier `/hints/ask` resolves with response from `qwen2.5:72b` via LiteLLM
-- [ ] NPC dialogue test (`tom-medium` voice) byte-identical to Tower output on canonical phrase set
+- [ ] NPC dialogue test: F5-TTS produces audibly Zacus-like voice from `zacus_reference.wav` on the canonical phrase set (subjective listening pass + waveform sanity check)
+- [ ] Forced-fallback drill: kill F5-TTS process, confirm voice-bridge serves audio from Piper Tower with `tts_backend_used=piper_fallback` in logs
 - [ ] Voice loop p95 latency ≤ 3 s (mic → STT → LLM → TTS → speaker)
+- [ ] Piper fallback ratio < 5 % over 24 h soak window
 - [ ] Root `CLAUDE.md` Infrastructure section updated
 - [ ] Rollback drill executed once (timed) before declaring cutover final
 
@@ -142,7 +193,7 @@ Both tiers fit comfortably in 512 GB unified RAM with headroom for whisper + Pip
 
 None at design stage. All decisions resolved during 2026-05-03 brainstorm:
 - Architecture: native daemons + LiteLLM ✅
-- TTS: Piper status quo (3 voices) ✅
+- TTS: F5-TTS local primary (cloned Zacus voice) + Piper Tower fallback ✅
 - STT: whisper-large-v3-turbo Q5_K ✅
 - LLM: dual-tier Qwen 2.5 7B + 72B Q8 ✅
 - Network: LAN, static IP `192.168.0.150` ✅

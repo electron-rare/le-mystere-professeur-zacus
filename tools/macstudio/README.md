@@ -231,6 +231,42 @@ vert avec un `::warning::` (pas de faux-positif rouge sur le repo). Si le
 voice-bridge répond mais que `smoke_e2e.py` exit `1`, le job apparaît rouge dans
 les logs mais n'échoue pas le commit.
 
+## Prometheus / Grafana
+
+Voice-bridge usage counters (`/usage/stats`) are exported as a Prometheus
+textfile every minute by
+[`voice-bridge/usage_to_prom.sh`](voice-bridge/usage_to_prom.sh) (cron
+`* * * * *` on studio). Output: `/Users/clems/textfile_collector/voice_bridge_usage.prom`.
+Dashboard reference: [`voice-bridge/grafana_voice_dashboard.md`](voice-bridge/grafana_voice_dashboard.md).
+
+Sync local → remote:
+
+```bash
+scp tools/macstudio/voice-bridge/usage_to_prom.sh studio:~/voice-bridge/usage_to_prom.sh
+ssh studio 'chmod +x ~/voice-bridge/usage_to_prom.sh'
+```
+
+Idempotent crontab line (already installed; re-running is safe):
+
+```cron
+* * * * * /Users/clems/voice-bridge/usage_to_prom.sh >> /Users/clems/voice-bridge-usage-prom.log 2>&1
+```
+
+> ⚠️ **Action utilisateur requise** — `node_exporter` est lancé sans
+> `--collector.textfile.directory`. Le fichier `.prom` est généré mais
+> n'apparaît pas sur `:9100/metrics`. Pour activer, modifier la ligne
+> `@reboot` du crontab (ou la session `node_exporter` en cours) :
+>
+> ```cron
+> @reboot /Users/clems/monitoring/node_exporter --web.listen-address=:9100 \
+>   --collector.textfile.directory=/Users/clems/textfile_collector/ \
+>   >> /Users/clems/monitoring/node_exporter.out.log 2>> /Users/clems/monitoring/node_exporter.err.log &
+> ```
+>
+> Puis `pkill node_exporter` pour qu'il se relance avec le nouveau flag
+> via le watchdog (ou relancer manuellement). Vérification :
+> `curl -s http://studio:9100/metrics | grep voice_bridge_`.
+
 ## Network
 
 Studio is multi-homed. The `192.168.0.150` IP previously hardcoded in some

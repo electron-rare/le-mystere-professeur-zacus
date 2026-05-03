@@ -33,18 +33,23 @@ Frontend, desktop, and tooling commands live in their nested CLAUDE.md.
 ```
 YAML scenario → compile_runtime3.py → Runtime 3 IR → ESP32 / Web player
                                                     ↓
-                                              Voice bridge → Piper TTS (Tower:8001)
+                                              Voice bridge :8200 (MacStudio)
+                                                ↳ /tts → F5-TTS-MLX (cache → F5 → safe wav)
+                                                ↳ /voice/intent → LiteLLM npc-fast (MLX 7B Q4)
+                                                ↳ /voice/transcribe → whisper.cpp :8300
                                                     ↓
-                                              Hints engine → /hints/ask
+                                              Hints engine → /hints/ask (LLM rewrite via hints-deep MLX 32B Q4)
 ```
 
 Key surfaces:
 - **Scenario IR**: `game/scenarios/zacus_v2.yaml` → `tools/scenario/compile_runtime3.py` → portable Runtime 3 IR. Contract: `specs/ZACUS_RUNTIME_3_SPEC.md`.
 - **Authoring**: `frontend-v3/` (pnpm monorepo: `apps/atelier/` Scratch-like studio + `apps/dashboard/` game-master live view).
 - **Firmware**:
-  - `ESP32_ZACUS/` submodule — Freenove ESP32-S3 master (NPC engine, voice pipeline, vision/QR, media manager).
+  - `ESP32_ZACUS/` submodule — Freenove ESP32-S3 master (NPC engine, voice pipeline, vision/QR, media manager). Branche `feat/idf-migration` en cours (port Arduino → ESP-IDF 5.4).
   - `PLIP_FIRMWARE/` — retro telephone annex (ES8388 dev kit bringup, Si3210 PCB target). REST endpoint consumed by the master ESP32.
-- **Voice / NPC**: Piper TTS on Tower:8001 (zacus voice = tom-medium). NPC phrases in `game/scenarios/npc_phrases.yaml`. MP3 pool generator: `tools/tts/generate_npc_pool.py`.
+- **Voice / NPC**: F5-TTS-MLX in-process sur MacStudio (`studio:8200`), voix Zacus clonée via `~/zacus_reference.wav`. Pré-rendu via `tools/tts/generate_npc_pool.py --backend f5`. Service down WAV hardcoded en graceful degradation. NPC phrases : `game/scenarios/npc_phrases.yaml`.
+- **Hints engine**: `tools/hints/server.py` FastAPI (LLM rewrite via LiteLLM `hints-deep`, anti-cheat, adaptive level, safety filter `game/scenarios/hints_safety.yaml`).
+- **Inference stack**: voir `tools/macstudio/README.md` — MLX-LM (npc + hints), whisper.cpp, F5-TTS, LiteLLM proxy `:4000`. Configs versionnées dans `tools/macstudio/`.
 - **MCP hardware**: `tools/dev/mcp_hardware_server.py` (stdio, 6 tools).
 - **Desktop hub**: `desktop/` (Electron, macOS, bundles V3 frontends, talks USB serial).
 
@@ -76,8 +81,9 @@ Key surfaces:
 
 ## Infrastructure
 
-- **Tower** (`clems@192.168.0.120`): Piper TTS FR on `:8001` (voices: tom-medium / siwis / upmc).
-- **KXKM-AI** (`kxkm@kxkm-ai` via Tailscale): RTX 4090, GPU inference.
+- **MacStudio** (`ssh studio`, M3 Ultra 512 GB) : **stack inférence Zacus complète** — MLX-LM (`npc-fast` 7B Q4 :8501, `hints-deep` 32B Q4 :8500), whisper.cpp `large-v3-turbo-q5_0` :8300, F5-TTS-MLX in-process via voice-bridge :8200 (cache disque + watchdog `*/2` + `service_down.wav` graceful), LiteLLM proxy :4000. Voir `tools/macstudio/README.md`.
+- **Tower** (`clems@192.168.0.120`) : Suite Numérique, n8n, LiteLLM Tower (legacy). **Plus dans la chaîne live Zacus** ; container Docker `zacus-tts-piper` survit pour batch historique uniquement (voix EN-only, FR à déployer si besoin).
+- **KXKM-AI** (`kxkm@kxkm-ai` via Tailscale) : RTX 4090, GPU inference (fine-tuning, plus utilisé en runtime).
 - SSH is key-based only — never `sshpass`.
 
 ## Language

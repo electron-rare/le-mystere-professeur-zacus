@@ -63,8 +63,18 @@ export function HintsAdaptivePanel(props: Props) {
   const opts: Parameters<typeof useHintsEngine>[0] = {};
   if (props.baseUrl !== undefined) opts.baseUrl = props.baseUrl;
   if (props.pollMs !== undefined) opts.pollMs = props.pollMs;
-  const { sessions, config, nowMs, loading, error, refetch, resetSession, baseUrl, pollMs } =
-    useHintsEngine(opts);
+  const {
+    sessions,
+    config,
+    nowMs,
+    loading,
+    error,
+    refetch,
+    resetSession,
+    baseUrl,
+    pollMs,
+    transport,
+  } = useHintsEngine(opts);
 
   // Local clock for cooldown countdowns between polls (1 Hz).
   const [tickMs, setTickMs] = useState<number>(() => Date.now());
@@ -83,17 +93,35 @@ export function HintsAdaptivePanel(props: Props) {
 
   return (
     <section className="w-72 p-4 border-l border-white/10 overflow-y-auto">
-      <header className="flex items-center justify-between mb-3">
+      <header className="flex items-center justify-between mb-3 gap-2">
         <h2 className="text-xs font-semibold text-white/60 uppercase tracking-wide">
           Hints adaptatifs
         </h2>
-        <button
-          onClick={() => void refetch()}
-          className="text-[10px] px-2 py-0.5 rounded-full bg-[#2c2c2e] hover:bg-[#3a3a3c] text-white/70"
-          title="Recharger maintenant"
-        >
-          {loading ? '…' : '↻'}
-        </button>
+        <div className="flex items-center gap-1.5">
+          <span
+            className={`text-[9px] px-1.5 py-0.5 rounded-full uppercase tracking-wide font-mono ${
+              transport === 'sse'
+                ? 'bg-green-500/20 text-green-300'
+                : 'bg-red-500/20 text-red-300'
+            }`}
+            title={
+              transport === 'sse'
+                ? 'Flux SSE en direct (/hints/events)'
+                : `Polling REST toutes les ${Math.round(pollMs / 1000)} s`
+            }
+          >
+            {transport === 'sse'
+              ? '\u{1F7E2} SSE live'
+              : `\u{1F534} polling ${Math.round(pollMs / 1000)}s`}
+          </span>
+          <button
+            onClick={() => void refetch()}
+            className="text-[10px] px-2 py-0.5 rounded-full bg-[#2c2c2e] hover:bg-[#3a3a3c] text-white/70"
+            title="Recharger maintenant"
+          >
+            {loading ? '…' : '↻'}
+          </button>
+        </div>
       </header>
 
       <div className="text-[10px] text-white/40 mb-3 leading-relaxed">

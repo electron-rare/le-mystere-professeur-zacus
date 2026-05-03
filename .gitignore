@@ -93,3 +93,6 @@ todos/
 
 # Generated TTS pool artefacts (reproducible from npc_phrases.yaml + voice ref)
 hotline_tts/
+
+# Hardcoded TTS assets (not generated)
+!tools/macstudio/voice-bridge/service_down.wav

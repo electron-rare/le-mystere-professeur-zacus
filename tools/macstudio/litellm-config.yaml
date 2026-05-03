@@ -8,7 +8,23 @@ model_list:
       model: ollama/qwen2.5:7b-instruct-q8_0
       api_base: http://localhost:11434
 
+  # hints-deep: MLX-LM 32B Q4 (~4.4 tok/s, 18 GB RSS, FR-fluent, Zacus tone OK)
+  # Replaces ollama 72B Q8 (~2 tok/s, 91 GB) — see P1 part5 bench.
   - model_name: hints-deep
+    litellm_params:
+      model: openai/mlx-community/Qwen2.5-32B-Instruct-4bit
+      api_base: http://localhost:8500/v1
+      api_key: dummy
+
+  # MLX 32B Q4 explicit alias (same backend as hints-deep)
+  - model_name: hints-mlx-32b
+    litellm_params:
+      model: openai/mlx-community/Qwen2.5-32B-Instruct-4bit
+      api_base: http://localhost:8500/v1
+      api_key: dummy
+
+  # Archived ollama 72B route — kept as fallback / quality sanity check
+  - model_name: hints-ollama-72b
     litellm_params:
       model: ollama/qwen2.5:72b-instruct-q8_0
       api_base: http://localhost:11434

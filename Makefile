@@ -71,9 +71,9 @@ playtest:
 		--snapshot game/scenarios/playtests/snapshots/zacus_v3_60min_tech.snapshot.json
 
 hints-serve:
-	uv run --with fastapi --with uvicorn --with pyyaml --with pydantic --with httpx \
+	uv run --with fastapi --with uvicorn --with pyyaml --with pydantic --with httpx --with sse-starlette \
 		uvicorn tools.hints.server:app --reload --port 8300
 
 hints-test:
-	uv run --with fastapi --with uvicorn --with pyyaml --with pydantic --with pytest --with httpx \
+	uv run --with fastapi --with uvicorn --with pyyaml --with pydantic --with pytest --with httpx --with sse-starlette \
 		pytest tests/hints/ -v

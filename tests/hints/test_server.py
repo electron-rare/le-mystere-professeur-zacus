@@ -887,3 +887,135 @@ def test_adaptive_unknown_profile_falls_back_to_mixed(client, real_puzzle_id, cl
     body = r.json()
     assert body["group_profile_used"] == "MIXED"
     assert body["level_floor_adaptive"] == 0
+
+
+# ---------------------------------------------------------------------------
+# P5 — SSE broadcast plumbing
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def captured_events(monkeypatch):
+    """Replace `_broadcast_event` with a capture list.
+
+    Returns a list of `(event_type, payload)` tuples observed during the
+    test. Avoids exercising real asyncio queue plumbing — those are covered
+    by the dedicated subscriber-cleanup test below.
+    """
+    events: List[Tuple[str, Dict[str, Any]]] = []
+
+    def fake_broadcast(event_type: str, payload: Dict[str, Any]) -> int:
+        events.append((event_type, dict(payload)))
+        return 1
+
+    monkeypatch.setattr(server_module, "_broadcast_event", fake_broadcast)
+    return events
+
+
+def test_sse_broadcast_on_commit(client, real_puzzle_id, captured_events):
+    """A successful /hints/ask must trigger a `hint_served` broadcast."""
+    r = client.post(
+        "/hints/ask?rewrite=false",
+        json={"puzzle_id": real_puzzle_id, "level": 1, "session_id": "sse-commit"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["refused"] is False
+
+    served = [e for e in captured_events if e[0] == "hint_served"]
+    assert len(served) == 1, f"expected 1 hint_served, got {captured_events!r}"
+    payload = served[0][1]
+    assert payload["session_id"] == "sse-commit"
+    assert payload["puzzle_id"] == real_puzzle_id
+    assert payload["level_served"] == 1
+    assert payload["count"] == 1
+    assert payload["score_penalty"] == 50
+    assert payload["total_penalty"] == 50
+    assert "cooldown_until_ms" in payload
+
+
+def test_sse_broadcast_on_puzzle_start(client, real_puzzle_id, captured_events):
+    """POST /hints/puzzle_start must trigger a `puzzle_start` broadcast.
+
+    Idempotent calls (already-started puzzle, no force) must NOT re-broadcast,
+    so the dashboard isn't spammed by retry-attach loops.
+    """
+    sid = "sse-puzzle-start"
+
+    r1 = client.post(
+        "/hints/puzzle_start",
+        json={"session_id": sid, "puzzle_id": real_puzzle_id},
+    )
+    assert r1.status_code == 200, r1.text
+
+    starts = [e for e in captured_events if e[0] == "puzzle_start"]
+    assert len(starts) == 1, f"expected 1 puzzle_start, got {captured_events!r}"
+    p = starts[0][1]
+    assert p["session_id"] == sid
+    assert p["puzzle_id"] == real_puzzle_id
+    assert p["forced"] is False
+    assert p["puzzle_started_at_ms"] > 0
+
+    # Second idempotent call — must NOT re-broadcast
+    captured_events.clear()
+    r2 = client.post(
+        "/hints/puzzle_start",
+        json={"session_id": sid, "puzzle_id": real_puzzle_id},
+    )
+    assert r2.status_code == 200
+    assert [e for e in captured_events if e[0] == "puzzle_start"] == []
+
+    # force=True must re-broadcast
+    r3 = client.post(
+        "/hints/puzzle_start",
+        json={"session_id": sid, "puzzle_id": real_puzzle_id, "force": True},
+    )
+    assert r3.status_code == 200
+    forced = [e for e in captured_events if e[0] == "puzzle_start"]
+    assert len(forced) == 1
+    assert forced[0][1]["forced"] is True
+
+
+def test_sse_subscribers_cleanup_on_disconnect():
+    """Adding 2 subscribers, removing 1, must leave exactly 1 in the registry.
+
+    Live SSE streaming over `TestClient` is fragile (anyio cancellation
+    semantics differ from httpx in real ASGI), so we exercise the registry
+    + broadcast directly. This is the contract the endpoint relies on.
+    """
+    # Snapshot then clear so the test is hermetic regardless of prior state.
+    saved = list(server_module._subscribers)
+    server_module._subscribers.clear()
+    try:
+        q1: asyncio.Queue = asyncio.Queue(maxsize=8)
+        q2: asyncio.Queue = asyncio.Queue(maxsize=8)
+        server_module._subscribers.append(q1)
+        server_module._subscribers.append(q2)
+        assert len(server_module._subscribers) == 2
+
+        delivered = server_module._broadcast_event(
+            "test", {"message": "ping ééàà"},
+        )
+        assert delivered == 2
+        assert q1.qsize() == 1
+        assert q2.qsize() == 1
+
+        # Sanity: diacritics survived the in-memory hop
+        env = q1.get_nowait()
+        assert env["type"] == "test"
+        assert "ééàà" in env["payload"]["message"]
+        assert isinstance(env["ts_ms"], int)
+
+        # Simulate a disconnect on q1 (the endpoint's `finally` block does this)
+        server_module._subscribers.remove(q1)
+        assert len(server_module._subscribers) == 1
+        assert server_module._subscribers[0] is q2
+
+        # New broadcast: only q2 receives
+        delivered = server_module._broadcast_event(
+            "test", {"after": "disconnect"},
+        )
+        assert delivered == 1
+        assert q2.qsize() == 2  # one from before + one new
+    finally:
+        server_module._subscribers.clear()
+        server_module._subscribers.extend(saved)

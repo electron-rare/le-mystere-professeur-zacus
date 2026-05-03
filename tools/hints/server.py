@@ -36,6 +36,11 @@ Endpoints:
   - GET  /hints/coverage                — per-puzzle level coverage audit
   - GET  /hints/sessions                — admin: list active sessions/state
   - DELETE /hints/sessions/{session_id} — admin: reset session state
+  - GET  /hints/events                  — SSE stream of live events (P5):
+                                          hint_served, hint_refused, puzzle_start,
+                                          attempt_failed, session_reset.
+  - GET  /hints/events/test             — admin: trigger a synthetic broadcast
+                                          (X-Admin-Key required when configured).
 
 Run:
   uv run --with fastapi --with uvicorn --with pyyaml --with pydantic \
@@ -79,6 +84,7 @@ import httpx
 import yaml
 from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, Field, conint
+from sse_starlette.sse import EventSourceResponse
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +128,62 @@ DEFAULT_PENALTY_L2 = 100
 DEFAULT_PENALTY_L3 = 200
 
 LOG = logging.getLogger("hints.server")
+
+
+# ---------------------------------------------------------------------------
+# P5 — SSE broadcast plumbing (module-level so SessionTracker hooks reach it)
+# ---------------------------------------------------------------------------
+
+# Allowed event types — kept narrow so the dashboard's switch/case stays sane.
+SSE_EVENT_TYPES = (
+    "hint_served",
+    "hint_refused",
+    "puzzle_start",
+    "attempt_failed",
+    "session_reset",
+    "test",
+)
+SSE_QUEUE_MAXSIZE = 128
+SSE_HEARTBEAT_S = 15
+
+# Subscribers are plain asyncio.Queue instances. New queue per /hints/events
+# connection; removed on disconnect or full-queue drop.
+_subscribers: List["asyncio.Queue[Dict[str, Any]]"] = []
+
+
+def _broadcast_event(event_type: str, payload: Dict[str, Any]) -> int:
+    """Push an event to every active SSE subscriber (best-effort, non-blocking).
+
+    The envelope mirrors what the dashboard expects:
+        {"type": <event_type>, "ts_ms": <wall clock ms>, "payload": <dict>}
+
+    Best-effort: if a subscriber's queue is full, the event is dropped FOR
+    THAT SUBSCRIBER ONLY (queue stays in the list — the slow consumer just
+    misses one event). Returns the number of queues that accepted the event.
+
+    Safe to call from sync request handlers — `Queue.put_nowait` does not
+    require an event loop, only that the queue was created on one.
+    """
+    if event_type not in SSE_EVENT_TYPES:
+        LOG.warning("broadcast: unknown event_type=%r — dropping", event_type)
+        return 0
+    envelope = {
+        "type": event_type,
+        "ts_ms": int(time.time() * 1000),
+        "payload": payload,
+    }
+    delivered = 0
+    for queue in list(_subscribers):  # copy: subscribers may mutate concurrently
+        try:
+            queue.put_nowait(envelope)
+            delivered += 1
+        except asyncio.QueueFull:
+            LOG.warning(
+                "broadcast: subscriber queue full — dropping event=%s", event_type,
+            )
+        except Exception as exc:  # noqa: BLE001 — broadcast must never raise
+            LOG.warning("broadcast: unexpected error %s — dropping event", exc)
+    return delivered
 
 
 # ---------------------------------------------------------------------------
@@ -221,8 +283,22 @@ class SessionTracker:
         clock — though current default is to NOT force).
         """
         entry = self._ensure(session_id, puzzle_id)
+        changed = False
         if entry.get("puzzle_started_at_ms", 0) == 0 or force:
             entry["puzzle_started_at_ms"] = self.clock.now_ms()
+            changed = True
+        # P5 SSE: only broadcast when the timestamp actually moved, so the
+        # dashboard isn't spammed by idempotent firmware retries.
+        if changed:
+            _broadcast_event(
+                "puzzle_start",
+                {
+                    "session_id": session_id,
+                    "puzzle_id": puzzle_id,
+                    "puzzle_started_at_ms": int(entry["puzzle_started_at_ms"]),
+                    "forced": bool(force),
+                },
+            )
         return int(entry["puzzle_started_at_ms"])
 
     def increment_failed_attempts(
@@ -237,7 +313,18 @@ class SessionTracker:
         # the player is clearly engaged on this puzzle now.
         if entry.get("puzzle_started_at_ms", 0) == 0:
             entry["puzzle_started_at_ms"] = self.clock.now_ms()
-        return int(entry["failed_attempts_for_puzzle"])
+        new_count = int(entry["failed_attempts_for_puzzle"])
+        # P5 SSE
+        _broadcast_event(
+            "attempt_failed",
+            {
+                "session_id": session_id,
+                "puzzle_id": puzzle_id,
+                "failed_attempts_for_puzzle": new_count,
+                "puzzle_started_at_ms": int(entry.get("puzzle_started_at_ms", 0)),
+            },
+        )
+        return new_count
 
     def cooldown_until_ms(self, entry: Dict[str, int]) -> int:
         return int(entry.get("last_at_ms", 0)) + self.cooldown_s * 1000
@@ -330,6 +417,19 @@ class SessionTracker:
         # firmware may also POST /hints/puzzle_start explicitly.
         if entry.get("puzzle_started_at_ms", 0) == 0:
             entry["puzzle_started_at_ms"] = now_ms
+        # P5 SSE
+        _broadcast_event(
+            "hint_served",
+            {
+                "session_id": session_id,
+                "puzzle_id": puzzle_id,
+                "level_served": int(level_served),
+                "count": int(entry["count"]),
+                "score_penalty": self.penalty_for_level(level_served),
+                "total_penalty": int(entry["total_penalty"]),
+                "cooldown_until_ms": self.cooldown_until_ms(entry),
+            },
+        )
         return dict(entry)
 
     # -- admin --------------------------------------------------------------
@@ -364,6 +464,15 @@ class SessionTracker:
         keys = [k for k in self._state if k[0] == session_id]
         for k in keys:
             del self._state[k]
+        # P5 SSE — broadcast even when nothing was removed; the dashboard may
+        # use this to clear stale UI state regardless.
+        _broadcast_event(
+            "session_reset",
+            {
+                "session_id": session_id,
+                "entries_removed": len(keys),
+            },
+        )
         return len(keys)
 
 
@@ -882,12 +991,13 @@ def create_app(
 
     app = FastAPI(
         title="Zacus Hints Engine",
-        version="0.4.0-P4",
+        version="0.5.0-P5",
         description=(
             "Static NPC hint phrase lookup + LLM rewrite via LiteLLM hints-deep "
             "+ in-memory anti-cheat (cap/cooldown/penalty) "
-            "+ adaptive level (group profile / stuck-timer / failed attempts). "
-            "Phase P4 of the hints engine spec."
+            "+ adaptive level (group profile / stuck-timer / failed attempts) "
+            "+ SSE live event stream for the dashboard. "
+            "Phase P5 of the hints engine spec."
         ),
     )
 
@@ -1111,6 +1221,23 @@ def create_app(
                     details = (
                         f"cooldown active, retry in {decision['retry_in_s']}s"
                     )
+                # P5 SSE: refusals don't mutate tracker state, so they're
+                # broadcast from the handler rather than from a mutator.
+                _broadcast_event(
+                    "hint_refused",
+                    {
+                        "session_id": payload.session_id,
+                        "puzzle_id": payload.puzzle_id,
+                        "reason": decision["reason"],
+                        "level_requested": payload.level,
+                        "level_served": decision.get("level_served"),
+                        "count": int(entry.get("count", 0)),
+                        "retry_in_s": int(decision.get("retry_in_s", 0)),
+                        "cooldown_until_ms": int(
+                            decision.get("cooldown_until_ms", 0)
+                        ),
+                    },
+                )
                 return HintAskResponse(
                     refused=True,
                     reason=decision["reason"],
@@ -1370,6 +1497,84 @@ def create_app(
         tracker: SessionTracker = app.state.tracker
         removed = tracker.reset_session(session_id)
         return {"session_id": session_id, "entries_removed": removed, "ok": True}
+
+    # ------------------------------------------------------------------
+    # P5 — SSE live event stream (GET /hints/events)
+    # ------------------------------------------------------------------
+
+    @app.get("/hints/events")
+    async def hints_events(request: Request) -> EventSourceResponse:
+        """Server-Sent Events stream for the dashboard.
+
+        Each subscriber gets its own bounded asyncio.Queue (capacity
+        SSE_QUEUE_MAXSIZE). The generator yields envelopes pushed by
+        `_broadcast_event`. On client disconnect (CancelledError or the
+        ASGI receive channel reporting `http.disconnect`), the queue is
+        removed from the global subscriber list. `EventSourceResponse`'s
+        own `ping` keep-alives every SSE_HEARTBEAT_S seconds keep the
+        socket open through proxies.
+
+        The dashboard is expected to consume this with the native
+        EventSource API (no extra JS lib needed).
+        """
+        queue: "asyncio.Queue[Dict[str, Any]]" = asyncio.Queue(
+            maxsize=SSE_QUEUE_MAXSIZE,
+        )
+        _subscribers.append(queue)
+        LOG.info(
+            "SSE subscriber connected (total=%d) from %s",
+            len(_subscribers),
+            request.client.host if request.client else "?",
+        )
+
+        async def event_stream():
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    try:
+                        envelope = await asyncio.wait_for(
+                            queue.get(), timeout=SSE_HEARTBEAT_S,
+                        )
+                    except asyncio.TimeoutError:
+                        # Let sse-starlette's built-in ping keep the socket
+                        # warm; we just loop and re-check disconnect.
+                        continue
+                    yield {
+                        "event": envelope["type"],
+                        "data": json.dumps(envelope, ensure_ascii=False),
+                    }
+            except asyncio.CancelledError:
+                # Client closed cleanly; just propagate after cleanup below.
+                raise
+            finally:
+                try:
+                    _subscribers.remove(queue)
+                except ValueError:
+                    pass
+                LOG.info(
+                    "SSE subscriber disconnected (remaining=%d)",
+                    len(_subscribers),
+                )
+
+        return EventSourceResponse(event_stream(), ping=SSE_HEARTBEAT_S)
+
+    @app.get("/hints/events/test")
+    def hints_events_test(request: Request) -> Dict[str, Any]:
+        """Trigger a synthetic broadcast — handy when wiring the dashboard."""
+        _require_admin(request)
+        delivered = _broadcast_event(
+            "test",
+            {
+                "message": "Hello depuis Zacus — événement de test SSE.",
+                "now_ms": app.state.clock.now_ms(),
+            },
+        )
+        return {
+            "ok": True,
+            "subscribers": len(_subscribers),
+            "delivered": delivered,
+        }
 
     return app
 

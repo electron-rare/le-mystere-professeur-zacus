@@ -90,3 +90,6 @@ prompt a suivre/
 memory/
 site/
 todos/
+
+# Generated TTS pool artefacts (reproducible from npc_phrases.yaml + voice ref)
+hotline_tts/

@@ -41,7 +41,9 @@ YAML scenario → compile_runtime3.py → Runtime 3 IR → ESP32 / Web player
 Key surfaces:
 - **Scenario IR**: `game/scenarios/zacus_v2.yaml` → `tools/scenario/compile_runtime3.py` → portable Runtime 3 IR. Contract: `specs/ZACUS_RUNTIME_3_SPEC.md`.
 - **Authoring**: `frontend-v3/` (pnpm monorepo: `apps/atelier/` Scratch-like studio + `apps/dashboard/` game-master live view).
-- **Firmware**: `ESP32_ZACUS/` submodule (separate repo, separate CI). Freenove ESP32-S3 + PlatformIO. NPC engine, voice pipeline, vision/QR, media manager.
+- **Firmware**:
+  - `ESP32_ZACUS/` submodule — Freenove ESP32-S3 master (NPC engine, voice pipeline, vision/QR, media manager).
+  - `PLIP_FIRMWARE/` — retro telephone annex (ES8388 dev kit bringup, Si3210 PCB target). REST endpoint consumed by the master ESP32.
 - **Voice / NPC**: Piper TTS on Tower:8001 (zacus voice = tom-medium). NPC phrases in `game/scenarios/npc_phrases.yaml`. MP3 pool generator: `tools/tts/generate_npc_pool.py`.
 - **MCP hardware**: `tools/dev/mcp_hardware_server.py` (stdio, 6 tools).
 - **Desktop hub**: `desktop/` (Electron, macOS, bundles V3 frontends, talks USB serial).
@@ -56,7 +58,8 @@ Key surfaces:
 | Zacus Studio macOS app | `desktop/` |
 | Add or change a contract spec | `specs/` |
 | Python tests (Runtime 3, NPC) | `tests/` |
-| Firmware code | `ESP32_ZACUS/` submodule (own repo) |
+| Firmware code (Zacus master) | `ESP32_ZACUS/` submodule (own repo) |
+| Firmware code (PLIP retro phone) | `PLIP_FIRMWARE/` (inlined; see README for submodule conversion) |
 
 ## Canonical Files
 

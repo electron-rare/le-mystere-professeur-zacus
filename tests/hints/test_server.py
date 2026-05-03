@@ -22,10 +22,13 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from tools.hints import server as server_module  # noqa: E402
 from tools.hints.server import (  # noqa: E402
+    DEFAULT_ADAPTIVE_PATH,
     DEFAULT_PHRASES_PATH,
     DEFAULT_SAFETY_PATH,
     MutableClock,
+    compute_level_floor,
     create_app,
+    load_adaptive_config,
     load_phrase_bank,
     safety_check,
 )
@@ -589,3 +592,298 @@ def test_admin_endpoints_require_key_when_set(monkeypatch):
     ok = c.get("/hints/sessions", headers={"X-Admin-Key": "secret-zacus"})
     assert ok.status_code == 200
     assert "sessions" in ok.json()
+
+
+# ---------------------------------------------------------------------------
+# P4 — adaptive level (group profile + stuck-timer + failed attempts)
+# ---------------------------------------------------------------------------
+
+
+def _ask_adaptive(client, *, puzzle_id, level, session_id, group_profile=None,
+                  rewrite=False):
+    body = {"puzzle_id": puzzle_id, "level": level, "session_id": session_id}
+    if group_profile is not None:
+        body["group_profile"] = group_profile
+    return client.post(
+        f"/hints/ask?rewrite={'true' if rewrite else 'false'}",
+        json=body,
+    )
+
+
+def test_adaptive_default_no_bump(client, real_puzzle_id, clock):
+    """First ask, no failed attempts, no stuck-timer → floor must be 0."""
+    r = _ask_adaptive(
+        client, puzzle_id=real_puzzle_id, level=1, session_id="adaptive-default",
+        group_profile="MIXED",
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["refused"] is False
+    assert body["level_served"] == 1
+    assert body["level_floor_adaptive"] == 0
+    assert body["stuck_minutes"] == 0
+    assert body["failed_attempts"] == 0
+    assert body["group_profile_used"] == "MIXED"
+
+
+def test_adaptive_non_tech_after_5_min_bumps_level(client, real_puzzle_id, clock):
+    """NON_TECH profile + 5 min stuck-timer → adaptive floor lifts level to 2."""
+    sid = "adaptive-non-tech"
+    # Mark the puzzle started at t0
+    r0 = client.post(
+        "/hints/puzzle_start",
+        json={"session_id": sid, "puzzle_id": real_puzzle_id},
+    )
+    assert r0.status_code == 200, r0.text
+    assert r0.json()["puzzle_started_at_ms"] == clock.now_ms_value
+
+    # Advance past the NON_TECH bump threshold (5 minutes)
+    clock.advance(5 * 60_000 + 1_000)  # 5 min 1 s
+
+    r = _ask_adaptive(
+        client, puzzle_id=real_puzzle_id, level=1, session_id=sid,
+        group_profile="NON_TECH",
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["refused"] is False
+    assert body["group_profile_used"] == "NON_TECH"
+    assert body["stuck_minutes"] == 5
+    assert body["level_floor_adaptive"] >= 1, (
+        f"NON_TECH after 5 min must produce a floor>=1, got {body['level_floor_adaptive']}"
+    )
+    assert body["level_served"] >= 2, (
+        f"level_served must be auto-bumped to >=2, got {body['level_served']}"
+    )
+    assert body["level_requested"] == 1
+
+
+def test_adaptive_failed_attempts_bumps_level(client, real_puzzle_id, clock):
+    """3 failed attempts → +1 level via the failed_attempts.bump_every rule."""
+    sid = "adaptive-failed"
+
+    # Report 3 failed attempts (mirrors firmware behaviour on wrong inputs)
+    for _ in range(3):
+        r = client.post(
+            "/hints/attempt_failed",
+            json={"session_id": sid, "puzzle_id": real_puzzle_id},
+        )
+        assert r.status_code == 200, r.text
+    assert r.json()["failed_attempts_for_puzzle"] == 3
+
+    # Even with TECH (slow stuck escalation) and no time elapsed,
+    # 3 failed attempts must lift the floor by 1.
+    r = _ask_adaptive(
+        client, puzzle_id=real_puzzle_id, level=1, session_id=sid,
+        group_profile="TECH",
+    )
+    body = r.json()
+    assert body["refused"] is False
+    assert body["failed_attempts"] == 3
+    assert body["level_floor_adaptive"] >= 1
+    assert body["level_served"] >= 2
+    assert body["level_requested"] == 1
+
+
+def test_adaptive_max_auto_bump_respected(client, real_puzzle_id, clock):
+    """NON_TECH max_auto_bump=2 caps the stuck-timer contribution at 2 bumps.
+
+    With base level 1 + 2 bumps, the floor saturates at level 3 (also the
+    hard server cap NPC_MAX_HINT_LEVEL).
+    """
+    sid = "adaptive-cap"
+    client.post(
+        "/hints/puzzle_start",
+        json={"session_id": sid, "puzzle_id": real_puzzle_id},
+    )
+
+    # Advance way past 4 bumps' worth (5 min/bump * 4 = 20 min) → 60 min
+    clock.advance(60 * 60_000)
+
+    r = _ask_adaptive(
+        client, puzzle_id=real_puzzle_id, level=1, session_id=sid,
+        group_profile="NON_TECH",
+    )
+    body = r.json()
+    assert body["refused"] is False
+    # NON_TECH max_auto_bump=2 → floor saturates at 1 + 2 = 3
+    assert body["level_floor_adaptive"] == 3, (
+        "NON_TECH stuck floor must cap at base+max_auto_bump=3, "
+        f"got {body['level_floor_adaptive']}"
+    )
+    # Level served also clamped to NPC_MAX_HINT_LEVEL (= 3)
+    assert body["level_served"] == 3
+    # And TECH (max_auto_bump=1) never exceeds floor 2 from the timer alone,
+    # even after a long stretch (we re-arm the clock for this puzzle here).
+    sid_tech = "adaptive-cap-tech"
+    client.post(
+        "/hints/puzzle_start",
+        json={"session_id": sid_tech, "puzzle_id": real_puzzle_id},
+    )
+    clock.advance(60 * 60_000)  # 60 more minutes for this fresh puzzle
+    r2 = _ask_adaptive(
+        client, puzzle_id=real_puzzle_id, level=1, session_id=sid_tech,
+        group_profile="TECH",
+    )
+    assert r2.json()["level_floor_adaptive"] == 2
+
+
+def test_attempt_failed_endpoint_increments(client, real_puzzle_id):
+    """POST /hints/attempt_failed increments per-puzzle counter and 404s on unknown."""
+    sid = "adaptive-attempt"
+    for expected in (1, 2, 3, 4):
+        r = client.post(
+            "/hints/attempt_failed",
+            json={"session_id": sid, "puzzle_id": real_puzzle_id},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["failed_attempts_for_puzzle"] == expected
+
+    # Unknown puzzle id → 404
+    r404 = client.post(
+        "/hints/attempt_failed",
+        json={"session_id": sid, "puzzle_id": "P999_NOPE"},
+    )
+    assert r404.status_code == 404
+    assert "unknown puzzle_id" in r404.json()["detail"]
+
+
+def test_puzzle_start_records_timestamp(client, real_puzzle_id, clock):
+    """POST /hints/puzzle_start sets puzzle_started_at_ms on first call only."""
+    sid = "adaptive-start"
+    t0 = clock.now_ms_value
+    r1 = client.post(
+        "/hints/puzzle_start",
+        json={"session_id": sid, "puzzle_id": real_puzzle_id},
+    )
+    assert r1.status_code == 200, r1.text
+    assert r1.json()["puzzle_started_at_ms"] == t0
+
+    # Advance time, call again without force — timestamp must NOT shift
+    clock.advance(120_000)
+    r2 = client.post(
+        "/hints/puzzle_start",
+        json={"session_id": sid, "puzzle_id": real_puzzle_id},
+    )
+    assert r2.json()["puzzle_started_at_ms"] == t0
+
+    # With force=true, timestamp resets to current clock
+    r3 = client.post(
+        "/hints/puzzle_start",
+        json={
+            "session_id": sid,
+            "puzzle_id": real_puzzle_id,
+            "force": True,
+        },
+    )
+    assert r3.json()["puzzle_started_at_ms"] == clock.now_ms_value
+    assert r3.json()["puzzle_started_at_ms"] != t0
+
+
+def test_adaptive_disabled_when_yaml_absent(tmp_path, clock, real_puzzle_id):
+    """Adaptive mode silently disables when hints_adaptive.yaml is absent.
+
+    Floor stays at 0 regardless of profile / stuck-timer / failed attempts.
+    """
+    missing = tmp_path / "no_such_adaptive.yaml"
+    assert not missing.exists()
+    app = create_app(
+        DEFAULT_PHRASES_PATH, DEFAULT_SAFETY_PATH,
+        clock=clock, adaptive_path=missing,
+    )
+    c = TestClient(app)
+
+    # Health: adaptive_enabled must be false
+    h = c.get("/healthz").json()
+    assert h["adaptive_enabled"] is False
+    assert h["adaptive_profiles"] == []
+
+    sid = "adaptive-disabled"
+    c.post(
+        "/hints/puzzle_start",
+        json={"session_id": sid, "puzzle_id": real_puzzle_id},
+    )
+    clock.advance(60 * 60_000)  # 60 min
+    for _ in range(10):
+        c.post(
+            "/hints/attempt_failed",
+            json={"session_id": sid, "puzzle_id": real_puzzle_id},
+        )
+
+    r = c.post(
+        "/hints/ask?rewrite=false",
+        json={
+            "puzzle_id": real_puzzle_id, "level": 1, "session_id": sid,
+            "group_profile": "NON_TECH",
+        },
+    )
+    body = r.json()
+    assert body["refused"] is False
+    assert body["level_floor_adaptive"] == 0
+    assert body["level_served"] == 1
+    # Surface fields still report observed state even though no bump happens
+    assert body["failed_attempts"] == 10
+    assert body["stuck_minutes"] == 60
+    assert body["group_profile_used"] == "NON_TECH"
+
+
+def test_compute_level_floor_unit():
+    """Direct unit coverage of the pure floor function.
+
+    The floor is the absolute minimum level to serve. 0 means "no adaptive
+    opinion" (defer to base P3 logic). Otherwise floor = 1 + base_modifier
+    + stuck_bumps + failed_attempt_bumps (each capped per the YAML).
+    """
+    cfg = load_adaptive_config(DEFAULT_ADAPTIVE_PATH)
+    assert cfg["enabled"] is True
+    # No stuck, no fails → 0 across all profiles
+    for prof in ("TECH", "NON_TECH", "MIXED", "BOTH"):
+        assert compute_level_floor(
+            config=cfg, profile=prof, stuck_ms=0, failed_attempts=0,
+        ) == 0
+    # NON_TECH (5 min/bump, max_auto_bump=2):
+    #   5 min → 1 bump → floor 2
+    #   10 min → 2 bumps → floor 3
+    #   30 min → still 2 bumps (capped) → floor 3
+    assert compute_level_floor(
+        config=cfg, profile="NON_TECH", stuck_ms=5 * 60_000, failed_attempts=0,
+    ) == 2
+    assert compute_level_floor(
+        config=cfg, profile="NON_TECH", stuck_ms=10 * 60_000, failed_attempts=0,
+    ) == 3
+    assert compute_level_floor(
+        config=cfg, profile="NON_TECH", stuck_ms=30 * 60_000, failed_attempts=0,
+    ) == 3
+    # TECH (8 min/bump, max_auto_bump=1):
+    #   8 min → 1 bump → floor 2
+    #   60 min → still 1 bump (capped) → floor 2
+    assert compute_level_floor(
+        config=cfg, profile="TECH", stuck_ms=8 * 60_000, failed_attempts=0,
+    ) == 2
+    assert compute_level_floor(
+        config=cfg, profile="TECH", stuck_ms=60 * 60_000, failed_attempts=0,
+    ) == 2
+    # Failed attempts: 3 → +1 bump (max_bump=1) → floor 2 even on TECH idle
+    assert compute_level_floor(
+        config=cfg, profile="TECH", stuck_ms=0, failed_attempts=3,
+    ) == 2
+    assert compute_level_floor(
+        config=cfg, profile="TECH", stuck_ms=0, failed_attempts=9,
+    ) == 2  # max_bump=1
+    # Combined bumps add: NON_TECH 10 min (+2) and 3 fails (+1) → floor 4
+    assert compute_level_floor(
+        config=cfg, profile="NON_TECH",
+        stuck_ms=10 * 60_000, failed_attempts=3,
+    ) == 4
+
+
+def test_adaptive_unknown_profile_falls_back_to_mixed(client, real_puzzle_id, clock):
+    """Unknown group_profile string is logged and falls back to MIXED."""
+    r = _ask_adaptive(
+        client, puzzle_id=real_puzzle_id, level=1,
+        session_id="adaptive-unknown-prof",
+        group_profile="MARS_COLONIST",
+    )
+    body = r.json()
+    assert body["group_profile_used"] == "MIXED"
+    assert body["level_floor_adaptive"] == 0

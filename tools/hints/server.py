@@ -1,7 +1,8 @@
-"""Hints engine — Phase P3 FastAPI server.
+"""Hints engine — Phase P4 FastAPI server.
 
 Static phrase lookup (P1) + LLM rewrite layer via LiteLLM `hints-deep` (P2)
-+ in-memory anti-cheat (cap 3 / cooldown / progressive penalties) (P3).
++ in-memory anti-cheat (cap 3 / cooldown / progressive penalties) (P3)
++ adaptive level selection (group profile + stuck-timer + failed attempts) (P4).
 
 The rewriter restyles the static base phrase in the Professor Zacus voice
 without inventing new content. Safety filter blocks rewrites that leak
@@ -15,13 +16,23 @@ Anti-cheat (P3):
   always parses a coherent JSON envelope. The transport layer remains a
   success ; the body conveys business outcome.
 
+Adaptive level (P4):
+  Optional `group_profile` (TECH | NON_TECH | MIXED | BOTH) + per-puzzle
+  `puzzle_started_at_ms` + `failed_attempts_for_puzzle` produce an
+  adaptive **floor** on the level served. Auto-trigger on stuck-timer is
+  NOT implemented server-side — the firmware polls `/hints/ask` itself
+  (see slice D_P6). Configuration: `game/scenarios/hints_adaptive.yaml`.
+
 Endpoints:
   - GET  /healthz                       — liveness + counts
   - POST /hints/ask                     — base phrase, optionally LLM-rewritten,
-                                          with anti-cheat (cap/cooldown/penalty).
+                                          with anti-cheat (cap/cooldown/penalty)
+                                          + adaptive level (P4).
                                           ?rewrite=false bypasses LLM.
   - POST /hints/rewrite                 — debug: rewrite-only, no static fallback,
                                           no anti-cheat accounting.
+  - POST /hints/puzzle_start            — mark puzzle_started_at_ms (P4)
+  - POST /hints/attempt_failed          — bump failed_attempts_for_puzzle (P4)
   - GET  /hints/coverage                — per-puzzle level coverage audit
   - GET  /hints/sessions                — admin: list active sessions/state
   - DELETE /hints/sessions/{session_id} — admin: reset session state
@@ -37,6 +48,7 @@ Env:
   HINTS_LLM_MODEL        (default hints-deep)
   HINTS_LLM_TIMEOUT_S    (default 8.0)
   HINTS_SAFETY_PATH      (default game/scenarios/hints_safety.yaml)
+  HINTS_ADAPTIVE_PATH    (default game/scenarios/hints_adaptive.yaml)
   ZACUS_NPC_PHRASES_PATH (default game/scenarios/npc_phrases.yaml)
   HINTS_COOLDOWN_S       (default 60)   — minimum gap between hints per puzzle
   HINTS_MAX_PER_PUZZLE   (default 3)    — hard cap per (session, puzzle)
@@ -46,8 +58,8 @@ Env:
   HINTS_ADMIN_KEY        (default unset) — when set, admin endpoints require
                                            matching `X-Admin-Key` header.
 
-Spec: docs/superpowers/specs/2026-05-03-hints-engine-design.md §4-§5
-P4 (adaptive level) and P6 (auto-trigger) are NOT yet implemented here.
+Spec: docs/superpowers/specs/2026-05-03-hints-engine-design.md §3-§5
+P6 (auto-trigger on stuck-timer, firmware-side) is NOT yet implemented.
 """
 from __future__ import annotations
 
@@ -76,8 +88,10 @@ from pydantic import BaseModel, Field, conint
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PHRASES_PATH = REPO_ROOT / "game" / "scenarios" / "npc_phrases.yaml"
 DEFAULT_SAFETY_PATH = REPO_ROOT / "game" / "scenarios" / "hints_safety.yaml"
+DEFAULT_ADAPTIVE_PATH = REPO_ROOT / "game" / "scenarios" / "hints_adaptive.yaml"
 PHRASES_PATH_ENV = "ZACUS_NPC_PHRASES_PATH"
 SAFETY_PATH_ENV = "HINTS_SAFETY_PATH"
+ADAPTIVE_PATH_ENV = "HINTS_ADAPTIVE_PATH"
 
 DEFAULT_LITELLM_URL = "http://192.168.0.120:4000"
 DEFAULT_LITELLM_KEY = "sk-zacus-local-dev-do-not-share"
@@ -96,6 +110,9 @@ ZACUS_SYSTEM_PROMPT = (
 
 PUZZLE_ID_PATTERN = re.compile(r"^P\d+_[A-Z0-9_]+$")
 ALL_LEVELS = (1, 2, 3)
+NPC_MAX_HINT_LEVEL = max(ALL_LEVELS)
+GROUP_PROFILES = ("TECH", "NON_TECH", "MIXED", "BOTH")
+DEFAULT_GROUP_PROFILE = "MIXED"
 
 # P3 anti-cheat defaults (overridable via env at app startup)
 DEFAULT_COOLDOWN_S = 60
@@ -147,7 +164,20 @@ class SessionTracker:
     duration of a single escape-room session. Single-process FastAPI means
     a plain dict + per-call mutation is race-safe enough (FastAPI runs each
     request handler to completion on one event loop).
+
+    P4 extends each entry with `puzzle_started_at_ms` and
+    `failed_attempts_for_puzzle` to drive adaptive level selection.
     """
+
+    # Default shape of a fresh entry — kept centralised so .get(),
+    # .commit() and the new P4 helpers stay in sync.
+    _EMPTY_ENTRY: Dict[str, int] = {
+        "count": 0,
+        "last_at_ms": 0,
+        "total_penalty": 0,
+        "puzzle_started_at_ms": 0,
+        "failed_attempts_for_puzzle": 0,
+    }
 
     def __init__(
         self,
@@ -161,15 +191,53 @@ class SessionTracker:
         self.max_per_puzzle = max_per_puzzle
         self.penalty_per_level = penalty_per_level
         self.clock = clock
-        # (session_id, puzzle_id) -> {count, last_at_ms, total_penalty}
+        # (session_id, puzzle_id) -> entry dict (see _EMPTY_ENTRY)
         self._state: Dict[Tuple[str, str], Dict[str, int]] = {}
 
     # -- read helpers -------------------------------------------------------
 
     def get(self, session_id: str, puzzle_id: str) -> Dict[str, int]:
-        return self._state.get((session_id, puzzle_id), {
-            "count": 0, "last_at_ms": 0, "total_penalty": 0,
-        })
+        return self._state.get((session_id, puzzle_id), dict(self._EMPTY_ENTRY))
+
+    def _ensure(self, session_id: str, puzzle_id: str) -> Dict[str, int]:
+        """Return the live entry for (sid, pid), creating it if absent."""
+        key = (session_id, puzzle_id)
+        entry = self._state.get(key)
+        if entry is None:
+            entry = dict(self._EMPTY_ENTRY)
+            self._state[key] = entry
+        return entry
+
+    # -- P4 mutators (puzzle_start + attempt_failed + first-ask side-effect) -
+
+    def mark_puzzle_started(
+        self, session_id: str, puzzle_id: str, *, force: bool = False,
+    ) -> int:
+        """Record `puzzle_started_at_ms` if not already set.
+
+        Returns the effective `puzzle_started_at_ms`. If `force=True`, resets
+        the timestamp even when one already exists (used by the explicit
+        /hints/puzzle_start endpoint when the firmware wants to restart the
+        clock — though current default is to NOT force).
+        """
+        entry = self._ensure(session_id, puzzle_id)
+        if entry.get("puzzle_started_at_ms", 0) == 0 or force:
+            entry["puzzle_started_at_ms"] = self.clock.now_ms()
+        return int(entry["puzzle_started_at_ms"])
+
+    def increment_failed_attempts(
+        self, session_id: str, puzzle_id: str,
+    ) -> int:
+        """Bump the failed-attempts counter for a puzzle. Returns new count."""
+        entry = self._ensure(session_id, puzzle_id)
+        entry["failed_attempts_for_puzzle"] = (
+            int(entry.get("failed_attempts_for_puzzle", 0)) + 1
+        )
+        # First failed attempt also seeds the puzzle-started clock if absent —
+        # the player is clearly engaged on this puzzle now.
+        if entry.get("puzzle_started_at_ms", 0) == 0:
+            entry["puzzle_started_at_ms"] = self.clock.now_ms()
+        return int(entry["failed_attempts_for_puzzle"])
 
     def cooldown_until_ms(self, entry: Dict[str, int]) -> int:
         return int(entry.get("last_at_ms", 0)) + self.cooldown_s * 1000
@@ -246,18 +314,22 @@ class SessionTracker:
     def commit(
         self, session_id: str, puzzle_id: str, level_served: int,
     ) -> Dict[str, int]:
-        """Account for a served hint — bump counters, return updated entry."""
+        """Account for a served hint — bump counters, return updated entry.
+
+        P4: preserves `puzzle_started_at_ms` and `failed_attempts_for_puzzle`,
+        and seeds `puzzle_started_at_ms` on the very first ask if absent.
+        """
         now_ms = self.clock.now_ms()
-        key = (session_id, puzzle_id)
-        entry = self._state.get(key, {
-            "count": 0, "last_at_ms": 0, "total_penalty": 0,
-        })
+        entry = self._ensure(session_id, puzzle_id)
         entry["count"] = int(entry.get("count", 0)) + 1
         entry["last_at_ms"] = now_ms
         entry["total_penalty"] = (
             int(entry.get("total_penalty", 0)) + self.penalty_for_level(level_served)
         )
-        self._state[key] = entry
+        # First /hints/ask for this puzzle implicitly starts the clock —
+        # firmware may also POST /hints/puzzle_start explicitly.
+        if entry.get("puzzle_started_at_ms", 0) == 0:
+            entry["puzzle_started_at_ms"] = now_ms
         return dict(entry)
 
     # -- admin --------------------------------------------------------------
@@ -272,6 +344,10 @@ class SessionTracker:
                 "last_at_ms": int(entry.get("last_at_ms", 0)),
                 "total_penalty": int(entry.get("total_penalty", 0)),
                 "cooldown_until_ms": self.cooldown_until_ms(entry),
+                "puzzle_started_at_ms": int(entry.get("puzzle_started_at_ms", 0)),
+                "failed_attempts_for_puzzle": int(
+                    entry.get("failed_attempts_for_puzzle", 0)
+                ),
             })
         out = []
         for sid, puzzles in sorted(by_session.items()):
@@ -408,6 +484,160 @@ def load_safety_bank(path: Path) -> Dict[str, List[str]]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Adaptive config (P4)
+# ---------------------------------------------------------------------------
+
+
+# Sentinel returned when the YAML is absent — adaptive mode disabled, the
+# floor logic short-circuits to 0 (no auto-bump from group / stuck / fails).
+_DISABLED_ADAPTIVE: Dict[str, Any] = {
+    "enabled": False,
+    "profiles": {},
+    "failed_attempts": {"bump_every": 0, "max_bump": 0},
+}
+
+
+def load_adaptive_config(path: Path) -> Dict[str, Any]:
+    """Load `hints_adaptive.yaml` and validate its minimal schema.
+
+    Returns a dict with keys:
+      - enabled: bool — False when the file is absent or unparseable
+      - profiles: {profile_name: {base_modifier, stuck_minutes_per_bump,
+                                  max_auto_bump}}
+      - failed_attempts: {bump_every, max_bump}
+
+    Missing files are tolerated (warning logged, adaptive mode disabled).
+    Malformed files raise ValueError so misconfiguration surfaces at boot.
+    """
+    if not path.is_file():
+        LOG.warning(
+            "hints_adaptive.yaml not found at %s — adaptive mode DISABLED",
+            path,
+        )
+        return dict(_DISABLED_ADAPTIVE)
+
+    with path.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"hints_adaptive.yaml: root must be a YAML mapping, got {type(data).__name__}"
+        )
+
+    profiles_raw = data.get("profiles") or {}
+    if not isinstance(profiles_raw, dict) or not profiles_raw:
+        raise ValueError(
+            "hints_adaptive.yaml: missing or empty 'profiles' mapping"
+        )
+
+    profiles: Dict[str, Dict[str, int]] = {}
+    for name, body in profiles_raw.items():
+        if not isinstance(body, dict):
+            raise ValueError(
+                f"hints_adaptive.yaml: profile {name!r} must be a mapping"
+            )
+        try:
+            profiles[str(name)] = {
+                "base_modifier": int(body.get("base_modifier", 0)),
+                "stuck_minutes_per_bump": int(
+                    body.get("stuck_minutes_per_bump", 0)
+                ),
+                "max_auto_bump": int(body.get("max_auto_bump", 0)),
+            }
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"hints_adaptive.yaml: profile {name!r} has non-integer field: {exc}"
+            ) from exc
+
+    fa_raw = data.get("failed_attempts") or {}
+    if not isinstance(fa_raw, dict):
+        raise ValueError(
+            "hints_adaptive.yaml: 'failed_attempts' must be a mapping when present"
+        )
+    try:
+        failed_attempts = {
+            "bump_every": int(fa_raw.get("bump_every", 0)),
+            "max_bump": int(fa_raw.get("max_bump", 0)),
+        }
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"hints_adaptive.yaml: failed_attempts has non-integer field: {exc}"
+        ) from exc
+
+    return {
+        "enabled": True,
+        "profiles": profiles,
+        "failed_attempts": failed_attempts,
+    }
+
+
+def compute_level_floor(
+    *,
+    config: Dict[str, Any],
+    profile: str,
+    stuck_ms: int,
+    failed_attempts: int,
+) -> int:
+    """Return the adaptive *floor* on the level to serve.
+
+    Semantic: the floor is the minimum **absolute** level the engine should
+    serve given the adaptive context. It combines additively at the call
+    site as ``level_served = max(level_requested, count + 1, floor)``.
+
+    Computation:
+      - Start from the base level (= 1) IF there is any adaptive contribution
+        (profile base_modifier > 0, stuck-timer bumps, or failed-attempt
+        bumps). Otherwise return 0 — meaning "no adaptive opinion", so the
+        existing P3 logic decides freely.
+      - Add `base_modifier` (constant per profile, usually 0).
+      - Add `min(max_auto_bump, stuck_minutes // stuck_minutes_per_bump)`.
+      - Add `min(failed_attempts.max_bump,
+                 failed_attempts // failed_attempts.bump_every)`.
+
+    Returns 0 when adaptive mode is disabled or the profile is unknown —
+    callers then fall back to the existing P3 logic. Final clamping to
+    NPC_MAX_HINT_LEVEL happens at the call site.
+    """
+    if not config.get("enabled"):
+        return 0
+    profiles = config.get("profiles") or {}
+    p = profiles.get(profile)
+    if p is None:
+        return 0
+
+    base = int(p.get("base_modifier", 0))
+
+    # Stuck-timer bump
+    per_bump = max(0, int(p.get("stuck_minutes_per_bump", 0)))
+    max_stuck_bump = max(0, int(p.get("max_auto_bump", 0)))
+    if per_bump > 0 and stuck_ms > 0 and max_stuck_bump > 0:
+        stuck_minutes = stuck_ms // 60_000
+        stuck_bump = min(max_stuck_bump, stuck_minutes // per_bump)
+    else:
+        stuck_bump = 0
+
+    # Failed-attempts bump (independent of the stuck-timer)
+    fa_cfg = config.get("failed_attempts") or {}
+    fa_every = max(0, int(fa_cfg.get("bump_every", 0)))
+    fa_max = max(0, int(fa_cfg.get("max_bump", 0)))
+    if fa_every > 0 and failed_attempts > 0 and fa_max > 0:
+        fa_bump = min(fa_max, failed_attempts // fa_every)
+    else:
+        fa_bump = 0
+
+    total_bump = int(stuck_bump) + int(fa_bump)
+    # If nothing nudges us, return 0 (no opinion)
+    if total_bump <= 0 and base <= 0:
+        return 0
+
+    # Floor is at least level 1 (base level), plus any adaptive bumps
+    floor = 1 + base + total_bump
+    if floor < 0:
+        floor = 0
+    return floor
+
+
 def compute_coverage(bank: Dict[str, Dict[str, List[str]]]) -> Dict[str, Any]:
     """Build the audit summary returned by GET /hints/coverage."""
     per_puzzle: List[Dict[str, Any]] = []
@@ -537,6 +767,9 @@ class HintAskRequest(BaseModel):
     # Kept Optional[str] in the model so we can return a friendly 400 body
     # rather than Pydantic's 422 envelope, which the firmware doesn't parse.
     session_id: Optional[str] = None
+    # P4: optional group profile (TECH | NON_TECH | MIXED | BOTH).
+    # Anything outside the enum falls back to MIXED with a warning log.
+    group_profile: Optional[str] = None
 
 
 class HintAskResponse(BaseModel):
@@ -564,6 +797,11 @@ class HintAskResponse(BaseModel):
     cooldown_until_ms: int = 0
     retry_in_s: int = 0
     details: Optional[str] = None
+    # P4 adaptive surface (always present; zeros when adaptive disabled)
+    level_floor_adaptive: int = 0
+    stuck_minutes: int = 0
+    failed_attempts: int = 0
+    group_profile_used: Optional[str] = None
 
 
 class HintRewriteRequest(BaseModel):
@@ -584,6 +822,21 @@ class HintRewriteResponse(BaseModel):
     tokens_used: Optional[int] = None
 
 
+# P4 — puzzle lifecycle helpers (firmware-driven)
+class PuzzleStartRequest(BaseModel):
+    session_id: str = Field(..., min_length=1)
+    puzzle_id: str = Field(..., min_length=1)
+    # When true, resets the timestamp even if one already exists. Default
+    # behaviour is no-op when the puzzle is already started, so the firmware
+    # can safely call it on every retry.
+    force: Optional[bool] = False
+
+
+class AttemptFailedRequest(BaseModel):
+    session_id: str = Field(..., min_length=1)
+    puzzle_id: str = Field(..., min_length=1)
+
+
 # ---------------------------------------------------------------------------
 # FastAPI app factory
 # ---------------------------------------------------------------------------
@@ -599,6 +852,11 @@ def _resolve_safety_path() -> Path:
     return Path(override).resolve() if override else DEFAULT_SAFETY_PATH
 
 
+def _resolve_adaptive_path() -> Path:
+    override = os.environ.get(ADAPTIVE_PATH_ENV)
+    return Path(override).resolve() if override else DEFAULT_ADAPTIVE_PATH
+
+
 def _emit_log(record: Dict[str, Any]) -> None:
     """Structured JSON log line on stdout (one dict per request)."""
     sys.stdout.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -610,31 +868,37 @@ def create_app(
     safety_path: Optional[Path] = None,
     *,
     clock: Optional[Clock] = None,
+    adaptive_path: Optional[Path] = None,
 ) -> FastAPI:
     """Build the FastAPI app. Pass paths/clock for tests, defaults for prod."""
     p_path = phrases_path or _resolve_phrases_path()
     s_path = safety_path or _resolve_safety_path()
+    a_path = adaptive_path or _resolve_adaptive_path()
     bank = load_phrase_bank(p_path)
     safety = load_safety_bank(s_path)
+    adaptive = load_adaptive_config(a_path)
     coverage_cache = compute_coverage(bank)
     phrase_total = count_phrases(bank)
 
     app = FastAPI(
         title="Zacus Hints Engine",
-        version="0.3.0-P3",
+        version="0.4.0-P4",
         description=(
             "Static NPC hint phrase lookup + LLM rewrite via LiteLLM hints-deep "
-            "+ in-memory anti-cheat (cap/cooldown/penalty). "
-            "Phase P3 of the hints engine spec."
+            "+ in-memory anti-cheat (cap/cooldown/penalty) "
+            "+ adaptive level (group profile / stuck-timer / failed attempts). "
+            "Phase P4 of the hints engine spec."
         ),
     )
 
     app.state.phrase_bank = bank
     app.state.safety_bank = safety
+    app.state.adaptive = adaptive
     app.state.coverage = coverage_cache
     app.state.phrase_total = phrase_total
     app.state.phrases_path = str(p_path)
     app.state.safety_path = str(s_path)
+    app.state.adaptive_path = str(a_path)
     app.state.litellm_url = os.environ.get("LITELLM_URL", DEFAULT_LITELLM_URL)
     app.state.litellm_key = os.environ.get("LITELLM_MASTER_KEY", DEFAULT_LITELLM_KEY)
     app.state.llm_model = os.environ.get("HINTS_LLM_MODEL", DEFAULT_LLM_MODEL)
@@ -733,6 +997,7 @@ def create_app(
 
     @app.get("/healthz")
     def healthz() -> Dict[str, Any]:
+        adaptive = app.state.adaptive
         return {
             "status": "ok",
             "phrases_loaded": app.state.phrase_total,
@@ -742,6 +1007,9 @@ def create_app(
             "safety_path": app.state.safety_path,
             "litellm_url": app.state.litellm_url,
             "llm_model": app.state.llm_model,
+            "adaptive_enabled": bool(adaptive.get("enabled")),
+            "adaptive_path": app.state.adaptive_path,
+            "adaptive_profiles": sorted((adaptive.get("profiles") or {}).keys()),
         }
 
     @app.get("/hints/coverage")
@@ -755,6 +1023,19 @@ def create_app(
         provided = request.headers.get("X-Admin-Key")
         if provided != configured:
             raise HTTPException(status_code=401, detail="invalid or missing X-Admin-Key")
+
+    def _resolve_group_profile(raw: Optional[str]) -> str:
+        """Validate group_profile, fallback to MIXED with a debug log."""
+        if not raw:
+            return DEFAULT_GROUP_PROFILE
+        normalized = raw.strip().upper()
+        if normalized in GROUP_PROFILES:
+            return normalized
+        LOG.warning(
+            "unknown group_profile=%r received, falling back to %s",
+            raw, DEFAULT_GROUP_PROFILE,
+        )
+        return DEFAULT_GROUP_PROFILE
 
     @app.post("/hints/ask", response_model=HintAskResponse)
     async def hints_ask(
@@ -772,6 +1053,11 @@ def create_app(
         hint_rewritten: Optional[str] = None
         decision: Dict[str, Any] = {}
         committed: Dict[str, int] = {}
+        # P4 — adaptive surface (initialised early so the `finally` log sees them)
+        group_profile_used = _resolve_group_profile(payload.group_profile)
+        level_floor_adaptive = 0
+        stuck_minutes = 0
+        failed_attempts = 0
         try:
             # session_id is logically required for anti-cheat accounting.
             if not payload.session_id:
@@ -781,8 +1067,35 @@ def create_app(
                 )
 
             tracker: SessionTracker = app.state.tracker
+
+            # ---- P4 adaptive floor -------------------------------------
+            # Read existing puzzle state BEFORE check() so the stuck-timer is
+            # measured against the (possibly already-recorded) puzzle start.
+            entry_pre = tracker.get(payload.session_id, payload.puzzle_id)
+            puzzle_started_ms = int(entry_pre.get("puzzle_started_at_ms", 0))
+            failed_attempts = int(entry_pre.get("failed_attempts_for_puzzle", 0))
+            now_ms = app.state.clock.now_ms()
+            stuck_ms = (
+                max(0, now_ms - puzzle_started_ms) if puzzle_started_ms else 0
+            )
+            stuck_minutes = stuck_ms // 60_000
+            level_floor_adaptive = compute_level_floor(
+                config=app.state.adaptive,
+                profile=group_profile_used,
+                stuck_ms=stuck_ms,
+                failed_attempts=failed_attempts,
+            )
+
+            # Effective requested level seen by the cap/cooldown logic — the
+            # adaptive floor lifts the requested level so the existing P3
+            # "level = max(requested, count+1)" rule combines naturally with
+            # the new floor without duplicating clamp logic.
+            effective_requested = max(int(payload.level), int(level_floor_adaptive))
+            if effective_requested > NPC_MAX_HINT_LEVEL:
+                effective_requested = NPC_MAX_HINT_LEVEL
+
             decision = tracker.check(
-                payload.session_id, payload.puzzle_id, payload.level,
+                payload.session_id, payload.puzzle_id, effective_requested,
             )
 
             # ---- Refusal envelope (HTTP 200 + refused=true) -------------
@@ -814,6 +1127,10 @@ def create_app(
                     cooldown_until_ms=int(decision.get("cooldown_until_ms", 0)),
                     retry_in_s=int(decision.get("retry_in_s", 0)),
                     details=details,
+                    level_floor_adaptive=int(level_floor_adaptive),
+                    stuck_minutes=int(stuck_minutes),
+                    failed_attempts=int(failed_attempts),
+                    group_profile_used=group_profile_used,
                 )
 
             # ---- Served path -------------------------------------------
@@ -865,6 +1182,10 @@ def create_app(
                 total_penalty=int(committed.get("total_penalty", 0)),
                 cooldown_until_ms=tracker.cooldown_until_ms(committed),
                 retry_in_s=0,
+                level_floor_adaptive=int(level_floor_adaptive),
+                stuck_minutes=int(stuck_minutes),
+                failed_attempts=int(failed_attempts),
+                group_profile_used=group_profile_used,
             )
         except HTTPException as exc:
             status_code = exc.status_code
@@ -889,6 +1210,11 @@ def create_app(
                     int(decision.get("count_before", 0)) if decision else 0
                 ),
                 "total_penalty": int(committed.get("total_penalty", 0)) if committed else 0,
+                "group_profile_used": group_profile_used,
+                "stuck_minutes": int(stuck_minutes),
+                "failed_attempts": int(failed_attempts),
+                "level_floor_adaptive": int(level_floor_adaptive),
+                "adaptive_enabled": bool(app.state.adaptive.get("enabled")),
                 "latency_ms": round((time.perf_counter() - started) * 1000, 2),
                 "status": status_code,
             })
@@ -957,6 +1283,70 @@ def create_app(
                 "status": status_code,
             })
 
+    @app.post("/hints/puzzle_start")
+    def hints_puzzle_start(payload: PuzzleStartRequest) -> Dict[str, Any]:
+        """Mark `puzzle_started_at_ms` so the stuck-timer can run.
+
+        Idempotent: subsequent calls without `force=true` are no-ops on the
+        timestamp (firmware can spam this on every retry-attach).
+        """
+        tracker: SessionTracker = app.state.tracker
+        started_ms = tracker.mark_puzzle_started(
+            payload.session_id, payload.puzzle_id, force=bool(payload.force),
+        )
+        entry = tracker.get(payload.session_id, payload.puzzle_id)
+        _emit_log({
+            "ts": time.time(),
+            "event": "hints_puzzle_start",
+            "session_id": payload.session_id,
+            "puzzle_id": payload.puzzle_id,
+            "force": bool(payload.force),
+            "puzzle_started_at_ms": started_ms,
+        })
+        return {
+            "ok": True,
+            "session_id": payload.session_id,
+            "puzzle_id": payload.puzzle_id,
+            "puzzle_started_at_ms": started_ms,
+            "failed_attempts_for_puzzle": int(
+                entry.get("failed_attempts_for_puzzle", 0)
+            ),
+            "now_ms": app.state.clock.now_ms(),
+        }
+
+    @app.post("/hints/attempt_failed")
+    def hints_attempt_failed(payload: AttemptFailedRequest) -> Dict[str, Any]:
+        """Increment failed_attempts_for_puzzle (firmware-driven).
+
+        Returns the new count. Returns 404 only when the puzzle_id is unknown
+        to the phrase bank — otherwise the entry is created lazily.
+        """
+        if payload.puzzle_id not in app.state.phrase_bank:
+            raise HTTPException(
+                status_code=404,
+                detail=f"unknown puzzle_id: {payload.puzzle_id!r}",
+            )
+        tracker: SessionTracker = app.state.tracker
+        new_count = tracker.increment_failed_attempts(
+            payload.session_id, payload.puzzle_id,
+        )
+        entry = tracker.get(payload.session_id, payload.puzzle_id)
+        _emit_log({
+            "ts": time.time(),
+            "event": "hints_attempt_failed",
+            "session_id": payload.session_id,
+            "puzzle_id": payload.puzzle_id,
+            "failed_attempts_for_puzzle": new_count,
+        })
+        return {
+            "ok": True,
+            "session_id": payload.session_id,
+            "puzzle_id": payload.puzzle_id,
+            "failed_attempts_for_puzzle": new_count,
+            "puzzle_started_at_ms": int(entry.get("puzzle_started_at_ms", 0)),
+            "now_ms": app.state.clock.now_ms(),
+        }
+
     @app.get("/hints/sessions")
     def admin_list_sessions(request: Request) -> Dict[str, Any]:
         _require_admin(request)
@@ -969,6 +1359,7 @@ def create_app(
                 "cooldown_s": tracker.cooldown_s,
                 "max_per_puzzle": tracker.max_per_puzzle,
                 "penalty_per_level": tracker.penalty_per_level,
+                "adaptive": app.state.adaptive,
             },
             "now_ms": app.state.clock.now_ms(),
         }

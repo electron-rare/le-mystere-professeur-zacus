@@ -1,0 +1,49 @@
+# Adaptive level rules for the hints engine (D_P4).
+#
+# Profiles map a group composition to a base level modifier and stuck-timer
+# thresholds. The server uses this to compute an adaptive *floor* on the level
+# served:
+#
+#     level_served = max(level_requested, count + 1, level_floor_adaptive)
+#
+# `level_floor_adaptive` is derived from:
+#   - profile.base_modifier (constant nudge, kept at 0 for now — never auto-bump
+#     beyond what the player asked just because of group composition)
+#   - bumps from the stuck-timer (one bump per `stuck_minutes_per_bump` elapsed
+#     since the puzzle started, capped at `max_auto_bump`)
+#   - bumps from `failed_attempts` (independent of the timer; one bump per
+#     `failed_attempts.bump_every`, capped at `failed_attempts.max_bump`)
+#
+# All bumps are additive but the final level_served is clamped to
+# NPC_MAX_HINT_LEVEL (= 3, hard-coded in the server).
+#
+# Spec: docs/superpowers/specs/2026-05-03-hints-engine-design.md §3
+# Slice : D_P4 (server-side adaptive level — auto-trigger lives on ESP32, P6).
+
+profiles:
+  TECH:
+    # Tech groups: very gentle, slow auto-escalation. They prefer to think.
+    base_modifier: 0
+    stuck_minutes_per_bump: 8
+    max_auto_bump: 1
+  NON_TECH:
+    # Non-tech groups: faster auto-escalation to avoid frustration.
+    base_modifier: 0
+    stuck_minutes_per_bump: 5
+    max_auto_bump: 2
+  MIXED:
+    # Default profile when composition is unknown or balanced.
+    base_modifier: 0
+    stuck_minutes_per_bump: 6
+    max_auto_bump: 1
+  BOTH:
+    # Alias for MIXED, kept for spec compat (group_profile enum mentions BOTH).
+    base_modifier: 0
+    stuck_minutes_per_bump: 6
+    max_auto_bump: 1
+
+# Failed-attempts bump (independent from the stuck-timer).
+# A "failed attempt" is reported by the firmware via POST /hints/attempt_failed.
+failed_attempts:
+  bump_every: 3   # +1 level every 3 failed attempts on the same puzzle
+  max_bump: 1     # never more than +1 from this source alone

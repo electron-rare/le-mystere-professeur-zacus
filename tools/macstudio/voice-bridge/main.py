@@ -1,4 +1,4 @@
-"""voice-bridge — FastAPI daemon (P1 part7 + part9b cache + part11 hardening).
+"""voice-bridge — FastAPI daemon (P1 part7 + part9b cache + part11/part12 WS).
 
 Spec: docs/superpowers/specs/2026-05-03-tts-stt-llm-macstudio-design.md §2.5
 
@@ -14,7 +14,8 @@ POST /voice/transcribe    → multipart proxy → whisper.cpp :8300 /inference
 POST /voice/intent        → forward → LiteLLM npc-fast (model="npc-fast")
 WS   /voice/ws            → STT streaming for ESP32 firmware (PCM16 16 kHz mono).
                             Hello-handshake, binary frames, end → whisper.cpp →
-                            optional intent forward, then close.
+                            optional intent forward → optional F5 TTS reply
+                            stream (PCM16 24 kHz, chunked binary), then close.
 
 Design notes
 ------------
@@ -106,6 +107,24 @@ WS_BYTES_PER_SAMPLE = 2  # PCM 16-bit mono
 WS_MAX_DURATION_S = 30
 WS_MAX_BYTES = WS_EXPECTED_SR * WS_BYTES_PER_SAMPLE * WS_MAX_DURATION_S  # 960 KB
 WS_FORWARD_INTENT = os.getenv("WS_FORWARD_INTENT", "1") not in {"0", "false", "no"}
+# Server-side TTS over WS (P1 part12). Default: mirror WS_FORWARD_INTENT, since
+# synthesizing the intent reply is the natural follow-up. Can be force-disabled
+# (e.g. for STT-only smoke tests) by setting WS_FORWARD_TTS=0 explicitly.
+_WS_FORWARD_TTS_RAW = os.getenv("WS_FORWARD_TTS")
+if _WS_FORWARD_TTS_RAW is None:
+    WS_FORWARD_TTS = WS_FORWARD_INTENT
+else:
+    WS_FORWARD_TTS = _WS_FORWARD_TTS_RAW not in {"0", "false", "no"}
+# Output PCM framing: 24 kHz mono int16 (matches F5 native sample rate).
+WS_TTS_OUTPUT_SR = F5_SAMPLE_RATE  # 24_000
+WS_TTS_BYTES_PER_SAMPLE = 2  # PCM 16-bit mono
+WS_TTS_CHUNK_BYTES = int(os.getenv("WS_TTS_CHUNK_BYTES", "4096"))  # ~85 ms @ 24 kHz
+WS_TTS_MAX_DURATION_S = 30
+WS_TTS_MAX_BYTES = (
+    WS_TTS_OUTPUT_SR * WS_TTS_BYTES_PER_SAMPLE * WS_TTS_MAX_DURATION_S
+)  # 1.44 MB
+# steps used when synthesizing the intent reply over WS (kept conservative).
+WS_TTS_STEPS = max(F5_STEPS_MIN, min(F5_STEPS_MAX, F5_DEFAULT_STEPS))
 
 # ── logging (single-line JSON) ──────────────────────────────────────────────
 logging.basicConfig(
@@ -837,6 +856,86 @@ async def _whisper_transcribe_pcm(pcm: bytes) -> str:
     return text
 
 
+def _wav_to_pcm16(wav_bytes: bytes) -> bytes:
+    """Strip the RIFF/WAVE container and return raw PCM16 mono samples.
+
+    The cache stores 24 kHz mono PCM_16 WAVs (see ``_f5_synthesize_sync``)
+    so we expect a standard 44-byte RIFF header. To stay tolerant against
+    files written with extra chunks (LIST/INFO etc.), we walk the chunks
+    and grab the ``data`` payload explicitly rather than blindly skipping
+    44 bytes.
+    """
+    if len(wav_bytes) < 44 or wav_bytes[:4] != b"RIFF" or wav_bytes[8:12] != b"WAVE":
+        # Not a WAV — assume already raw PCM and return as-is.
+        return wav_bytes
+    pos = 12
+    while pos + 8 <= len(wav_bytes):
+        chunk_id = wav_bytes[pos:pos + 4]
+        chunk_size = struct.unpack("<I", wav_bytes[pos + 4:pos + 8])[0]
+        if chunk_id == b"data":
+            start = pos + 8
+            return bytes(wav_bytes[start:start + chunk_size])
+        pos += 8 + chunk_size
+        # Chunks are padded to even byte boundaries.
+        if chunk_size % 2:
+            pos += 1
+    # No data chunk found — fallback to raw header skip.
+    return bytes(wav_bytes[44:])
+
+
+def _float32_to_pcm16(samples: np.ndarray) -> bytes:
+    """Convert float32 [-1.0..1.0] mono numpy array to PCM_16 little-endian."""
+    arr = np.clip(samples, -1.0, 1.0)
+    pcm = (arr * 32767.0).astype("<i2")
+    return pcm.tobytes()
+
+
+def _f5_synthesize_pcm_sync(text: str, steps: int) -> bytes:
+    """Synthesize via F5 and return raw PCM16 mono @ 24 kHz (no WAV header).
+
+    Exists alongside ``_f5_synthesize_sync`` so the WS path can stream raw
+    samples without paying the WAV-header round-trip. Mirrors the same MLX
+    invocation 1:1 (same prompt, same sampler args) — keep them in sync.
+    """
+    import mlx.core as mx  # noqa: WPS433
+    from f5_tts_mlx.utils import convert_char_to_pinyin
+
+    audio_arr, sr = sf.read(str(_REF_AUDIO_PATH))
+    if sr != F5_SAMPLE_RATE:
+        raise RuntimeError(
+            f"Reference audio sample rate {sr} ≠ {F5_SAMPLE_RATE} Hz"
+        )
+    audio = mx.array(audio_arr)
+
+    target_rms = 0.1
+    rms = mx.sqrt(mx.mean(mx.square(audio)))
+    if float(rms) < target_rms:
+        audio = audio * target_rms / rms
+
+    prompt = convert_char_to_pinyin([_REF_AUDIO_TEXT + " " + text])
+    wave, _ = _F5_MODEL_OBJ.sample(
+        mx.expand_dims(audio, axis=0),
+        text=prompt,
+        duration=None,
+        steps=steps,
+        method="rk4",
+        speed=1.0,
+        cfg_strength=2.0,
+        sway_sampling_coef=-1.0,
+        seed=None,
+    )
+    wave = wave[audio.shape[0]:]
+    mx.eval(wave)
+    pcm_f32 = np.array(wave, dtype=np.float32)
+    return _float32_to_pcm16(pcm_f32)
+
+
+async def _run_f5_pcm(text: str, steps: int) -> bytes:
+    assert _F5_LOCK is not None
+    async with _F5_LOCK:
+        return _f5_synthesize_pcm_sync(text, steps)
+
+
 async def _intent_complete(text: str) -> Optional[str]:
     """Call LiteLLM npc-fast and return the assistant content, or None on fail.
 
@@ -877,6 +976,12 @@ async def voice_ws(ws: WebSocket) -> None:
         server → client : {"type":"stt","text":"...","final":true}
         server → client : {"type":"intent","content":"...","model":"npc-fast"}
                           (only if WS_FORWARD_INTENT and the call succeeded)
+        server → client : {"type":"speak_start","sample_rate":24000,
+                           "format":"pcm_s16","total_estimated_ms":<int>}
+        server → client : <binary PCM16 mono frames @ 24 kHz, ≤4096 bytes>...
+        server → client : {"type":"speak_end","duration_ms":<int>,
+                           "backend":"f5"|"cache"|"none","latency_ms":<int>}
+                          (speak_* trio only if WS_FORWARD_TTS and intent_ok)
         server closes   : 1000 normal
 
     Error close codes:
@@ -977,18 +1082,168 @@ async def voice_ws(ws: WebSocket) -> None:
           bytes=len(buf), text_len=len(transcript), latency_ms=stt_ms)
 
     # ── 4. Optional intent forward (LiteLLM npc-fast) ────────────────────
+    intent_content: Optional[str] = None
     if WS_FORWARD_INTENT and transcript:
         intent_started = time.monotonic()
-        content = await _intent_complete(transcript)
-        if content is not None:
+        intent_content = await _intent_complete(transcript)
+        if intent_content is not None:
             await ws.send_text(json.dumps(
-                {"type": "intent", "content": content, "model": "npc-fast"}
+                {"type": "intent", "content": intent_content, "model": "npc-fast"}
             ))
             _jlog("ws_intent_done", request_id=request_id,
-                  reply_len=len(content),
+                  reply_len=len(intent_content),
                   latency_ms=int((time.monotonic() - intent_started) * 1000))
 
-    # ── 5. Clean close ──────────────────────────────────────────────────
+    # ── 5. Optional TTS forward (F5 → cache, raw PCM stream) ─────────────
+    tts_chunks_sent = 0
+    tts_total_bytes = 0
+    tts_backend_used: Optional[str] = None
+    tts_stage_latency_ms = 0
+    if WS_FORWARD_TTS and intent_content:
+        tts_started = time.monotonic()
+        speak_text = intent_content.strip()
+        if not speak_text:
+            _jlog("ws_tts_empty_intent", request_id=request_id)
+        else:
+            # Truncate over-long replies so we never send > 30 s of audio
+            # back; the firmware buffer is small and the diffusion latency
+            # blows up linearly with text length.
+            if len(speak_text) > TTS_TEXT_MAX_CHARS:
+                _jlog("ws_tts_truncated", request_id=request_id,
+                      had=len(speak_text), max=TTS_TEXT_MAX_CHARS)
+                speak_text = speak_text[:TTS_TEXT_MAX_CHARS]
+            cache_key = _cache_key(
+                speak_text, _voice_ref_token(None), WS_TTS_STEPS
+            )
+            pcm: Optional[bytes] = None
+            tts_err: Optional[str] = None
+
+            # 5a. Cache lookup (mirrors the /tts handler) ─────────────────
+            cached_path = _CACHE_INDEX.get(cache_key)
+            if cached_path is None:
+                candidate = CACHE_DIR / f"{cache_key}.wav"
+                if candidate.exists():
+                    cached_path = candidate
+                    _CACHE_INDEX[cache_key] = candidate
+            if cached_path is not None and cached_path.exists():
+                try:
+                    wav_bytes = cached_path.read_bytes()
+                    pcm = _wav_to_pcm16(wav_bytes)
+                    tts_backend_used = "cache"
+                    _jlog("ws_tts_cache_hit", request_id=request_id,
+                          cache_key=cache_key, bytes=len(pcm))
+                except OSError as exc:
+                    _jlog("ws_tts_cache_read_err",
+                          request_id=request_id, err=str(exc))
+                    cached_path = None  # fall through to F5
+
+            # 5b. F5 synthesis on miss ────────────────────────────────────
+            if pcm is None and _F5_MODEL_OBJ is not None:
+                try:
+                    pcm = await asyncio.wait_for(
+                        _run_f5_pcm(speak_text, WS_TTS_STEPS),
+                        timeout=F5_TIMEOUT_S,
+                    )
+                    tts_backend_used = "f5"
+                    # Persist a WAV copy alongside /tts cache entries so the
+                    # next request (HTTP or WS) hits the cache.
+                    try:
+                        buf = io.BytesIO()
+                        sf.write(
+                            buf,
+                            np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32767.0,
+                            F5_SAMPLE_RATE,
+                            format="WAV",
+                            subtype="PCM_16",
+                        )
+                        await _write_cache(cache_key, buf.getvalue())
+                    except Exception as exc:  # noqa: BLE001
+                        _jlog("ws_tts_cache_write_err",
+                              request_id=request_id, err=str(exc))
+                except asyncio.TimeoutError:
+                    tts_err = "timeout"
+                    _jlog("ws_tts_f5_timeout", request_id=request_id,
+                          timeout_s=F5_TIMEOUT_S)
+                except Exception as exc:  # noqa: BLE001
+                    tts_err = type(exc).__name__
+                    _jlog("ws_tts_f5_error", request_id=request_id,
+                          err=tts_err, msg=str(exc))
+            elif pcm is None:
+                tts_err = "f5_not_loaded"
+                _jlog("ws_tts_f5_not_loaded", request_id=request_id,
+                      load_err=_F5_LOAD_ERR)
+
+            tts_stage_latency_ms = int(
+                (time.monotonic() - tts_started) * 1000
+            )
+
+            if pcm is None:
+                # Tell the client we failed to synthesize, then send a
+                # zero-length speak_end so the receiver state machine still
+                # advances cleanly. NEVER fall back to service_down.wav
+                # over WS — the client can fetch it via REST if it cares.
+                try:
+                    await ws.send_text(json.dumps({
+                        "type": "error",
+                        "stage": "tts",
+                        "message": tts_err or "tts unavailable",
+                    }))
+                    await ws.send_text(json.dumps({
+                        "type": "speak_end",
+                        "duration_ms": 0,
+                        "backend": "none",
+                        "latency_ms": tts_stage_latency_ms,
+                    }))
+                except (WebSocketDisconnect, RuntimeError):
+                    pass
+                tts_backend_used = "none"
+            else:
+                # Cap memory: drop trailing samples beyond 30 s of audio.
+                if len(pcm) > WS_TTS_MAX_BYTES:
+                    _jlog("ws_tts_truncate_audio", request_id=request_id,
+                          had=len(pcm), max=WS_TTS_MAX_BYTES)
+                    pcm = pcm[:WS_TTS_MAX_BYTES]
+                duration_ms = int(
+                    len(pcm) / WS_TTS_BYTES_PER_SAMPLE
+                    * 1000 / WS_TTS_OUTPUT_SR
+                )
+                try:
+                    await ws.send_text(json.dumps({
+                        "type": "speak_start",
+                        "sample_rate": WS_TTS_OUTPUT_SR,
+                        "format": "pcm_s16",
+                        "total_estimated_ms": duration_ms,
+                    }))
+                    # Stream PCM in fixed-size chunks. Final chunk may be
+                    # shorter; that is the firmware's responsibility to
+                    # handle (it already does for the inbound STT path).
+                    for offset in range(0, len(pcm), WS_TTS_CHUNK_BYTES):
+                        chunk = pcm[offset:offset + WS_TTS_CHUNK_BYTES]
+                        await ws.send_bytes(chunk)
+                        tts_chunks_sent += 1
+                        tts_total_bytes += len(chunk)
+                    await ws.send_text(json.dumps({
+                        "type": "speak_end",
+                        "duration_ms": duration_ms,
+                        "backend": tts_backend_used or "f5",
+                        "latency_ms": tts_stage_latency_ms,
+                    }))
+                except WebSocketDisconnect:
+                    _jlog("ws_tts_client_dropped",
+                          request_id=request_id,
+                          chunks_sent=tts_chunks_sent,
+                          bytes_sent=tts_total_bytes)
+                    return
+
+            _jlog("ws_tts_done", request_id=request_id,
+                  session_id=session_id,
+                  tts_stage_latency_ms=tts_stage_latency_ms,
+                  tts_chunks_sent=tts_chunks_sent,
+                  tts_total_bytes=tts_total_bytes,
+                  tts_backend_used=tts_backend_used or "none",
+                  cache_key=cache_key)
+
+    # ── 6. Clean close ──────────────────────────────────────────────────
     try:
         await ws.close(code=1000, reason="done")
     except RuntimeError:

@@ -1,0 +1,20 @@
+name: "60-minute TECH team — happy path (P1 minimal)"
+description: >
+  P1 canonical playtest. Boots the canonical scenario, advances out of
+  the U-SON intro, and resolves PUZZLE_LA_440 (the simplest puzzle in
+  zacus_v2.yaml — a single 'unlock' transition on STEP_LA_DETECTOR).
+  Asserts that the team lands on STEP_RTC_ESP_ETAPE1 ready to confirm
+  Étape 1.
+
+scenario: ../zacus_v2.yaml
+
+events:
+  - { at: 5,   type: serial, name: BTN_NEXT }         # leave STEP_U_SON_PROTO
+  - { at: 300, type: unlock, name: UNLOCK_LA_440 }    # solve PUZZLE_LA_440
+
+# Phase P1 only records expectations; the critical_asserts block is
+# parsed for forward-compat but enforcement lands in P2/P3.
+critical_asserts:
+  at_end:
+    final_step_id: STEP_RTC_ESP_ETAPE1
+    history.length: "== 3"

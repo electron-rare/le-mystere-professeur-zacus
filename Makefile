@@ -2,7 +2,7 @@ PYTHON ?= python3
 SCENARIO ?= game/scenarios/zacus_v2.yaml
 FRONTEND_DIR ?= frontend-v3
 
-.PHONY: bootstrap-validators bootstrap-docs scenario-validate audio-validate printables-validate export validate-runtime-bundle content-checks runtime3-compile runtime3-simulate runtime3-verify runtime3-test runtime3-firmware-bundle frontend-typecheck frontend-test frontend-build docs-build docs-serve all-validate images
+.PHONY: bootstrap-validators bootstrap-docs scenario-validate audio-validate printables-validate export validate-runtime-bundle content-checks runtime3-compile runtime3-simulate runtime3-verify runtime3-test runtime3-firmware-bundle frontend-typecheck frontend-test frontend-build docs-build docs-serve all-validate images playtest
 
 bootstrap-validators:
 	bash tools/setup/install_validators.sh
@@ -63,3 +63,9 @@ all-validate: scenario-validate audio-validate printables-validate validate-runt
 
 images:
 	$(PYTHON) tools/images/generate_printables.py --manifest printables/manifests/zacus_v2_printables.yaml
+
+playtest:
+	uv run --no-project --with pyyaml python tools/playtest/run_playtest.py \
+		--scenario game/scenarios/zacus_v2.yaml \
+		--playtest game/scenarios/playtests/zacus_v3_60min_tech.playtest.yaml \
+		--snapshot game/scenarios/playtests/snapshots/zacus_v3_60min_tech.snapshot.json

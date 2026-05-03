@@ -1,0 +1,32 @@
+{
+  "snapshot_version": "zacus.playtest.snapshot.v1",
+  "scenario_id": "ZACUS_V2",
+  "playtest_name": "60-minute TECH team — happy path (P1 minimal)",
+  "initial_step_id": "STEP_U_SON_PROTO",
+  "final_step_id": "STEP_RTC_ESP_ETAPE1",
+  "history": [
+    "STEP_U_SON_PROTO",
+    "STEP_LA_DETECTOR",
+    "STEP_RTC_ESP_ETAPE1"
+  ],
+  "transcript": [
+    {
+      "at": 5,
+      "event_type": "serial",
+      "event_name": "BTN_NEXT",
+      "step_id": "STEP_LA_DETECTOR",
+      "scene_id": "SCENE_LA_DETECTOR",
+      "audio_pack_id": "",
+      "narrative": "Atelier des Ondes. Objectif : produire un LA 440 stable. Le groupe s’organise : une personne fait le son, d’autres surveillent le feedback.\n"
+    },
+    {
+      "at": 300,
+      "event_type": "unlock",
+      "event_name": "UNLOCK_LA_440",
+      "step_id": "STEP_RTC_ESP_ETAPE1",
+      "scene_id": "SCENE_WIN_ETAPE1",
+      "audio_pack_id": "",
+      "narrative": "Transmission distante (ESP-NOW). L’ACK confirme la validation Étape 1.\n"
+    }
+  ]
+}

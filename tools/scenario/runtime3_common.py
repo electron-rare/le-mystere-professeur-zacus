@@ -125,9 +125,29 @@ def _compile_runtime3_steps_from_firmware(
     return compiled_steps, entry_step_id
 
 
+def _parse_major_version(raw: Any) -> int:
+    """Tolerate both int versions (1, 2, 3) and semantic strings ("3.1").
+
+    Returns the major component as an int. Falls back to 1 if unparseable.
+    """
+    if isinstance(raw, int):
+        return raw
+    text = str(raw).strip()
+    if not text:
+        return 1
+    try:
+        return int(text)
+    except ValueError:
+        head = text.split(".", 1)[0]
+        try:
+            return int(head)
+        except ValueError:
+            return 1
+
+
 def compile_runtime3_document(data: dict[str, Any], source_kind: str = "yaml") -> dict[str, Any]:
     scenario_id = normalize_token(str(data.get("id", "")), "ZACUS_RUNTIME3")
-    version = int(data.get("version", 1))
+    version = _parse_major_version(data.get("version", 1))
     title = str(data.get("title", scenario_id))
     firmware = data.get("firmware") if isinstance(data.get("firmware"), dict) else {}
     steps_reference_order = (

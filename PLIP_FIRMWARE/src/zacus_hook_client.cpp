@@ -87,7 +87,9 @@ bool post_once(const HookEvent &ev) {
            "{\"state\":\"%s\",\"reason\":\"%s\"}",
            ev.state, ev.reason);
 
-  int code = http.POST(reinterpret_cast<const uint8_t *>(body), strlen(body));
+  // HTTPClient::POST takes a non-const uint8_t*; body is a local stack
+  // buffer so the const_cast is safe (no shared mutable aliasing).
+  int code = http.POST(reinterpret_cast<uint8_t *>(body), strlen(body));
   http.end();
   if (code >= 200 && code < 300) {
     Serial.printf("[zacus-hook] POST %s -> %d (state=%s reason=%s)\n",

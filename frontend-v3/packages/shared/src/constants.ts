@@ -28,3 +28,8 @@ export const BOX3_WS_RECONNECT_MS = 3000;
 export const HINTS_DEFAULT_BASE_URL = 'http://localhost:8311';
 export const HINTS_DEFAULT_POLL_MS = 5000;
 export const HINTS_GROUP_PROFILES = ['TECH', 'NON_TECH', 'MIXED', 'BOTH'] as const;
+
+// Voice-bridge REST defaults — overridden via VITE_VOICE_BRIDGE_URL / VITE_VOICE_BRIDGE_POLL_MS
+// 100.116.92.12:8200 = MacStudio Tailscale IP, where the F5-TTS bridge runs.
+export const VOICE_BRIDGE_DEFAULT_BASE_URL = 'http://100.116.92.12:8200';
+export const VOICE_BRIDGE_DEFAULT_POLL_MS = 2000;

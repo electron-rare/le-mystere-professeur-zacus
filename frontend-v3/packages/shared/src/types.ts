@@ -248,6 +248,27 @@ export interface HintAskResponse {
   group_profile_used: HintsGroupProfile | null;
 }
 
+// ============================================================
+// VOICE BRIDGE TYPES (mirror tools/voice/bridge.py FastAPI surface)
+// ============================================================
+
+/** GET /health/ready envelope. F5-TTS warmup status. */
+export interface VoiceBridgeReady {
+  ready: boolean;
+  f5_loaded: boolean;
+  warmup_ms: number;
+  cache_size: number;
+}
+
+/** GET /tts/cache/stats envelope. */
+export interface VoiceBridgeCacheStats {
+  count: number;
+  size_mb: number;
+  hits: number;
+  misses: number;
+  hit_rate_since_boot: number;
+}
+
 export interface ScenarioYaml {
   id: string;
   version: string;

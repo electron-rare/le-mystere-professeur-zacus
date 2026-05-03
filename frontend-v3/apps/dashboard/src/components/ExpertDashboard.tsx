@@ -6,6 +6,7 @@ import { NpcPanel } from './NpcPanel.js';
 import { Timeline } from './Timeline.js';
 import { ControlPanel } from './ControlPanel.js';
 import { HintsAdaptivePanel } from './HintsAdaptivePanel.js';
+import { VoiceActivityPanel } from './VoiceActivityPanel.js';
 
 export function ExpertDashboard() {
   const {
@@ -66,6 +67,9 @@ export function ExpertDashboard() {
 
         {/* Hints adaptive (P4) */}
         <HintsAdaptivePanel />
+
+        {/* Voice bridge activity (P5) */}
+        <VoiceActivityPanel />
 
         {/* Controls */}
         <ControlPanel />

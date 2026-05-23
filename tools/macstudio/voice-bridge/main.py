@@ -184,6 +184,19 @@ WS_EXPECTED_SR = 16_000
 WS_BYTES_PER_SAMPLE = 2  # PCM 16-bit mono
 WS_MAX_DURATION_S = 30
 WS_MAX_BYTES = WS_EXPECTED_SR * WS_BYTES_PER_SAMPLE * WS_MAX_DURATION_S  # 960 KB
+# Server-side end-of-utterance safety net (auto-EOU). Plain RMS-based
+# silence detection: if we've seen at least WS_VAD_MIN_SPEECH_MS of
+# speech (frames whose RMS exceeds WS_VAD_RMS_THRESHOLD) and then
+# WS_VAD_SILENCE_TIMEOUT_MS of contiguous silence, we exit the
+# receive loop as if the firmware had sent {"type":"end"}. Firmware's
+# own VAD AFE remains primary — this is purely a backstop for the
+# case where the firmware loses the end frame or crashes mid-stream.
+# Set WS_VAD_ENABLED=0 to disable. Thresholds chosen empirically for
+# the ESP32 INMP441 mic at typical desk distance — tune via env.
+WS_VAD_ENABLED = os.getenv("WS_VAD_ENABLED", "1") not in {"0", "false", "no"}
+WS_VAD_RMS_THRESHOLD = float(os.getenv("WS_VAD_RMS_THRESHOLD", "0.012"))
+WS_VAD_MIN_SPEECH_MS = int(os.getenv("WS_VAD_MIN_SPEECH_MS", "400"))
+WS_VAD_SILENCE_TIMEOUT_MS = int(os.getenv("WS_VAD_SILENCE_TIMEOUT_MS", "900"))
 WS_FORWARD_INTENT = os.getenv("WS_FORWARD_INTENT", "1") not in {"0", "false", "no"}
 # Server-side TTS over WS (P1 part12). Default: mirror WS_FORWARD_INTENT, since
 # synthesizing the intent reply is the natural follow-up. Can be force-disabled
@@ -289,6 +302,23 @@ def _pcm16_seconds(pcm_bytes: int, sample_rate: int) -> float:
     if sample_rate <= 0:
         return 0.0
     return pcm_bytes / float(sample_rate * 2)
+
+
+def _pcm16_rms(pcm_bytes: bytes) -> float:
+    """RMS amplitude of a PCM16 mono buffer, normalised to [0, 1].
+
+    Used by the server-side end-of-utterance safety net to detect
+    silence vs speech without pulling in a full VAD model. Empty
+    buffers return 0.0 (treated as silence).
+    """
+    if not pcm_bytes:
+        return 0.0
+    samples = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+    if samples.size == 0:
+        return 0.0
+    # Use mean-squared instead of sqrt(mean(x**2)) to avoid the sqrt on
+    # the hot path; the threshold is calibrated against this value.
+    return float(np.sqrt(np.mean(samples * samples)))
 
 
 async def _usage_snapshot() -> dict[str, Any]:
@@ -1546,11 +1576,43 @@ async def voice_ws(ws: WebSocket) -> None:
     _jlog("ws_hello_ok", request_id=request_id, session_id=session_id,
           puzzle_id=puzzle_id)
 
-    # ── 2. Streaming loop: binary frames + text "end" ────────────────────
+    # ── 2. Streaming loop: binary frames + text "end" + server VAD ──────
     buf = bytearray()
+    # Server-side EOU state: tracks how many ms of audio we've ingested
+    # since we last saw a frame above the speech threshold. Combined
+    # with `had_any_speech`, we trigger an automatic end-of-utterance
+    # when silence persists post-speech long enough. This is purely a
+    # safety net — the firmware's local VAD AFE still sends {"type":
+    # "end"} normally, and whichever signal arrives first wins.
+    audio_ms = 0  # total PCM duration accumulated, ms
+    last_speech_at_audio_ms = 0  # audio_ms when we last saw speech
+    had_any_speech = False
+    auto_eou_triggered = False
     try:
         while True:
-            msg = await ws.receive()
+            # If VAD is enabled and we've already locked in some speech,
+            # cap the per-frame await so a long-silent client unblocks
+            # the loop within WS_VAD_SILENCE_TIMEOUT_MS even when no
+            # further frames arrive at all (the firmware froze mid-stream).
+            if WS_VAD_ENABLED and had_any_speech:
+                remaining_silence_ms = max(
+                    50,
+                    WS_VAD_SILENCE_TIMEOUT_MS
+                    - (audio_ms - last_speech_at_audio_ms),
+                )
+                try:
+                    msg = await asyncio.wait_for(
+                        ws.receive(), timeout=remaining_silence_ms / 1000.0
+                    )
+                except asyncio.TimeoutError:
+                    auto_eou_triggered = True
+                    _jlog("ws_auto_eou_idle_timeout",
+                          request_id=request_id, bytes=len(buf),
+                          audio_ms=audio_ms,
+                          since_speech_ms=audio_ms - last_speech_at_audio_ms)
+                    break
+            else:
+                msg = await ws.receive()
             # FastAPI / Starlette receive() returns a dict with either "bytes"
             # or "text" populated; closing handshakes are surfaced as a
             # "websocket.disconnect" type.
@@ -1565,6 +1627,35 @@ async def voice_ws(ws: WebSocket) -> None:
                     await ws.close(code=1009, reason="audio > 30 s cap")
                     return
                 buf.extend(data)
+                # Update VAD state on each binary frame. Frame duration
+                # depends on what the firmware ships (20 ms is the
+                # current default), but we derive it from byte count so
+                # any frame size works.
+                if WS_VAD_ENABLED:
+                    frame_ms = int(
+                        _pcm16_seconds(len(data), WS_EXPECTED_SR) * 1000
+                    )
+                    audio_ms += frame_ms
+                    if _pcm16_rms(data) >= WS_VAD_RMS_THRESHOLD:
+                        had_any_speech = True
+                        last_speech_at_audio_ms = audio_ms
+                    elif (
+                        had_any_speech
+                        and audio_ms - last_speech_at_audio_ms
+                            >= WS_VAD_SILENCE_TIMEOUT_MS
+                        and audio_ms >= WS_VAD_MIN_SPEECH_MS
+                    ):
+                        # Enough trailing silence post-speech — close
+                        # the utterance as if the firmware had sent end.
+                        auto_eou_triggered = True
+                        _jlog(
+                            "ws_auto_eou_silence",
+                            request_id=request_id, bytes=len(buf),
+                            audio_ms=audio_ms,
+                            since_speech_ms=audio_ms
+                                - last_speech_at_audio_ms,
+                        )
+                        break
                 continue
             if (text := msg.get("text")) is not None:
                 try:

@@ -119,6 +119,12 @@ LITELLM_URL = os.getenv("LITELLM_URL", "http://localhost:4000")
 LITELLM_DEFAULT_KEY = "sk-zacus-local-dev-do-not-share"  # placeholder, log warns at boot
 LITELLM_KEY = os.environ.get("LITELLM_MASTER_KEY", LITELLM_DEFAULT_KEY)
 PIPER_URL = os.getenv("PIPER_URL", "http://192.168.0.120:8001")
+# Kokoro-FR fallback (MacStudio :8002) — third-tier TTS, used when F5
+# fails AND Piper fails / produces wrong-language output. The /tts
+# HTTP handler still gives Piper first crack for backwards-compat, but
+# the /voice/ws path prefers Kokoro since Piper Tower is EN-only.
+# Set KOKORO_URL=0 to disable.
+KOKORO_URL = os.getenv("KOKORO_URL", "http://localhost:8002")
 F5_TIMEOUT_S = float(os.getenv("F5_TIMEOUT_S", "8.0"))
 F5_MODEL = os.getenv("F5_MODEL", "lucasnewman/f5-tts-mlx")
 F5_DEFAULT_STEPS = int(os.getenv("F5_DEFAULT_STEPS", "4"))
@@ -828,6 +834,31 @@ async def _piper_fallback(text: str) -> Optional[bytes]:
         _jlog("piper_fallback_nonok", status=resp.status_code)
     except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPError) as exc:
         _jlog("piper_fallback_unreachable", err=type(exc).__name__)
+    return None
+
+
+async def _kokoro_fallback(text: str) -> Optional[bytes]:
+    """POST text to Kokoro :8002/synthesize. Returns WAV bytes or None.
+
+    Third-tier TTS, used by /voice/ws when F5 and Piper both fail or
+    when Kokoro is configured as the FR-preferred fallback (since
+    Piper Tower is EN-only as of 2026-05). Returns None on any error
+    so the caller can fall through to the next tier (or empty
+    speak_end on the WS path).
+    """
+    if KOKORO_URL in {"", "0", "off", "disabled"}:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{KOKORO_URL}/synthesize",
+                json={"text": text},
+            )
+        if resp.status_code == 200:
+            return resp.content
+        _jlog("kokoro_fallback_nonok", status=resp.status_code)
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPError) as exc:
+        _jlog("kokoro_fallback_unreachable", err=type(exc).__name__)
     return None
 
 
@@ -1839,11 +1870,26 @@ async def voice_ws(ws: WebSocket) -> None:
                 _jlog("ws_tts_f5_not_loaded", request_id=request_id,
                       load_err=_F5_LOAD_ERR)
 
-            # 5c. Piper fallback on F5 failure — mirrors the /tts handler.
-            # Same wav-to-pcm conversion; we resample on output only if the
-            # Piper sample-rate diverges from the WS contract (24 kHz). The
-            # fallback is intentionally best-effort: any error here just
-            # leaves pcm=None and the WS sends an empty speak_end below.
+            # 5c. Fallback chain on F5 failure — mirrors the /tts handler
+            # for the wav→pcm conversion, but ordered Kokoro-first then
+            # Piper since Piper Tower is EN-only today and the WS path
+            # is overwhelmingly FR. Each tier is best-effort; on any
+            # error we fall through to the next one, and a final
+            # pcm=None means the WS just emits an empty speak_end.
+            if pcm is None and speak_text:
+                wav_fallback = await _kokoro_fallback(speak_text)
+                if wav_fallback is not None:
+                    try:
+                        pcm = _wav_to_pcm16(wav_fallback)
+                        tts_backend_used = "kokoro_fallback"
+                        tts_err = None
+                        _jlog("ws_tts_kokoro_fallback",
+                              request_id=request_id, bytes=len(pcm))
+                    except Exception as exc:  # noqa: BLE001
+                        _jlog("ws_tts_kokoro_decode_err",
+                              request_id=request_id,
+                              err=type(exc).__name__, msg=str(exc))
+
             if pcm is None and speak_text:
                 wav_fallback = await _piper_fallback(speak_text)
                 if wav_fallback is not None:

@@ -1,0 +1,10 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2
+numpy>=1.26
+soundfile>=0.12
+# Kokoro-82M MLX inference engine. Pulls in misaki (G2P), spacy, etc.
+# Total install ~1.5 GB once warm.
+mlx-audio>=0.4
+kokoro>=0.9
+# transformers version follows mlx-audio's own pin — let pip resolve.

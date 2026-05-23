@@ -1628,6 +1628,25 @@ async def voice_ws(ws: WebSocket) -> None:
                 _jlog("ws_tts_f5_not_loaded", request_id=request_id,
                       load_err=_F5_LOAD_ERR)
 
+            # 5c. Piper fallback on F5 failure — mirrors the /tts handler.
+            # Same wav-to-pcm conversion; we resample on output only if the
+            # Piper sample-rate diverges from the WS contract (24 kHz). The
+            # fallback is intentionally best-effort: any error here just
+            # leaves pcm=None and the WS sends an empty speak_end below.
+            if pcm is None and speak_text:
+                wav_fallback = await _piper_fallback(speak_text)
+                if wav_fallback is not None:
+                    try:
+                        pcm = _wav_to_pcm16(wav_fallback)
+                        tts_backend_used = "piper_fallback"
+                        tts_err = None
+                        _jlog("ws_tts_piper_fallback",
+                              request_id=request_id, bytes=len(pcm))
+                    except Exception as exc:  # noqa: BLE001
+                        _jlog("ws_tts_piper_decode_err",
+                              request_id=request_id,
+                              err=type(exc).__name__, msg=str(exc))
+
             tts_stage_latency_ms = int(
                 (time.monotonic() - tts_started) * 1000
             )

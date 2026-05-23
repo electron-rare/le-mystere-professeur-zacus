@@ -11,3 +11,9 @@ slowapi>=0.1.9
 # F5-TTS in-process backend (Apple Silicon MLX)
 f5-tts-mlx>=0.2.6
 mlx>=0.31
+# Kyutai STT streaming client (kyutai_stt.py) — talks msgpack to
+# moshi-server on :8304. scipy only used for the 16 kHz → 24 kHz
+# polyphase resample.
+msgpack>=1.0
+websockets>=12
+scipy>=1.10

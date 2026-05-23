@@ -5,8 +5,11 @@ msgpack) on `100.116.92.12:8304`. Backbone : `moshi-server 0.6.4` (crates.io)
 + model `kyutai/stt-1b-en_fr-candle` (~600 MB, Candle/Metal, EN+FR).
 
 Validated on a clean French sample (`say -v Thomas`) — 14/17 mots verbatim,
-3 substitutions cosmétiques. **Not yet wired into `voice-bridge`** : that's
-the next chantier.
+3 substitutions cosmétiques. **Wired into `voice-bridge` /voice/ws since
+2026-05-24** — see `kyutai_stt.py` next to `main.py` and the `STT_BACKEND`
+env switch in `main.py:92`. Per-word partials forwarded as
+`{"type":"stt","final":false,"text":...}`; fallback to whisper.cpp on
+`KyutaiSttError`.
 
 ## Why this instead of whisper.cpp / whisperx
 
@@ -145,20 +148,22 @@ three STT engines hallucinate on it identically. The win is on human-grade
 audio, where Kyutai gives a transcription usable as-is by `npc-fast` in
 the existing `/voice/intent` chain.
 
-## Next chantiers (not yet done)
+## Next chantiers
 
-1. **Glossary biasing** — Kyutai's STT supports an `initial_prompt`
+1. ✅ **Voice-bridge integration** (done 2026-05-24) — `kyutai_stt.py`
+   replaces the batch path. STT_BACKEND=kyutai is the default; flip to
+   whispercpp for A/B or during Kyutai upgrade. Auto-fallback on error.
+2. **Glossary biasing** — Kyutai's STT supports an `initial_prompt`
    mechanism via the conditioning embedding. Wire the active-puzzle
    glossary from `game/scenarios/zacus_v2.yaml` to fix the `U-SON →
-   Husson n'est` substitution and similar metier terms.
-2. **Voice-bridge integration** — replace `_whisper_transcribe_pcm`
-   (batch-after-end) in `tools/macstudio/voice-bridge/main.py:1473` with
-   a Kyutai client that emits `{"type":"stt","final":false,...}` partials
-   over `/voice/ws` as `Word` events arrive. End-of-stream emits `final:true`.
+   eu son nez` substitution and similar metier terms.
 3. **Persona-aware system prompt** — pass the active puzzle ID into
    `/voice/intent`'s system prompt so `npc-fast` can interpret a
    sub-optimal transcript with contextual prior (this is what saves us
    even when STT misses 1-2 words).
+4. **Silero VAD server-side** — auto-detect end-of-utterance instead of
+   waiting for the firmware to send `{"type":"end"}`. Reduces fixed
+   buffer-wait latency.
 
 ## Known issues
 

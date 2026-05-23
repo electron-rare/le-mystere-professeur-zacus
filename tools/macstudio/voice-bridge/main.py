@@ -90,6 +90,13 @@ from slowapi.util import get_remote_address
 
 # ── config (env-overridable) ────────────────────────────────────────────────
 WHISPER_URL = os.getenv("WHISPER_URL", "http://localhost:8300")
+# STT_BACKEND switches the /voice/ws STT path between the legacy batch
+# whisper.cpp call (set to "whispercpp") and the streaming Kyutai client
+# in kyutai_stt.py (set to "kyutai", default). Kyutai falls back to
+# whisper.cpp automatically on connect/transport failure, so the only
+# reason to flip this to "whispercpp" is for A/B testing or if Kyutai
+# is being upgraded.
+STT_BACKEND = os.getenv("STT_BACKEND", "kyutai").lower()
 LITELLM_URL = os.getenv("LITELLM_URL", "http://localhost:4000")
 LITELLM_DEFAULT_KEY = "sk-zacus-local-dev-do-not-share"  # placeholder, log warns at boot
 LITELLM_KEY = os.environ.get("LITELLM_MASTER_KEY", LITELLM_DEFAULT_KEY)
@@ -1469,11 +1476,41 @@ async def voice_ws(ws: WebSocket) -> None:
         await ws.close(code=1003, reason="no audio")
         return
 
-    # ── 3. Whisper STT on the buffered PCM ──────────────────────────────
+    # ── 3. STT on the buffered PCM ──────────────────────────────────────
+    # Two backends, selectable via STT_BACKEND env:
+    #   - kyutai     : streaming WS → moshi-server :8304, emits
+    #                  {"type":"stt","final":false,...} partials as words
+    #                  arrive, then a single final:true at end.
+    #   - whispercpp : legacy single-shot batch through whisper.cpp.
+    # Kyutai falls back to whispercpp on KyutaiSttError so a downed
+    # moshi-server never breaks the firmware loop.
+    stt_backend_used = "whispercpp"
+    transcript = ""
     try:
-        transcript = await _whisper_transcribe_pcm(bytes(buf))
+        if STT_BACKEND == "kyutai":
+            async def _forward_partial(partial: str) -> None:
+                await ws.send_text(json.dumps(
+                    {"type": "stt", "text": partial, "final": False}
+                ))
+            try:
+                from kyutai_stt import (
+                    kyutai_transcribe_streaming,
+                    KyutaiSttError,
+                )
+                transcript = await kyutai_transcribe_streaming(
+                    bytes(buf), on_partial=_forward_partial
+                )
+                stt_backend_used = "kyutai"
+            except KyutaiSttError as exc:
+                _jlog("ws_stt_kyutai_fallback", request_id=request_id,
+                      err=str(exc))
+                transcript = await _whisper_transcribe_pcm(bytes(buf))
+                stt_backend_used = "whispercpp-fallback"
+        else:
+            transcript = await _whisper_transcribe_pcm(bytes(buf))
     except (RuntimeError, httpx.HTTPError) as exc:
-        _jlog("ws_stt_failed", request_id=request_id, err=str(exc))
+        _jlog("ws_stt_failed", request_id=request_id, err=str(exc),
+              backend=stt_backend_used)
         # Best-effort: tell the client and close. Firmware can decide.
         try:
             await ws.send_text(json.dumps(
@@ -1492,7 +1529,7 @@ async def voice_ws(ws: WebSocket) -> None:
     ))
     _jlog("ws_stt_done", request_id=request_id, session_id=session_id,
           bytes=len(buf), text_len=len(transcript), latency_ms=stt_ms,
-          audio_s=round(stt_audio_s, 3))
+          audio_s=round(stt_audio_s, 3), backend=stt_backend_used)
 
     # ── 4. Optional intent forward (LiteLLM npc-fast) ────────────────────
     intent_content: Optional[str] = None

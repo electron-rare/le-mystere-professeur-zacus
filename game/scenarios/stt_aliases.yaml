@@ -1,0 +1,62 @@
+# STT post-correction fuzzy aliases for Kyutai (and any) STT output.
+#
+# The Kyutai 1B en_fr model does not know Zacus metier vocabulary
+# (U-SON, the 440 Hz tuning fork context, custom NPC names, etc.) and
+# the moshi-server Rust runtime does not expose any per-request
+# TextPrompt mechanism we could use to bias the LM (cf.
+# docs/voice-pipeline-roadmap.md). So we rewrite the transcript on the
+# server side before forwarding to /voice/intent.
+#
+# Loaded by tools/macstudio/voice-bridge/main.py at boot via the
+# `STT_ALIASES_PATH` env var (default: this file). Hot reload by
+# restarting voice-bridge.
+#
+# Schema:
+#   global:                # applied to every transcript
+#     - from: "regex pattern"   # case-insensitive, word boundaries auto
+#       to: "replacement"
+#   per_puzzle:            # keyed by puzzle_id (firmware passes it in hello)
+#     P1_SON:
+#       - from: "..."
+#         to: "..."
+#
+# Patterns are matched case-insensitively. Word boundaries are added
+# around the pattern unless it starts with `(?` (escape hatch for
+# bespoke regex). Replacements preserve case of the first matched
+# character.
+
+global:
+  # Professor name — the model often hears it as "the rasus" / "le rasus".
+  - from: "(?:le |la )?rasus"
+    to: "Zacus"
+  - from: "professeur ?(?:le |la )?rasus"
+    to: "Professeur Zacus"
+
+  # Common French STT polish — these are not Kyutai-specific but help
+  # everyone (e.g. whisper.cpp fallback would benefit too).
+  - from: "vue son"
+    to: "U-SON"
+  - from: "(?:eu|u) son nez"
+    to: "U-SON"
+  - from: "(?:eu|u) son(?:'s)?"
+    to: "U-SON"
+  - from: "husson(?: n'est)?"
+    to: "U-SON"
+
+per_puzzle:
+  # Puzzle U-SON — frequency / tuning fork
+  SCENE_U_SON_PROTO:
+    - from: "(?:le |la )?la (?:quatre|4) ?cent ?quarante"
+      to: "LA 440"
+    - from: "(?:le |la )?la (?:quatre|4)40 ?(?:hertz|hz)"
+      to: "LA 440 Hz"
+    - from: "diapazon"
+      to: "diapason"
+    - from: "fréquence fondamentale"
+      to: "fréquence fondamentale"
+
+  # Reserve slots for the other scenes — populate as playtest reveals
+  # actual STT failure modes per puzzle.
+  SCENE_LA_DETECTOR: []
+  SCENE_MORSE: []
+  SCENE_COFFRE: []

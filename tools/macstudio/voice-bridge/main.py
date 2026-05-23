@@ -55,6 +55,7 @@ import asyncio
 import hashlib
 import io
 import json
+import re
 import logging
 import os
 import shutil
@@ -97,6 +98,23 @@ WHISPER_URL = os.getenv("WHISPER_URL", "http://localhost:8300")
 # reason to flip this to "whispercpp" is for A/B testing or if Kyutai
 # is being upgraded.
 STT_BACKEND = os.getenv("STT_BACKEND", "kyutai").lower()
+# Post-correction fuzzy alias table for the STT output (cf.
+# game/scenarios/stt_aliases.yaml). Loaded at boot, applied to the
+# *final* transcript only (not the streaming partials, to avoid
+# stuttering UI flicker on the firmware side).
+STT_ALIASES_PATH = os.getenv(
+    "STT_ALIASES_PATH",
+    # First try sibling to main.py (Studio deploy puts the yaml next to
+    # the module), then fall back to the in-repo canonical location
+    # (dev/test from a checkout of the Zacus repo).
+    next(
+        (str(p) for p in [
+            Path(__file__).resolve().parent / "stt_aliases.yaml",
+            Path(__file__).resolve().parents[2] / "game" / "scenarios" / "stt_aliases.yaml",
+        ] if p.exists()),
+        str(Path(__file__).resolve().parent / "stt_aliases.yaml"),
+    ),
+)
 LITELLM_URL = os.getenv("LITELLM_URL", "http://localhost:4000")
 LITELLM_DEFAULT_KEY = "sk-zacus-local-dev-do-not-share"  # placeholder, log warns at boot
 LITELLM_KEY = os.environ.get("LITELLM_MASTER_KEY", LITELLM_DEFAULT_KEY)
@@ -670,6 +688,94 @@ async def health_ready() -> JSONResponse:
     }
     code = status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE
     return JSONResponse(content=body, status_code=code)
+
+
+# ── STT post-correction fuzzy alias table ───────────────────────────────────
+# Compiles once at module import. Format documented in
+# game/scenarios/stt_aliases.yaml. Loader silently degrades to a no-op if
+# the YAML can't be loaded — STT still works, just without metier polish.
+_STT_GLOBAL_PATTERNS: list[tuple[re.Pattern[str], str]] = []
+_STT_PUZZLE_PATTERNS: dict[str, list[tuple[re.Pattern[str], str]]] = {}
+
+
+def _compile_alias_entries(entries: Any) -> list[tuple[re.Pattern[str], str]]:
+    """Compile a list of {from, to} dicts into (Pattern, replacement) pairs.
+
+    Patterns get case-insensitive word-boundary wrapping unless they
+    already start with ``(?`` (escape hatch for advanced regex).
+    Invalid entries are logged and skipped — never raise.
+    """
+    out: list[tuple[re.Pattern[str], str]] = []
+    if not isinstance(entries, list):
+        return out
+    for raw in entries:
+        if not isinstance(raw, dict):
+            continue
+        pat = raw.get("from")
+        repl = raw.get("to")
+        if not isinstance(pat, str) or not isinstance(repl, str):
+            continue
+        wrapped = pat if pat.startswith("(?") else rf"\b(?:{pat})\b"
+        try:
+            out.append((re.compile(wrapped, re.IGNORECASE), repl))
+        except re.error as exc:
+            _jlog("stt_alias_bad_regex", pattern=pat, err=str(exc))
+    return out
+
+
+def _load_stt_aliases(path: str) -> None:
+    """Populate the module-level alias tables. Idempotent."""
+    global _STT_GLOBAL_PATTERNS, _STT_PUZZLE_PATTERNS
+    try:
+        import yaml  # local import — pyyaml is a soft dep
+    except ImportError:
+        _jlog("stt_alias_no_pyyaml")
+        return
+    p = Path(path)
+    if not p.exists():
+        _jlog("stt_alias_file_missing", path=str(p))
+        return
+    try:
+        data = yaml.safe_load(p.read_text())
+    except Exception as exc:  # noqa: BLE001
+        _jlog("stt_alias_load_err", path=str(p), err=str(exc))
+        return
+    if not isinstance(data, dict):
+        return
+    _STT_GLOBAL_PATTERNS = _compile_alias_entries(data.get("global"))
+    per_puzzle = data.get("per_puzzle") or {}
+    _STT_PUZZLE_PATTERNS = {
+        str(k): _compile_alias_entries(v)
+        for k, v in per_puzzle.items()
+        if isinstance(v, list)
+    }
+    _jlog(
+        "stt_alias_loaded",
+        path=str(p),
+        global_count=len(_STT_GLOBAL_PATTERNS),
+        puzzle_keys=list(_STT_PUZZLE_PATTERNS.keys()),
+    )
+
+
+def _apply_stt_aliases(text: str, puzzle_id: Optional[str] = None) -> str:
+    """Apply global + puzzle-scoped substitutions to a final transcript.
+
+    No-op if alias tables are empty. Puzzle-scoped patterns apply on
+    top of globals so per-puzzle entries can refine generic ones.
+    """
+    if not text:
+        return text
+    out = text
+    for pat, repl in _STT_GLOBAL_PATTERNS:
+        out = pat.sub(repl, out)
+    if puzzle_id:
+        for pat, repl in _STT_PUZZLE_PATTERNS.get(puzzle_id, ()):
+            out = pat.sub(repl, out)
+    return out
+
+
+# Load at import so /voice/ws path has the tables ready when first WS hits.
+_load_stt_aliases(STT_ALIASES_PATH)
 
 
 # ── /tts (cache → F5 primary, Piper fallback, service_down last) ─────────────
@@ -1434,7 +1540,11 @@ async def voice_ws(ws: WebSocket) -> None:
         await ws.close(code=1003, reason="unsupported hello")
         return
     session_id = hello.get("session_id")
-    _jlog("ws_hello_ok", request_id=request_id, session_id=session_id)
+    # Optional: firmware can pass the active puzzle_id so we apply
+    # puzzle-scoped STT alias overrides on top of the global table.
+    puzzle_id = hello.get("puzzle_id") if isinstance(hello.get("puzzle_id"), str) else None
+    _jlog("ws_hello_ok", request_id=request_id, session_id=session_id,
+          puzzle_id=puzzle_id)
 
     # ── 2. Streaming loop: binary frames + text "end" ────────────────────
     buf = bytearray()
@@ -1524,6 +1634,16 @@ async def voice_ws(ws: WebSocket) -> None:
     # P1 part14: record STT call + audio duration (PCM16 16 kHz mono).
     stt_audio_s = _pcm16_seconds(len(buf), WS_EXPECTED_SR)
     await _usage_record_stt(stt_audio_s)
+    # Apply post-correction fuzzy alias table to the *final* transcript
+    # only (partials passed through verbatim above to avoid UI flicker).
+    # The result is what we forward to /voice/intent and what the
+    # firmware records — never a raw STT output with metier holes.
+    transcript_raw = transcript
+    transcript = _apply_stt_aliases(transcript_raw, puzzle_id=puzzle_id)
+    if transcript != transcript_raw:
+        _jlog("ws_stt_alias_applied", request_id=request_id,
+              before=transcript_raw[:160], after=transcript[:160],
+              puzzle_id=puzzle_id)
     await ws.send_text(json.dumps(
         {"type": "stt", "text": transcript, "final": True}
     ))

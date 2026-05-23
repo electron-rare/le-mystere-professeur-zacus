@@ -17,3 +17,5 @@ mlx>=0.31
 msgpack>=1.0
 websockets>=12
 scipy>=1.10
+# STT post-correction alias table loader (game/scenarios/stt_aliases.yaml).
+pyyaml>=6

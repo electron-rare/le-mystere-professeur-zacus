@@ -1,0 +1,35 @@
+# Board registry consumed by /v1/flash/{board}. Edit on the gateway host then
+# `sudo systemctl restart zacus-hub-gateway`.
+boards:
+  master:
+    label: "Master Zacus (Freenove ESP32-S3)"
+    type: idf_zacus
+    ip: 10.2.5.42                       # set to the actual board IP on the LAN
+    mdns: zacus-master.local
+    hot_endpoint: "/game/scenario"      # not yet implemented in firmware → 502 fallback
+    cold_data_dir: "ESP32_ZACUS/idf_zacus/data"
+    espnow_relay_peers: [box3, plip, p7_coffre]   # master pushes to these via ESP-NOW
+
+  box3:
+    label: "ESP32-S3-BOX-3 (voice annex)"
+    type: box3_voice
+    ip: null                            # reachable via master ESP-NOW relay only
+    mdns: zacus-box3.local
+    hot_endpoint: "/game/scenario"
+    cold_data_dir: "ESP32_ZACUS/box3_voice/data"
+
+  plip:
+    label: "PLIP retro telephone"
+    type: plip_firmware
+    ip: null
+    mdns: zacus-plip.local
+    hot_endpoint: "/game/scenario"
+    cold_data_dir: "PLIP_FIRMWARE/data"
+
+  p7_coffre:
+    label: "Puzzle p7 — coffre"
+    type: puzzle
+    ip: null
+    mdns: zacus-p7.local
+    hot_endpoint: "/game/scenario"
+    cold_data_dir: "ESP32_ZACUS/puzzles/p7_coffre/data"

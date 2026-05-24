@@ -1,0 +1,66 @@
+name: ZacusHub
+options:
+  bundleIdPrefix: cc.saillant.zacus
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: "JRLQM7V3V5"
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_STRICT_CONCURRENCY: complete
+
+targets:
+  ZacusHub:
+    type: application
+    supportedDestinations: [iOS, macOS, iPadOS]
+    sources:
+      - path: Sources
+      - path: Resources/blockly
+        type: folder
+        buildPhase: resources
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleDisplayName: Zacus Hub
+        ITSAppUsesNonExemptEncryption: false
+        NSMicrophoneUsageDescription: Push-to-talk avec Zacus dans le mode Companion.
+        NSCameraUsageDescription: Scanner les QR codes du jeu.
+        NSLocalNetworkUsageDescription: Communication avec le gateway Zacus sur le tailnet.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSExceptionDomains:
+            "100.78.191.52":
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSTemporaryExceptionAllowsInsecureHTTPLoads: true
+              NSExceptionMinimumTLSVersion: TLSv1.0
+            "100.116.92.12":
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSTemporaryExceptionAllowsInsecureHTTPLoads: true
+            "100.112.121.126":
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSTemporaryExceptionAllowsInsecureHTTPLoads: true
+            electron-server:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: true
+            macm1:
+              NSExceptionAllowsInsecureHTTPLoads: true
+            studio:
+              NSExceptionAllowsInsecureHTTPLoads: true
+    entitlements:
+      path: Resources/ZacusHub.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.device.audio-input: true
+        com.apple.security.device.camera: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: cc.saillant.zacus.hub
+        GENERATE_INFOPLIST_FILE: NO
+        ENABLE_PREVIEWS: YES

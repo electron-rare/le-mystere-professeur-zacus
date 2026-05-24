@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zacus Blocks (Scratch-like)</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, Arial, sans-serif; }
+  #blocklyDiv { position: absolute; top: 40px; left: 0; right: 0; bottom: 0; }
+  #toolbar { position: absolute; top: 0; left: 0; right: 0; height: 40px;
+    background: rgba(245,245,247,0.94); display: flex; align-items: center;
+    padding: 0 12px; gap: 8px; border-bottom: 1px solid rgba(0,0,0,0.12);
+    font-size: 13px; backdrop-filter: saturate(180%) blur(8px); }
+  #toolbar button { font: inherit; padding: 4px 10px; border-radius: 6px;
+    border: 1px solid rgba(0,0,0,0.12); background: white; cursor: pointer; }
+  #toolbar button:hover { background: #efeff4; }
+  #toolbar .spacer { flex: 1; }
+  #toolbar .status { font-size: 11px; color: #666; }
+  input[type=file] { display: none; }
+</style>
+<script src="https://unpkg.com/blockly@11.2.2/blockly_compressed.js"></script>
+<script src="https://unpkg.com/blockly@11.2.2/blocks_compressed.js"></script>
+<script src="https://unpkg.com/blockly@11.2.2/msg/fr.js"></script>
+<script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
+</head>
+<body>
+<div id="toolbar">
+  <button onclick="window.zacus.exportSB3()">⬇ .sb3</button>
+  <label class="filebtn">
+    <input type="file" id="sb3picker" accept=".sb3" onchange="window.zacus.importSB3(this.files[0])">
+    <button onclick="document.getElementById('sb3picker').click()">⬆ .sb3</button>
+  </label>
+  <button onclick="window.zacus.save()">💾 Enregistrer (gateway)</button>
+  <span class="spacer"></span>
+  <span class="status" id="status">prêt</span>
+</div>
+<div id="blocklyDiv"></div>
+
+<script src="zacus_blocks.js"></script>
+<script src="zacus_codec.js"></script>
+<script>
+(function() {
+  const TOOLBOX = {
+    kind: "categoryToolbox",
+    contents: [
+      { kind: "category", name: "Scènes", colour: "#5085F2", contents: [
+        { kind: "block", type: "zacus_sceneStart" },
+        { kind: "block", type: "zacus_sceneEnd" },
+        { kind: "block", type: "zacus_sceneGoto" },
+        { kind: "block", type: "zacus_sceneBranch" },
+      ]},
+      { kind: "category", name: "NPC (Zacus)", colour: "#D85B73", contents: [
+        { kind: "block", type: "zacus_npcSay" },
+        { kind: "block", type: "zacus_npcWaitResponse" },
+        { kind: "block", type: "zacus_npcIntentMatch" },
+      ]},
+      { kind: "category", name: "Audio", colour: "#A772D9", contents: [
+        { kind: "block", type: "zacus_hwSoundPlay" },
+        { kind: "block", type: "zacus_hwAudioStop" },
+        { kind: "block", type: "zacus_hwAudioVolume" },
+      ]},
+      { kind: "category", name: "Affichage LCD", colour: "#338CBF", contents: [
+        { kind: "block", type: "zacus_hwLCDText" },
+        { kind: "block", type: "zacus_hwLCDClear" },
+        { kind: "block", type: "zacus_hwLCDImage" },
+        { kind: "block", type: "zacus_hwLCDTouchWait" },
+      ]},
+      { kind: "category", name: "Hardware ESP32", colour: "#2EAD8C", contents: [
+        { kind: "block", type: "zacus_hwServo" },
+        { kind: "block", type: "zacus_hwReadQR" },
+        { kind: "block", type: "zacus_hwLEDPattern" },
+        { kind: "block", type: "zacus_hwBuzzerTone" },
+        { kind: "block", type: "zacus_hwRelay" },
+        { kind: "block", type: "zacus_hwSensorRead" },
+        { kind: "block", type: "zacus_hwButtonWait" },
+      ]},
+      { kind: "category", name: "ESP-NOW", colour: "#F28033", contents: [
+        { kind: "block", type: "zacus_espnowRegisterPeer" },
+        { kind: "block", type: "zacus_espnowSend" },
+        { kind: "block", type: "zacus_espnowBroadcast" },
+        { kind: "block", type: "zacus_espnowWait" },
+      ]},
+      { kind: "category", name: "ESP32-S3-BOX-3", colour: "#8C5A33", contents: [
+        { kind: "block", type: "zacus_boxIMUShake" },
+        { kind: "block", type: "zacus_boxIRSend" },
+      ]},
+      { kind: "category", name: "M5Stack / M5StickC", colour: "#4D73A6", contents: [
+        { kind: "block", type: "zacus_m5Beep" },
+        { kind: "block", type: "zacus_m5LCDText" },
+        { kind: "block", type: "zacus_m5ButtonAB" },
+        { kind: "block", type: "zacus_m5RGBLed" },
+        { kind: "block", type: "zacus_m5IMUShake" },
+      ]},
+      { kind: "category", name: "PLIP téléphone", colour: "#C74D8C", contents: [
+        { kind: "block", type: "zacus_plipRing" },
+        { kind: "block", type: "zacus_plipPickupWait" },
+      ]},
+      { kind: "category", name: "Logique", colour: "#F2A633", contents: [
+        { kind: "block", type: "zacus_logicIf" },
+        { kind: "block", type: "zacus_logicTimer" },
+        { kind: "block", type: "zacus_logicScore" },
+        { kind: "block", type: "zacus_logicSetVar" },
+      ]},
+    ]
+  };
+
+  const workspace = Blockly.inject(document.getElementById("blocklyDiv"), {
+    toolbox: TOOLBOX,
+    renderer: "zelos",
+    theme: Blockly.Themes.Zelos || undefined,
+    grid: { spacing: 24, length: 3, colour: "#ddd", snap: true },
+    zoom: { controls: true, wheel: true, startScale: 1.0, maxScale: 2.0, minScale: 0.4, scaleSpeed: 1.1 },
+    trashcan: true,
+    move: { scrollbars: true, drag: true, wheel: false },
+  });
+
+  const status = document.getElementById("status");
+  let dirty = false;
+
+  workspace.addChangeListener(function(ev) {
+    if (ev.isUiEvent) return;
+    if (ev.type === Blockly.Events.FINISHED_LOADING) return;
+    dirty = true;
+    status.textContent = "modifié";
+  });
+
+  function postToHost(payload) {
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.zacus) {
+      window.webkit.messageHandlers.zacus.postMessage(payload);
+    }
+  }
+
+  window.zacus = {
+    loadYAML: function(yamlText) {
+      try {
+        const xml = window.ZacusCodec.yamlToWorkspaceXml(yamlText);
+        workspace.clear();
+        if (xml) {
+          const dom = Blockly.utils.xml.textToDom(xml);
+          Blockly.Xml.domToWorkspace(dom, workspace);
+        }
+        dirty = false;
+        status.textContent = "chargé";
+      } catch (e) {
+        status.textContent = "erreur load: " + e.message;
+        postToHost({ op: "error", message: String(e) });
+      }
+    },
+    save: function() {
+      try {
+        const yaml = window.ZacusCodec.workspaceToYaml(workspace);
+        postToHost({ op: "save", yaml: yaml });
+        dirty = false;
+        status.textContent = "enregistré";
+      } catch (e) {
+        status.textContent = "erreur save: " + e.message;
+        postToHost({ op: "error", message: String(e) });
+      }
+    },
+    exportSB3: async function() {
+      try {
+        const blob = await window.ZacusCodec.workspaceToSB3(workspace);
+        // post as base64 to host for it to save
+        const reader = new FileReader();
+        reader.onload = () => {
+          const b64 = reader.result.split(",")[1];
+          postToHost({ op: "exportSB3", base64: b64 });
+        };
+        reader.readAsDataURL(blob);
+        status.textContent = ".sb3 prêt";
+      } catch (e) {
+        status.textContent = "erreur sb3: " + e.message;
+        postToHost({ op: "error", message: String(e) });
+      }
+    },
+    importSB3: async function(file) {
+      if (!file) return;
+      try {
+        const data = await file.arrayBuffer();
+        const xml = await window.ZacusCodec.sb3ToWorkspaceXml(data);
+        workspace.clear();
+        if (xml) {
+          const dom = Blockly.utils.xml.textToDom(xml);
+          Blockly.Xml.domToWorkspace(dom, workspace);
+        }
+        dirty = true;
+        status.textContent = "importé " + file.name;
+      } catch (e) {
+        status.textContent = "erreur import: " + e.message;
+        postToHost({ op: "error", message: String(e) });
+      }
+    }
+  };
+
+  postToHost({ op: "ready" });
+})();
+</script>
+</body>
+</html>

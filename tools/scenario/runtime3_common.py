@@ -218,6 +218,46 @@ def compile_runtime3_document(data: dict[str, Any], source_kind: str = "yaml") -
     }
 
 
+STANDARD_ACTION_KINDS = {
+    "tts_say", "wait_user_voice",
+    "hw_servo", "qr_expect", "led_pattern",
+    "sound_play", "sound_stop", "sound_volume",
+    "lcd_text", "lcd_clear", "lcd_image", "lcd_touch_wait",
+    "buzzer_tone", "relay", "sensor_read", "button_wait",
+    "espnow_register_peer", "espnow_send", "espnow_broadcast", "espnow_wait",
+    "box_imu_shake", "box_ir_send",
+    "m5_beep", "m5_lcd_text", "m5_button_wait", "m5_rgb_led", "m5_imu_shake",
+    "plip_ring", "plip_pickup_wait",
+    "score_add", "set_var",
+    "if_condition",  # deprecated alias, kept for older blocks codec output
+    "condition",
+}
+
+
+def validate_action(action: Any, *, step_id: str, path: str = "actions") -> None:
+    """Accept string-form (legacy firmware) or dict-form actions.
+
+    Dict-form actions must carry a non-empty `kind`. `condition` actions are
+    recursively validated to ensure their `then` / `else` lists hold actions.
+    """
+    if isinstance(action, str):
+        return
+    if not isinstance(action, dict):
+        raise ValueError(f"step {step_id} {path}: action must be a string or object")
+    kind = action.get("kind")
+    if not isinstance(kind, str) or not kind:
+        raise ValueError(f"step {step_id} {path}: action missing 'kind'")
+    if kind == "condition":
+        if not isinstance(action.get("expr"), str):
+            raise ValueError(f"step {step_id} {path}: condition.expr must be a string")
+        for branch in ("then", "else"):
+            branch_actions = action.get(branch, [])
+            if not isinstance(branch_actions, list):
+                raise ValueError(f"step {step_id} {path}.{branch}: must be a list")
+            for sub_idx, sub in enumerate(branch_actions):
+                validate_action(sub, step_id=step_id, path=f"{path}.{branch}[{sub_idx}]")
+
+
 def validate_runtime3_document(document: dict[str, Any]) -> None:
     if document.get("schema_version") != "zacus.runtime3.v1":
         raise ValueError("schema_version must be zacus.runtime3.v1")
@@ -238,6 +278,11 @@ def validate_runtime3_document(document: dict[str, Any]) -> None:
         if step_id in step_ids:
             raise ValueError(f"duplicate step id: {step_id}")
         step_ids.add(step_id)
+        actions = step.get("actions", [])
+        if not isinstance(actions, list):
+            raise ValueError(f"step {step_id} actions must be a list")
+        for idx, action in enumerate(actions):
+            validate_action(action, step_id=step_id, path=f"actions[{idx}]")
         transitions = step.get("transitions", [])
         if not isinstance(transitions, list):
             raise ValueError(f"step {step_id} transitions must be a list")
